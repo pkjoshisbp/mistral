@@ -1,0 +1,35 @@
+# Ignore Python virtual environment
+venv/
+
+# Ignore Ollama models (default location)
+~/.ollama/
+ollama_models/
+
+# Ignore log files
+*.log
+logs/
+
+# Ignore node_modules (for Laravel/AdminLTE)
+node_modules/
+
+# Ignore vendor (Laravel)
+vendor/
+
+# Ignore storage (Laravel)
+storage/
+
+# Ignore environment files
+.env
+
+# Ignore IDE/editor files
+.vscode/
+.idea/
+
+# Ignore other large files
+*.bin
+*.pt
+*.ckpt
+*.h5
+
+# Ignore Qdrant data (if local)
+qdrant_data/
