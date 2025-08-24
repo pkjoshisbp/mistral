@@ -1,0 +1,14 @@
+[Unit]
+Description=FastAPI AI Backend Service
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/var/www/clients/client1/web64/web/ai_backend
+Environment="PATH=/var/www/clients/client1/web64/web/ai_backend/venv/bin"
+ExecStart=/var/www/clients/client1/web64/web/ai_backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

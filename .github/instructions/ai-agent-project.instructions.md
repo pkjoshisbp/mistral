@@ -60,3 +60,5 @@ Collection: gupta_diagnostics_pdfs
     "category": "instructions"
   }
 }
+in laravel - always create livewire components for frontend interactions and not standard controller and view.
+we can create controller for interaction with fastapi if needed.
