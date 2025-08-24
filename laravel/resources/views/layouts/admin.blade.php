@@ -113,6 +113,12 @@
               <p>AI Chat</p>
             </a>
           </li>
+          <li class="nav-item">
+            <a href="{{ route('widget-manager') }}" class="nav-link {{ request()->routeIs('widget-manager') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-code"></i>
+              <p>Widget Manager</p>
+            </a>
+          </li>
           <li class="nav-header">ACCOUNT</li>
           <li class="nav-item">
             <a href="{{ route('profile.edit') }}" class="nav-link {{ request()->routeIs('profile.edit') ? 'active' : '' }}">
