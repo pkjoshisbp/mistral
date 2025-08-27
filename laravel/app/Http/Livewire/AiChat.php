@@ -84,13 +84,14 @@ class AiChat extends Component
                 $context = '';
                 if (!empty($topContext)) {
                     $context = "Relevant information:\n\n";
-                    $seen = [];
+                    $uniqueValues = [
+                        'address' => [],
+                        'mobile' => [],
+                        'email' => [],
+                        'contact' => [],
+                        'website' => [],
+                    ];
                     $mobileNumbers = [];
-                    $keyword = strtolower($userMessage ?? $this->query ?? '');
-                    $keywordParts = preg_split('/\s+/', $keyword);
-                    $keywordRegex = implode('|', array_map('preg_quote', array_filter($keywordParts)));
-                    $matchedFirst = [];
-                    $other = [];
                     foreach ($topContext as $item) {
                         $payload = $item['content'];
                         $payloadText = json_encode($payload);
@@ -103,24 +104,24 @@ class AiChat extends Component
                                 }
                             }
                         }
-                        if (isset($payload['title']) && isset($payload['content'])) {
-                            $entryKey = md5($payload['title'] . $payload['content']);
-                            if (in_array($entryKey, $seen)) {
-                                continue;
+                        // Extract and deduplicate by key fields
+                        foreach ($payload as $k => $v) {
+                            $lk = strtolower($k);
+                            $lv = trim($v);
+                            if ($lk === 'address' && !in_array($lv, $uniqueValues['address']) && !empty($lv)) {
+                                $uniqueValues['address'][] = $lv;
                             }
-                            $seen[] = $entryKey;
-                            // Extract only keyword-specific paragraphs
-                            $matchedText = '';
-                            $matches = [];
-                            if (!empty($keywordRegex) && preg_match_all("/(.*?($keywordRegex).*?)(?:\\n|$)/is", $payload['content'], $matches)) {
-                                foreach ($matches[1] as $match) {
-                                    $matchedText .= trim($match) . "\n";
-                                }
+                            if (($lk === 'mobile' || strpos($lv, 'Mobile') !== false) && !in_array($lv, $uniqueValues['mobile']) && !empty($lv)) {
+                                $uniqueValues['mobile'][] = $lv;
                             }
-                            if (!empty($matchedText)) {
-                                $matchedFirst[] = $payload['title'] . ': ' . $matchedText;
-                            } else {
-                                $other[] = $payload['title'] . ': ' . (strlen($payload['content']) > 300 ? substr($payload['content'], 0, 300) . '...' : $payload['content']);
+                            if (($lk === 'email' || strpos($lv, '@') !== false) && !in_array($lv, $uniqueValues['email']) && !empty($lv)) {
+                                $uniqueValues['email'][] = $lv;
+                            }
+                            if (($lk === 'contact' || strpos(strtolower($lv), 'contact') !== false) && !in_array($lv, $uniqueValues['contact']) && !empty($lv)) {
+                                $uniqueValues['contact'][] = $lv;
+                            }
+                            if (($lk === 'website' || strpos($lv, 'http') !== false) && !in_array($lv, $uniqueValues['website']) && !empty($lv)) {
+                                $uniqueValues['website'][] = $lv;
                             }
                         }
                     }
@@ -128,15 +129,11 @@ class AiChat extends Component
                     if (!empty($mobileNumbers)) {
                         $context .= "Mobile Number(s): " . implode(', ', $mobileNumbers) . "\n\n";
                     }
-                    $finalContext = array_merge($matchedFirst, $other);
-                    $deduped = [];
-                    foreach ($finalContext as $text) {
-                        if (!in_array($text, $deduped)) {
-                            $deduped[] = $text;
+                    // Add only one instance of each unique value
+                    foreach (['address', 'email', 'contact', 'website'] as $field) {
+                        if (!empty($uniqueValues[$field])) {
+                            $context .= ucfirst($field) . ': ' . $uniqueValues[$field][0] . "\n\n";
                         }
-                    }
-                    foreach (array_slice($deduped, 0, 3) as $text) {
-                        $context .= "- " . $text . "\n\n";
                     }
                 } else {
                     $context = "No specific information found. Provide general response and suggest contacting the organization.";
