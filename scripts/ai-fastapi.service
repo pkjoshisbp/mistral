@@ -1,0 +1,34 @@
+[#] Copy to /etc/systemd/system/ai-fastapi.service then:
+[#]   systemctl daemon-reload && systemctl enable --now ai-fastapi
+
+[Unit]
+Description=AI Agent FastAPI Backend (Embeddings + Qdrant bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/clients/client1/web64/web/ai_backend
+# Directly invoke venv python (simpler & more reliable than wrapper script)
+ExecStart=/var/www/clients/client1/web64/web/ai_backend/venv/bin/python /var/www/clients/client1/web64/web/ai_backend/main.py
+# Alternative (uncomment to use wrapper script instead):
+# ExecStart=/bin/bash /var/www/clients/client1/web64/web/scripts/start_fastapi.sh
+User=web64
+Group=client1
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=OLLAMA_URL=http://127.0.0.1:11434
+Environment=QDRANT_HOST=127.0.0.1
+Environment=QDRANT_PORT=6333
+LimitNOFILE=65536
+TimeoutStartSec=120
+# Logging: rely on journald (remove previously unsupported append directives)
+# Security hardening (adjust if it blocks access to model/data paths)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target

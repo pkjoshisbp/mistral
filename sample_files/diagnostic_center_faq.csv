@@ -1,0 +1,13 @@
+question,answer,category,priority
+"What services do you provide?","We provide comprehensive diagnostic services including blood tests, X-rays, ultrasounds, CT scans, MRI, ECG, and complete health checkup packages.","services","high"
+"What are your operating hours?","We are open Monday to Saturday from 8:00 AM to 8:00 PM. Emergency services available 24/7. Closed on Sundays except for emergencies.","hours","high"
+"How can I book an appointment?","You can book an appointment by calling us at +91-XXXXXXXXX, visiting our website, or walking in during business hours.","booking","high"
+"Do you accept insurance?","Yes, we accept most major insurance plans including CGHS, ESIC, Mediclaim, and private insurance. Please bring your insurance card.","payment","high"
+"What tests require fasting?","Blood sugar tests, lipid profile, liver function tests, and kidney function tests require 12 hours of fasting. Only water is allowed.","test-preparation","medium"
+"How long do test results take?","Most routine blood tests are available within 4-6 hours. Special tests may take 24-48 hours. Reports are available online and via SMS.","results","medium"
+"What should I bring for my appointment?","Please bring a valid ID, insurance card (if applicable), previous medical reports, and current medication list.","preparation","medium"
+"Do you provide home sample collection?","Yes, we provide home sample collection for blood tests and other samples. Additional charges apply. Call us to schedule.","services","medium"
+"What is the cost of a complete health checkup?","Our basic health checkup package starts from ₹2,500. Premium packages with advanced tests are available. Contact us for detailed pricing.","pricing","medium"
+"How accurate are your test results?","We maintain 99.5% accuracy with NABL accredited laboratory and latest equipment. All tests are cross-verified by experienced technicians.","quality","low"
+"Can I get my reports online?","Yes, all reports are available on our website portal. You will receive login credentials via SMS after sample collection.","results","low"
+"Do you have parking facilities?","Yes, we have free parking available for patients and attendants. Wheelchair accessible parking spots are also available.","facilities","low"

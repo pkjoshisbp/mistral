@@ -45,9 +45,48 @@
                             <textarea wire:model="description" class="form-control" id="description" rows="3"></textarea>
                         </div>
 
-                        <div class="form-group">
-                            <label for="database_name">Database Name</label>
-                            <input type="text" wire:model="database_name" class="form-control" id="database_name">
+                        <div class="card card-outline card-info">
+                            <div class="card-header">
+                                <h3 class="card-title">Database Configuration (Optional)</h3>
+                                <small class="text-muted">Configure client's MySQL database for data synchronization</small>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="database_name">Database Name</label>
+                                            <input type="text" wire:model="database_name" class="form-control" id="database_name" placeholder="e.g., gupta_diagnostics_db">
+                                            <small class="text-muted">Name of the client's MySQL database</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="database_host">Database Host</label>
+                                            <input type="text" wire:model="database_host" class="form-control" id="database_host" placeholder="localhost">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="form-group">
+                                            <label for="database_username">Username</label>
+                                            <input type="text" wire:model="database_username" class="form-control" id="database_username">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-group">
+                                            <label for="database_password">Password</label>
+                                            <input type="password" wire:model="database_password" class="form-control" id="database_password">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-group">
+                                            <label for="database_port">Port</label>
+                                            <input type="text" wire:model="database_port" class="form-control" id="database_port" placeholder="3306">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="form-group">

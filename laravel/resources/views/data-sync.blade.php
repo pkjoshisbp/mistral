@@ -1,7 +1,7 @@
-@extends('layouts.admin')
+@extends('layouts.app')
 
-@section('title', 'Data Synchronization')
+@section('title', 'Data Entry')
 
 @section('content')
-@livewire('data-sync')
+@livewire('data-entry-manager')
 @endsection

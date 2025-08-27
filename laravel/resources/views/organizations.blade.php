@@ -1,6 +1,4 @@
-@extends('layouts.admin')
-
-@section('title', 'Organizations')
+@extends('layouts.app')
 
 @section('content')
 @livewire('organization-manager')

@@ -32,7 +32,7 @@ return [
     ],
 
     'ai_agent' => [
-        'url' => env('AI_AGENT_URL', 'http://localhost:8000'),
+        'url' => env('AI_AGENT_URL', 'http://localhost:8111'),
     ],
 
 ];

@@ -13,7 +13,7 @@
             <div class="col-md-6">
                 <div class="form-group">
                     <label for="selectedOrgId">Select Organization</label>
-                    <select wire:model="selectedOrgId" class="form-control" id="selectedOrgId">
+                    <select wire:model.live="selectedOrgId" class="form-control" id="selectedOrgId">
                         <option value="">Choose an organization...</option>
                         @foreach ($organizations as $org)
                             <option value="{{ $org->id }}">{{ $org->name }}</option>
@@ -41,18 +41,40 @@
 
             @if ($isLoading)
                 <div class="message mb-3 text-left">
-                    <div class="d-inline-block p-2 rounded bg-light">
-                        <i class="fas fa-spinner fa-spin"></i> AI is thinking...
+                    <div class="d-inline-block p-3 rounded bg-light border">
+                        <div class="d-flex align-items-center">
+                            <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
+                                <span class="sr-only">Loading...</span>
+                            </div>
+                            <span class="text-muted">AI is analyzing your question, please wait...</span>
+                        </div>
                     </div>
                 </div>
             @endif
+            
+            <!-- Real-time loading indicator -->
+            <div wire:loading.delay wire:target="sendMessage" class="message mb-3 text-left">
+                <div class="d-inline-block p-3 rounded bg-light border">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
+                            <span class="sr-only">Loading...</span>
+                        </div>
+                        <span class="text-muted">Processing your request...</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="input-group">
-            <input type="text" wire:model="query" wire:keydown.enter="sendMessage" class="form-control" placeholder="Type your message..." {{ !$selectedOrgId || $isLoading ? 'disabled' : '' }}>
+            <input type="text" wire:model.live="query" wire:keydown.enter="sendMessage" class="form-control" placeholder="Type your message..." {{ !$selectedOrgId || $isLoading ? 'disabled' : '' }}>
             <div class="input-group-append">
                 <button wire:click="sendMessage" class="btn btn-primary" {{ !$selectedOrgId || $isLoading ? 'disabled' : '' }}>
-                    <i class="fas fa-paper-plane"></i> Send
+                    <span wire:loading.remove wire:target="sendMessage">
+                        <i class="fas fa-paper-plane"></i> Send
+                    </span>
+                    <span wire:loading wire:target="sendMessage">
+                        <i class="fas fa-spinner fa-spin"></i> Sending...
+                    </span>
                 </button>
             </div>
         </div>

@@ -97,22 +97,38 @@ class WidgetController extends Controller
                 throw new \Exception('Failed to generate embedding');
             }
 
-            // Search for relevant context in Qdrant
-            $searchResults = $this->aiAgentService->searchQdrant(
-                "org_{$orgId}",
-                $embedding['embedding'],
-                3
-            );
-
-            // Prepare context from search results
+            // Search all relevant Qdrant collections for context
+            $collections = [
+                "org_{$orgId}_document",
+                "org_{$orgId}_service",
+                "org_{$orgId}_product",
+                "org_{$orgId}_faq",
+                "org_{$orgId}_webpage"
+            ];
             $context = '';
-            if ($searchResults && isset($searchResults['results'])) {
-                foreach ($searchResults['results'] as $result) {
-                    $payload = $result['payload'];
-                    $context .= "Content: " . ($payload['name'] ?? '') . "\n";
-                    $context .= "Description: " . ($payload['description'] ?? '') . "\n";
-                    $context .= "Details: " . ($payload['content'] ?? '') . "\n\n";
+            foreach ($collections as $collection) {
+                $searchResults = $this->aiAgentService->searchQdrant(
+                    $collection,
+                    $embedding['embedding'],
+                    3
+                );
+                \Log::debug('Qdrant search results for ' . $collection, ['searchResults' => $searchResults]);
+                if ($searchResults && isset($searchResults['results'])) {
+                    foreach ($searchResults['results'] as $result) {
+                        $payload = $result['payload'] ?? [];
+                        \Log::debug('Qdrant result payload', ['collection' => $collection, 'payload' => $payload]);
+                        // Aggregate all available fields for context
+                        foreach ($payload as $key => $value) {
+                            \Log::debug('Payload field', ['key' => $key, 'value' => $value, 'type' => gettype($value)]);
+                            if (is_string($value) && !empty($value)) {
+                                $context .= ucfirst($key) . ": " . $value . "\n";
+                            }
+                        }
+                        \Log::debug('Context after payload aggregation', ['context' => $context]);
+                        $context .= "\n";
+                    }
                 }
+                \Log::debug('Context after collection', ['collection' => $collection, 'context' => $context]);
             }
 
             // Create system prompt

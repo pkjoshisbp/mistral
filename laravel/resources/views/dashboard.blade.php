@@ -1,4 +1,4 @@
-@extends('layouts.admin')
+@extends('layouts.app')
 
 @section('title', 'Dashboard')
 
@@ -126,7 +126,7 @@
 // Check system status
 $(document).ready(function() {
     // Check backend status
-    fetch('http://localhost:8000/')
+    fetch('http://localhost:8111/')
         .then(response => response.ok ? 'Online' : 'Offline')
         .catch(() => 'Offline')
         .then(status => $('#backend-status').text(status));

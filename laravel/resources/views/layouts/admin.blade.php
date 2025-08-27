@@ -89,6 +89,7 @@
       <!-- Sidebar Menu -->
       <nav class="mt-2">
         <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
+          @if(Auth::user()->isAdmin())
           <li class="nav-item">
             <a href="{{ route('dashboard') }}" class="nav-link {{ request()->routeIs('dashboard') ? 'active' : '' }}">
               <i class="nav-icon fas fa-tachometer-alt"></i>
@@ -119,6 +120,14 @@
               <p>Widget Manager</p>
             </a>
           </li>
+          @else
+          <li class="nav-item">
+            <a href="{{ route('customer.dashboard') }}" class="nav-link">
+              <i class="nav-icon fas fa-external-link-alt"></i>
+              <p>Go to Customer Panel</p>
+            </a>
+          </li>
+          @endif
           <li class="nav-header">ACCOUNT</li>
           <li class="nav-item">
             <a href="{{ route('profile.edit') }}" class="nav-link {{ request()->routeIs('profile.edit') ? 'active' : '' }}">

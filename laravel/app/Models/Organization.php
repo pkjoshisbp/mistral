@@ -13,6 +13,7 @@ class Organization extends Model
         'name',
         'slug',
         'description',
+        'domain',
         'database_name',
         'api_key',
         'settings',
@@ -27,6 +28,16 @@ class Organization extends Model
     public function organizationData()
     {
         return $this->hasMany(OrganizationData::class);
+    }
+
+    public function users()
+    {
+        return $this->hasMany(User::class);
+    }
+
+    public function dataSources()
+    {
+        return $this->hasMany(DataSource::class);
     }
 
     public function getCollectionNameAttribute()
