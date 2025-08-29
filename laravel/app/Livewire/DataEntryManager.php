@@ -22,6 +22,7 @@ class DataEntryManager extends Component
     public $requirements = '';
     public $duration = '';
     public $availability = '';
+    public $keywords = '';
 
     protected $rules = [
         'name' => 'required|min:2',
@@ -30,7 +31,8 @@ class DataEntryManager extends Component
         'category' => 'nullable',
         'requirements' => 'nullable',
         'duration' => 'nullable',
-        'availability' => 'nullable'
+        'availability' => 'nullable',
+        'keywords' => 'nullable|string'
     ];
 
     public function mount()
@@ -67,36 +69,47 @@ class DataEntryManager extends Component
 
         try {
             $organization = Organization::find($this->selectedOrgId);
-            
-            // Prepare data based on type
             $data = $this->prepareDataForType();
-            
-            // Add to vector database
+            $data['keywords'] = $this->keywords;
+            $collection = "org_{$organization->id}_data";
             $aiService = new AiAgentService();
-            // Select collection based on dataType
-            $collection = "org_{$organization->id}";
-            if ($this->dataType === 'info') {
-                $collection .= '_document';
-            } elseif ($this->dataType === 'service') {
-                $collection .= '_service';
-            } elseif ($this->dataType === 'product') {
-                $collection .= '_product';
-            } elseif ($this->dataType === 'faq') {
-                $collection .= '_faq';
-            } else {
-                $collection .= '_document'; // fallback
+
+            // Check for duplicate by name, category, and type
+            $searchPayload = [
+                'name' => $data['name'],
+                'category' => $data['category'],
+                'type' => $data['type']
+            ];
+            $existing = $aiService->searchQdrant($collection, $data['name'] . ' ' . $data['category'] . ' ' . $data['type'], 10);
+            $isDuplicate = false;
+            if (!empty($existing)) {
+                foreach ($existing as $item) {
+                    $payload = $item['payload'] ?? [];
+                    if (
+                        isset($payload['name'], $payload['category'], $payload['type']) &&
+                        $payload['name'] === $data['name'] &&
+                        $payload['category'] === $data['category'] &&
+                        $payload['type'] === $data['type']
+                    ) {
+                        $isDuplicate = true;
+                        break;
+                    }
+                }
+            }
+            if ($isDuplicate) {
+                session()->flash('error', 'Duplicate entry detected. This record already exists.');
+                return;
             }
 
-            // Generate embedding vector using embed() method
-            $vector = $aiService->embed($data['content'] ?? '');
+            // Generate embedding vector using embed() method (include keywords)
+            $embedText = ($data['content'] ?? '') . ' ' . ($this->keywords ?? '');
+            $vector = $aiService->embed($embedText);
             $payload = $data;
             $result = $aiService->addToQdrant($collection, $vector, $payload);
             \Log::debug('Qdrant addToQdrant response', ['result' => $result, 'collection' => $collection, 'payload' => $payload]);
-            
             session()->flash('message', ucfirst($this->dataType) . ' added successfully!');
             $this->resetForm();
             $this->showAddForm = false;
-            
         } catch (\Exception $e) {
             session()->flash('error', 'Failed to add entry: ' . $e->getMessage());
         }
@@ -146,20 +159,22 @@ class DataEntryManager extends Component
 
     public function resetForm()
     {
-        $this->name = '';
-        $this->description = '';
-        $this->price = '';
-        $this->category = '';
-        $this->requirements = '';
-        $this->duration = '';
-        $this->availability = '';
+    $this->name = '';
+    $this->description = '';
+    $this->price = '';
+    $this->category = '';
+    $this->requirements = '';
+    $this->duration = '';
+    $this->availability = '';
+    $this->keywords = '';
     }
 
     public function getFormFieldsProperty()
     {
+        $fields = [];
         switch ($this->dataType) {
             case 'service':
-                return [
+                $fields = [
                     'name' => 'Service Name',
                     'description' => 'Service Description',
                     'price' => 'Price (₹)',
@@ -167,33 +182,31 @@ class DataEntryManager extends Component
                     'requirements' => 'Requirements/Preparation',
                     'duration' => 'Duration',
                     'availability' => 'Availability/Timing'
-                ];
-
+                ]; break;
             case 'product':
-                return [
+                $fields = [
                     'name' => 'Product Name',
                     'description' => 'Product Description',
                     'price' => 'Price (₹)',
                     'category' => 'Category'
-                ];
-
+                ]; break;
             case 'faq':
-                return [
+                $fields = [
                     'name' => 'Question',
                     'description' => 'Answer',
                     'category' => 'Category'
-                ];
-
+                ]; break;
             case 'info':
-                return [
+                $fields = [
                     'name' => 'Title',
                     'description' => 'Information',
                     'category' => 'Category'
-                ];
-
+                ]; break;
             default:
-                return [];
+                $fields = [];
         }
+        $fields['keywords'] = 'Keywords (comma separated)';
+        return $fields;
     }
 
     public function render()

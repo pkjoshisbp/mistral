@@ -73,6 +73,14 @@
                                                 @error($field) <span class="text-danger">{{ $message }}</span> @enderror
                                             </div>
                                         </div>
+                                    @elseif ($field === 'keywords')
+                                        <div class="col-12">
+                                            <div class="form-group">
+                                                <label for="{{ $field }}">{{ $label }}</label>
+                                                <input type="text" wire:model="{{ $field }}" class="form-control" id="{{ $field }}" placeholder="Enter keywords, comma separated">
+                                                @error($field) <span class="text-danger">{{ $message }}</span> @enderror
+                                            </div>
+                                        </div>
                                     @else
                                         <div class="col-md-6">
                                             <div class="form-group">

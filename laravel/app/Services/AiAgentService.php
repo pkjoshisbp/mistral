@@ -44,7 +44,23 @@ class AiAgentService
 
                 if ($response->successful()) {
                     $data = $response->json();
-                    Log::info('AI Agent embed response', ['response' => $data]);
+                    // Truncate logging of the full response (can contain long embedding array)
+                    try {
+                        $rawJson = json_encode($data);
+                        $truncated = substr($rawJson, 0, 100);
+                        Log::info('AI Agent embed response', [
+                            'truncated' => $truncated,
+                            'total_length' => strlen($rawJson),
+                            'embedding_dims' => isset($data['embedding']) && is_array($data['embedding']) ? count($data['embedding']) : null,
+                            'model' => $data['model'] ?? null
+                        ]);
+                    } catch (\Throwable $t) {
+                        Log::info('AI Agent embed response (fallback log)', [
+                            'error' => $t->getMessage(),
+                            'has_embedding' => isset($data['embedding']),
+                            'model' => $data['model'] ?? null
+                        ]);
+                    }
                     Log::debug('Embedding generated', [
                         'len' => strlen($text),
                         'elapsed_ms' => $elapsedMs,
@@ -261,19 +277,23 @@ class AiAgentService
                 'model' => $model
             ];
             
+            // Truncate logged payload to keep logs lean
+            $payloadPreview = substr(json_encode($payload), 0, 100);
             Log::info('AI Agent LLM chat request', [
                 'url' => "{$this->baseUrl}/llm/chat",
-                'payload' => $payload,
+                'payload_preview' => $payloadPreview,
+                'payload_length' => strlen(json_encode($payload)),
                 'timeout' => 90
             ]);
 
             $response = Http::timeout(90)->post("{$this->baseUrl}/llm/chat", $payload);
 
+            $body = $response->body();
             Log::info('AI Agent LLM chat response', [
                 'status' => $response->status(),
                 'successful' => $response->successful(),
-                'body_length' => strlen($response->body()),
-                'body_preview' => substr($response->body(), 0, 200)
+                'body_length' => strlen($body),
+                'body_preview' => substr($body, 0, 100)
             ]);
 
             return $response->successful() ? $response->json() : null;
@@ -433,4 +453,77 @@ class AiAgentService
         
         return trim($text);
     }
+
+    /**
+     * Lightweight intent detection using the LLM (categorical, JSON output).
+     */
+    public function detectIntent(string $utterance, array $context = [], string $model = 'llama3.2:1b')
+    {
+        $sys = "You are an intent classifier. Classify the user's utterance into one of: 
+        [general_qna, booking, pricing, timing, directions, contact_info, troubleshooting, other].
+        Return STRICT JSON with keys: intent (string), confidence (0-1). Do not add any text outside JSON.";
+        $messages = [
+            ['role' => 'system', 'content' => $sys],
+            ['role' => 'user', 'content' => json_encode(['utterance' => $utterance, 'context' => $context])]
+        ];
+        $resp = $this->llmChat($messages, $model);
+        if (!$resp || empty($resp['message']['content'])) return ['intent' => 'general_qna', 'confidence' => 0.4];
+        $txt = trim($resp['message']['content']);
+        $parsed = json_decode($txt, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($parsed)) {
+            return ['intent' => 'general_qna', 'confidence' => 0.4, 'raw' => $txt];
+        }
+        return $parsed;
+    }
+
+    /**
+     * Slot extraction (few general-purpose slots) using the LLM. Returns ['slots'=>[], 'missing'=>[]].
+     */
+    public function extractSlots(string $utterance, array $existingSlots = [], string $model = 'llama3.2:1b')
+    {
+        $schema = [
+            'organization', 'service', 'date', 'time', 'location', 'person', 'quantity',
+            'price', 'email', 'phone'
+        ];
+        $sys = "Extract slots from the utterance. Allowed slots: " . implode(',', $schema) . ". 
+        Merge with existing slots (prefer new if confident). Infer only if explicit or unambiguous.
+        Return STRICT JSON: {\"slots\": {slot: value, ...}} with ISO date/time if present.";
+        $messages = [
+            ['role' => 'system', 'content' => $sys],
+            ['role' => 'user', 'content' => json_encode(['utterance'=>$utterance, 'existing'=>$existingSlots])]
+        ];
+        $resp = $this->llmChat($messages, $model);
+        $out = ['slots' => $existingSlots];
+        if ($resp && !empty($resp['message']['content'])) {
+            $txt = trim($resp['message']['content']);
+            $parsed = json_decode($txt, true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($parsed['slots']) && is_array($parsed['slots'])) {
+                $out['slots'] = array_filter(array_merge($existingSlots, $parsed['slots']), function($v){ return $v !== null && $v !== ''; });
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Rewriter: rewrite the user query to be explicit & self-contained using memory, slots and recent context.
+     */
+    public function rewriteQuery(string $utterance, array $recentMessages = [], array $slots = [], array $memory = [], string $model = 'llama3.2:1b')
+    {
+        $sys = "Rewrite the user's message into a single explicit, context-complete query for retrieval.
+        Keep original meaning. Include relevant slot values inline (date/time normalized). 
+        Output plain text only.";
+        $messages = [
+            ['role' => 'system', 'content' => $sys],
+            ['role' => 'user', 'content' => json_encode([
+                'utterance'=>$utterance,
+                'recent_messages'=>array_slice($recentMessages, -8),
+                'slots'=>$slots,
+                'memory'=>$memory
+            ])]
+        ];
+        $resp = $this->llmChat($messages, $model);
+        if (!$resp || empty($resp['message']['content'])) return $utterance;
+        return trim($resp['message']['content']);
+    }
+
 }

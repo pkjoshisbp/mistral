@@ -1,6 +1,3 @@
-[#] Copy to /etc/systemd/system/ai-fastapi.service then:
-[#]   systemctl daemon-reload && systemctl enable --now ai-fastapi
-
 [Unit]
 Description=AI Agent FastAPI Backend (Embeddings + Qdrant bridge)
 After=network-online.target
@@ -21,14 +18,28 @@ Environment=PYTHONUNBUFFERED=1
 Environment=OLLAMA_URL=http://127.0.0.1:11434
 Environment=QDRANT_HOST=127.0.0.1
 Environment=QDRANT_PORT=6333
+# If you later add HF downloads at runtime you can supply a token (avoid committing):
+# Environment=HF_TOKEN=hf_xxxxxxxxxxxxxxxxx
 LimitNOFILE=65536
 TimeoutStartSec=120
 # Logging: rely on journald (remove previously unsupported append directives)
 # Security hardening (adjust if it blocks access to model/data paths)
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=off
 ProtectHome=false
+
+# Ensure required directories exist before start (avoid namespace failures)
+ExecStartPre=/usr/bin/mkdir -p /var/www/clients/client1/web64/web/ai_backend/logs
+# If you really need a separate top-level logs dir, create it explicitly (commented out for now)
+# ExecStartPre=/usr/bin/mkdir -p /var/www/clients/client1/web64/web/logs
+
+# Graceful stop timeout (model unload can be slow)
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+# ExecReload can be used after editing env variables (full restart)
+ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
 WantedBy=multi-user.target
