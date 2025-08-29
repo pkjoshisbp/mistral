@@ -75,7 +75,11 @@ class AiChatSimple extends Component
         // ---- RETRIEVAL ----
         $context = '';
         try {
-            $collectionName = "org_{$this->selectedOrgId}_data";
+            $organization = Organization::find($this->selectedOrgId);
+            if (!$organization) {
+                throw new \Exception("Organization not found: {$this->selectedOrgId}");
+            }
+            $collectionName = $organization->collection_name;
             $embedding = $aiService->embed($rewritten, 'nomic-embed-text');
             $searchResults = $aiService->searchQdrant($collectionName, $embedding, 3);
             

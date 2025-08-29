@@ -110,8 +110,13 @@ class AiChat extends Component
     $topContext = [];
     $context = '';
     try {
-        // Embed rewritten query, include keywords from all entries for better matching
-        $collectionName = "org_{$this->selectedOrgId}_data";
+        // Get the correct collection name from the organization model
+        $organization = Organization::find($this->selectedOrgId);
+        if (!$organization) {
+            throw new \Exception("Organization not found: {$this->selectedOrgId}");
+        }
+        $collectionName = $organization->collection_name; // Uses the getCollectionNameAttribute method
+        
         // Fetch all keywords from collection for context expansion
         $allKeywords = [];
         $embedStart = microtime(true);
@@ -209,7 +214,8 @@ class AiChat extends Component
     $fastAnswered = false;
     $lowerQ = strtolower($userMessage);
     $isSimpleContactQuery = (bool)preg_match('/\b(address|location|where are you|phone|mobile|contact)\b/', $lowerQ);
-    if ($directBypass && $isSimpleContactQuery && !empty($topContext)) {
+    $directBypass = false; // Remove complex bypass logic, keep simple
+    if ($isSimpleContactQuery && !empty($topContext)) {
         // Extract first description block
         $rawDesc = '';
         foreach ($topContext as $ctxItem) {

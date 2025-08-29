@@ -45,12 +45,16 @@ class OrganizationManager extends Component
     {
         $this->validate();
 
+        // Generate unique collection name from organization name
+        $collectionName = Organization::generateUniqueCollectionName($this->name);
+
         $org = Organization::create([
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
             'database_name' => $this->database_name,
             'api_key' => \Str::random(32),
+            'collection_name' => $collectionName,
             'settings' => [
                 'database' => [
                     'host' => $this->database_host,
@@ -62,9 +66,9 @@ class OrganizationManager extends Component
             ]
         ]);
 
-        // Create Qdrant collection for this organization
+        // Create Qdrant collection with the generated name
         $aiService = new AiAgentService();
-        $aiService->createCollection("org_{$org->id}");
+        $aiService->createCollection($collectionName);
 
         $this->reset(['name', 'slug', 'description', 'database_name', 'database_host', 'database_username', 'database_password', 'database_port']);
         $this->showCreateForm = false;

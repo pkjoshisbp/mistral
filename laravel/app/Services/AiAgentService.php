@@ -174,6 +174,23 @@ class AiAgentService
     }
 
     /**
+     * Delete a Qdrant collection
+     */
+    public function deleteCollection($collectionName)
+    {
+        try {
+            $response = Http::timeout(30)->delete("{$this->baseUrl}/qdrant/delete_collection", [
+                'collection_name' => $collectionName
+            ]);
+
+            return $response->successful() ? $response->json() : null;
+        } catch (\Exception $e) {
+            Log::error('AI Agent delete collection exception', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
      * Add data to Qdrant collection
      */
     public function addToQdrant($collectionName, $vector, $payload, $id = null)
