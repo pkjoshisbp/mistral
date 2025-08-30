@@ -141,6 +141,12 @@
 
           <li class="nav-header">ACCOUNT</li>
           <li class="nav-item">
+            <a href="{{ route('customer.subscription') }}" class="nav-link {{ request()->routeIs('customer.subscription') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-credit-card"></i>
+              <p>Subscription</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('profile.edit') }}" class="nav-link {{ request()->routeIs('profile.edit') ? 'active' : '' }}">
               <i class="nav-icon fas fa-user"></i>
               <p>Profile</p>

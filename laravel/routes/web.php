@@ -75,20 +75,31 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
 
 // Customer Routes (for customers to manage their organization data)
 Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->group(function () {
-    Route::get('/dashboard', function () {
-        return view('customer.dashboard');
-    })->name('dashboard');
+    // Organization setup route (available without organization)
+    Route::get('/setup-organization', function () {
+        return view('customer.setup-organization');
+    })->name('setup-organization');
     
-    Route::get('/data-sources', \App\Livewire\Customer\DataSources::class)->name('data-sources');
-    Route::get('/content', function () {
-        return view('customer.content');
-    })->name('content');
-    Route::get('/analytics', function () {
-        return view('customer.analytics');
-    })->name('analytics');
-    Route::get('/settings', function () {
-        return view('customer.settings');
-    })->name('settings');
+    // All other customer routes require an organization
+    Route::middleware(['user.has.organization'])->group(function () {
+        Route::get('/dashboard', function () {
+            return view('customer.dashboard');
+        })->name('dashboard');
+        
+        Route::get('/data-sources', \App\Livewire\Customer\DataSources::class)->name('data-sources');
+        Route::get('/content', function () {
+            return view('customer.content');
+        })->name('content');
+        Route::get('/analytics', function () {
+            return view('customer.analytics');
+        })->name('analytics');
+        Route::get('/subscription', function () {
+            return view('customer.subscription');
+        })->name('subscription');
+        Route::get('/settings', function () {
+            return view('customer.settings');
+        })->name('settings');
+    });
 });
 
 // Widget Routes (Public - no auth required)
@@ -101,6 +112,16 @@ Route::prefix('widget')->middleware(\App\Http\Middleware\CorsMiddleware::class)-
         $organization = \App\Models\Organization::findOrFail($orgId);
         return view('widget.test', compact('organization'));
     })->name('widget.test');
+});
+
+// PayPal Routes
+Route::prefix('paypal')->name('paypal.')->group(function () {
+    Route::post('create-subscription', [\App\Http\Controllers\PayPalController::class, 'createSubscription'])
+        ->middleware('auth')
+        ->name('create-subscription');
+    Route::get('success', [\App\Http\Controllers\PayPalController::class, 'handleSuccess'])->name('success');
+    Route::get('cancel', [\App\Http\Controllers\PayPalController::class, 'handleCancel'])->name('cancel');
+    Route::post('webhook', [\App\Http\Controllers\PayPalController::class, 'handleWebhook'])->name('webhook');
 });
 
 require __DIR__.'/auth.php';

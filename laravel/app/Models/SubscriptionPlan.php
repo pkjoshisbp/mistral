@@ -12,6 +12,7 @@ class SubscriptionPlan extends Model
     protected $fillable = [
         'name',
         'slug',
+        'paypal_plan_id',
         'description',
         'monthly_price',
         'yearly_price',

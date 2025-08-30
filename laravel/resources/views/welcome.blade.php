@@ -273,10 +273,16 @@
                                         <a href="mailto:sales@ai-chat.support" class="btn btn-outline-primary btn-block w-100">
                                             Contact Sales
                                         </a>
-                                    @else
+                                    @elseif($plan->slug === 'payg')
                                         <a href="{{ route('customer.dashboard') }}" class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100">
-                                            Upgrade to {{ $plan->name }}
+                                            Activate Pay-as-you-go
                                         </a>
+                                    @else
+                                        <button onclick="createSubscription({{ $plan->id }})" 
+                                                class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
+                                                id="subscribe-btn-{{ $plan->id }}">
+                                            Subscribe to {{ $plan->name }}
+                                        </button>
                                     @endif
                                 @endguest
                             </div>
@@ -308,5 +314,49 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    @auth
+    <!-- PayPal SDK -->
+    <script src="https://www.paypal.com/sdk/js?client-id={{ env('PAYPAL_CLIENT_ID') }}&vault=true&intent=subscription"></script>
+    
+    <script>
+        async function createSubscription(planId) {
+            const button = document.getElementById(`subscribe-btn-${planId}`);
+            const originalText = button.innerHTML;
+            
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            button.disabled = true;
+            
+            try {
+                const response = await fetch('{{ route("paypal.create-subscription") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({
+                        plan_id: planId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.approval_url) {
+                    // Redirect to PayPal for approval
+                    window.location.href = data.approval_url;
+                } else {
+                    alert('Error: ' + (data.message || 'Failed to create subscription'));
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while processing your request');
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+    </script>
+    @endauth
 </body>
 </html>

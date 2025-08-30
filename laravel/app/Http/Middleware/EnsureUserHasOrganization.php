@@ -15,13 +15,14 @@ class EnsureUserHasOrganization
      */
     public function handle(Request $request, Closure $next): Response
     {
-        if (auth()->check() && auth()->user()->isCustomer()) {
-            // If user doesn't have an organization, redirect to setup
-            if (!auth()->user()->organization_id) {
-                return redirect()->route('customer.setup-organization');
-            }
+        $user = Auth::user();
+        
+        // Check if user has any organizations
+        if (!$user || $user->organizations()->count() === 0) {
+            return redirect()->route('customer.setup-organization')
+                ->with('error', 'You need to create or join an organization to access this area.');
         }
-
+        
         return $next($request);
     }
 }
