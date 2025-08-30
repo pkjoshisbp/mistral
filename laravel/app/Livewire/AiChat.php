@@ -69,54 +69,132 @@ class AiChat extends Component
     $t0 = microtime(true);
     $perf = [];
     $perf['start'] = $t0;
-    
-    // ---- SIMPLE QUERY REWRITING BASED ON CONVERSATION HISTORY ----
+    // ---- DIRECT QUERY FAST NLU BYPASS CHECK ----
+    $maybeDirect = $this->isDirectQuery($userMessage);
+    $bypassedNLU = false;
+
+    // Prepare defaults
+    $intentName = 'general_qna';
+    $slots = $this->conversationContext['slots'] ?? [];
     $rewritten = $userMessage;
-    $bypassedNLU = true; // Always bypass complex NLU
-    
-    // If we have recent conversation history, rewrite the query for better context
-    if (!empty($recentMessages)) {
-        $rewriteSystem = "Rewrite the user's query to be more specific and searchable based on conversation history. Include context from previous messages. Keep it concise (1-2 sentences max).";
-        
-        $conversationText = "";
-        foreach ($recentMessages as $msg) {
-            $conversationText .= ($msg['role'] === 'user' ? "User" : "Assistant") . ": " . $msg['content'] . "\n";
-        }
-        
-        $rewritePrompt = "Conversation history:\n$conversationText\nCurrent query: $userMessage\n\nRewritten query:";
-        
-        try {
-            $rewriteResp = $aiService->llmChat([
-                ['role' => 'system', 'content' => $rewriteSystem],
-                ['role' => 'user', 'content' => $rewritePrompt]
-            ], 'llama3.2:1b');
-            
-            $rewritten = trim($rewriteResp['message']['content'] ?? $userMessage);
-            if (empty($rewritten) || strlen($rewritten) < 3) {
-                $rewritten = $userMessage; // Fallback to original
+
+    if ($maybeDirect) {
+        // Skip NLU fully
+        $bypassedNLU = true;
+        \Log::info('NLU bypassed for direct query', ['query' => $userMessage]);
+    } else {
+        // ---- UNIFIED NLU: slots + intent + rewritten query in ONE CALL ----
+        // Clear slots before NLU for stateless extraction
+        $this->clearSlots();
+        $existingSlots = $this->conversationContext['slots'] ?? [];
+
+// 🔹 Shorter system prompt for 1B
+$nluSystem = <<<PROMPT
+Return STRICT JSON ONLY in this shape:
+{
+  "intent": "general_qna|booking|pricing|timing|directions|contact_info|troubleshooting|other",
+  "slots": {
+    "organization"?: string,
+    "service"?: string,
+    "date"?: string,   // ISO 8601
+    "time"?: string,   // ISO 8601
+    "location"?: string,
+    "person"?: string,
+    "quantity"?: string|number,
+    "price"?: string|number,
+    "email"?: string,
+    "phone"?: string
+  },
+  "rewritten_query": "single explicit query with slot values inline"
+}
+Rules:
+- Merge with provided slots, prefer explicit new values
+- Do not invent slots
+- Use ISO for date/time if present
+- Output JSON ONLY
+PROMPT;
+
+$nluUser = [
+    'utterance'       => $userMessage,
+    'existing_slots'  => $existingSlots,
+    'recent_messages' => $recentMessages,
+    'memory'          => $sessionMemory,
+];
+
+        // 🔹 1B as primary, 3B as fallback
+        $nluModels = ['llama3.2:1b', 'llama3.2:3b'];
+        $nlu = null;
+        foreach ($nluModels as $mdl) {
+            $nluResp = $aiService->llmChat([
+                ['role' => 'system', 'content' => $nluSystem],
+                ['role' => 'user',   'content' => json_encode($nluUser, JSON_UNESCAPED_UNICODE)]
+            ], $mdl);
+            $raw = $nluResp['message']['content'] ?? '';
+            $clean = $this->sanitizeJsonContent($raw);
+            $parsed = json_decode($clean, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($parsed)) {
+                $nlu = $parsed;
+                \Log::info('Unified NLU parsed', ['model' => $mdl, 'json' => $parsed]);
+                break;
+            } else {
+                \Log::warning('Unified NLU JSON parse failed', [
+                    'model' => $mdl,
+                    'raw'   => mb_substr($raw, 0, 300)
+                ]);
             }
-            \Log::info('Query rewritten', ['original' => $userMessage, 'rewritten' => $rewritten]);
-        } catch (Exception $e) {
-            \Log::warning('Query rewrite failed', ['error' => $e->getMessage()]);
-            $rewritten = $userMessage; // Fallback to original
+        }
+        $perf['after_nlu'] = microtime(true);
+        if ($nlu) {
+            $intentName = $nlu['intent'] ?? $intentName;
+            $incomingSlots = is_array($nlu['slots'] ?? null) ? $nlu['slots'] : [];
+            $slots = array_filter(array_merge($slots, $incomingSlots), fn($v) => !is_null($v) && $v !== '');
+            $rewritten = !empty($nlu['rewritten_query'] ?? '') ? $nlu['rewritten_query'] : $rewritten;
         }
     }
-    
-    $perf['after_nlu'] = microtime(true);
 
-        
+    $this->conversationContext['slots'] = $slots;
+
+    // If the user query is a simple direct question, bypass rewritten query and use original
+    $directBypass = false;
+    if ($this->isDirectQuery($userMessage)) {
+        $rewritten = $userMessage; // force original for retrieval
+        $directBypass = true;
+    }
+
+    // ---- REQUIRED SLOTS for specific intents ----
+    $requiredByIntent = [
+        'booking' => ['service','date','time','person'],
+        'pricing' => ['service'],
+        'timing'  => ['service'],
+    ];
+    $missing = [];
+    if (isset($requiredByIntent[$intentName])) {
+        foreach ($requiredByIntent[$intentName] as $s) {
+            if (empty($slots[$s] ?? null)) $missing[] = $s;
+        }
+    }
+
+    if (!empty($missing) && $intentName === 'booking') {
+        $ask = "To proceed with booking, we need: " . implode(', ', $missing) . ". Please provide these.";
+        $this->messages[] = [
+            'role' => 'assistant',
+            'content' => $ask,
+            'timestamp' => now()
+        ];
+        $this->saveConversationToSession();
+        $this->isLoading = false;
+        return;
+    }
+
     // ---- RETRIEVAL (Qdrant via nomic embeddings) ----
     $allContext = [];
     $topContext = [];
     $context = '';
     try {
-        // Get the correct collection name from the organization model
+        // Get organization slug for collection name
         $organization = Organization::find($this->selectedOrgId);
-        if (!$organization) {
-            throw new \Exception("Organization not found: {$this->selectedOrgId}");
-        }
-        $collectionName = $organization->collection_name; // Uses the getCollectionNameAttribute method
-        
+        $orgSlug = $organization ? str_replace('-', '_', $organization->slug) : "org_{$this->selectedOrgId}";
+        $collectionName = $orgSlug;
         // Fetch all keywords from collection for context expansion
         $allKeywords = [];
         $embedStart = microtime(true);
@@ -214,8 +292,7 @@ class AiChat extends Component
     $fastAnswered = false;
     $lowerQ = strtolower($userMessage);
     $isSimpleContactQuery = (bool)preg_match('/\b(address|location|where are you|phone|mobile|contact)\b/', $lowerQ);
-    $directBypass = false; // Remove complex bypass logic, keep simple
-    if ($isSimpleContactQuery && !empty($topContext)) {
+    if ($directBypass && $isSimpleContactQuery && !empty($topContext)) {
         // Extract first description block
         $rawDesc = '';
         foreach ($topContext as $ctxItem) {
