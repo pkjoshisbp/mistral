@@ -74,9 +74,40 @@ class ApiEndpointManager extends Component
         }
     }
 
-    public function removeParameter($paramName)
+    public function removeParameter($index)
     {
-        unset($this->endpointParameters[$paramName]);
+        if (is_numeric($index)) {
+            // Remove by numeric index (for table display)
+            $values = array_values($this->endpointParameters);
+            $keys = array_keys($this->endpointParameters);
+            if (isset($keys[$index])) {
+                unset($this->endpointParameters[$keys[$index]]);
+            }
+        } else {
+            // Remove by parameter name
+            unset($this->endpointParameters[$index]);
+        }
+    }
+
+    public function saveApiToken()
+    {
+        if (!$this->organization) return;
+
+        $this->organization->update([
+            'api_token' => $this->apiToken
+        ]);
+
+        session()->flash('message', 'API token saved successfully!');
+    }
+
+    public function removeEndpoint($key)
+    {
+        $endpoints = $this->organization->api_endpoints ?? [];
+        unset($endpoints[$key]);
+        
+        $this->organization->update(['api_endpoints' => $endpoints]);
+        $this->endpoints = $endpoints;
+        session()->flash('message', 'API endpoint removed successfully!');
     }
 
     public function saveEndpoint()
