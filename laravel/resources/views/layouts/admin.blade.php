@@ -68,7 +68,7 @@
   <!-- Main Sidebar Container -->
   <aside class="main-sidebar sidebar-dark-primary elevation-4">
     <!-- Brand Logo -->
-    <a href="{{ route('dashboard') }}" class="brand-link">
+    <a href="{{ route('admin.dashboard') }}" class="brand-link">
       <i class="fas fa-robot brand-image"></i>
       <span class="brand-text font-weight-light">AI Agent Panel</span>
     </a>
@@ -91,33 +91,39 @@
         <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
           @if(Auth::user()->isAdmin())
           <li class="nav-item">
-            <a href="{{ route('dashboard') }}" class="nav-link {{ request()->routeIs('dashboard') ? 'active' : '' }}">
+            <a href="{{ route('admin.dashboard') }}" class="nav-link {{ request()->routeIs('admin.dashboard') ? 'active' : '' }}">
               <i class="nav-icon fas fa-tachometer-alt"></i>
               <p>Dashboard</p>
             </a>
           </li>
           <li class="nav-item">
-            <a href="{{ route('organizations') }}" class="nav-link {{ request()->routeIs('organizations') ? 'active' : '' }}">
+            <a href="{{ route('admin.organizations') }}" class="nav-link {{ request()->routeIs('admin.organizations') ? 'active' : '' }}">
               <i class="nav-icon fas fa-building"></i>
               <p>Organizations</p>
             </a>
           </li>
           <li class="nav-item">
-            <a href="{{ route('data-sync') }}" class="nav-link {{ request()->routeIs('data-sync') ? 'active' : '' }}">
+            <a href="{{ route('admin.data-sync') }}" class="nav-link {{ request()->routeIs('admin.data-sync') ? 'active' : '' }}">
               <i class="nav-icon fas fa-sync"></i>
               <p>Data Sync</p>
             </a>
           </li>
           <li class="nav-item">
-            <a href="{{ route('ai-chat') }}" class="nav-link {{ request()->routeIs('ai-chat') ? 'active' : '' }}">
+            <a href="{{ route('admin.ai-chat') }}" class="nav-link {{ request()->routeIs('admin.ai-chat') ? 'active' : '' }}">
               <i class="nav-icon fas fa-comments"></i>
               <p>AI Chat</p>
             </a>
           </li>
           <li class="nav-item">
-            <a href="{{ route('widget-manager') }}" class="nav-link {{ request()->routeIs('widget-manager') ? 'active' : '' }}">
+            <a href="{{ route('admin.widget-manager') }}" class="nav-link {{ request()->routeIs('admin.widget-manager') ? 'active' : '' }}">
               <i class="nav-icon fas fa-code"></i>
               <p>Widget Manager</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.api-endpoints') }}" class="nav-link {{ request()->routeIs('admin.api-endpoints') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-plug"></i>
+              <p>API Endpoints</p>
             </a>
           </li>
           @else
