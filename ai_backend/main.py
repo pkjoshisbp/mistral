@@ -10,9 +10,11 @@ import os
 import subprocess
 import psutil
 import signal
-import json
-from concurrent_ai import ConcurrentAIService
-from websocket_ai import websocket_ai_service
+try:
+    from rewrite import rewrite_prompt  # type: ignore
+except Exception as e:
+    rewrite_import_error = e
+    rewrite_prompt = None  # type: ignore
 
 SERVICE_START_TIME = time.time()
 MODEL_WARMED = False
@@ -36,9 +38,6 @@ embed_semaphore = asyncio.Semaphore(EMBED_CONCURRENCY)
 app = FastAPI()
 qdrant = QdrantClient(host="127.0.0.1", port=6333)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-
-# Initialize concurrent AI service
-concurrent_ai = ConcurrentAIService()
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
 
@@ -199,33 +198,16 @@ async def embed(request: Request):
 
 @app.post("/rewrite")
 async def rewrite_endpoint(request: Request):
-    """Rewrite a user query using Ollama (4x faster than quantized model)."""
+    """Rewrite a user query into a concise unambiguous form using local quantized llama.cpp model."""
     try:
+        if rewrite_prompt is None:
+            raise HTTPException(status_code=503, detail=f"Rewrite model unavailable: {rewrite_import_error}")
         data = await request.json()
         text = data.get("text")
         if not text or not isinstance(text, str):
             raise HTTPException(status_code=400, detail="'text' must be a non-empty string")
-        
-        start_time = time.time()
-        # Use Ollama fast 1B model for rewriting (2.4s vs 20s+ quantized)
-        messages = [
-            {"role": "system", "content": "Rewrite the user's query into a single, clear, professional sentence suitable for search. Do not use bullet points, asterisks, or multiple variations. Output only one clean rewritten sentence."},
-            {"role": "user", "content": text.strip()}
-        ]
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(f"{OLLAMA_URL}/api/chat", json={
-                "model": FALLBACK_CHAT_MODEL,  # llama3.2:1b - fast model
-                "messages": messages,
-                "stream": False,
-                "options": {"num_predict": 32, "temperature": 0.1}  # Short, deterministic
-            })
-            result = resp.json()
-            rewritten = result.get("message", {}).get("content", "").strip()
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            logging.info(f"rewrite chars={len(text)} model={FALLBACK_CHAT_MODEL} ms={elapsed_ms}")
-            return {"rewrite": rewritten, "model": FALLBACK_CHAT_MODEL, "elapsed_ms": elapsed_ms}
-            
+        rewritten = await asyncio.get_event_loop().run_in_executor(None, rewrite_prompt, text)
+        return {"rewrite": rewritten}
     except HTTPException:
         raise
     except Exception as e:
@@ -235,6 +217,10 @@ async def rewrite_endpoint(request: Request):
 async def ws_rewrite(ws: WebSocket):
     await ws.accept()
     try:
+        if rewrite_prompt is None:
+            await ws.send_text(f"ERROR: rewrite model unavailable: {rewrite_import_error}")
+            await ws.close()
+            return
         while True:
             try:
                 text = await ws.receive_text()
@@ -243,142 +229,14 @@ async def ws_rewrite(ws: WebSocket):
             if not text.strip():
                 await ws.send_text("")
                 continue
-            
-            # Use Ollama for WebSocket rewriting (fast)
-            messages = [
-                {"role": "system", "content": "Rewrite the user's query into a single, clear, professional sentence suitable for search. Do not use bullet points, asterisks, or multiple variations. Output only one clean rewritten sentence."},
-                {"role": "user", "content": text.strip()}
-            ]
-            
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.post(f"{OLLAMA_URL}/api/chat", json={
-                        "model": FALLBACK_CHAT_MODEL,
-                        "messages": messages,
-                        "stream": False,
-                        "options": {"num_predict": 32, "temperature": 0.1}
-                    })
-                    result = resp.json()
-                    rewritten = result.get("message", {}).get("content", "").strip()
-                    await ws.send_text(rewritten)
-            except Exception as e:
-                await ws.send_text(f"ERROR: {str(e)}")
+            # Offload blocking llama.cpp call to thread pool
+            rewritten = await asyncio.get_event_loop().run_in_executor(None, rewrite_prompt, text)
+            await ws.send_text(rewritten)
     except Exception:
         try:
             await ws.close()
         except Exception:
             pass
-
-@app.post("/ai/optimized")
-async def optimized_ai_pipeline(request: Request):
-    """Optimized AI pipeline with concurrent processing - targets <10s total response"""
-    try:
-        data = await request.json()
-        query = data.get("query")
-        org_collection = data.get("collection", "org_1_data")
-        
-        if not query or not isinstance(query, str):
-            raise HTTPException(status_code=400, detail="'query' must be a non-empty string")
-        
-        result = await concurrent_ai.optimized_pipeline(query, org_collection)
-        
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Optimized pipeline failed: {e}")
-
-@app.post("/ai/benchmark")  
-async def benchmark_comparison(request: Request):
-    """Compare optimized vs current pipeline performance"""
-    try:
-        data = await request.json()
-        query = data.get("query", "What is the address of Gupta Diagnostics?")
-        
-        # Test optimized pipeline
-        start_time = time.time()
-        optimized_result = await concurrent_ai.optimized_pipeline(query)
-        optimized_ms = int((time.time() - start_time) * 1000)
-        
-        return {
-            "query": query,
-            "optimized_pipeline": {
-                "result": optimized_result,
-                "total_time_ms": optimized_ms
-            },
-            "performance_comparison": {
-                "target_time_ms": 10000,  # 10s target
-                "achieved_time_ms": optimized_ms,
-                "speedup_achieved": f"{70000 / optimized_ms:.1f}x faster" if optimized_ms > 0 else "N/A"
-            }
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Benchmark failed: {e}")
-
-@app.websocket("/ws/ai")
-async def websocket_ai_endpoint(websocket: WebSocket):
-    """High-performance WebSocket AI endpoint with streaming"""
-    client_id = f"client_{int(time.time() * 1000)}"
-    
-    await websocket_ai_service.connect(websocket, client_id)
-    
-    try:
-        while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-            
-            try:
-                message = json.loads(data)
-                query = message.get("query", "")
-                collection = message.get("collection", "org_1_data")
-                
-                if not query:
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "error": "Query is required"
-                    }))
-                    continue
-                
-                # Process query with streaming updates
-                result = await websocket_ai_service.process_query_pipeline(
-                    query, collection, client_id
-                )
-                
-                # Send final result
-                await websocket.send_text(json.dumps({
-                    "type": "final_result",
-                    "data": result
-                }))
-                
-            except json.JSONDecodeError:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "error": "Invalid JSON format"
-                }))
-            except Exception as e:
-                await websocket.send_text(json.dumps({
-                    "type": "error", 
-                    "error": str(e)
-                }))
-                
-    except WebSocketDisconnect:
-        await websocket_ai_service.disconnect(client_id)
-    except Exception as e:
-        logger.error(f"WebSocket error for {client_id}: {e}")
-        await websocket_ai_service.disconnect(client_id)
-
-@app.get("/ws/stats")
-async def websocket_stats():
-    """Get WebSocket connection statistics"""
-    return {
-        "active_connections": len(websocket_ai_service.active_connections),
-        "connection_stats": websocket_ai_service.connection_stats
-    }
 
 @app.post("/qdrant/create_collection")
 async def create_collection(request: Request):
@@ -554,8 +412,7 @@ async def llm_chat(request: Request):
             resp = await client.post(f"{OLLAMA_URL}/api/chat", json={
                 "model": model,
                 "messages": messages,
-                "stream": False,
-                "options": {"num_predict": 512}  # Increased token limit for proper JSON responses
+                "stream": False
             })
             result = resp.json()
             elapsed_ms = int((time.time() - start_time) * 1000)
@@ -571,8 +428,7 @@ async def llm_chat(request: Request):
                     resp = await client.post(f"{OLLAMA_URL}/api/chat", json={
                         "model": FALLBACK_CHAT_MODEL,
                         "messages": messages,
-                        "stream": False,
-                        "options": {"num_predict": 512}  # Increased token limit for proper JSON responses
+                        "stream": False
                     })
                     result = resp.json()
                     elapsed_ms = int((time.time() - start_time) * 1000)

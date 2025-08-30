@@ -13,15 +13,17 @@ class Organization extends Model
         'name',
         'slug',
         'description',
-        'domain',
-        'database_name',
+        'website_url',
         'api_key',
         'settings',
+        'api_endpoints',
+        'api_token',
         'is_active'
     ];
 
     protected $casts = [
         'settings' => 'array',
+        'api_endpoints' => 'array',
         'is_active' => 'boolean'
     ];
 
@@ -40,8 +42,18 @@ class Organization extends Model
         return $this->hasMany(DataSource::class);
     }
 
+    public function subscriptions()
+    {
+        return $this->hasMany(Subscription::class);
+    }
+
+    public function tokenUsageLogs()
+    {
+        return $this->hasMany(TokenUsageLog::class);
+    }
+
     public function getCollectionNameAttribute()
     {
-        return "org_{$this->id}";
+        return str_replace('-', '_', $this->slug);
     }
 }

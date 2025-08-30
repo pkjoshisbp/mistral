@@ -60,6 +60,10 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
         return view('widget-manager');
     })->name('widget-manager');
     
+    Route::get('/api-endpoints', function () {
+        return view('api-endpoints');
+    })->name('api-endpoints');
+    
     Route::get('/users', function () {
         return view('admin.users');
     })->name('users');

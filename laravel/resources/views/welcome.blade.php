@@ -41,6 +41,9 @@
                         <a class="nav-link" href="#features">Features</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="#pricing">Pricing</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="#about">About</a>
                     </li>
                     <li class="nav-item">
@@ -126,7 +129,7 @@
                         <div class="card-body text-center">
                             <i class="fas fa-robot fa-3x text-primary mb-3"></i>
                             <h5>AI-Powered Chat</h5>
-                            <p class="text-muted">Advanced AI using Mistral 7B for natural language understanding</p>
+                            <p class="text-muted">Advanced AI models for natural language understanding</p>
                         </div>
                     </div>
                 </div>
@@ -177,6 +180,109 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="py-5">
+        <div class="container">
+            <div class="text-center mb-5">
+                <h2>Choose Your Plan</h2>
+                <p class="lead">Flexible pricing that scales with your business</p>
+            </div>
+            <div class="row">
+                @php
+                    $plans = App\Models\SubscriptionPlan::where('is_active', true)
+                        ->orderBy('sort_order')
+                        ->get();
+                @endphp
+
+                @foreach($plans as $plan)
+                    <div class="col-lg-3 col-md-6 mb-4">
+                        <div class="card h-100 {{ $plan->slug === 'pro' ? 'border-primary' : '' }}">
+                            @if($plan->slug === 'pro')
+                                <div class="card-header bg-primary text-white text-center">
+                                    <span class="badge bg-warning text-dark">Most Popular</span>
+                                </div>
+                            @endif
+                            <div class="card-body text-center">
+                                <h4 class="card-title">{{ $plan->name }}</h4>
+                                <div class="price-section mb-3">
+                                    @if($plan->monthly_price > 0)
+                                        <div class="monthly-price">
+                                            @if($plan->slug === 'starter')
+                                                <span class="h3 text-success">${{ number_format($plan->monthly_price, 0) }}</span>
+                                                <small class="text-muted"><s>${{ number_format(79, 0) }}</s> promo</small>
+                                            @else
+                                                <span class="h3">${{ number_format($plan->monthly_price, 0) }}</span>
+                                            @endif
+                                            <small class="text-muted">/month</small>
+                                        </div>
+                                        <div class="yearly-price">
+                                            @if($plan->slug === 'starter')
+                                                <small class="text-muted">
+                                                    ${{ number_format($plan->yearly_price, 0) }} yearly (promo) / $790 normal
+                                                </small>
+                                            @else
+                                                <small class="text-muted">${{ number_format($plan->yearly_price, 0) }} yearly (10× monthly)</small>
+                                            @endif
+                                        </div>
+                                    @elseif($plan->slug === 'payg')
+                                        <div class="h3">Pay as you go</div>
+                                        <small class="text-muted">No monthly fees</small>
+                                    @else
+                                        <div class="h3">Custom</div>
+                                        <small class="text-muted">Starting ~${{ number_format($plan->monthly_price, 0) }}</small>
+                                    @endif
+                                </div>
+                                
+                                <p class="text-muted">{{ $plan->description }}</p>
+                                
+                                <div class="mb-3">
+                                    @if($plan->token_cap_monthly > 0)
+                                        <strong>{{ $plan->formatted_token_cap }} tokens/month</strong>
+                                    @else
+                                        <strong>No usage cap</strong>
+                                    @endif
+                                    <br>
+                                    <small class="text-muted">
+                                        Overage: ${{ number_format($plan->overage_price_per_100k, 0) }} per 100k tokens
+                                    </small>
+                                </div>
+
+                                <ul class="list-unstyled text-start">
+                                    @foreach($plan->features as $feature)
+                                        <li class="mb-2">
+                                            <i class="fas fa-check text-success me-2"></i>{{ $feature }}
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                @guest
+                                    <a href="{{ route('register') }}" class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100">
+                                        @if($plan->slug === 'enterprise')
+                                            Contact Sales
+                                        @else
+                                            Choose {{ $plan->name }}
+                                        @endif
+                                    </a>
+                                @else
+                                    @if($plan->slug === 'enterprise')
+                                        <a href="mailto:sales@ai-chat.support" class="btn btn-outline-primary btn-block w-100">
+                                            Contact Sales
+                                        </a>
+                                    @else
+                                        <a href="{{ route('customer.dashboard') }}" class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100">
+                                            Upgrade to {{ $plan->name }}
+                                        </a>
+                                    @endif
+                                @endguest
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
             </div>
         </div>
     </section>

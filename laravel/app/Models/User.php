@@ -50,6 +50,23 @@ class User extends Authenticatable
         return $this->belongsTo(Organization::class);
     }
 
+    public function subscriptions()
+    {
+        return $this->hasMany(Subscription::class);
+    }
+
+    public function activeSubscription()
+    {
+        return $this->hasOne(Subscription::class)
+                    ->where('status', 'active')
+                    ->where('current_period_end', '>', now());
+    }
+
+    public function tokenUsageLogs()
+    {
+        return $this->hasMany(TokenUsageLog::class);
+    }
+
     public function isAdmin()
     {
         return $this->role === 'admin';

@@ -20,123 +20,170 @@
             <div class="card card-secondary">
                 <div class="card-header">
                     <h3 class="card-title">Create New Organization</h3>
+                    <div class="card-tools">
+                        <button wire:click="toggleCreateForm" class="btn btn-tool">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <form wire:submit.prevent="createOrganization">
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="form-group">
-                                    <label for="name">Name</label>
-                                    <input type="text" wire:model="name" class="form-control" id="name">
+                                    <label for="name">Organization Name *</label>
+                                    <input type="text" wire:model="name" class="form-control" id="name" placeholder="e.g., Gupta Diagnostics">
                                     @error('name') <span class="text-danger">{{ $message }}</span> @enderror
                                 </div>
                             </div>
                             <div class="col-md-6">
                                 <div class="form-group">
-                                    <label for="slug">Slug</label>
-                                    <input type="text" wire:model="slug" class="form-control" id="slug">
+                                    <label for="slug">Slug *</label>
+                                    <input type="text" wire:model="slug" class="form-control" id="slug" placeholder="e.g., gupta-diagnostics">
                                     @error('slug') <span class="text-danger">{{ $message }}</span> @enderror
+                                    <small class="text-muted">Used for API endpoints and collections</small>
                                 </div>
                             </div>
                         </div>
 
                         <div class="form-group">
                             <label for="description">Description</label>
-                            <textarea wire:model="description" class="form-control" id="description" rows="3"></textarea>
-                        </div>
-
-                        <div class="card card-outline card-info">
-                            <div class="card-header">
-                                <h3 class="card-title">Database Configuration (Optional)</h3>
-                                <small class="text-muted">Configure client's MySQL database for data synchronization</small>
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="form-group">
-                                            <label for="database_name">Database Name</label>
-                                            <input type="text" wire:model="database_name" class="form-control" id="database_name" placeholder="e.g., gupta_diagnostics_db">
-                                            <small class="text-muted">Name of the client's MySQL database</small>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="form-group">
-                                            <label for="database_host">Database Host</label>
-                                            <input type="text" wire:model="database_host" class="form-control" id="database_host" placeholder="localhost">
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="col-md-4">
-                                        <div class="form-group">
-                                            <label for="database_username">Username</label>
-                                            <input type="text" wire:model="database_username" class="form-control" id="database_username">
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <div class="form-group">
-                                            <label for="database_password">Password</label>
-                                            <input type="password" wire:model="database_password" class="form-control" id="database_password">
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <div class="form-group">
-                                            <label for="database_port">Port</label>
-                                            <input type="text" wire:model="database_port" class="form-control" id="database_port" placeholder="3306">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                            <textarea wire:model="description" class="form-control" id="description" rows="3" placeholder="Brief description of the organization"></textarea>
+                            @error('description') <span class="text-danger">{{ $message }}</span> @enderror
                         </div>
 
                         <div class="form-group">
-                            <button type="submit" class="btn btn-success">Create</button>
-                            <button type="button" wire:click="toggleCreateForm" class="btn btn-secondary">Cancel</button>
+                            <label for="website_url">Website URL</label>
+                            <input type="url" wire:model="website_url" class="form-control" id="website_url" placeholder="https://example.com">
+                            @error('website_url') <span class="text-danger">{{ $message }}</span> @enderror
+                        </div>
+
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Create Organization
+                            </button>
+                            <button type="button" wire:click="toggleCreateForm" class="btn btn-secondary ml-2">
+                                <i class="fas fa-times"></i> Cancel
+                            </button>
                         </div>
                     </form>
                 </div>
             </div>
         @endif
 
-        <div class="table-responsive">
-            <table class="table table-bordered table-striped">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Name</th>
-                        <th>Slug</th>
-                        <th>Database</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse ($organizations as $org)
-                        <tr>
-                            <td>{{ $org->id }}</td>
-                            <td>{{ $org->name }}</td>
-                            <td>{{ $org->slug }}</td>
-                            <td>{{ $org->database_name ?? 'N/A' }}</td>
-                            <td>
-                                <span class="badge badge-{{ $org->is_active ? 'success' : 'danger' }}">
-                                    {{ $org->is_active ? 'Active' : 'Inactive' }}
-                                </span>
-                            </td>
-                            <td>{{ $org->created_at->format('Y-m-d H:i') }}</td>
-                            <td>
-                                <button wire:click="selectOrganization({{ $org->id }})" class="btn btn-info btn-sm">
-                                    <i class="fas fa-eye"></i> View
-                                </button>
-                            </td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="7" class="text-center">No organizations found</td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
+        @if ($showEditForm)
+            <div class="card card-warning">
+                <div class="card-header">
+                    <h3 class="card-title">Edit Organization</h3>
+                    <div class="card-tools">
+                        <button wire:click="cancelEdit" class="btn btn-tool">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <form wire:submit.prevent="updateOrganization">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="edit_name">Organization Name *</label>
+                                    <input type="text" wire:model="name" class="form-control" id="edit_name">
+                                    @error('name') <span class="text-danger">{{ $message }}</span> @enderror
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="edit_slug">Slug *</label>
+                                    <input type="text" wire:model="slug" class="form-control" id="edit_slug">
+                                    @error('slug') <span class="text-danger">{{ $message }}</span> @enderror
+                                    <small class="text-muted">Changing this will update Qdrant collections</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit_description">Description</label>
+                            <textarea wire:model="description" class="form-control" id="edit_description" rows="3"></textarea>
+                            @error('description') <span class="text-danger">{{ $message }}</span> @enderror
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit_website_url">Website URL</label>
+                            <input type="url" wire:model="website_url" class="form-control" id="edit_website_url">
+                            @error('website_url') <span class="text-danger">{{ $message }}</span> @enderror
+                        </div>
+
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-warning">
+                                <i class="fas fa-save"></i> Update Organization
+                            </button>
+                            <button type="button" wire:click="cancelEdit" class="btn btn-secondary ml-2">
+                                <i class="fas fa-times"></i> Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        @endif
+
+        <!-- Organizations List -->
+        @if(count($organizations) > 0)
+            <div class="row">
+                @foreach($organizations as $org)
+                    <div class="col-md-6 mb-3">
+                        <div class="card card-outline card-primary">
+                            <div class="card-header">
+                                <h5 class="card-title">{{ $org->name }}</h5>
+                                <div class="card-tools">
+                                    <button wire:click="editOrganization({{ $org->id }})" class="btn btn-tool text-warning">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">{{ $org->description ?: 'No description provided' }}</p>
+                                
+                                <div class="row">
+                                    <div class="col-6">
+                                        <strong>Slug:</strong> <code>{{ $org->slug }}</code>
+                                    </div>
+                                    <div class="col-6">
+                                        <strong>Users:</strong> {{ $org->users->count() }}
+                                    </div>
+                                </div>
+                                
+                                @if($org->website_url)
+                                    <div class="mt-2">
+                                        <strong>Website:</strong> 
+                                        <a href="{{ $org->website_url }}" target="_blank" class="text-primary">
+                                            {{ $org->website_url }}
+                                        </a>
+                                    </div>
+                                @endif
+                                
+                                <div class="mt-2">
+                                    <strong>Collection:</strong> <code>{{ $org->collection_name }}</code>
+                                </div>
+                                
+                                <div class="mt-2">
+                                    <strong>Status:</strong> 
+                                    @if($org->is_active)
+                                        <span class="badge badge-success">Active</span>
+                                    @else
+                                        <span class="badge badge-danger">Inactive</span>
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        @else
+            <div class="text-center py-4">
+                <i class="fas fa-building fa-3x text-muted mb-3"></i>
+                <h5 class="text-muted">No organizations created yet.</h5>
+                <p class="text-muted">Click "Add Organization" to get started.</p>
+            </div>
+        @endif
     </div>
 </div>

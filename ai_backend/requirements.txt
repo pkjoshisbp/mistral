@@ -3,3 +3,4 @@ uvicorn[standard]
 httpx
 qdrant-client
 pydantic
+llama-cpp-python==0.2.90

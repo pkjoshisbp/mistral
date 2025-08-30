@@ -18,6 +18,12 @@ Environment=PYTHONUNBUFFERED=1
 Environment=OLLAMA_URL=http://127.0.0.1:11434
 Environment=QDRANT_HOST=127.0.0.1
 Environment=QDRANT_PORT=6333
+Environment=REWRITE_MODEL_PATH=/var/www/clients/client1/web64/web/ai_backend/models/llama-3.2-1b-instruct/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+Environment=REWRITE_N_THREADS=8
+# Optional: pin rewrite generation determinism / tuning (override in drop-in if needed)
+Environment=REWRITE_TEMPERATURE=0.2
+Environment=REWRITE_TOP_P=0.9
+Environment=REWRITE_MAX_TOKENS=128
 # If you later add HF downloads at runtime you can supply a token (avoid committing):
 # Environment=HF_TOKEN=hf_xxxxxxxxxxxxxxxxx
 LimitNOFILE=65536
@@ -30,6 +36,7 @@ ProtectSystem=off
 ProtectHome=false
 
 # Ensure required directories exist before start (avoid namespace failures)
+ExecStartPre=/usr/bin/mkdir -p /var/www/clients/client1/web64/web/ai_backend/models/llama-3.2-1b-instruct
 ExecStartPre=/usr/bin/mkdir -p /var/www/clients/client1/web64/web/ai_backend/logs
 # If you really need a separate top-level logs dir, create it explicitly (commented out for now)
 # ExecStartPre=/usr/bin/mkdir -p /var/www/clients/client1/web64/web/logs
