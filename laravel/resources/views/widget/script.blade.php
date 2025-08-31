@@ -15,6 +15,8 @@
             this.isOpen = false;
             this.sessionId = this.generateSessionId();
             this.messages = [];
+            this.leadCaptured = false;
+            this.userInfo = {};
             this.init();
         }
 
@@ -26,11 +28,6 @@
             this.loadStyles();
             this.createWidget();
             this.bindEvents();
-            
-            // Welcome message
-            setTimeout(() => {
-                this.addMessage(this.config.welcomeMessage, 'bot');
-            }, 1000);
         }
 
         loadStyles() {
@@ -77,6 +74,27 @@
                         <div id="ai-chat-messages" class="ai-chat-messages">
                         </div>
 
+                        <!-- Lead Capture Form -->
+                        <div id="ai-chat-lead-form" class="ai-chat-lead-form" style="display: none;">
+                            <div class="ai-chat-lead-content">
+                                <h3>Let's get started!</h3>
+                                <p>Please provide your details so we can assist you better:</p>
+                                <div class="ai-chat-form-group">
+                                    <input type="text" id="ai-lead-name" class="ai-chat-form-input" placeholder="Your Name *" required />
+                                </div>
+                                <div class="ai-chat-form-group">
+                                    <input type="email" id="ai-lead-email" class="ai-chat-form-input" placeholder="Your Email *" required />
+                                </div>
+                                <div class="ai-chat-form-group">
+                                    <input type="tel" id="ai-lead-phone" class="ai-chat-form-input" placeholder="Your Phone Number" />
+                                </div>
+                                <div class="ai-chat-form-actions">
+                                    <button id="ai-chat-lead-submit" class="ai-chat-lead-submit">Start Chatting</button>
+                                    <button id="ai-chat-lead-skip" class="ai-chat-lead-skip">Skip for now</button>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Input -->
                         <div class="ai-chat-input-container">
                             <input type="text" id="ai-chat-input" class="ai-chat-input" placeholder="Type your message..." />
@@ -98,10 +116,14 @@
             const closeBtn = document.getElementById('ai-chat-close');
             const sendBtn = document.getElementById('ai-chat-send');
             const input = document.getElementById('ai-chat-input');
+            const leadSubmit = document.getElementById('ai-chat-lead-submit');
+            const leadSkip = document.getElementById('ai-chat-lead-skip');
 
             button.addEventListener('click', () => this.toggleWidget());
             closeBtn.addEventListener('click', () => this.toggleWidget());
             sendBtn.addEventListener('click', () => this.sendMessage());
+            leadSubmit.addEventListener('click', () => this.submitLeadForm());
+            leadSkip.addEventListener('click', () => this.skipLeadForm());
             
             input.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
@@ -124,7 +146,13 @@
             if (this.isOpen) {
                 window.style.display = 'flex';
                 button.style.transform = 'scale(0.9)';
-                document.getElementById('ai-chat-input').focus();
+                
+                // Show lead form if not captured yet
+                if (!this.leadCaptured) {
+                    this.showLeadForm();
+                } else {
+                    document.getElementById('ai-chat-input').focus();
+                }
             } else {
                 window.style.display = 'none';
                 button.style.transform = 'scale(1)';
@@ -178,6 +206,72 @@
             }
         }
 
+        showLeadForm() {
+            const leadForm = document.getElementById('ai-chat-lead-form');
+            const messagesContainer = document.getElementById('ai-chat-messages');
+            const inputContainer = document.querySelector('.ai-chat-input-container');
+            
+            leadForm.style.display = 'block';
+            messagesContainer.style.display = 'none';
+            inputContainer.style.display = 'none';
+            
+            // Focus on name input
+            document.getElementById('ai-lead-name').focus();
+        }
+
+        hideLeadForm() {
+            const leadForm = document.getElementById('ai-chat-lead-form');
+            const messagesContainer = document.getElementById('ai-chat-messages');
+            const inputContainer = document.querySelector('.ai-chat-input-container');
+            
+            leadForm.style.display = 'none';
+            messagesContainer.style.display = 'flex';
+            inputContainer.style.display = 'flex';
+            
+            // Show welcome message if no messages yet
+            if (this.messages.length === 0) {
+                setTimeout(() => {
+                    this.addMessage(this.config.welcomeMessage, 'bot');
+                }, 500);
+            }
+            
+            document.getElementById('ai-chat-input').focus();
+        }
+
+        submitLeadForm() {
+            const name = document.getElementById('ai-lead-name').value.trim();
+            const email = document.getElementById('ai-lead-email').value.trim();
+            const phone = document.getElementById('ai-lead-phone').value.trim();
+
+            if (!name || !email) {
+                alert('Please fill in your name and email address.');
+                return;
+            }
+
+            // Simple email validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                alert('Please enter a valid email address.');
+                return;
+            }
+
+            this.userInfo = { name, email, phone };
+            this.leadCaptured = true;
+            
+            // Store lead info (you can send this to server if needed)
+            console.log('Lead captured:', this.userInfo);
+            
+            this.hideLeadForm();
+            
+            // Welcome message with name
+            this.addMessage(`Hello ${name}! ${this.config.welcomeMessage}`, 'bot');
+        }
+
+        skipLeadForm() {
+            this.leadCaptured = true;
+            this.hideLeadForm();
+        }
+
         async sendMessage() {
             const input = document.getElementById('ai-chat-input');
             const message = input.value.trim();
@@ -192,16 +286,23 @@
             this.addTypingIndicator();
 
             try {
+                const requestBody = {
+                    message: message,
+                    session_id: this.sessionId
+                };
+
+                // Include lead information if captured
+                if (this.leadCaptured && this.userInfo.name) {
+                    requestBody.user_info = this.userInfo;
+                }
+
                 const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/chat`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify({
-                        message: message,
-                        session_id: this.sessionId
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 const data = await response.json();

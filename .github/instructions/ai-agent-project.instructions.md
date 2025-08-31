@@ -17,7 +17,7 @@ so our modal should be able to not only read content from vector but what is sto
 
 the workspace is connected to remote server which is ubuntu 22.04
 current workspace is a www-data limited user - so we cannot run systemctl command here
-the workspace weburl is https://mistral.mywebsolutions.co.in
+the workspace weburl is https://ai-chat.support
 
 so final structure.
 Laravel will act as your main web application and frontend.
@@ -34,31 +34,6 @@ Get LLM responses
 data structure in qdrant
 Example Structure (Gupta Diagnostics)
 
-Collection: gupta_diagnostics_tests
 
-{
-  "id": 1,
-  "vector": [0.13, 0.87, ...],
-  "payload": {
-    "org_id": "gupta_diagnostics",
-    "test_name": "Thyroid Profile",
-    "cost": 600,
-    "prep": "No fasting",
-    "availability": "Mon–Sat 8AM–12PM"
-  }
-}
-
-
-Collection: gupta_diagnostics_pdfs
-
-{
-  "id": 1,
-  "vector": [0.45, 0.91, ...],
-  "payload": {
-    "org_id": "gupta_diagnostics",
-    "file_name": "BloodSugarInstructions.pdf",
-    "category": "instructions"
-  }
-}
 in laravel - always create livewire components for frontend interactions and not standard controller and view.
 we can create controller for interaction with fastapi if needed.

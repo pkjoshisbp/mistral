@@ -15,6 +15,8 @@ class Subscription extends Model
         'organization_id',
         'subscription_plan_id',
         'paypal_subscription_id',
+        'razorpay_subscription_id',
+        'razorpay_payment_id',
         'billing_cycle',
         'status',
         'current_period_start',

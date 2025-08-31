@@ -1,0 +1,21 @@
+question,answer,category
+What is AI Chat Support?,AI Chat Support is an intelligent conversational AI platform that helps businesses provide 24/7 customer support through automated chat widgets on their websites.,general
+How does AI Chat Support work?,Our AI analyzes your business data and FAQs to provide accurate responses to customer queries in real-time through a customizable chat widget on your website.,general
+What types of businesses can use AI Chat Support?,"AI Chat Support is perfect for any business that receives customer inquiries online, including e-commerce stores, service providers, SaaS companies, healthcare providers, and more.",general
+How do I get started with AI Chat Support?,"Simply sign up for an account, upload your business data or FAQs, customize your chat widget, and embed it on your website. Our AI will start responding to customer queries immediately.",getting-started
+What data can I upload to train the AI?,"You can upload FAQs, product information, service descriptions, policies, documentation, and any other relevant business information in various formats including text, CSV, and PDF files.",getting-started
+Is there a free trial available?,"Yes, we offer a 14-day free trial with full access to all features so you can experience the power of AI Chat Support before committing to a subscription.",pricing
+What are your pricing plans?,"We offer flexible pricing plans starting from $29/month for small businesses, with enterprise options available. All plans include unlimited conversations and 24/7 support.",pricing
+Can I customize the chat widget appearance?,"Absolutely! You can customize colors, fonts, position, welcome messages, and branding to match your website's design perfectly.",customization
+How accurate are the AI responses?,"Our AI provides highly accurate responses based on the data you provide. The more comprehensive your training data, the better the AI performs. Typical accuracy rates exceed 95%.",technical
+What languages does AI Chat Support support?,"Currently, we support English with plans to add Spanish, French, German, and other languages in the coming months.",technical
+How do I integrate the chat widget on my website?,"Integration is simple - just copy and paste a small JavaScript code snippet into your website's HTML. No technical expertise required, and it works with all major website platforms.",integration
+Does it work with WordPress/Shopify/other platforms?,"Yes, our chat widget works seamlessly with WordPress, Shopify, Wix, Squarespace, and virtually all website platforms that allow custom HTML/JavaScript.",integration
+Can I see chat history and analytics?,"Yes, your dashboard provides complete chat history, conversation analytics, popular questions, response accuracy metrics, and customer satisfaction scores.",analytics
+How secure is my data?,"We use enterprise-grade security with 256-bit SSL encryption, secure data centers, and comply with GDPR and other privacy regulations to protect your business and customer data.",security
+Can multiple team members access the dashboard?,"Yes, you can invite team members with different permission levels to manage your AI Chat Support account and monitor conversations.",team-management
+What kind of support do you provide?,"We provide 24/7 customer support via email and chat, comprehensive documentation, video tutorials, and dedicated account management for enterprise customers.",support
+How often is the AI updated?,"Our AI models are continuously improved and updated monthly with the latest advancements in natural language processing and machine learning.",technical
+Can the AI handle complex queries?,"Yes, our AI can handle complex multi-part questions, follow-up queries, and maintain context throughout conversations for more natural interactions.",technical
+What happens if the AI can't answer a question?,"If the AI cannot provide a confident answer, it will politely let the customer know and can optionally collect their contact information for follow-up by your team.",fallback
+Can I review and approve AI responses before they go live?,"Yes, you have full control over AI responses. You can review, edit, and approve responses, or set the AI to operate fully autonomously based on your preferences.",management

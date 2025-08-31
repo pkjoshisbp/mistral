@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\SitemapController;
 use Illuminate\Support\Facades\Route;
 
 // Public Routes (no authentication required)
@@ -17,14 +18,54 @@ Route::get('/features', function () {
 })->name('features');
 
 Route::get('/contact', function () {
-    return view('public.contact');
+    return view('contact');
 })->name('contact');
+
+Route::get('/terms', function () {
+    $terms = App\Models\TermsAndConditions::getTerms();
+    return view('public.terms', compact('terms'));
+})->name('terms');
+
+Route::get('/privacy', function () {
+    $privacy = App\Models\TermsAndConditions::getPrivacyPolicy();
+    return view('public.privacy', compact('privacy'));
+})->name('privacy');
+
+Route::get('/refund-policy', function () {
+    $refund = App\Models\TermsAndConditions::getRefundPolicy();
+    return view('public.refund-policy', compact('refund'));
+})->name('refund-policy');
+
+// Blog Routes
+Route::get('/blog', function () {
+    $blogs = App\Models\Blog::published()->orderBy('published_at', 'desc')->paginate(6);
+    return view('public.blog.index', compact('blogs'));
+})->name('blog.index');
+
+Route::get('/blog/{blog:slug}', function (App\Models\Blog $blog) {
+    // Get related posts (exclude current post)
+    $relatedPosts = App\Models\Blog::published()
+        ->where('id', '!=', $blog->id)
+        ->inRandomOrder()
+        ->limit(3)
+        ->get();
+    
+    return view('public.blog.show', compact('blog', 'relatedPosts'));
+})->name('blog.show');
+
+// SEO Routes
+Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('sitemap');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
+
+// Customer redirect
+Route::get('/customer', function () {
+    return redirect()->route('customer.dashboard');
+})->name('customer.redirect');
 
 // Admin Routes (for system administrators)
 Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(function () {
@@ -68,6 +109,10 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
         return view('admin.users');
     })->name('users');
     
+    Route::get('/terms-management', function () {
+        return view('admin.terms-management');
+    })->name('terms-management');
+    
     Route::get('/settings', function () {
         return view('admin.settings');
     })->name('settings');
@@ -83,7 +128,33 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
     // All other customer routes require an organization
     Route::middleware(['user.has.organization'])->group(function () {
         Route::get('/dashboard', function () {
-            return view('customer.dashboard');
+            $user = auth()->user();
+            $organization = $user->organizations->first();
+            
+            // Get basic stats
+            $totalChats = 0;
+            $todayChats = 0;
+            $dataSources = 0;
+            $subscriptionStatus = 'Active';
+            $recentChats = collect();
+            
+            if ($organization) {
+                $totalChats = \App\Models\ChatConversation::where('organization_id', $organization->id)->count();
+                $todayChats = \App\Models\ChatConversation::where('organization_id', $organization->id)
+                    ->whereDate('created_at', today())->count();
+                $dataSources = \App\Models\DataSource::where('organization_id', $organization->id)->count();
+                $recentChats = \App\Models\ChatConversation::where('organization_id', $organization->id)
+                    ->with('messages')
+                    ->withCount('messages')
+                    ->orderBy('last_activity_at', 'desc')
+                    ->limit(10)
+                    ->get();
+            }
+            
+            return view('customer.dashboard', compact(
+                'totalChats', 'todayChats', 'dataSources', 
+                'subscriptionStatus', 'recentChats'
+            ));
         })->name('dashboard');
         
         Route::get('/data-sources', \App\Livewire\Customer\DataSources::class)->name('data-sources');
@@ -122,6 +193,16 @@ Route::prefix('paypal')->name('paypal.')->group(function () {
     Route::get('success', [\App\Http\Controllers\PayPalController::class, 'handleSuccess'])->name('success');
     Route::get('cancel', [\App\Http\Controllers\PayPalController::class, 'handleCancel'])->name('cancel');
     Route::post('webhook', [\App\Http\Controllers\PayPalController::class, 'handleWebhook'])->name('webhook');
+});
+
+// Razorpay Routes
+Route::prefix('razorpay')->name('razorpay.')->group(function () {
+    Route::post('create-subscription', [\App\Http\Controllers\RazorpayController::class, 'createSubscription'])
+        ->middleware('auth')
+        ->name('create-subscription');
+    Route::post('success', [\App\Http\Controllers\RazorpayController::class, 'handleSuccess'])->name('success');
+    Route::post('failure', [\App\Http\Controllers\RazorpayController::class, 'handleFailure'])->name('failure');
+    Route::post('webhook', [\App\Http\Controllers\RazorpayController::class, 'handleWebhook'])->name('webhook');
 });
 
 require __DIR__.'/auth.php';

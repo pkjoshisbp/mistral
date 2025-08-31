@@ -3,7 +3,34 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AI Agent System - Multi-Organization Support</title>
+    
+    <!-- SEO Meta Tags -->
+    <title>AI Chat Support - Revolutionary Customer Service Automation | 24/7 AI Assistance</title>
+    <meta name="description" content="Transform your customer support with AI-powered chat solutions. Provide instant 24/7 assistance, reduce costs, and boost customer satisfaction with our intelligent AI chat system.">
+    <meta name="keywords" content="AI chat support, customer service automation, chatbot, artificial intelligence, live chat, customer support software, AI assistant, automated customer service">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="AI Chat Support">
+    
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="AI Chat Support - Revolutionary Customer Service Automation">
+    <meta property="og:description" content="Transform your customer support with AI-powered chat solutions. Provide instant 24/7 assistance, reduce costs, and boost customer satisfaction.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ url('/') }}">
+    <meta property="og:image" content="{{ asset('images/ai-chat-support-og.jpg') }}">
+    <meta property="og:site_name" content="AI Chat Support">
+    
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="AI Chat Support - Revolutionary Customer Service Automation">
+    <meta name="twitter:description" content="Transform your customer support with AI-powered chat solutions. Provide instant 24/7 assistance, reduce costs, and boost customer satisfaction.">
+    <meta name="twitter:image" content="{{ asset('images/ai-chat-support-og.jpg') }}">
+    
+    <!-- Canonical URL -->
+    <link rel="canonical" href="{{ url('/') }}">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}">
+    
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -42,6 +69,9 @@
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#pricing">Pricing</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ route('blog.index') }}">Blog</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#about">About</a>
@@ -196,6 +226,9 @@
                     $plans = App\Models\SubscriptionPlan::where('is_active', true)
                         ->orderBy('sort_order')
                         ->get();
+                    $locationService = app(\App\Services\LocationService::class);
+                    $isFromIndia = $locationService->isFromIndia();
+                    $currency = $locationService->getUserCurrency();
                 @endphp
 
                 @foreach($plans as $plan)
@@ -211,21 +244,35 @@
                                 <div class="price-section mb-3">
                                     @if($plan->monthly_price > 0)
                                         <div class="monthly-price">
+                                            @php
+                                                $monthlyPrice = $plan->getMonthlyPriceForCurrency($currency);
+                                                $yearlyPrice = $plan->getYearlyPriceForCurrency($currency);
+                                                $currencySymbol = $currency === 'INR' ? '₹' : '$';
+                                            @endphp
                                             @if($plan->slug === 'starter')
-                                                <span class="h3 text-success">${{ number_format($plan->monthly_price, 0) }}</span>
-                                                <small class="text-muted"><s>${{ number_format(79, 0) }}</s> promo</small>
+                                                <span class="h3 text-success">{{ $currencySymbol }}{{ number_format($monthlyPrice, 0) }}</span>
+                                                @if($currency === 'INR')
+                                                    <small class="text-muted"><s>₹{{ number_format(7900, 0) }}</s> promo</small>
+                                                @else
+                                                    <small class="text-muted"><s>${{ number_format(79, 0) }}</s> promo</small>
+                                                @endif
                                             @else
-                                                <span class="h3">${{ number_format($plan->monthly_price, 0) }}</span>
+                                                <span class="h3">{{ $currencySymbol }}{{ number_format($monthlyPrice, 0) }}</span>
                                             @endif
                                             <small class="text-muted">/month</small>
                                         </div>
                                         <div class="yearly-price">
                                             @if($plan->slug === 'starter')
                                                 <small class="text-muted">
-                                                    ${{ number_format($plan->yearly_price, 0) }} yearly (promo) / $790 normal
+                                                    {{ $currencySymbol }}{{ number_format($yearlyPrice, 0) }} yearly (promo) 
+                                                    @if($currency === 'INR')
+                                                        / ₹79,000 normal
+                                                    @else 
+                                                        / $790 normal
+                                                    @endif
                                                 </small>
                                             @else
-                                                <small class="text-muted">${{ number_format($plan->yearly_price, 0) }} yearly (10× monthly)</small>
+                                                <small class="text-muted">{{ $currencySymbol }}{{ number_format($yearlyPrice, 0) }} yearly (10× monthly)</small>
                                             @endif
                                         </div>
                                     @elseif($plan->slug === 'payg')
@@ -233,7 +280,11 @@
                                         <small class="text-muted">No monthly fees</small>
                                     @else
                                         <div class="h3">Custom</div>
-                                        <small class="text-muted">Starting ~${{ number_format($plan->monthly_price, 0) }}</small>
+                                        @php
+                                            $customPrice = $plan->getMonthlyPriceForCurrency($currency);
+                                            $currencySymbol = $currency === 'INR' ? '₹' : '$';
+                                        @endphp
+                                        <small class="text-muted">Starting ~{{ $currencySymbol }}{{ number_format($customPrice, 0) }}</small>
                                     @endif
                                 </div>
                                 
@@ -247,7 +298,11 @@
                                     @endif
                                     <br>
                                     <small class="text-muted">
-                                        Overage: ${{ number_format($plan->overage_price_per_100k, 0) }} per 100k tokens
+                                        @php
+                                            $overagePrice = $currency === 'INR' ? $locationService->convertToINR($plan->overage_price_per_100k) : $plan->overage_price_per_100k;
+                                            $currencySymbol = $currency === 'INR' ? '₹' : '$';
+                                        @endphp
+                                        Overage: {{ $currencySymbol }}{{ number_format($overagePrice, 0) }} per 100k tokens
                                     </small>
                                 </div>
 
@@ -278,11 +333,19 @@
                                             Activate Pay-as-you-go
                                         </a>
                                     @else
-                                        <button onclick="createSubscription({{ $plan->id }})" 
-                                                class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
-                                                id="subscribe-btn-{{ $plan->id }}">
-                                            Subscribe to {{ $plan->name }}
-                                        </button>
+                                        @if($isFromIndia)
+                                            <button onclick="createRazorpaySubscription({{ $plan->id }})" 
+                                                    class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
+                                                    id="subscribe-btn-{{ $plan->id }}">
+                                                Subscribe to {{ $plan->name }}
+                                            </button>
+                                        @else
+                                            <button onclick="createSubscription({{ $plan->id }})" 
+                                                    class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
+                                                    id="subscribe-btn-{{ $plan->id }}">
+                                                Subscribe to {{ $plan->name }}
+                                            </button>
+                                        @endif
                                     @endif
                                 @endguest
                             </div>
@@ -318,6 +381,9 @@
     @auth
     <!-- PayPal SDK -->
     <script src="https://www.paypal.com/sdk/js?client-id={{ env('PAYPAL_CLIENT_ID') }}&vault=true&intent=subscription"></script>
+    
+    <!-- Razorpay SDK -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     
     <script>
         async function createSubscription(planId) {
@@ -356,7 +422,532 @@
                 button.disabled = false;
             }
         }
+
+        async function createRazorpaySubscription(planId) {
+            const button = document.getElementById(`subscribe-btn-${planId}`);
+            const originalText = button.innerHTML;
+            
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            button.disabled = true;
+            
+            try {
+                const response = await fetch('{{ route("razorpay.create-subscription") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({
+                        plan_id: planId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Initialize Razorpay
+                    const options = {
+                        key: data.razorpay_key,
+                        subscription_id: data.subscription_id,
+                        name: data.name,
+                        description: data.description,
+                        handler: function (response) {
+                            // Handle successful payment
+                            const form = document.createElement('form');
+                            form.method = 'POST';
+                            form.action = '{{ route("razorpay.success") }}';
+                            
+                            const csrfInput = document.createElement('input');
+                            csrfInput.type = 'hidden';
+                            csrfInput.name = '_token';
+                            csrfInput.value = '{{ csrf_token() }}';
+                            form.appendChild(csrfInput);
+                            
+                            const subscriptionInput = document.createElement('input');
+                            subscriptionInput.type = 'hidden';
+                            subscriptionInput.name = 'razorpay_subscription_id';
+                            subscriptionInput.value = response.razorpay_subscription_id;
+                            form.appendChild(subscriptionInput);
+                            
+                            const paymentInput = document.createElement('input');
+                            paymentInput.type = 'hidden';
+                            paymentInput.name = 'razorpay_payment_id';
+                            paymentInput.value = response.razorpay_payment_id;
+                            form.appendChild(paymentInput);
+                            
+                            const signatureInput = document.createElement('input');
+                            signatureInput.type = 'hidden';
+                            signatureInput.name = 'razorpay_signature';
+                            signatureInput.value = response.razorpay_signature;
+                            form.appendChild(signatureInput);
+                            
+                            document.body.appendChild(form);
+                            form.submit();
+                        },
+                        prefill: data.prefill,
+                        theme: {
+                            color: '#007bff'
+                        },
+                        modal: {
+                            ondismiss: function() {
+                                button.innerHTML = originalText;
+                                button.disabled = false;
+                            }
+                        }
+                    };
+                    
+                    const rzp = new Razorpay(options);
+                    rzp.open();
+                } else {
+                    alert('Error: ' + (data.message || 'Failed to create subscription'));
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while processing your request');
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
     </script>
     @endauth
+
+    <!-- AI Chat Widget -->
+    <div id="ai-chat-widget">
+        <div id="ai-chat-button" onclick="toggleChat()">
+            <i class="fas fa-comments"></i>
+        </div>
+        <div id="ai-chat-window" style="display: none;">
+            <div id="ai-chat-header">
+                <span>AI Chat Support</span>
+                <button onclick="toggleChat()" id="close-chat">×</button>
+            </div>
+            <div id="ai-chat-messages">
+                <div class="ai-message">
+                    <div class="message-bubble">
+                        Hello! I'm your AI assistant. How can I help you today?
+                    </div>
+                </div>
+            </div>
+            <div id="ai-chat-input">
+                <input type="text" id="chat-message-input" placeholder="Type your message..." onkeypress="handleChatKeyPress(event)">
+                <button onclick="sendMessage()" id="send-message">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+    #ai-chat-widget {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+    }
+
+    #ai-chat-button {
+        width: 60px;
+        height: 60px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 24px;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    #ai-chat-button:hover {
+        transform: scale(1.1);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    #ai-chat-window {
+        position: absolute;
+        bottom: 70px;
+        right: 0;
+        width: 350px;
+        height: 500px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    #ai-chat-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-weight: 600;
+    }
+
+    #close-chat {
+        background: none;
+        border: none;
+        color: white;
+        font-size: 20px;
+        cursor: pointer;
+        padding: 0;
+        width: 25px;
+        height: 25px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #ai-chat-messages {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        background: #f8f9fa;
+    }
+
+    .message-bubble {
+        background: white;
+        padding: 12px 16px;
+        border-radius: 18px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        max-width: 80%;
+    }
+
+    .user-message {
+        text-align: right;
+    }
+
+    .user-message .message-bubble {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        margin-left: auto;
+    }
+
+    .ai-message {
+        text-align: left;
+    }
+
+    #ai-chat-input {
+        padding: 15px 20px;
+        background: white;
+        border-top: 1px solid #e9ecef;
+        display: flex;
+        gap: 10px;
+    }
+
+    #chat-message-input {
+        flex: 1;
+        border: 1px solid #dee2e6;
+        border-radius: 20px;
+        padding: 10px 15px;
+        outline: none;
+        font-size: 14px;
+    }
+
+    #chat-message-input:focus {
+        border-color: #667eea;
+    }
+
+    #send-message {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #send-message:hover {
+        opacity: 0.9;
+    }
+
+    @media (max-width: 768px) {
+        #ai-chat-window {
+            width: 320px;
+            height: 450px;
+        }
+    }
+    </style>
+
+    <script>
+    function toggleChat() {
+        const chatWindow = document.getElementById('ai-chat-window');
+        const chatButton = document.getElementById('ai-chat-button');
+        
+        if (chatWindow.style.display === 'none') {
+            chatWindow.style.display = 'flex';
+            chatButton.style.display = 'none';
+        } else {
+            chatWindow.style.display = 'none';
+            chatButton.style.display = 'flex';
+        }
+    }
+
+    function handleChatKeyPress(event) {
+        if (event.key === 'Enter') {
+            sendMessage();
+        }
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('chat-message-input');
+        const message = input.value.trim();
+        
+        if (!message) return;
+        
+        // Add user message to chat
+        addMessageToChat(message, 'user');
+        input.value = '';
+        
+        // Show typing indicator
+        const typingId = addTypingIndicator();
+        
+        try {
+            // Send message to AI Chat Support API
+            const response = await fetch('https://ai-chat.support/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Organization': 'ai-chat-support'
+                },
+                body: JSON.stringify({
+                    message: message,
+                    conversation_id: getOrCreateConversationId()
+                })
+            });
+            
+            const data = await response.json();
+            
+            // Remove typing indicator
+            removeTypingIndicator(typingId);
+            
+            if (data.response) {
+                addMessageToChat(data.response, 'ai');
+            } else {
+                addMessageToChat('Sorry, I encountered an error. Please try again.', 'ai');
+            }
+        } catch (error) {
+            console.error('Chat error:', error);
+            removeTypingIndicator(typingId);
+            addMessageToChat('Sorry, I\'m having trouble connecting. Please try again later.', 'ai');
+        }
+    }
+
+    function addMessageToChat(message, sender) {
+        const messagesContainer = document.getElementById('ai-chat-messages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = sender + '-message';
+        
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.className = 'message-bubble';
+        bubbleDiv.textContent = message;
+        
+        messageDiv.appendChild(bubbleDiv);
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function addTypingIndicator() {
+        const messagesContainer = document.getElementById('ai-chat-messages');
+        const typingDiv = document.createElement('div');
+        const typingId = 'typing-' + Date.now();
+        typingDiv.id = typingId;
+        typingDiv.className = 'ai-message';
+        typingDiv.innerHTML = '<div class="message-bubble">Typing...</div>';
+        messagesContainer.appendChild(typingDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        return typingId;
+    }
+
+    function removeTypingIndicator(typingId) {
+        const typingElement = document.getElementById(typingId);
+        if (typingElement) {
+            typingElement.remove();
+        }
+    }
+
+    function getOrCreateConversationId() {
+        let conversationId = localStorage.getItem('ai-chat-conversation-id');
+        if (!conversationId) {
+            conversationId = 'conv-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('ai-chat-conversation-id', conversationId);
+        }
+        return conversationId;
+    }
+    </script>
+
+    <!-- Footer -->
+    <footer class="bg-dark text-white py-5 mt-5">
+        <div class="container">
+            <div class="row">
+                <div class="col-lg-4 mb-4">
+                    <div class="footer-brand">
+                        <h5 class="mb-3">
+                            <i class="fas fa-robot me-2"></i>
+                            AI Chat Support
+                        </h5>
+                        <p class="text-light">
+                            Revolutionizing customer support with intelligent AI conversations. 
+                            Provide 24/7 assistance to your customers with our advanced chatbot platform.
+                        </p>
+                        <div class="social-links">
+                            <a href="#" class="text-light me-3"><i class="fab fa-twitter fa-lg"></i></a>
+                            <a href="#" class="text-light me-3"><i class="fab fa-linkedin fa-lg"></i></a>
+                            <a href="#" class="text-light me-3"><i class="fab fa-facebook fa-lg"></i></a>
+                            <a href="#" class="text-light"><i class="fab fa-github fa-lg"></i></a>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-2 col-md-6 mb-4">
+                    <h6 class="mb-3 text-uppercase">Product</h6>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#features" class="text-light text-decoration-none">Features</a></li>
+                        <li class="mb-2"><a href="#pricing" class="text-light text-decoration-none">Pricing</a></li>
+                        <li class="mb-2"><a href="/widget/1/test" class="text-light text-decoration-none">Demo</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">API Docs</a></li>
+                    </ul>
+                </div>
+                
+                <div class="col-lg-2 col-md-6 mb-4">
+                    <h6 class="mb-3 text-uppercase">Company</h6>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="{{ route('about') }}" class="text-light text-decoration-none">About Us</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Blog</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Careers</a></li>
+                        <li class="mb-2"><a href="{{ route('contact') }}" class="text-light text-decoration-none">Contact</a></li>
+                    </ul>
+                </div>
+                
+                <div class="col-lg-2 col-md-6 mb-4">
+                    <h6 class="mb-3 text-uppercase">Legal</h6>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="{{ route('privacy') }}" class="text-light text-decoration-none">Privacy Policy</a></li>
+                        <li class="mb-2"><a href="{{ route('terms') }}" class="text-light text-decoration-none">Terms of Service</a></li>
+                        <li class="mb-2"><a href="{{ route('refund-policy') }}" class="text-light text-decoration-none">Refund Policy</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Cookie Policy</a></li>
+                    </ul>
+                </div>
+                
+                <div class="col-lg-2 col-md-6 mb-4">
+                    <h6 class="mb-3 text-uppercase">Support</h6>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Help Center</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Documentation</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Community</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Status</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <hr class="my-4 border-secondary">
+            
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <p class="mb-0 text-light">
+                        &copy; {{ date('Y') }} AI Chat Support. All rights reserved.
+                    </p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="mb-0 text-light">
+                        <i class="fas fa-heart text-danger"></i> 
+                        Made with AI Technology
+                    </p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <style>
+    footer .social-links a:hover {
+        color: #667eea !important;
+        transition: color 0.3s ease;
+    }
+    
+    footer ul li a:hover {
+        color: #667eea !important;
+        transition: color 0.3s ease;
+    }
+    </style>
+
+    <!-- Schema.org Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "AI Chat Support",
+        "url": "{{ url('/') }}",
+        "logo": "{{ asset('images/logo.png') }}",
+        "description": "Revolutionary AI-powered customer support automation platform providing 24/7 intelligent chat assistance.",
+        "sameAs": [
+            "https://twitter.com/aichatsupport",
+            "https://linkedin.com/company/aichatsupport",
+            "https://github.com/aichatsupport"
+        ],
+        "contactPoint": {
+            "@type": "ContactPoint",
+            "telephone": "+1-555-AI-CHAT",
+            "contactType": "customer service"
+        },
+        "offers": {
+            "@type": "Offer",
+            "name": "AI Chat Support Service",
+            "description": "AI-powered customer support automation with 24/7 availability",
+            "category": "Software as a Service"
+        }
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "AI Chat Support",
+        "url": "{{ url('/') }}",
+        "description": "Transform your customer support with AI-powered chat solutions. Provide instant 24/7 assistance, reduce costs, and boost customer satisfaction.",
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": "{{ url('/') }}/search?q={search_term_string}",
+            "query-input": "required name=search_term_string"
+        }
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "AI Chat Support Platform",
+        "description": "Revolutionary AI-powered customer support automation platform providing 24/7 intelligent chat assistance.",
+        "brand": {
+            "@type": "Brand",
+            "name": "AI Chat Support"
+        },
+        "offers": {
+            "@type": "Offer",
+            "priceCurrency": "USD",
+            "price": "29.00",
+            "priceValidUntil": "{{ now()->addYear()->format('Y-m-d') }}",
+            "availability": "https://schema.org/InStock"
+        },
+        "aggregateRating": {
+            "@type": "AggregateRating",
+            "ratingValue": "4.8",
+            "reviewCount": "150"
+        }
+    }
+    </script>
 </body>
 </html>

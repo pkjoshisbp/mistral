@@ -31,11 +31,6 @@ class CustomerMiddleware
             abort(403, 'Access denied. Customer role required.');
         }
 
-        // Check if customer has an organization assigned
-        if (!auth()->user()->organization_id) {
-            abort(403, 'Access denied. No organization assigned to your account.');
-        }
-
         return $next($request);
     }
 }

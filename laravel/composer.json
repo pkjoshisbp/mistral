@@ -6,11 +6,13 @@
     "license": "MIT",
     "require": {
         "php": "^8.1",
+        "geoip2/geoip2": "^3.2",
         "guzzlehttp/guzzle": "^7.2",
         "laravel/framework": "^10.10",
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
         "livewire/livewire": "^3.6",
+        "razorpay/razorpay": "^2.9",
         "simple-html-dom/simple-html-dom": "^1.5"
     },
     "require-dev": {

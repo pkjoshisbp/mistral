@@ -38,12 +38,52 @@ class SubscriptionPlan extends Model
 
     public function getFormattedMonthlyPriceAttribute()
     {
+        $locationService = app(\App\Services\LocationService::class);
+        $currency = $locationService->getUserCurrency();
+        
+        if ($currency === 'INR') {
+            $amount = $locationService->convertToINR($this->monthly_price);
+            return '₹' . number_format($amount, 0);
+        }
+        
         return '$' . number_format($this->monthly_price, 0);
     }
 
     public function getFormattedYearlyPriceAttribute()
     {
+        $locationService = app(\App\Services\LocationService::class);
+        $currency = $locationService->getUserCurrency();
+        
+        if ($currency === 'INR') {
+            $amount = $locationService->convertToINR($this->yearly_price);
+            return '₹' . number_format($amount, 0);
+        }
+        
         return '$' . number_format($this->yearly_price, 0);
+    }
+
+    public function getMonthlyPriceForCurrency($currency = null)
+    {
+        $locationService = app(\App\Services\LocationService::class);
+        $currency = $currency ?: $locationService->getUserCurrency();
+        
+        if ($currency === 'INR') {
+            return $locationService->convertToINR($this->monthly_price);
+        }
+        
+        return $this->monthly_price;
+    }
+
+    public function getYearlyPriceForCurrency($currency = null)
+    {
+        $locationService = app(\App\Services\LocationService::class);
+        $currency = $currency ?: $locationService->getUserCurrency();
+        
+        if ($currency === 'INR') {
+            return $locationService->convertToINR($this->yearly_price);
+        }
+        
+        return $this->yearly_price;
     }
 
     public function getFormattedTokenCapAttribute()

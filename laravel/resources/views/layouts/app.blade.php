@@ -148,6 +148,12 @@
 
           <li class="nav-header">SYSTEM</li>
           <li class="nav-item">
+            <a href="{{ route('admin.terms-management') }}" class="nav-link {{ request()->routeIs('admin.terms-management') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-file-contract"></i>
+              <p>Terms & Policies</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.settings') }}" class="nav-link {{ request()->routeIs('admin.settings') ? 'active' : '' }}">
               <i class="nav-icon fas fa-cogs"></i>
               <p>Settings</p>

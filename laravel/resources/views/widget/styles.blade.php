@@ -304,3 +304,102 @@
     margin: 0 !important;
     padding: 0 !important;
 }
+
+/* Lead Capture Form */
+.ai-chat-lead-form {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 30px 20px !important;
+    background: white !important;
+}
+
+.ai-chat-lead-content {
+    width: 100% !important;
+    max-width: 300px !important;
+    text-align: center !important;
+}
+
+.ai-chat-lead-content h3 {
+    color: {{ $theme['primaryColor'] }} !important;
+    font-size: 24px !important;
+    font-weight: 600 !important;
+    margin: 0 0 10px 0 !important;
+}
+
+.ai-chat-lead-content p {
+    color: {{ $theme['textColor'] }} !important;
+    font-size: 14px !important;
+    margin: 0 0 25px 0 !important;
+    line-height: 1.4 !important;
+}
+
+.ai-chat-form-group {
+    margin: 0 0 15px 0 !important;
+}
+
+.ai-chat-form-input {
+    width: 100% !important;
+    padding: 12px 16px !important;
+    border: 2px solid #e1e5e9 !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    font-family: inherit !important;
+    transition: border-color 0.3s ease !important;
+    background: white !important;
+    color: {{ $theme['textColor'] }} !important;
+}
+
+.ai-chat-form-input:focus {
+    outline: none !important;
+    border-color: {{ $theme['primaryColor'] }} !important;
+}
+
+.ai-chat-form-input::placeholder {
+    color: #999 !important;
+}
+
+.ai-chat-form-actions {
+    margin: 20px 0 0 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+}
+
+.ai-chat-lead-submit {
+    width: 100% !important;
+    padding: 12px 20px !important;
+    background: {{ $theme['primaryColor'] }} !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    transition: background-color 0.3s ease !important;
+    font-family: inherit !important;
+}
+
+.ai-chat-lead-submit:hover {
+    background: color-mix(in srgb, {{ $theme['primaryColor'] }} 85%, black) !important;
+}
+
+.ai-chat-lead-skip {
+    width: 100% !important;
+    padding: 8px 20px !important;
+    background: transparent !important;
+    color: #666 !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-size: 12px !important;
+    cursor: pointer !important;
+    transition: color 0.3s ease !important;
+    font-family: inherit !important;
+    text-decoration: underline !important;
+}
+
+.ai-chat-lead-skip:hover {
+    color: {{ $theme['primaryColor'] }} !important;
+}

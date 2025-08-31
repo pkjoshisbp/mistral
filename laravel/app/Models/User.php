@@ -50,6 +50,11 @@ class User extends Authenticatable
         return $this->belongsTo(Organization::class);
     }
 
+    public function organizations()
+    {
+        return $this->belongsToMany(Organization::class, 'organization_user');
+    }
+
     public function subscriptions()
     {
         return $this->hasMany(Subscription::class);

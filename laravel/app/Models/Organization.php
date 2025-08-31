@@ -37,6 +37,11 @@ class Organization extends Model
         return $this->hasMany(User::class);
     }
 
+    public function assignedUsers()
+    {
+        return $this->belongsToMany(User::class, 'organization_user');
+    }
+
     public function dataSources()
     {
         return $this->hasMany(DataSource::class);

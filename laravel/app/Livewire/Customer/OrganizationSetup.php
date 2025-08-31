@@ -39,11 +39,11 @@ class OrganizationSetup extends Component
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
-            'owner_id' => Auth::id(),
+            'is_active' => true,
         ]);
 
-        // Add the user to the organization
-        $organization->users()->attach(Auth::id(), ['role' => 'owner']);
+        // Add the user to the organization using our many-to-many relationship
+        Auth::user()->organizations()->attach($organization->id);
 
         session()->flash('success', 'Organization created successfully!');
         
@@ -54,9 +54,14 @@ class OrganizationSetup extends Component
     {
         $organization = Organization::findOrFail($organizationId);
         
-        // For now, we'll auto-approve the request
-        // In a real application, this would send a request to the organization owner
-        $organization->users()->attach(Auth::id(), ['role' => 'member']);
+        // Check if user is already assigned to this organization
+        if (Auth::user()->organizations->contains($organizationId)) {
+            session()->flash('error', 'You are already a member of this organization.');
+            return;
+        }
+        
+        // Add user to organization
+        Auth::user()->organizations()->attach($organizationId);
         
         session()->flash('success', 'You have been added to the organization!');
         
