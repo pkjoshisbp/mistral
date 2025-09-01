@@ -210,6 +210,9 @@
         @endif
 
         @yield('content')
+        @isset($slot)
+          {{ $slot }}
+        @endisset
       </div>
     </section>
   </div>
