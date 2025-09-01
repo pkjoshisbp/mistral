@@ -661,6 +661,7 @@
                 <div class="ai-message">
                     <div class="message-bubble">
                         Hello! I'm your AI assistant. How can I help you today?
+                        <div class="timestamp">Just now</div>
                     </div>
                 </div>
             </div>
@@ -705,8 +706,8 @@
         position: absolute;
         bottom: 70px;
         right: 0;
-        width: 350px;
-        height: 500px;
+        width: 420px; /* enlarged */
+        height: 600px; /* enlarged */
         background: white;
         border-radius: 12px;
         box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
@@ -753,6 +754,7 @@
         margin-bottom: 10px;
         box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         max-width: 80%;
+        position: relative;
     }
 
     .user-message {
@@ -763,6 +765,13 @@
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         margin-left: auto;
+    }
+
+    .timestamp {
+        display: block;
+        font-size: 10px;
+        opacity: 0.7;
+        margin-top: 4px;
     }
 
     .ai-message {
@@ -809,8 +818,8 @@
 
     @media (max-width: 768px) {
         #ai-chat-window {
-            width: 320px;
-            height: 450px;
+            width: 90vw;
+            height: 70vh;
         }
     }
     </style>
@@ -883,14 +892,33 @@
         const messagesContainer = document.getElementById('ai-chat-messages');
         const messageDiv = document.createElement('div');
         messageDiv.className = sender + '-message';
-        
+
         const bubbleDiv = document.createElement('div');
         bubbleDiv.className = 'message-bubble';
-        bubbleDiv.textContent = message;
-        
+        bubbleDiv.innerHTML = `${escapeHtml(message)}<div class="timestamp">${formatTimestamp(new Date())}</div>`;
+
         messageDiv.appendChild(bubbleDiv);
         messagesContainer.appendChild(messageDiv);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function formatTimestamp(date) {
+        const now = new Date();
+        const isToday = date.toDateString() === now.toDateString();
+        const hours = date.getHours();
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const hour12 = hours % 12 || 12;
+        const timePart = `${hour12}:${minutes} ${ampm}`;
+        if (isToday) return timePart;
+        return `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${timePart}`;
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/[&<>"']/g, function(tag) {
+            const chars = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+            return chars[tag] || tag;
+        });
     }
 
     function addTypingIndicator() {

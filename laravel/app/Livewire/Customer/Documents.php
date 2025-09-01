@@ -156,6 +156,7 @@ class Documents extends Component
     public function render()
     {
         return view('livewire.customer.documents')
-            ->layout('layouts.customer');
+            ->layout('layouts.customer')
+            ->layoutData(['title' => 'Documents']);
     }
 }

@@ -104,6 +104,7 @@ class ApiIntegration extends Component
     public function render()
     {
         return view('livewire.customer.api-integration')
-            ->layout('layouts.customer');
+            ->layout('layouts.customer')
+            ->layoutData(['title' => 'API Integration']);
     }
 }

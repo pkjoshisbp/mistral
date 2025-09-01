@@ -150,6 +150,10 @@ class ChatHistory extends Component
         return view('livewire.customer.chat-history', [
             'sessions' => $sessions,
             'organizations' => $organizations
-        ])->layout('layouts.customer');
+        ])->layout('layouts.customer', [
+            'layoutData' => [
+                'title' => 'Chat History'
+            ]
+        ]);
     }
 }
