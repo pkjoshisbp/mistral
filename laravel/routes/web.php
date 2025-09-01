@@ -162,6 +162,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         })->name('dashboard');
         
         Route::get('/data-sources', \App\Livewire\Customer\DataSources::class)->name('data-sources');
+    Route::get('/organization', \App\Livewire\Customer\OrganizationManager::class)->name('organization');
     Route::get('/data-entry', \App\Livewire\Customer\DataEntry::class)->name('data-entry');
         Route::get('/documents', \App\Livewire\Customer\Documents::class)->name('documents');
         Route::get('/website-crawler', \App\Livewire\Customer\WebsiteCrawler::class)->name('crawler');

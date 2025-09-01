@@ -101,6 +101,12 @@
           
           <li class="nav-header">DATA MANAGEMENT</li>
           <li class="nav-item">
+            <a href="{{ route('customer.organization') }}" class="nav-link {{ request()->routeIs('customer.organization') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-building"></i>
+              <p>Organization</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('customer.data-entry') }}" class="nav-link {{ request()->routeIs('customer.data-entry') ? 'active' : '' }}">
               <i class="nav-icon fas fa-keyboard"></i>
               <p>Data Entry</p>

@@ -70,6 +70,8 @@ class OrganizationSetup extends Component
 
     public function render()
     {
-        return view('livewire.customer.organization-setup');
+        return view('livewire.customer.organization-setup')
+            ->layout('layouts.customer')
+            ->layoutData(['title' => 'Organization Setup']);
     }
 }
