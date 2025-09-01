@@ -52,17 +52,18 @@ class SubscriptionPlanSeeder extends Seeder
             [
                 'name' => 'Pay-as-you-go',
                 'slug' => 'payg',
-                'description' => 'Flexible pricing for variable usage patterns',
-                'monthly_price' => 0.00,
-                'yearly_price' => 0.00,
-                'token_cap_monthly' => 0, // No cap
+                'description' => 'Flexible pricing with $5 minimum charge for variable usage patterns',
+                'monthly_price' => 5.00, // $5 minimum charge
+                'yearly_price' => 5.00, // Same minimum
+                'token_cap_monthly' => 200000, // 200k tokens for $5
                 'overage_price_per_100k' => 5.00,
                 'features' => [
-                    'No monthly commitment',
+                    '$5 minimum charge (200k tokens)',
+                    'Tokens never expire',
                     'API access',
                     'Email support',
-                    'Pay per token used',
-                    'No usage cap'
+                    'Pay per additional token used',
+                    'No monthly commitment'
                 ],
                 'is_active' => true,
                 'sort_order' => 3

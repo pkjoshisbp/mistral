@@ -10,7 +10,9 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rules;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class RegisteredUserController extends Controller
@@ -18,9 +20,10 @@ class RegisteredUserController extends Controller
     /**
      * Display the registration view.
      */
-    public function create(): View
+    public function create(Request $request): View
     {
-        return view('auth.register');
+        $selectedPlan = $request->get('plan');
+        return view('auth.register', compact('selectedPlan'));
     }
 
     /**
@@ -36,15 +39,47 @@ class RegisteredUserController extends Controller
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
         ]);
 
+        // Validate hCaptcha if configured
+        if (config('services.hcaptcha.site_key') && config('services.hcaptcha.secret_key')) {
+            $request->validate([
+                'h-captcha-response' => 'required|string',
+            ]);
+
+            // Verify hCaptcha with server-side validation
+            $hcaptchaResponse = $request->input('h-captcha-response');
+            $verifyResponse = Http::asForm()->post('https://hcaptcha.com/siteverify', [
+                'secret' => config('services.hcaptcha.secret_key'),
+                'response' => $hcaptchaResponse,
+                'remoteip' => $request->ip(),
+            ]);
+
+            $hcaptchaResult = $verifyResponse->json();
+            
+            if (!$hcaptchaResult['success']) {
+                throw ValidationException::withMessages([
+                    'h-captcha-response' => ['The hCaptcha verification failed. Please try again.'],
+                ]);
+            }
+        }
+
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
+            'role' => 'customer', // Set role as customer
         ]);
 
         event(new Registered($user));
 
         Auth::login($user);
+
+        // Check if a plan was selected during registration
+        $selectedPlan = $request->get('plan');
+        if ($selectedPlan && $selectedPlan !== 'enterprise') {
+            // Store the selected plan in session for after login redirect
+            session(['selected_plan' => $selectedPlan]);
+            return redirect()->route('customer.subscription')->with('plan', $selectedPlan);
+        }
 
         return redirect(RouteServiceProvider::HOME);
     }

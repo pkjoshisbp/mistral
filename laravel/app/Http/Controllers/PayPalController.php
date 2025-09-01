@@ -52,51 +52,39 @@ class PayPalController extends Controller
             $plan = SubscriptionPlan::findOrFail($request->plan_id);
             $user = Auth::user();
 
-            // Create PayPal subscription
+            // Create PayPal one-time payment since we don't have billing plans set up yet
             $accessToken = $this->getAccessToken();
             
-            $subscriptionData = [
-                'plan_id' => $plan->paypal_plan_id, // We'll need to add this field
-                'subscriber' => [
-                    'name' => [
-                        'given_name' => $user->name,
-                        'surname' => $user->name
-                    ],
-                    'email_address' => $user->email
+            $paymentData = [
+                'intent' => 'CAPTURE',
+                'purchase_units' => [
+                    [
+                        'amount' => [
+                            'currency_code' => 'USD',
+                            'value' => number_format($plan->monthly_price, 2, '.', '')
+                        ],
+                        'description' => $plan->name . ' Plan - ' . $plan->description
+                    ]
                 ],
                 'application_context' => [
                     'brand_name' => config('app.name'),
                     'locale' => 'en-US',
+                    'landing_page' => 'BILLING',
                     'shipping_preference' => 'NO_SHIPPING',
-                    'user_action' => 'SUBSCRIBE_NOW',
-                    'payment_method' => [
-                        'payer_selected' => 'PAYPAL',
-                        'payee_preferred' => 'IMMEDIATE_PAYMENT_REQUIRED'
-                    ],
-                    'return_url' => route('paypal.success'),
+                    'user_action' => 'PAY_NOW',
+                    'return_url' => route('paypal.success') . '?plan_id=' . $plan->id,
                     'cancel_url' => route('paypal.cancel')
                 ]
             ];
 
             $response = Http::withToken($accessToken)
-                ->post($this->paypalBaseUrl . '/v1/billing/subscriptions', $subscriptionData);
+                ->post($this->paypalBaseUrl . '/v2/checkout/orders', $paymentData);
 
             if ($response->successful()) {
-                $paypalSubscription = $response->json();
+                $paypalOrder = $response->json();
                 
-                // Create local subscription record
-                $subscription = Subscription::create([
-                    'user_id' => $user->id,
-                    'subscription_plan_id' => $plan->id,
-                    'paypal_subscription_id' => $paypalSubscription['id'],
-                    'status' => 'pending',
-                    'current_period_start' => now(),
-                    'current_period_end' => now()->addMonth(),
-                    'tokens_used_current_period' => 0
-                ]);
-
-                // Return approval URL
-                foreach ($paypalSubscription['links'] as $link) {
+                // Find approval URL
+                foreach ($paypalOrder['links'] as $link) {
                     if ($link['rel'] === 'approve') {
                         return response()->json([
                             'success' => true,
@@ -108,66 +96,75 @@ class PayPalController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to create PayPal subscription'
+                'message' => 'Failed to create PayPal payment order'
             ], 500);
 
         } catch (\Exception $e) {
-            Log::error('PayPal subscription creation failed: ' . $e->getMessage());
+            Log::error('PayPal payment creation failed: ' . $e->getMessage());
             
             return response()->json([
                 'success' => false,
-                'message' => 'An error occurred while creating the subscription'
+                'message' => 'An error occurred while creating the payment: ' . $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Handle successful subscription
+     * Handle successful payment
      */
     public function handleSuccess(Request $request)
     {
         try {
-            $subscriptionId = $request->subscription_id;
+            $token = $request->token; // PayPal order token
+            $planId = $request->plan_id;
             $accessToken = $this->getAccessToken();
 
-            // Get subscription details from PayPal
+            // Capture the payment
             $response = Http::withToken($accessToken)
-                ->get($this->paypalBaseUrl . '/v1/billing/subscriptions/' . $subscriptionId);
+                ->post($this->paypalBaseUrl . '/v2/checkout/orders/' . $token . '/capture');
 
             if ($response->successful()) {
-                $paypalSubscription = $response->json();
+                $paypalOrder = $response->json();
                 
-                // Update local subscription
-                $subscription = Subscription::where('paypal_subscription_id', $subscriptionId)->first();
-                if ($subscription) {
-                    $subscription->update([
-                        'status' => strtolower($paypalSubscription['status']),
-                        'paypal_data' => $paypalSubscription
+                if ($paypalOrder['status'] === 'COMPLETED') {
+                    $plan = SubscriptionPlan::findOrFail($planId);
+                    $user = Auth::user();
+                    
+                    // Create local subscription record
+                    $subscription = Subscription::create([
+                        'user_id' => $user->id,
+                        'organization_id' => $user->organization_id ?? 3,
+                        'subscription_plan_id' => $plan->id,
+                        'paypal_subscription_id' => $paypalOrder['id'],
+                        'status' => 'active',
+                        'current_period_start' => now(),
+                        'current_period_end' => now()->addMonth(),
+                        'tokens_used_this_period' => 0
                     ]);
-                }
 
-                return redirect()->route('customer.dashboard')
-                    ->with('success', 'Subscription activated successfully!');
+                    return redirect()->route('customer.dashboard')
+                        ->with('success', 'Payment successful! Your ' . $plan->name . ' plan has been activated.');
+                }
             }
 
-            return redirect()->route('customer.dashboard')
-                ->with('error', 'Failed to verify subscription');
+            return redirect()->route('customer.subscription')
+                ->with('error', 'Payment could not be completed. Please try again.');
 
         } catch (\Exception $e) {
-            Log::error('PayPal success handling failed: ' . $e->getMessage());
+            Log::error('PayPal payment completion failed: ' . $e->getMessage());
             
-            return redirect()->route('customer.dashboard')
-                ->with('error', 'An error occurred while processing your subscription');
+            return redirect()->route('customer.subscription')
+                ->with('error', 'An error occurred while completing your payment.');
         }
     }
 
     /**
-     * Handle cancelled subscription
+     * Handle cancelled payment
      */
     public function handleCancel(Request $request)
     {
-        return redirect()->route('customer.dashboard')
-            ->with('info', 'Subscription setup was cancelled');
+        return redirect()->route('customer.subscription')
+            ->with('info', 'Payment was cancelled. You can try again anytime.');
     }
 
     /**

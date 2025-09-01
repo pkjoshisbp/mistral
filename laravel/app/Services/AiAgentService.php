@@ -251,7 +251,7 @@ class AiAgentService
     /**
      * Get LLM answer
      */
-    public function llmAnswer($prompt, $model = 'mistral:7b')
+    public function llmAnswer($prompt, $model = 'llama3.2:1b')
     {
         try {
             $response = Http::timeout(60)->post("{$this->baseUrl}/llm/answer", [

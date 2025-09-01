@@ -3,6 +3,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    @auth
+        <meta name="user-authenticated" content="true">
+    @endauth
     
     <!-- SEO Meta Tags -->
     <title>AI Chat Support - Revolutionary Customer Service Automation | 24/7 AI Assistance</title>
@@ -47,6 +50,25 @@
         .feature-card:hover {
             transform: translateY(-5px);
         }
+        .blog-card {
+            border: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+        .blog-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .blog-card img {
+            transition: transform 0.3s ease;
+        }
+        .blog-card:hover img {
+            transform: scale(1.05);
+        }
+        .blog-meta {
+            font-size: 0.875rem;
+        }
     </style>
 </head>
 <body>
@@ -74,10 +96,10 @@
                         <a class="nav-link" href="{{ route('blog.index') }}">Blog</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#about">About</a>
+                        <a class="nav-link" href="{{ route('about') }}">About</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#contact">Contact</a>
+                        <a class="nav-link" href="{{ route('contact') }}">Contact</a>
                     </li>
                 </ul>
                 <ul class="navbar-nav">
@@ -276,8 +298,8 @@
                                             @endif
                                         </div>
                                     @elseif($plan->slug === 'payg')
-                                        <div class="h3">Pay as you go</div>
-                                        <small class="text-muted">No monthly fees</small>
+                                        <div class="h3">{{ $currencySymbol }}5</div>
+                                        <small class="text-muted">Minimum charge (200k tokens)</small>
                                     @else
                                         <div class="h3">Custom</div>
                                         @php
@@ -316,7 +338,7 @@
                             </div>
                             <div class="card-footer">
                                 @guest
-                                    <a href="{{ route('register') }}" class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100">
+                                    <a href="{{ route('register', ['plan' => $plan->slug]) }}" class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100">
                                         @if($plan->slug === 'enterprise')
                                             Contact Sales
                                         @else
@@ -329,9 +351,19 @@
                                             Contact Sales
                                         </a>
                                     @elseif($plan->slug === 'payg')
-                                        <a href="{{ route('customer.dashboard') }}" class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100">
-                                            Activate Pay-as-you-go
-                                        </a>
+                                        @if($isFromIndia)
+                                            <button onclick="createRazorpaySubscription({{ $plan->id }})" 
+                                                    class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
+                                                    id="subscribe-btn-{{ $plan->id }}">
+                                                Activate Pay-as-you-go
+                                            </button>
+                                        @else
+                                            <button onclick="createSubscription({{ $plan->id }})" 
+                                                    class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
+                                                    id="subscribe-btn-{{ $plan->id }}">
+                                                Activate Pay-as-you-go
+                                            </button>
+                                        @endif
                                     @else
                                         @if($isFromIndia)
                                             <button onclick="createRazorpaySubscription({{ $plan->id }})" 
@@ -356,6 +388,106 @@
         </div>
     </section>
 
+    <!-- Blog Section -->
+    <section class="py-5 bg-light">
+        <div class="container">
+            <div class="text-center mb-5">
+                <h2>Latest from Our Blog</h2>
+                <p class="lead">Stay updated with the latest insights and tips for AI customer support</p>
+            </div>
+            
+            <div class="row g-4">
+                <div class="col-lg-4 col-md-6">
+                    <div class="card blog-card h-100 shadow-sm">
+                        <img src="https://images.unsplash.com/photo-1677442136019-21780ecad995?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="AI Customer Support Guide" style="height: 200px; object-fit: cover;">
+                        <div class="card-body d-flex flex-column">
+                            <div class="mb-3">
+                                <span class="badge bg-primary">Guide</span>
+                                <span class="badge bg-secondary">Implementation</span>
+                            </div>
+                            
+                            <h5 class="card-title">Implementing AI Customer Support: A Complete Guide</h5>
+                            <p class="card-text flex-grow-1">A practical guide for small businesses to implement AI customer support solutions without breaking the bank, including tips, tools, and strategies.</p>
+                            
+                            <div class="blog-meta mb-3 text-muted small">
+                                <i class="fas fa-calendar-alt me-2"></i>
+                                Aug 28, 2025
+                                <span class="ms-3">
+                                    <i class="fas fa-clock me-2"></i>
+                                    3 min read
+                                </span>
+                            </div>
+                            
+                            <a href="{{ route('blog.index') }}" class="btn btn-primary">
+                                Read More <i class="fas fa-arrow-right ms-2"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-4 col-md-6">
+                    <div class="card blog-card h-100 shadow-sm">
+                        <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="Sales Growth with AI" style="height: 200px; object-fit: cover;">
+                        <div class="card-body d-flex flex-column">
+                            <div class="mb-3">
+                                <span class="badge bg-success">Sales</span>
+                                <span class="badge bg-warning">Growth</span>
+                            </div>
+                            
+                            <h5 class="card-title">Boost Sales with AI Chatbots</h5>
+                            <p class="card-text flex-grow-1">Learn how implementing AI chatbots can directly impact your bottom line through improved customer satisfaction, reduced costs, and increased sales conversions.</p>
+                            
+                            <div class="blog-meta mb-3 text-muted small">
+                                <i class="fas fa-calendar-alt me-2"></i>
+                                Aug 26, 2025
+                                <span class="ms-3">
+                                    <i class="fas fa-clock me-2"></i>
+                                    3 min read
+                                </span>
+                            </div>
+                            
+                            <a href="{{ route('blog.index') }}" class="btn btn-primary">
+                                Read More <i class="fas fa-arrow-right ms-2"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-4 col-md-6">
+                    <div class="card blog-card h-100 shadow-sm">
+                        <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="Future of Customer Communications" style="height: 200px; object-fit: cover;">
+                        <div class="card-body d-flex flex-column">
+                            <div class="mb-3">
+                                <span class="badge bg-info">Future</span>
+                                <span class="badge bg-dark">Technology</span>
+                            </div>
+                            
+                            <h5 class="card-title">Future of Customer Communications</h5>
+                            <p class="card-text flex-grow-1">Discover how artificial intelligence is transforming customer support, making it more efficient, personalized, and available 24/7 for businesses of all sizes.</p>
+                            
+                            <div class="blog-meta mb-3 text-muted small">
+                                <i class="fas fa-calendar-alt me-2"></i>
+                                Aug 24, 2025
+                                <span class="ms-3">
+                                    <i class="fas fa-clock me-2"></i>
+                                    3 min read
+                                </span>
+                            </div>
+                            
+                            <a href="{{ route('blog.index') }}" class="btn btn-primary">
+                                Read More <i class="fas fa-arrow-right ms-2"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="text-center mt-4">
+                <a href="{{ route('blog.index') }}" class="btn btn-primary">View All Articles</a>
+            </div>
+        </div>
+    </section>
+
     <!-- CTA Section -->
     <section class="bg-light py-5">
         <div class="container text-center">
@@ -368,13 +500,6 @@
             @endguest
         </div>
     </section>
-
-    <!-- Footer -->
-    <footer class="bg-dark text-white py-4">
-        <div class="container text-center">
-            <p>&copy; {{ date('Y') }} AI Agent System. All rights reserved.</p>
-        </div>
-    </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     
@@ -407,9 +532,18 @@
                 
                 const data = await response.json();
                 
-                if (data.success && data.approval_url) {
-                    // Redirect to PayPal for approval
-                    window.location.href = data.approval_url;
+                if (data.success) {
+                    if (data.approval_url) {
+                        // Redirect to PayPal for approval
+                        window.location.href = data.approval_url;
+                    } else if (data.redirect_url) {
+                        // Direct redirect (development mode)
+                        alert(data.message || 'Subscription activated successfully!');
+                        window.location.href = data.redirect_url;
+                    } else {
+                        alert(data.message || 'Subscription created successfully!');
+                        window.location.reload();
+                    }
                 } else {
                     alert('Error: ' + (data.message || 'Failed to create subscription'));
                     button.innerHTML = originalText;
@@ -716,15 +850,15 @@
         
         try {
             // Send message to AI Chat Support API
-            const response = await fetch('https://ai-chat.support/api/chat', {
+            const response = await fetch('https://ai-chat.support/widget/3/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Organization': 'ai-chat-support'
+                    'Accept': 'application/json'
                 },
                 body: JSON.stringify({
                     message: message,
-                    conversation_id: getOrCreateConversationId()
+                    session_id: getOrCreateConversationId()
                 })
             });
             
@@ -825,7 +959,7 @@
                     <h6 class="mb-3 text-uppercase">Company</h6>
                     <ul class="list-unstyled">
                         <li class="mb-2"><a href="{{ route('about') }}" class="text-light text-decoration-none">About Us</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Blog</a></li>
+                        <li class="mb-2"><a href="{{ route('blog.index') }}" class="text-light text-decoration-none">Blog</a></li>
                         <li class="mb-2"><a href="#" class="text-light text-decoration-none">Careers</a></li>
                         <li class="mb-2"><a href="{{ route('contact') }}" class="text-light text-decoration-none">Contact</a></li>
                     </ul>

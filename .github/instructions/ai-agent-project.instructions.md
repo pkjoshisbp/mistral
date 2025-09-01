@@ -31,9 +31,16 @@ Add/query data in Qdrant
 Generate embeddings
 Get LLM responses
 
-data structure in qdrant
-Example Structure (Gupta Diagnostics)
+Note:
+please use url for any testing https://ai-chat.support and not php artisan serve.
+10.for admin username - admin@example.com password - password123
+for customer - customer@ai-chat.support - password - 4NAWhgQ5PskpQ2b
 
+for restarting fastapi server you can send the command - 
+ systemctl restart ai-fastapi.service
+ systemctl status ai-fastapi.service
+
+ for testing you can use simple browser which you were doing use login credentials. always use https when checking any page.
 
 in laravel - always create livewire components for frontend interactions and not standard controller and view.
 we can create controller for interaction with fastapi if needed.

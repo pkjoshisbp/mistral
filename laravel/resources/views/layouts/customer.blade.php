@@ -101,15 +101,9 @@
           
           <li class="nav-header">DATA MANAGEMENT</li>
           <li class="nav-item">
-            <a href="{{ route('customer.data-sources') }}" class="nav-link {{ request()->routeIs('customer.data-sources') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-database"></i>
-              <p>Data Sources</p>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="{{ route('customer.file-upload') }}" class="nav-link {{ request()->routeIs('customer.file-upload') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-upload"></i>
-              <p>File Upload</p>
+            <a href="{{ route('customer.documents') }}" class="nav-link {{ request()->routeIs('customer.documents') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-file-alt"></i>
+              <p>Documents</p>
             </a>
           </li>
           <li class="nav-item">
@@ -119,9 +113,9 @@
             </a>
           </li>
           <li class="nav-item">
-            <a href="{{ route('customer.google-sheets') }}" class="nav-link {{ request()->routeIs('customer.google-sheets') ? 'active' : '' }}">
-              <i class="nav-icon fab fa-google"></i>
-              <p>Google Sheets</p>
+            <a href="{{ route('customer.api-integration') }}" class="nav-link {{ request()->routeIs('customer.api-integration') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-plug"></i>
+              <p>API Integration</p>
             </a>
           </li>
 
@@ -133,9 +127,21 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{ route('customer.whatsapp') }}" class="nav-link {{ request()->routeIs('customer.whatsapp') ? 'active' : '' }}">
+              <i class="nav-icon fab fa-whatsapp"></i>
+              <p>WhatsApp Integration</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('customer.chat-test') }}" class="nav-link {{ request()->routeIs('customer.chat-test') ? 'active' : '' }}">
               <i class="nav-icon fas fa-comments"></i>
               <p>Test Chat</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('customer.chat-history') }}" class="nav-link {{ request()->routeIs('customer.chat-history') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-history"></i>
+              <p>Chat History</p>
             </a>
           </li>
 

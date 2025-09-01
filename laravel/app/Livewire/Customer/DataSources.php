@@ -172,6 +172,7 @@ class DataSources extends Component
 
     public function render()
     {
-        return view('livewire.customer.data-sources');
+        return view('livewire.customer.data-sources')
+            ->layout('layouts.customer');
     }
 }

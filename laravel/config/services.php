@@ -35,4 +35,9 @@ return [
         'url' => env('AI_AGENT_URL', 'http://localhost:8111'),
     ],
 
+    'hcaptcha' => [
+        'site_key' => env('HCAPTCHA_SITE_KEY'),
+        'secret_key' => env('HCAPTCHA_SECRET_KEY'),
+    ],
+
 ];

@@ -85,50 +85,49 @@ class WidgetController extends Controller
 
             $message = $request->input('message');
             $sessionId = $request->input('session_id', uniqid());
+            $userInfo = $request->input('user_info', []);
 
             if (!$message) {
                 return response()->json(['error' => 'Message is required'], 400);
             }
 
+            // Log lead capture if provided
+            if (!empty($userInfo) && isset($userInfo['name'])) {
+                Log::info('Lead captured via widget', [
+                    'org_id' => $orgId,
+                    'session_id' => $sessionId,
+                    'user_info' => $userInfo
+                ]);
+            }
+
             // Generate embedding for the message
             $embedding = $this->aiAgentService->embed($message);
 
-            if (!$embedding || !isset($embedding['embedding'])) {
+            if (!$embedding || !is_array($embedding)) {
                 throw new \Exception('Failed to generate embedding');
             }
 
-            // Search all relevant Qdrant collections for context
-            $collections = [
-                "org_{$orgId}_document",
-                "org_{$orgId}_service",
-                "org_{$orgId}_product",
-                "org_{$orgId}_faq",
-                "org_{$orgId}_webpage"
-            ];
+            // Search organization's Qdrant collection for context
+            $collectionName = $organization->slug; // Use organization slug directly
+            
+            $searchResults = $this->aiAgentService->searchQdrant(
+                $collectionName,
+                $embedding, // embedding is already the array
+                5 // Get top 5 relevant results
+            );
+            
             $context = '';
-            foreach ($collections as $collection) {
-                $searchResults = $this->aiAgentService->searchQdrant(
-                    $collection,
-                    $embedding['embedding'],
-                    3
-                );
-                \Log::debug('Qdrant search results for ' . $collection, ['searchResults' => $searchResults]);
-                if ($searchResults && isset($searchResults['results'])) {
-                    foreach ($searchResults['results'] as $result) {
-                        $payload = $result['payload'] ?? [];
-                        \Log::debug('Qdrant result payload', ['collection' => $collection, 'payload' => $payload]);
-                        // Aggregate all available fields for context
-                        foreach ($payload as $key => $value) {
-                            \Log::debug('Payload field', ['key' => $key, 'value' => $value, 'type' => gettype($value)]);
-                            if (is_string($value) && !empty($value)) {
-                                $context .= ucfirst($key) . ": " . $value . "\n";
-                            }
+            if ($searchResults && isset($searchResults['results'])) {
+                foreach ($searchResults['results'] as $result) {
+                    $payload = $result['payload'] ?? [];
+                    // Aggregate all available fields for context
+                    foreach ($payload as $key => $value) {
+                        if (is_string($value) && !empty($value) && $key !== 'org_id') {
+                            $context .= ucfirst($key) . ": " . $value . "\n";
                         }
-                        \Log::debug('Context after payload aggregation', ['context' => $context]);
-                        $context .= "\n";
                     }
+                    $context .= "\n";
                 }
-                \Log::debug('Context after collection', ['collection' => $collection, 'context' => $context]);
             }
 
             // Create system prompt

@@ -79,6 +79,14 @@
     border: 1px solid #e1e5e9 !important;
 }
 
+/* Larger size for desktop screens */
+@media (min-width: 1200px) {
+    .ai-chat-window {
+        width: 450px !important;
+        height: 600px !important;
+    }
+}
+
 @media (max-width: 420px) {
     .ai-chat-window {
         width: calc(100vw - 40px) !important;

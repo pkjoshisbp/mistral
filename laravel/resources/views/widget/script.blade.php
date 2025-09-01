@@ -147,11 +147,24 @@
                 window.style.display = 'flex';
                 button.style.transform = 'scale(0.9)';
                 
-                // Show lead form if not captured yet
-                if (!this.leadCaptured) {
+                // Check if user is logged in by looking for auth indicators
+                const isLoggedIn = document.querySelector('meta[name="user-authenticated"]') || 
+                                  document.body.classList.contains('logged-in') ||
+                                  window.Laravel && window.Laravel.user;
+                
+                // Show lead form if not captured yet AND user is not logged in
+                if (!this.leadCaptured && !isLoggedIn) {
                     this.showLeadForm();
                 } else {
+                    this.leadCaptured = true; // Skip lead capture for logged in users
                     document.getElementById('ai-chat-input').focus();
+                    
+                    // Show welcome message if no messages yet
+                    if (this.messages.length === 0) {
+                        setTimeout(() => {
+                            this.addMessage(this.config.welcomeMessage, 'bot');
+                        }, 500);
+                    }
                 }
             } else {
                 window.style.display = 'none';

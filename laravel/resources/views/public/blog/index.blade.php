@@ -1,13 +1,96 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blog - AI Chat Support</title>
-    <meta name="description" content="Stay updated with the latest insights, tips, and trends in AI customer support. Expert advice to help your business thrive.">
+@extends('layouts.public')
+
+@section('title', 'Blog - AI Chat Support')
+@section('meta_description', 'Stay updated with the latest insights, tips, and trends in AI customer support. Expert advice to help your business thrive.')
+
+@section('styles')
+<style>
+    .text-gradient {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
     
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    .hero-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 100px 0 80px;
+    }
+    
+    .blog-card {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border: none;
+        border-radius: 15px;
+        overflow: hidden;
+        height: 100%;
+    }
+    
+    .blog-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+    }
+    
+    .blog-meta {
+        color: #6c757d;
+        font-size: 0.9em;
+    }
+    
+    .blog-meta i {
+        margin-right: 5px;
+    }
+    
+    .read-more-btn {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        border-radius: 25px;
+        padding: 10px 25px;
+        color: white;
+        text-decoration: none;
+        display: inline-block;
+        transition: all 0.3s ease;
+    }
+    
+    .read-more-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        color: white;
+        text-decoration: none;
+    }
+    
+    .newsletter-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    .newsletter-section .form-control {
+        border: none;
+        border-radius: 25px;
+        padding: 12px 20px;
+    }
+    
+    .newsletter-section .btn {
+        background: rgba(255,255,255,0.2);
+        border: 2px solid white;
+        border-radius: 25px;
+        padding: 10px 30px;
+        color: white;
+        margin-left: 10px;
+    }
+    
+    .newsletter-section .btn:hover {
+        background: white;
+        color: #667eea;
+    }
+    
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+    }
+</style>
+@endsection
+
+@section('content')
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -143,13 +226,9 @@
     </nav>
 
     <!-- Hero Section -->
-    <section class="hero-section text-center">
-        <div class="container">
-            <h1 class="display-4 fw-bold mb-4">AI Chat Support Blog</h1>
-            <p class="lead mb-4">Stay updated with the latest insights, tips, and trends in AI customer support</p>
-            <p class="h5">Expert advice to help your business thrive with artificial intelligence</p>
-        </div>
-    </section>
+    @section('content')
+    
+    <!-- Hero Section -->
 
     <!-- Blog Posts -->
     <section class="py-5">
@@ -297,7 +376,4 @@
         </div>
     </footer>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+@endsection

@@ -158,6 +158,10 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         })->name('dashboard');
         
         Route::get('/data-sources', \App\Livewire\Customer\DataSources::class)->name('data-sources');
+        Route::get('/documents', \App\Livewire\Customer\Documents::class)->name('documents');
+        Route::get('/website-crawler', \App\Livewire\Customer\WebsiteCrawler::class)->name('crawler');
+        Route::get('/api-integration', \App\Livewire\Customer\ApiIntegration::class)->name('api-integration');
+        Route::get('/chat-history', \App\Livewire\Customer\ChatHistory::class)->name('chat-history');
         Route::get('/content', function () {
             return view('customer.content');
         })->name('content');
@@ -170,6 +174,21 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/settings', function () {
             return view('customer.settings');
         })->name('settings');
+        Route::get('/crawler', function () {
+            return view('customer.crawler');
+        })->name('crawler');
+        Route::get('/google-sheets', function () {
+            return view('customer.google-sheets');
+        })->name('google-sheets');
+        Route::get('/widget', function () {
+            return view('customer.widget');
+        })->name('widget');
+        Route::get('/whatsapp', function () {
+            return view('customer.whatsapp');
+        })->name('whatsapp');
+        Route::get('/chat-test', function () {
+            return view('customer.chat-test');
+        })->name('chat-test');
     });
 });
 
@@ -183,6 +202,13 @@ Route::prefix('widget')->middleware(\App\Http\Middleware\CorsMiddleware::class)-
         $organization = \App\Models\Organization::findOrFail($orgId);
         return view('widget.test', compact('organization'));
     })->name('widget.test');
+});
+
+// API Routes
+Route::prefix('api')->group(function () {
+    // WhatsApp Webhook
+    Route::get('/whatsapp/webhook', [\App\Http\Controllers\WhatsAppController::class, 'verifyWebhook']);
+    Route::post('/whatsapp/webhook', [\App\Http\Controllers\WhatsAppController::class, 'handleWebhook']);
 });
 
 // PayPal Routes

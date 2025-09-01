@@ -143,20 +143,21 @@
                     <div class="contact-info-item">
                         <i class="fas fa-envelope"></i>
                         <h5>Email Us</h5>
-                        <p class="mb-0">support@ai-chat.support</p>
+                        <p class="mb-0">info@ai-chat.support</p>
                     </div>
 
                     <div class="contact-info-item">
                         <i class="fas fa-phone"></i>
                         <h5>Call Us</h5>
-                        <p class="mb-0">+1 (555) AI-CHAT</p>
+                        <p class="mb-0">+91 9937253528</p>
                     </div>
 
                     <div class="contact-info-item">
-                        <i class="fas fa-clock"></i>
-                        <h5>Business Hours</h5>
-                        <p class="mb-1">Monday - Friday: 9:00 AM - 6:00 PM</p>
-                        <p class="mb-0">Saturday: 10:00 AM - 4:00 PM</p>
+                        <i class="fas fa-map-marker-alt"></i>
+                        <h5>Address</h5>
+                        <p class="mb-1">Villa No.10, Sriram Villa,</p>
+                        <p class="mb-1">AN Guha Lane,</p>
+                        <p class="mb-0">Sambalpur - 768001</p>
                     </div>
 
                     <div class="contact-info-item">
@@ -306,40 +307,39 @@
             </div>
         </div>
     </footer>
-
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+    // Handle contact form submission
+    document.addEventListener('DOMContentLoaded', function() {
+        const contactForm = document.getElementById('contactForm');
+        if (contactForm) {
+            contactForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const captchaResponse = hcaptcha.getResponse();
+                if (!captchaResponse) {
+                    alert('Please complete the captcha verification.');
+                    return;
+                }
+                
+                // Collect form data
+                const formData = {
+                    name: document.getElementById('contact_name').value,
+                    email: document.getElementById('contact_email').value,
+                    subject: document.getElementById('contact_subject').value,
+                    message: document.getElementById('contact_message').value,
+                    'h-captcha-response': captchaResponse
+                };
+                
+                // Submit form (you can implement AJAX submission here)
+                alert('Thank you for your message! We will get back to you soon.');
+                contactForm.reset();
+                hcaptcha.reset();
+            });
+        }
+    });
+    </script>
 </body>
 </html>
-
-// Handle contact form submission
-document.addEventListener('DOMContentLoaded', function() {
-    const contactForm = document.getElementById('contactForm');
-    if (contactForm) {
-        contactForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const captchaResponse = hcaptcha.getResponse();
-            if (!captchaResponse) {
-                alert('Please complete the captcha verification.');
-                return;
-            }
-            
-            // Collect form data
-            const formData = {
-                name: document.getElementById('contact_name').value,
-                email: document.getElementById('contact_email').value,
-                subject: document.getElementById('contact_subject').value,
-                message: document.getElementById('contact_message').value,
-                'h-captcha-response': captchaResponse
-            };
-            
-            // Submit form (you can implement AJAX submission here)
-            alert('Thank you for your message! We will get back to you soon.');
-            contactForm.reset();
-            hcaptcha.reset();
-        });
-    }
-});
-</script>
-@endsection

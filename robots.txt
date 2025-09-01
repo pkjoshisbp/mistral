@@ -16,7 +16,7 @@ Allow: /images/
 Allow: /favicon.ico
 
 # Sitemap location
-Sitemap: http://mistral.mywebsolutions.co.in/sitemap.xml
+Sitemap: https://ai-chat.support/sitemap.xml
 
 # Crawl delay (optional)
 Crawl-delay: 1
