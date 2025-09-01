@@ -3,11 +3,21 @@
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SitemapController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\App;
 
 // Public Routes (no authentication required)
 Route::get('/', function () {
     return view('welcome');
 })->name('home');
+
+// Language switch
+Route::get('/lang/{locale}', function ($locale) {
+    $available = ['en','de','fr','it','pt','hi','es','th'];
+    if (in_array($locale, $available)) {
+        session(['app_locale' => $locale]);
+    }
+    return back();
+})->name('lang.switch');
 
 Route::get('/about', function () {
     return view('public.about');
