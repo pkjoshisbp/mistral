@@ -29,7 +29,8 @@ class LocationService
                 $response = Http::timeout(5)->get("https://ipapi.co/{$ip}/country/");
                 
                 if ($response->successful()) {
-                    return $response->body();
+                    $country = $response->body();
+                    return $country;
                 }
                 
                 // Fallback to ip-api.com
@@ -37,7 +38,8 @@ class LocationService
                 
                 if ($response->successful()) {
                     $data = $response->json();
-                    return $data['countryCode'] ?? 'US';
+                    $country = $data['countryCode'] ?? 'US';
+                    return $country;
                 }
                 
                 return 'US'; // Default fallback
@@ -64,10 +66,8 @@ class LocationService
     public function isFromIndia($ip = null)
     {
         return $this->getUserCountry($ip) === 'IN';
-    }
-
-    /**
-     * Get currency based on location
+    }    /**
+     * Get user's currency based on location
      */
     public function getUserCurrency($ip = null)
     {

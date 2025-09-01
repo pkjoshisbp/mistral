@@ -201,7 +201,7 @@
                         <div class="card h-100 {{ $plan->slug === 'pro' ? 'border-primary' : '' }}">
                             @if($plan->slug === 'pro')
                                 <div class="card-header bg-primary text-white text-center">
-                                    <span class="badge bg-warning text-dark">Most Popular</span>
+                                    <span class="badge bg-warning text-dark">{{ __('common.most_popular') }}</span>
                                 </div>
                             @endif
                             <div class="card-body text-center">
@@ -273,8 +273,9 @@
 
                                 <ul class="list-unstyled text-start">
                                     @foreach($plan->features as $feature)
-                                        <li class="mb-2">
-                                            <i class="fas fa-check text-success me-2"></i>{{ __($feature) }}
+                                        <li class="mb-2 d-flex align-items-start">
+                                            <i class="fas fa-check text-success me-2 mt-1 flex-shrink-0"></i>
+                                            <span>{{ __('common.plan_' . $plan->slug . '_feature_' . Str::slug($feature, '_')) }}</span>
                                         </li>
                                     @endforeach
                                 </ul>
@@ -287,20 +288,20 @@
                                 @else
                                     @if($plan->slug === 'enterprise')
                                         <a href="mailto:sales@ai-chat.support" class="btn btn-outline-primary btn-block w-100">
-                                            Contact Sales
+                                            {{ __('common.plan_enterprise_button') }}
                                         </a>
                                     @elseif($plan->slug === 'payg')
                                         @if($isFromIndia)
                                             <button onclick="createRazorpaySubscription({{ $plan->id }})" 
                                                     class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
                                                     id="subscribe-btn-{{ $plan->id }}">
-                                                Activate Pay-as-you-go
+                                                {{ __('common.plan_payg_button') }}
                                             </button>
                                         @else
                                             <button onclick="createSubscription({{ $plan->id }})" 
                                                     class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
                                                     id="subscribe-btn-{{ $plan->id }}">
-                                                Activate Pay-as-you-go
+                                                {{ __('common.plan_payg_button') }}
                                             </button>
                                         @endif
                                     @else
@@ -308,13 +309,13 @@
                                             <button onclick="createRazorpaySubscription({{ $plan->id }})" 
                                                     class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
                                                     id="subscribe-btn-{{ $plan->id }}">
-                                                Subscribe to {{ $plan->name }}
+                                                {{ __('common.plan_' . $plan->slug . '_button') }}
                                             </button>
                                         @else
                                             <button onclick="createSubscription({{ $plan->id }})" 
                                                     class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
                                                     id="subscribe-btn-{{ $plan->id }}">
-                                                Subscribe to {{ $plan->name }}
+                                                {{ __('common.plan_' . $plan->slug . '_button') }}
                                             </button>
                                         @endif
                                     @endif
@@ -335,8 +336,8 @@
     <section class="py-5 bg-light">
         <div class="container">
             <div class="text-center mb-5">
-                <h2>Latest from Our Blog</h2>
-                <p class="lead">Stay updated with the latest insights and tips for AI customer support</p>
+                <h2>{{ __('common.blog_latest_title') }}</h2>
+                <p class="lead">{{ __('common.blog_latest_subtitle') }}</p>
             </div>
             
             <div class="row g-4">
@@ -345,24 +346,24 @@
                         <img src="https://images.unsplash.com/photo-1677442136019-21780ecad995?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="AI Customer Support Guide" style="height: 200px; object-fit: cover;">
                         <div class="card-body d-flex flex-column">
                             <div class="mb-3">
-                                <span class="badge bg-primary">Guide</span>
-                                <span class="badge bg-secondary">Implementation</span>
+                                <span class="badge bg-primary">{{ __('common.blog_guide_badge') }}</span>
+                                <span class="badge bg-secondary">{{ __('common.blog_implementation_badge') }}</span>
                             </div>
                             
-                            <h5 class="card-title">Implementing AI Customer Support: A Complete Guide</h5>
-                            <p class="card-text flex-grow-1">A practical guide for small businesses to implement AI customer support solutions without breaking the bank, including tips, tools, and strategies.</p>
+                            <h5 class="card-title">{{ __('common.blog_article_1_title') }}</h5>
+                            <p class="card-text flex-grow-1">{{ __('common.blog_article_1_desc') }}</p>
                             
                             <div class="blog-meta mb-3 text-muted small">
                                 <i class="fas fa-calendar-alt me-2"></i>
                                 Aug 28, 2025
                                 <span class="ms-3">
                                     <i class="fas fa-clock me-2"></i>
-                                    3 min read
+                                    3 {{ __('common.blog_read_time') }}
                                 </span>
                             </div>
                             
                             <a href="{{ route('blog.index') }}" class="btn btn-primary">
-                                Read More <i class="fas fa-arrow-right ms-2"></i>
+                                {{ __('common.blog_read_more') }} <i class="fas fa-arrow-right ms-2"></i>
                             </a>
                         </div>
                     </div>
@@ -373,24 +374,24 @@
                         <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="Sales Growth with AI" style="height: 200px; object-fit: cover;">
                         <div class="card-body d-flex flex-column">
                             <div class="mb-3">
-                                <span class="badge bg-success">Sales</span>
-                                <span class="badge bg-warning">Growth</span>
+                                <span class="badge bg-success">{{ __('common.blog_sales_badge') }}</span>
+                                <span class="badge bg-warning">{{ __('common.blog_growth_badge') }}</span>
                             </div>
                             
-                            <h5 class="card-title">Boost Sales with AI Chatbots</h5>
-                            <p class="card-text flex-grow-1">Learn how implementing AI chatbots can directly impact your bottom line through improved customer satisfaction, reduced costs, and increased sales conversions.</p>
+                            <h5 class="card-title">{{ __('common.blog_article_2_title') }}</h5>
+                            <p class="card-text flex-grow-1">{{ __('common.blog_article_2_desc') }}</p>
                             
                             <div class="blog-meta mb-3 text-muted small">
                                 <i class="fas fa-calendar-alt me-2"></i>
                                 Aug 26, 2025
                                 <span class="ms-3">
                                     <i class="fas fa-clock me-2"></i>
-                                    3 min read
+                                    3 {{ __('common.blog_read_time') }}
                                 </span>
                             </div>
                             
                             <a href="{{ route('blog.index') }}" class="btn btn-primary">
-                                Read More <i class="fas fa-arrow-right ms-2"></i>
+                                {{ __('common.blog_read_more') }} <i class="fas fa-arrow-right ms-2"></i>
                             </a>
                         </div>
                     </div>
@@ -401,24 +402,24 @@
                         <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="Future of Customer Communications" style="height: 200px; object-fit: cover;">
                         <div class="card-body d-flex flex-column">
                             <div class="mb-3">
-                                <span class="badge bg-info">Future</span>
-                                <span class="badge bg-dark">Technology</span>
+                                <span class="badge bg-info">{{ __('common.blog_tips_badge') }}</span>
+                                <span class="badge bg-dark">{{ __('common.blog_implementation_badge') }}</span>
                             </div>
                             
-                            <h5 class="card-title">Future of Customer Communications</h5>
-                            <p class="card-text flex-grow-1">Discover how artificial intelligence is transforming customer support, making it more efficient, personalized, and available 24/7 for businesses of all sizes.</p>
+                            <h5 class="card-title">{{ __('common.blog_article_3_title') }}</h5>
+                            <p class="card-text flex-grow-1">{{ __('common.blog_article_3_desc') }}</p>
                             
                             <div class="blog-meta mb-3 text-muted small">
                                 <i class="fas fa-calendar-alt me-2"></i>
                                 Aug 24, 2025
                                 <span class="ms-3">
                                     <i class="fas fa-clock me-2"></i>
-                                    3 min read
+                                    3 {{ __('common.blog_read_time') }}
                                 </span>
                             </div>
                             
                             <a href="{{ route('blog.index') }}" class="btn btn-primary">
-                                Read More <i class="fas fa-arrow-right ms-2"></i>
+                                {{ __('common.blog_read_more') }} <i class="fas fa-arrow-right ms-2"></i>
                             </a>
                         </div>
                     </div>
@@ -426,7 +427,7 @@
             </div>
             
             <div class="text-center mt-4">
-                <a href="{{ route('blog.index') }}" class="btn btn-primary">View All Articles</a>
+                <a href="{{ route('blog.index') }}" class="btn btn-primary">{{ __('common.view_all_articles') }}</a>
             </div>
         </div>
     </section>
@@ -434,11 +435,11 @@
     <!-- CTA Section -->
     <section class="bg-light py-5">
         <div class="container text-center">
-            <h3>Ready to Get Started?</h3>
-            <p class="mb-4">Join organizations already using our AI support system</p>
+            <h3>{{ __('common.cta_title') }}</h3>
+            <p class="mb-4">{{ __('common.cta_subtitle') }}</p>
             @guest
                 <a href="{{ route('register') }}" class="btn btn-primary btn-lg">
-                    <i class="fas fa-rocket me-2"></i>Start Free Trial
+                    <i class="fas fa-rocket me-2"></i>{{ __('common.cta_start_trial') }}
                 </a>
             @endguest
         </div>

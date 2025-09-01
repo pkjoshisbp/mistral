@@ -53,6 +53,11 @@ class Subscription extends Model
         return $this->hasMany(TokenUsageLog::class);
     }
 
+    public function invoices()
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
     public function isActive()
     {
         return $this->status === 'active' && 

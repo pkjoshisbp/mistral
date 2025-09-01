@@ -156,8 +156,8 @@
                             <div class="card-body p-3">
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
-                                        <h6 class="card-title mb-1">{{ $plan->name }}</h6>
-                                        <p class="card-text small text-muted mb-2">{{ $plan->description }}</p>
+                                        <h6 class="card-title mb-1">{{ __('common.plan_' . $plan->slug . '_title') }}</h6>
+                                        <p class="card-text small text-muted mb-2">{{ __('common.plan_' . $plan->slug . '_desc') }}</p>
                                         
                                         @if($plan->monthly_price > 0)
                                             <div class="text-primary">
@@ -165,11 +165,11 @@
                                             </div>
                                         @elseif($plan->slug === 'payg')
                                             <div class="text-primary">
-                                                <strong>Pay as you go</strong>
+                                                <strong>{{ __('common.plan_payg_title') }}</strong>
                                             </div>
                                         @else
                                             <div class="text-primary">
-                                                <strong>Custom pricing</strong>
+                                                <strong>{{ __('common.plan_enterprise_title') }}</strong>
                                             </div>
                                         @endif
                                         
@@ -177,22 +177,28 @@
                                             @if($plan->token_cap_monthly > 0)
                                                 {{ $plan->formatted_token_cap }} tokens/month
                                             @else
-                                                Unlimited tokens
+                                                {{ __('common.unlimited_tokens') }}
                                             @endif
                                         </small>
+
+                                        <ul class="list-unstyled mt-2">
+                                            @foreach($plan->features as $feature)
+                                                <li>{{ __('common.plan_' . $plan->slug . '_feature_' . Str::slug($feature, '_')) }}</li>
+                                            @endforeach
+                                        </ul>
                                     </div>
                                     
                                     @if($currentSubscription && $currentSubscription->subscription_plan_id === $plan->id)
-                                        <span class="badge badge-primary">Current</span>
+                                        <span class="badge badge-primary">{{ __('common.current_plan') }}</span>
                                     @else
                                         @if($plan->slug === 'enterprise')
                                             <a href="mailto:sales@ai-chat.support" class="btn btn-outline-primary btn-sm">
-                                                Contact
+                                                {{ __('common.plan_enterprise_button') }}
                                             </a>
                                         @else
                                             <button class="btn btn-primary btn-sm" 
                                                     onclick="location.href='{{ route('home') }}#pricing'">
-                                                Upgrade
+                                                {{ __('common.plan_' . $plan->slug . '_button') }}
                                             </button>
                                         @endif
                                     @endif

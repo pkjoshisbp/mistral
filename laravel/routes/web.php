@@ -118,6 +118,31 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
         return view('api-endpoints');
     })->name('api-endpoints');
     
+    Route::get('/invoices', function () {
+        return view('admin.invoices');
+    })->name('invoices');
+    
+    Route::get('/invoices/{invoice}/pdf', function (\App\Models\Invoice $invoice) {
+        $invoiceService = new \App\Services\InvoiceService();
+        $pdfContent = $invoiceService->generatePDF($invoice);
+        
+        return response($pdfContent, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="invoice-' . $invoice->invoice_number . '.pdf"',
+        ]);
+    })->name('invoices.pdf');
+    
+    // Test route for Indian pricing
+    Route::get('/test-india', function () {
+        session(['force_india' => true]);
+        return redirect('/');
+    })->name('test.india');
+    
+    Route::get('/test-us', function () {
+        session()->forget('force_india');
+        return redirect('/');
+    })->name('test.us');
+    
     Route::get('/users', function () {
         return view('admin.users');
     })->name('users');

@@ -21,6 +21,9 @@ class EventServiceProvider extends ServiceProvider
         \Illuminate\Auth\Events\Login::class => [
             \App\Listeners\RedirectAfterLogin::class,
         ],
+        \App\Events\PaymentProcessed::class => [
+            \App\Listeners\GenerateInvoiceOnPayment::class,
+        ],
     ];
 
     /**
