@@ -79,8 +79,8 @@
     <!-- Hero Section -->
     <section class="hero-section">
         <div class="container text-center">
-            <h1 class="display-4 mb-4">AI-Powered Support Agent</h1>
-            <p class="lead mb-5">Multi-organization AI support system with advanced data integration capabilities</p>
+            <h1 class="display-4 mb-4">{{ __('common.hero_title') }}</h1>
+            <p class="lead mb-5">{{ __('common.hero_subtitle') }}</p>
             <div class="row justify-content-center">
                 <div class="col-md-6">
                     @guest
@@ -110,16 +110,16 @@
     <section class="py-5" id="features">
         <div class="container">
             <div class="text-center mb-5">
-                <h2>Powerful Features</h2>
-                <p class="text-muted">Everything you need to power your AI support system</p>
+                    <h2>{{ __('common.features_title') }}</h2>
+                    <p class="text-muted">{{ __('common.features_subtitle') }}</p>
             </div>
             <div class="row">
                 <div class="col-md-4 mb-4">
                     <div class="card feature-card h-100">
                         <div class="card-body text-center">
                             <i class="fas fa-robot fa-3x text-primary mb-3"></i>
-                            <h5>AI-Powered Chat</h5>
-                            <p class="text-muted">Advanced AI models for natural language understanding</p>
+                                <h5>{{ __('common.features_ai_chat_title') }}</h5>
+                                <p class="text-muted">{{ __('common.features_ai_chat_desc') }}</p>
                         </div>
                     </div>
                 </div>
@@ -127,8 +127,8 @@
                     <div class="card feature-card h-100">
                         <div class="card-body text-center">
                             <i class="fas fa-database fa-3x text-success mb-3"></i>
-                            <h5>Multiple Data Sources</h5>
-                            <p class="text-muted">Website crawling, file uploads, Google Sheets, database connections</p>
+                                <h5>{{ __('common.features_data_sources_title') }}</h5>
+                                <p class="text-muted">{{ __('common.features_data_sources_desc') }}</p>
                         </div>
                     </div>
                 </div>
@@ -136,8 +136,8 @@
                     <div class="card feature-card h-100">
                         <div class="card-body text-center">
                             <i class="fas fa-code fa-3x text-warning mb-3"></i>
-                            <h5>Embeddable Widget</h5>
-                            <p class="text-muted">Easy-to-integrate JavaScript widget for any website</p>
+                                <h5>{{ __('common.features_widget_title') }}</h5>
+                                <p class="text-muted">{{ __('common.features_widget_desc') }}</p>
                         </div>
                     </div>
                 </div>
@@ -147,8 +147,8 @@
                     <div class="card feature-card h-100">
                         <div class="card-body text-center">
                             <i class="fas fa-language fa-3x text-info mb-3"></i>
-                            <h5>Multi-Language Support</h5>
-                            <p class="text-muted">Ollama 3.2 models handle English, Spanish, French, German, Italian, Portuguese, Hindi & more</p>
+                                <h5>{{ __('common.features_multilang_title') }}</h5>
+                                <p class="text-muted">{{ __('common.features_multilang_desc') }}</p>
                         </div>
                     </div>
                 </div>
@@ -156,8 +156,8 @@
                     <div class="card feature-card h-100">
                         <div class="card-body text-center">
                             <i class="fas fa-search fa-3x text-danger mb-3"></i>
-                            <h5>Vector Search</h5>
-                            <p class="text-muted">Powered by Qdrant for semantic search and retrieval</p>
+                                <h5>{{ __('common.features_vector_title') }}</h5>
+                                <p class="text-muted">{{ __('common.features_vector_desc') }}</p>
                         </div>
                     </div>
                 </div>
@@ -165,8 +165,8 @@
                     <div class="card feature-card h-100">
                         <div class="card-body text-center">
                             <i class="fas fa-sync fa-3x text-secondary mb-3"></i>
-                            <h5>Real-time Sync</h5>
-                            <p class="text-muted">Automatic data synchronization and updates</p>
+                                <h5>{{ __('common.features_sync_title') }}</h5>
+                                <p class="text-muted">{{ __('common.features_sync_desc') }}</p>
                         </div>
                     </div>
                 </div>
@@ -898,86 +898,6 @@
     </script>
 
     <!-- Footer -->
-    <footer class="bg-dark text-white py-5 mt-5">
-        <div class="container">
-            <div class="row">
-                <div class="col-lg-4 mb-4">
-                    <div class="footer-brand">
-                        <h5 class="mb-3">
-                            <i class="fas fa-robot me-2"></i>
-                            AI Chat Support
-                        </h5>
-                        <p class="text-light">
-                            {{ __('common.hero_intro') }}
-                            {{ __('common.hero_sub') }}
-                        </p>
-                        <div class="social-links">
-                            <a href="#" class="text-light me-3"><i class="fab fa-twitter fa-lg"></i></a>
-                            <a href="#" class="text-light me-3"><i class="fab fa-linkedin fa-lg"></i></a>
-                            <a href="#" class="text-light me-3"><i class="fab fa-facebook fa-lg"></i></a>
-                            <a href="#" class="text-light"><i class="fab fa-github fa-lg"></i></a>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="col-lg-2 col-md-6 mb-4">
-                    <h6 class="mb-3 text-uppercase">{{ __('marketing.product') }}</h6>
-                    <ul class="list-unstyled">
-                        <li class="mb-2"><a href="#features" class="text-light text-decoration-none">{{ __('marketing.features') }}</a></li>
-                        <li class="mb-2"><a href="#pricing" class="text-light text-decoration-none">{{ __('marketing.pricing') }}</a></li>
-                        <li class="mb-2"><a href="/widget/1/test" class="text-light text-decoration-none">{{ __('common.demo') }}</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">{{ __('marketing.api_docs') }}</a></li>
-                    </ul>
-                </div>
-                
-                <div class="col-lg-2 col-md-6 mb-4">
-                    <h6 class="mb-3 text-uppercase">{{ __('marketing.company') }}</h6>
-                    <ul class="list-unstyled">
-                        <li class="mb-2"><a href="{{ route('about') }}" class="text-light text-decoration-none">{{ __('common.about_us') }}</a></li>
-                        <li class="mb-2"><a href="{{ route('blog.index') }}" class="text-light text-decoration-none">{{ __('common.blog') }}</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">{{ __('common.careers') }}</a></li>
-                        <li class="mb-2"><a href="{{ route('contact') }}" class="text-light text-decoration-none">{{ __('common.contact') }}</a></li>
-                    </ul>
-                </div>
-                
-                <div class="col-lg-2 col-md-6 mb-4">
-                    <h6 class="mb-3 text-uppercase">{{ __('marketing.legal') }}</h6>
-                    <ul class="list-unstyled">
-                        <li class="mb-2"><a href="{{ route('privacy') }}" class="text-light text-decoration-none">{{ __('marketing.privacy') }}</a></li>
-                        <li class="mb-2"><a href="{{ route('terms') }}" class="text-light text-decoration-none">{{ __('marketing.terms') }}</a></li>
-                        <li class="mb-2"><a href="{{ route('refund-policy') }}" class="text-light text-decoration-none">Refund Policy</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Cookie Policy</a></li>
-                    </ul>
-                </div>
-                
-                <div class="col-lg-2 col-md-6 mb-4">
-                    <h6 class="mb-3 text-uppercase">Support</h6>
-                    <ul class="list-unstyled">
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Help Center</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Documentation</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Community</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Status</a></li>
-                    </ul>
-                </div>
-            </div>
-            
-            <hr class="my-4 border-secondary">
-            
-            <div class="row align-items-center">
-                <div class="col-md-6">
-                    <p class="mb-0 text-light">
-                        &copy; {{ date('Y') }} AI Chat Support. All rights reserved.
-                    </p>
-                </div>
-                <div class="col-md-6 text-md-end">
-                    <p class="mb-0 text-light">
-                        <i class="fas fa-heart text-danger"></i> 
-                        Made with AI Technology
-                    </p>
-                </div>
-            </div>
-        </div>
-    </footer>
 
     <style>
     footer .social-links a:hover {

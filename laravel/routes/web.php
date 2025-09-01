@@ -32,17 +32,17 @@ Route::get('/contact', function () {
 })->name('contact');
 
 Route::get('/terms', function () {
-    $terms = App\Models\TermsAndConditions::getTerms();
+    $terms = \App\Models\TermsAndConditions::getTerms();
     return view('public.terms', compact('terms'));
 })->name('terms');
 
 Route::get('/privacy', function () {
-    $privacy = App\Models\TermsAndConditions::getPrivacyPolicy();
+    $privacy = \App\Models\TermsAndConditions::getPrivacyPolicy();
     return view('public.privacy', compact('privacy'));
 })->name('privacy');
 
 Route::get('/refund-policy', function () {
-    $refund = App\Models\TermsAndConditions::getRefundPolicy();
+    $refund = \App\Models\TermsAndConditions::getRefundPolicy();
     return view('public.refund-policy', compact('refund'));
 })->name('refund-policy');
 
