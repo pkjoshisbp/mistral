@@ -82,8 +82,15 @@
 /* Larger size for desktop screens */
 @media (min-width: 1200px) {
     .ai-chat-window {
-        width: 450px !important;
-        height: 600px !important;
+        width: 480px !important;
+        height: 620px !important;
+    }
+}
+
+@media (min-width: 1600px) {
+    .ai-chat-window {
+        width: 520px !important;
+        height: 650px !important;
     }
 }
 

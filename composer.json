@@ -1,5 +1,6 @@
 {
     "require": {
-        "livewire/livewire": "^3.6"
+        "livewire/livewire": "^3.6",
+        "barryvdh/laravel-dompdf": "^2.0"
     }
 }

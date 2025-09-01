@@ -83,21 +83,24 @@ class ChatHistory extends Component
             ->first();
 
         if ($session) {
-            $content = "Chat Session Export\n";
-            $content .= "Organization: " . ($session->organization->name ?? 'N/A') . "\n";
-            $content .= "Date: " . $session->created_at->format('Y-m-d H:i:s') . "\n";
-            $content .= "Duration: " . $this->formatDuration($session->created_at, $session->updated_at) . "\n";
-            $content .= "Messages: " . $session->messages->count() . "\n\n";
-            $content .= str_repeat('-', 50) . "\n\n";
+            // Basic HTML content for PDF/text export
+            $html = view('exports.chat-session', [
+                'session' => $session,
+                'duration' => $this->formatDuration($session->created_at, $session->updated_at)
+            ])->render();
 
-            foreach ($session->messages as $message) {
-                $content .= "[" . $message->created_at->format('H:i:s') . "] ";
-                $content .= ucfirst($message->sender) . ": " . $message->content . "\n\n";
+            if (class_exists(\Dompdf\Dompdf::class)) {
+                $pdf = app('dompdf.wrapper');
+                $pdf->loadHTML($html)->setPaper('a4', 'portrait');
+                return response()->streamDownload(function() use ($pdf) {
+                    echo $pdf->output();
+                }, 'chat-session-' . $sessionId . '.pdf');
             }
 
-            return response()->streamDownload(function () use ($content) {
-                echo $content;
-            }, 'chat-session-' . $sessionId . '-' . now()->format('Y-m-d') . '.txt');
+            // Fallback to txt export
+            return response()->streamDownload(function () use ($html) {
+                echo strip_tags($html);
+            }, 'chat-session-' . $sessionId . '.txt');
         }
     }
 

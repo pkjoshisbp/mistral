@@ -62,6 +62,9 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
+// Alias route for customer namespacing of profile
+Route::middleware('auth')->get('/customer/profile', [ProfileController::class, 'edit'])->name('customer.profile');
+
 // Customer redirect
 Route::get('/customer', function () {
     return redirect()->route('customer.dashboard');
@@ -116,6 +119,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/settings', function () {
         return view('admin.settings');
     })->name('settings');
+    Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
 });
 
 // Customer Routes (for customers to manage their organization data)
@@ -158,6 +162,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         })->name('dashboard');
         
         Route::get('/data-sources', \App\Livewire\Customer\DataSources::class)->name('data-sources');
+    Route::get('/data-entry', \App\Livewire\Customer\DataEntry::class)->name('data-entry');
         Route::get('/documents', \App\Livewire\Customer\Documents::class)->name('documents');
         Route::get('/website-crawler', \App\Livewire\Customer\WebsiteCrawler::class)->name('crawler');
         Route::get('/api-integration', \App\Livewire\Customer\ApiIntegration::class)->name('api-integration');

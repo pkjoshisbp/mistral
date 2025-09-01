@@ -1,3 +1,4 @@
+<div>
 <div class="content-header">
     <div class="container-fluid">
         <div class="row mb-2">
@@ -145,8 +146,8 @@
                                                 <button type="button" 
                                                         class="btn btn-sm btn-outline-success"
                                                         wire:click="exportSession({{ $session->id }})">
-                                                    <i class="fas fa-download"></i>
-                                                    Export
+                                                    <i class="fas fa-file-export"></i>
+                                                    Export PDF
                                                 </button>
                                                 <button type="button" 
                                                         class="btn btn-sm btn-outline-danger"
@@ -227,3 +228,4 @@
     border-radius: 0.25rem;
 }
 </style>
+</div>

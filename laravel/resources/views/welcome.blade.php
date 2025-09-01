@@ -208,9 +208,9 @@
                 <div class="col-md-4 mb-4">
                     <div class="card feature-card h-100">
                         <div class="card-body text-center">
-                            <i class="fas fa-building fa-3x text-info mb-3"></i>
-                            <h5>Multi-Organization</h5>
-                            <p class="text-muted">Support multiple organizations with isolated data</p>
+                            <i class="fas fa-language fa-3x text-info mb-3"></i>
+                            <h5>Multi-Language Support</h5>
+                            <p class="text-muted">Ollama 3.2 models handle English, Spanish, French, German, Italian, Portuguese, Hindi & more</p>
                         </div>
                     </div>
                 </div>

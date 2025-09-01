@@ -51,10 +51,43 @@ class PayPalController extends Controller
         try {
             $plan = SubscriptionPlan::findOrFail($request->plan_id);
             $user = Auth::user();
-
-            // Create PayPal one-time payment since we don't have billing plans set up yet
             $accessToken = $this->getAccessToken();
-            
+
+            // If a PayPal billing plan ID exists, create a recurring subscription
+            if ($plan->paypal_plan_id) {
+                $subscriptionPayload = [
+                    'plan_id' => $plan->paypal_plan_id,
+                    'custom_id' => 'user_' . $user->id . '_plan_' . $plan->id,
+                    'application_context' => [
+                        'brand_name' => config('app.name'),
+                        'locale' => 'en-US',
+                        'shipping_preference' => 'NO_SHIPPING',
+                        'user_action' => 'SUBSCRIBE_NOW',
+                        'return_url' => route('paypal.success') . '?plan_id=' . $plan->id,
+                        'cancel_url' => route('paypal.cancel')
+                    ]
+                ];
+
+                $response = Http::withToken($accessToken)
+                    ->post($this->paypalBaseUrl . '/v1/billing/subscriptions', $subscriptionPayload);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    foreach ($data['links'] as $link) {
+                        if ($link['rel'] === 'approve') {
+                            return response()->json([
+                                'success' => true,
+                                'approval_url' => $link['href'],
+                                'mode' => 'recurring'
+                            ]);
+                        }
+                    }
+                } else {
+                    Log::error('PayPal subscription create error', ['body' => $response->body()]);
+                }
+            }
+
+            // Fallback: one-time order (until billing plan IDs are provisioned)
             $paymentData = [
                 'intent' => 'CAPTURE',
                 'purchase_units' => [
@@ -82,13 +115,12 @@ class PayPalController extends Controller
 
             if ($response->successful()) {
                 $paypalOrder = $response->json();
-                
-                // Find approval URL
                 foreach ($paypalOrder['links'] as $link) {
                     if ($link['rel'] === 'approve') {
                         return response()->json([
                             'success' => true,
-                            'approval_url' => $link['href']
+                            'approval_url' => $link['href'],
+                            'mode' => 'one_time'
                         ]);
                     }
                 }
@@ -96,12 +128,10 @@ class PayPalController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to create PayPal payment order'
+                'message' => 'Failed to initiate PayPal payment/subscription.'
             ], 500);
-
         } catch (\Exception $e) {
             Log::error('PayPal payment creation failed: ' . $e->getMessage());
-            
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while creating the payment: ' . $e->getMessage()

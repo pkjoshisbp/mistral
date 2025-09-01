@@ -44,7 +44,7 @@
             <span class="dropdown-item dropdown-header text-sm">{{ Auth::user()->organization->name }}</span>
           @endif
           <div class="dropdown-divider"></div>
-          <a href="{{ route('profile.edit') }}" class="dropdown-item">
+          <a href="{{ route('customer.profile') }}" class="dropdown-item">
             <i class="fas fa-user mr-2"></i> Profile
           </a>
           <div class="dropdown-divider"></div>
@@ -101,6 +101,12 @@
           
           <li class="nav-header">DATA MANAGEMENT</li>
           <li class="nav-item">
+            <a href="{{ route('customer.data-entry') }}" class="nav-link {{ request()->routeIs('customer.data-entry') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-keyboard"></i>
+              <p>Data Entry</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('customer.documents') }}" class="nav-link {{ request()->routeIs('customer.documents') ? 'active' : '' }}">
               <i class="nav-icon fas fa-file-alt"></i>
               <p>Documents</p>
@@ -153,7 +159,7 @@
             </a>
           </li>
           <li class="nav-item">
-            <a href="{{ route('profile.edit') }}" class="nav-link {{ request()->routeIs('profile.edit') ? 'active' : '' }}">
+            <a href="{{ route('customer.profile') }}" class="nav-link {{ request()->routeIs('customer.profile') ? 'active' : '' }}">
               <i class="nav-icon fas fa-user"></i>
               <p>Profile</p>
             </a>
