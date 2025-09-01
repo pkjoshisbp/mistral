@@ -25,7 +25,7 @@ class Documents extends Component
 
     public function loadDocuments()
     {
-        $organization = Auth::user()->organization;
+    $organization = Auth::user()->primaryOrganization();
         if (!$organization) {
             $this->uploadedFiles = collect();
             return;
@@ -51,7 +51,7 @@ class Documents extends Component
 
     public function uploadFile()
     {
-        $organization = Auth::user()->organization;
+    $organization = Auth::user()->primaryOrganization();
         if (!$organization) {
             session()->flash('error', 'No organization assigned to your account.');
             return;

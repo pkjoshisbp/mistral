@@ -26,7 +26,7 @@ class OrganizationManager extends Component
 
     public function mount()
     {
-        $this->organization = Auth::user()->organization; // assuming accessor for single org
+    $this->organization = Auth::user()->primaryOrganization();
         if ($this->organization) {
             $this->fill([
                 'name' => $this->organization->name,

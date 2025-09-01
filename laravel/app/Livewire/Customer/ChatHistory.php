@@ -143,8 +143,9 @@ class ChatHistory extends Component
 
         $sessions = $query->orderBy('created_at', 'desc')->paginate(10);
 
-        $organizations = Auth::user()->organization ? 
-            collect([Auth::user()->organization]) : 
+        $primary = Auth::user()->primaryOrganization();
+        $organizations = $primary ? 
+            collect([$primary]) : 
             collect([]);
 
         return view('livewire.customer.chat-history', [

@@ -21,14 +21,15 @@ class ApiIntegration extends Component
     public function loadApiKey()
     {
         $user = Auth::user();
-        if ($user->organization) {
-            $this->apiKey = $user->organization->api_key ?? 'Not generated';
+        $org = $user->primaryOrganization();
+        if ($org) {
+            $this->apiKey = $org->api_key ?? 'Not generated';
         }
     }
 
     public function generateApiKey()
     {
-        $organization = Auth::user()->organization;
+    $organization = Auth::user()->primaryOrganization();
         if (!$organization) {
             session()->flash('error', 'No organization assigned to your account.');
             return;
@@ -48,7 +49,7 @@ class ApiIntegration extends Component
 
     public function loadEndpoints()
     {
-        $organization = Auth::user()->organization;
+    $organization = Auth::user()->primaryOrganization();
         $baseUrl = config('app.url');
         $orgSlug = $organization ? $organization->slug : 'your-org-slug';
 

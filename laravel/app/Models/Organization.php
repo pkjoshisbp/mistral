@@ -13,7 +13,7 @@ class Organization extends Model
         'name',
         'slug',
         'description',
-        'website_url',
+        'website', // unified field used in forms
         'api_key',
         'settings',
         'api_endpoints',
@@ -34,12 +34,16 @@ class Organization extends Model
 
     public function users()
     {
-        return $this->hasMany(User::class);
+        // Canonical many-to-many list of users
+        return $this->belongsToMany(User::class, 'organization_user');
     }
 
-    public function assignedUsers()
+    /**
+     * Legacy direct hasMany (via users.organization_id) still supported where needed.
+     */
+    public function legacyUsers()
     {
-        return $this->belongsToMany(User::class, 'organization_user');
+        return $this->hasMany(User::class);
     }
 
     public function dataSources()

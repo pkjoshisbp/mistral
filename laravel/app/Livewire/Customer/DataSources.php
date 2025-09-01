@@ -28,7 +28,7 @@ class DataSources extends Component
 
     public function mount()
     {
-        $this->organization = auth()->user()->organization;
+    $this->organization = auth()->user()->primaryOrganization();
         $this->loadDataSources();
     }
 

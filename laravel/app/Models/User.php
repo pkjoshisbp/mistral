@@ -47,12 +47,28 @@ class User extends Authenticatable
 
     public function organization()
     {
+        // Legacy single organization reference (organization_id column)
         return $this->belongsTo(Organization::class);
     }
 
     public function organizations()
     {
         return $this->belongsToMany(Organization::class, 'organization_user');
+    }
+
+    /**
+     * Helper to consistently fetch the primary organization for user (prefers pivot, falls back).
+     */
+    public function primaryOrganization()
+    {
+        if ($this->relationLoaded('organizations')) {
+            $org = $this->organizations->first();
+            if ($org) return $org;
+        } else {
+            $org = $this->organizations()->first();
+            if ($org) return $org;
+        }
+        return $this->organization; // fallback to legacy column
     }
 
     public function subscriptions()
