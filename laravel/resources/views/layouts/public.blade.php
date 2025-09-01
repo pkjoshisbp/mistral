@@ -5,21 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     
     <!-- SEO Meta Tags -->
-    <title>@yield('title', 'AI Chat Support - Revolutionary Customer Service Automation')</title>
-    <meta name="description" content="@yield('description', 'Transform your customer support with AI-powered chat solutions. Provide instant 24/7 assistance, reduce costs, and boost customer satisfaction.')">
+    <title>@yield('title', __('common.hero_intro'))</title>
+    <meta name="description" content="@yield('description', __('common.hero_sub'))">
     <meta name="keywords" content="@yield('keywords', 'AI chat support, customer service automation, chatbot, artificial intelligence, live chat, customer support software')">
     
     <!-- Open Graph Meta Tags -->
-    <meta property="og:title" content="@yield('og_title', 'AI Chat Support - Revolutionary Customer Service Automation')">
-    <meta property="og:description" content="@yield('og_description', 'Transform your customer support with AI-powered chat solutions.')">
+    <meta property="og:title" content="@yield('og_title', __('common.hero_intro'))">
+    <meta property="og:description" content="@yield('og_description', __('common.hero_sub'))">
     <meta property="og:image" content="@yield('og_image', asset('images/ai-chat-og-image.jpg'))">
     <meta property="og:url" content="{{ url()->current() }}">
     <meta property="og:type" content="website">
     
     <!-- Twitter Card Meta Tags -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="@yield('twitter_title', 'AI Chat Support - Revolutionary Customer Service Automation')">
-    <meta name="twitter:description" content="@yield('twitter_description', 'Transform your customer support with AI-powered chat solutions.')">
+    <meta name="twitter:title" content="@yield('twitter_title', __('common.hero_intro'))">
+    <meta name="twitter:description" content="@yield('twitter_description', __('common.hero_sub'))">
+
+    <!-- Hreflang for alternate locales -->
+    @php($availableLocales = ['en','de','fr','it','pt','hi','es','th'])
+    @foreach($availableLocales as $loc)
+        <link rel="alternate" hreflang="{{ $loc }}" href="{{ url()->current() }}?lang={{ $loc }}" />
+    @endforeach
+    <link rel="alternate" hreflang="x-default" href="{{ url()->current() }}" />
     <meta name="twitter:image" content="@yield('twitter_image', asset('images/ai-chat-twitter-image.jpg'))">
     
     <!-- Favicon -->

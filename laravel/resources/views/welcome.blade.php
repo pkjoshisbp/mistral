@@ -34,7 +34,7 @@
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}">
     
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .hero-section {
@@ -72,71 +72,9 @@
     </style>
 </head>
 <body>
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container">
-            <a class="navbar-brand" href="{{ route('home') }}">
-                <i class="fas fa-robot me-2"></i>AI Agent System
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ route('home') }}">Home</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#features">Features</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#pricing">Pricing</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ route('blog.index') }}">Blog</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ route('about') }}">About</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ route('contact') }}">Contact</a>
-                    </li>
-                </ul>
-                <ul class="navbar-nav">
-                    @auth
-                        @if(auth()->user()->role === 'admin')
-                            <li class="nav-item">
-                                <a class="nav-link" href="{{ route('admin.dashboard') }}">
-                                    <i class="fas fa-cog me-1"></i>Admin Panel
-                                </a>
-                            </li>
-                        @elseif(auth()->user()->role === 'customer')
-                            <li class="nav-item">
-                                <a class="nav-link" href="{{ route('customer.dashboard') }}">
-                                    <i class="fas fa-tachometer-alt me-1"></i>Dashboard
-                                </a>
-                            </li>
-                        @endif
-                        <li class="nav-item">
-                            <form method="POST" action="{{ route('logout') }}" class="d-inline">
-                                @csrf
-                                <button type="submit" class="btn btn-link nav-link" style="border: none; background: none;">
-                                    <i class="fas fa-sign-out-alt me-1"></i>Logout
-                                </button>
-                            </form>
-                        </li>
-                    @else
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ route('login') }}">Login</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ route('register') }}">Register</a>
-                        </li>
-                    @endauth
-                </ul>
-            </div>
-        </div>
-    </nav>
+@extends('layouts.public')
+
+@section('content')
 
     <!-- Hero Section -->
     <section class="hero-section">
@@ -147,19 +85,19 @@
                 <div class="col-md-6">
                     @guest
                         <a href="{{ route('login') }}" class="btn btn-light btn-lg me-3">
-                            <i class="fas fa-sign-in-alt me-2"></i>Login
+                            <i class="fas fa-sign-in-alt me-2"></i>{{ __('common.login') }}
                         </a>
                         <a href="{{ route('register') }}" class="btn btn-outline-light btn-lg">
-                            <i class="fas fa-user-plus me-2"></i>Get Started
+                            <i class="fas fa-user-plus me-2"></i>{{ __('common.get_started') }}
                         </a>
                     @else
                         @if(auth()->user()->role === 'admin')
                             <a href="{{ route('admin.dashboard') }}" class="btn btn-light btn-lg">
-                                <i class="fas fa-cog me-2"></i>Go to Admin Panel
+                                <i class="fas fa-cog me-2"></i>{{ __('common.admin_panel') ?? 'Go to Admin Panel' }}
                             </a>
                         @elseif(auth()->user()->role === 'customer')
                             <a href="{{ route('customer.dashboard') }}" class="btn btn-light btn-lg">
-                                <i class="fas fa-tachometer-alt me-2"></i>Go to Dashboard
+                                <i class="fas fa-tachometer-alt me-2"></i>{{ __('common.dashboard') ?? 'Go to Dashboard' }}
                             </a>
                         @endif
                     @endguest
@@ -245,15 +183,20 @@
             </div>
             <div class="row">
                 @php
-                    $plans = App\Models\SubscriptionPlan::where('is_active', true)
-                        ->orderBy('sort_order')
-                        ->get();
-                    $locationService = app(\App\Services\LocationService::class);
-                    $isFromIndia = $locationService->isFromIndia();
-                    $currency = $locationService->getUserCurrency();
+                    try {
+                        $plans = App\Models\SubscriptionPlan::where('is_active', true)
+                            ->orderBy('sort_order')
+                            ->get();
+                    } catch (\Throwable $e) {
+                        $plans = collect();
+                    }
+                    $locationService = app()->bound(\App\Services\LocationService::class) ? app(\App\Services\LocationService::class) : null;
+                    $isFromIndia = $locationService && method_exists($locationService, 'isFromIndia') ? $locationService->isFromIndia() : false;
+                    $currency = $locationService && method_exists($locationService, 'getUserCurrency') ? $locationService->getUserCurrency() : 'USD';
                 @endphp
 
-                @foreach($plans as $plan)
+                @php if(!isset($plans) || !($plans instanceof \Illuminate\Support\Collection)) { $plans = collect(); } @endphp
+                @forelse($plans as $plan)
                     <div class="col-lg-3 col-md-6 mb-4">
                         <div class="card h-100 {{ $plan->slug === 'pro' ? 'border-primary' : '' }}">
                             @if($plan->slug === 'pro')
@@ -383,7 +326,11 @@
                             </div>
                         </div>
                     </div>
-                @endforeach
+                @empty
+                    <div class="col-12 text-center">
+                        <p class="text-muted">Pricing information coming soon.</p>
+                    </div>
+                @endforelse
             </div>
         </div>
     </section>
@@ -501,7 +448,7 @@
         </div>
     </section>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     @auth
     <!-- PayPal SDK -->
@@ -961,8 +908,8 @@
                             AI Chat Support
                         </h5>
                         <p class="text-light">
-                            Revolutionizing customer support with intelligent AI conversations. 
-                            Provide 24/7 assistance to your customers with our advanced chatbot platform.
+                            {{ __('common.hero_intro') }}
+                            {{ __('common.hero_sub') }}
                         </p>
                         <div class="social-links">
                             <a href="#" class="text-light me-3"><i class="fab fa-twitter fa-lg"></i></a>
@@ -974,30 +921,30 @@
                 </div>
                 
                 <div class="col-lg-2 col-md-6 mb-4">
-                    <h6 class="mb-3 text-uppercase">Product</h6>
+                    <h6 class="mb-3 text-uppercase">{{ __('marketing.product') }}</h6>
                     <ul class="list-unstyled">
-                        <li class="mb-2"><a href="#features" class="text-light text-decoration-none">Features</a></li>
-                        <li class="mb-2"><a href="#pricing" class="text-light text-decoration-none">Pricing</a></li>
-                        <li class="mb-2"><a href="/widget/1/test" class="text-light text-decoration-none">Demo</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">API Docs</a></li>
+                        <li class="mb-2"><a href="#features" class="text-light text-decoration-none">{{ __('marketing.features') }}</a></li>
+                        <li class="mb-2"><a href="#pricing" class="text-light text-decoration-none">{{ __('marketing.pricing') }}</a></li>
+                        <li class="mb-2"><a href="/widget/1/test" class="text-light text-decoration-none">{{ __('common.demo') }}</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">{{ __('marketing.api_docs') }}</a></li>
                     </ul>
                 </div>
                 
                 <div class="col-lg-2 col-md-6 mb-4">
-                    <h6 class="mb-3 text-uppercase">Company</h6>
+                    <h6 class="mb-3 text-uppercase">{{ __('marketing.company') }}</h6>
                     <ul class="list-unstyled">
-                        <li class="mb-2"><a href="{{ route('about') }}" class="text-light text-decoration-none">About Us</a></li>
-                        <li class="mb-2"><a href="{{ route('blog.index') }}" class="text-light text-decoration-none">Blog</a></li>
-                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">Careers</a></li>
-                        <li class="mb-2"><a href="{{ route('contact') }}" class="text-light text-decoration-none">Contact</a></li>
+                        <li class="mb-2"><a href="{{ route('about') }}" class="text-light text-decoration-none">{{ __('common.about_us') }}</a></li>
+                        <li class="mb-2"><a href="{{ route('blog.index') }}" class="text-light text-decoration-none">{{ __('common.blog') }}</a></li>
+                        <li class="mb-2"><a href="#" class="text-light text-decoration-none">{{ __('common.careers') }}</a></li>
+                        <li class="mb-2"><a href="{{ route('contact') }}" class="text-light text-decoration-none">{{ __('common.contact') }}</a></li>
                     </ul>
                 </div>
                 
                 <div class="col-lg-2 col-md-6 mb-4">
-                    <h6 class="mb-3 text-uppercase">Legal</h6>
+                    <h6 class="mb-3 text-uppercase">{{ __('marketing.legal') }}</h6>
                     <ul class="list-unstyled">
-                        <li class="mb-2"><a href="{{ route('privacy') }}" class="text-light text-decoration-none">Privacy Policy</a></li>
-                        <li class="mb-2"><a href="{{ route('terms') }}" class="text-light text-decoration-none">Terms of Service</a></li>
+                        <li class="mb-2"><a href="{{ route('privacy') }}" class="text-light text-decoration-none">{{ __('marketing.privacy') }}</a></li>
+                        <li class="mb-2"><a href="{{ route('terms') }}" class="text-light text-decoration-none">{{ __('marketing.terms') }}</a></li>
                         <li class="mb-2"><a href="{{ route('refund-policy') }}" class="text-light text-decoration-none">Refund Policy</a></li>
                         <li class="mb-2"><a href="#" class="text-light text-decoration-none">Cookie Policy</a></li>
                     </ul>
@@ -1111,5 +1058,4 @@
         }
     }
     </script>
-</body>
-</html>
+@endsection

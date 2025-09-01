@@ -121,7 +121,7 @@ function showTypingIndicator() {
     typingDiv.style.marginBottom = '15px';
     typingDiv.innerHTML = `
         <div style="background: #f1f3f4; padding: 10px; border-radius: 15px; max-width: 80%; display: inline-block;">
-            <span style="animation: pulse 1.5s infinite;">AI is typing...</span>
+            <span style="animation: pulse 1.5s infinite;">{{ __('common.ai_is_typing') }}</span>
         </div>
     `;
     messagesContainer.appendChild(typingDiv);

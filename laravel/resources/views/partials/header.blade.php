@@ -1,8 +1,23 @@
+</nav>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var langDropdown = document.getElementById('langDropdown');
+    if (langDropdown) {
+        langDropdown.addEventListener('click', function(e) {
+            e.preventDefault();
+            var menu = document.querySelector('.dropdown-menu[aria-labelledby="langDropdown"]');
+            if (menu) {
+                menu.classList.toggle('show');
+            }
+        });
+    }
+});
+</script>
 <!-- Header -->
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
     <div class="container">
-        <a class="navbar-brand text-gradient" href="{{ route('home') }}">
-            <i class="fas fa-robot me-2"></i>AI Chat Support
+        <a class="navbar-brand text-white fw-bold" href="{{ route('home') }}" style="font-size:1.5rem;">
+            <i class="fas fa-robot me-2"></i>AI Agent System
         </a>
         
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
@@ -25,13 +40,13 @@
                 </li>
             </ul>
             
-            <ul class="navbar-nav align-items-center">
+            <ul class="navbar-nav align-items-center ms-auto">
                 <li class="nav-item dropdown me-2">
                     @php($currentLocale = session('app_locale', app()->getLocale()))
-                    <a class="nav-link dropdown-toggle" href="#" id="langDropdown" role="button" data-bs-toggle="dropdown">
+                    <a class="nav-link dropdown-toggle text-white" href="#" id="langDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         {{ strtoupper($currentLocale) }}
                     </a>
-                    <ul class="dropdown-menu" aria-labelledby="langDropdown">
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="langDropdown">
                         @foreach(['en'=>'English','de'=>'Deutsch','fr'=>'Français','it'=>'Italiano','pt'=>'Português','hi'=>'हिन्दी','es'=>'Español','th'=>'ไทย'] as $code=>$label)
                             <li><a class="dropdown-item" href="{{ route('lang.switch', $code) }}">{{ $label }}</a></li>
                         @endforeach

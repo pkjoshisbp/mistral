@@ -33,8 +33,9 @@ class Kernel extends HttpKernel
             \App\Http\Middleware\EncryptCookies::class,
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
-            // Locale from session
-            function ($request, $next) { if (session()->has('app_locale')) { app()->setLocale(session('app_locale')); } return $next($request); },
+            \App\Http\Middleware\SetLocaleFromSession::class,
+            // Logs missing translation keys (only active meaningfully in local env)
+            \App\Http\Middleware\LogMissingTranslations::class,
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
             \App\Http\Middleware\VerifyCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
@@ -69,5 +70,7 @@ class Kernel extends HttpKernel
         'customer' => \App\Http\Middleware\CustomerMiddleware::class,
         'admin' => \App\Http\Middleware\AdminMiddleware::class,
         'user.has.organization' => \App\Http\Middleware\UserHasOrganization::class,
+    'locale.session' => \App\Http\Middleware\SetLocaleFromSession::class,
+    'i18n.missing' => \App\Http\Middleware\LogMissingTranslations::class,
     ];
 }

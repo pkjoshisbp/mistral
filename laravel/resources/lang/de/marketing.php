@@ -1,0 +1,20 @@
+<?php
+return [
+    'tagline' => 'Revolutionieren Sie Ihren Kundensupport mit KI-gestützten Gesprächen',
+    'features' => 'Funktionen',
+    'pricing' => 'Preise',
+    'integration' => 'Integration',
+    'api_docs' => 'API-Dokumentation',
+    'product' => 'Produkt',
+    'company' => 'Unternehmen',
+    'support' => 'Support',
+    'legal' => 'Rechtliches',
+    'help_center' => 'Hilfe Center',
+    'documentation' => 'Dokumentation',
+    'community' => 'Community',
+    'status' => 'Status',
+    'privacy' => 'Datenschutz',
+    'terms' => 'Nutzungsbedingungen',
+    'refund' => 'Rückerstattungsrichtlinie',
+    'all_rights' => 'Alle Rechte vorbehalten.',
+];

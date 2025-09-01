@@ -1,0 +1,20 @@
+<?php
+return [
+    'tagline' => 'Revolutionize your customer support with AI-powered conversations',
+    'features' => 'Features',
+    'pricing' => 'Pricing',
+    'integration' => 'Integration',
+    'api_docs' => 'API Docs',
+    'product' => 'Product',
+    'company' => 'Company',
+    'support' => 'Support',
+    'legal' => 'Legal',
+    'help_center' => 'Help Center',
+    'documentation' => 'Documentation',
+    'community' => 'Community',
+    'status' => 'Status',
+    'privacy' => 'Privacy Policy',
+    'terms' => 'Terms of Service',
+    'refund' => 'Refund Policy',
+    'all_rights' => 'All rights reserved.',
+];
