@@ -178,8 +178,8 @@
     <section id="pricing" class="py-5">
         <div class="container">
             <div class="text-center mb-5">
-                <h2>Choose Your Plan</h2>
-                <p class="lead">Flexible pricing that scales with your business</p>
+                <h2>{{ __('common.pricing_title') }}</h2>
+                <p class="lead">{{ __('common.pricing_subtitle') }}</p>
             </div>
             <div class="row">
                 @php
@@ -205,7 +205,7 @@
                                 </div>
                             @endif
                             <div class="card-body text-center">
-                                <h4 class="card-title">{{ $plan->name }}</h4>
+                                <h4 class="card-title">{{ __('common.plan_' . $plan->slug . '_title') }}</h4>
                                 <div class="price-section mb-3">
                                     @if($plan->monthly_price > 0)
                                         <div class="monthly-price">
@@ -253,7 +253,7 @@
                                     @endif
                                 </div>
                                 
-                                <p class="text-muted">{{ $plan->description }}</p>
+                                <p class="text-muted">{{ __('common.plan_' . $plan->slug . '_desc') }}</p>
                                 
                                 <div class="mb-3">
                                     @if($plan->token_cap_monthly > 0)
@@ -274,7 +274,7 @@
                                 <ul class="list-unstyled text-start">
                                     @foreach($plan->features as $feature)
                                         <li class="mb-2">
-                                            <i class="fas fa-check text-success me-2"></i>{{ $feature }}
+                                            <i class="fas fa-check text-success me-2"></i>{{ __($feature) }}
                                         </li>
                                     @endforeach
                                 </ul>
@@ -282,11 +282,7 @@
                             <div class="card-footer">
                                 @guest
                                     <a href="{{ route('register', ['plan' => $plan->slug]) }}" class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100">
-                                        @if($plan->slug === 'enterprise')
-                                            Contact Sales
-                                        @else
-                                            Choose {{ $plan->name }}
-                                        @endif
+                                        {{ __('common.plan_' . $plan->slug . '_button') }}
                                     </a>
                                 @else
                                     @if($plan->slug === 'enterprise')
@@ -328,7 +324,7 @@
                     </div>
                 @empty
                     <div class="col-12 text-center">
-                        <p class="text-muted">Pricing information coming soon.</p>
+                        <p class="text-muted">{{ __('common.pricing_coming_soon') }}</p>
                     </div>
                 @endforelse
             </div>
