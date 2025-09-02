@@ -69,3 +69,19 @@
         </div>
     </div>
 </footer>
+<!-- AI Chat Widget for Organization ID: 3 -->
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Load the AI chat widget script
+        var script = document.createElement('script');
+        script.src = 'https://ai-chat.support/widget/3/script.js';
+        script.async = true;
+        script.onload = function() {
+            console.log('AI Chat Widget loaded successfully');
+        };
+        script.onerror = function() {
+            console.error('Failed to load AI Chat Widget');
+        };
+        document.head.appendChild(script);
+    });
+</script>
