@@ -1,44 +1,51 @@
 <div>
-    <div class="content-header">
+    <section class="content-header">
         <div class="container-fluid">
             <div class="row mb-2">
-                <div class="col-sm-6"><h1 class="m-0">Manual Data Entry</h1></div>
+                <div class="col-sm-6">
+                    <h1><i class="fas fa-database"></i> Data Entry Management</h1>
+                </div>
                 <div class="col-sm-6">
                     <ol class="breadcrumb float-sm-right">
-                        <li class="breadcrumb-item"><a href="{{ route('customer.dashboard') }}">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a href="{{ route('admin.dashboard') }}">Dashboard</a></li>
                         <li class="breadcrumb-item active">Data Entry</li>
                     </ol>
                 </div>
             </div>
         </div>
-    </div>
+    </section>
 
     <section class="content">
         <div class="container-fluid">
             @if (session()->has('message'))
                 <div class="alert alert-success alert-dismissible fade show" role="alert">
-                    {{ session('message') }}
-                    <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span>&times;</span></button>
-                </div>
-            @endif
-            @if (session()->has('error'))
-                <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                    {{ session('error') }}
-                    <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span>&times;</span></button>
+                    <i class="fas fa-check-circle"></i> {{ session('message') }}
+                    <button type="button" class="close" data-dismiss="alert">
+                        <span>&times;</span>
+                    </button>
                 </div>
             @endif
 
-            @if(!auth()->user()->organization)
-                <div class="text-center py-5 text-muted">
-                    <i class="fas fa-building fa-3x mb-3"></i>
-                    <p>Your account is not yet linked to an organization. Please contact support.</p>
+            @if (session()->has('error'))
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i> {{ session('error') }}
+                    <button type="button" class="close" data-dismiss="alert">
+                        <span>&times;</span>
+                    </button>
                 </div>
-            @else
+            @endif
+
             <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h3 class="card-title"><i class="fas fa-database mr-2"></i>Add Data</h3>
-                    <div>
-                        <select wire:model.live="dataType" class="form-control">
+                    <h3 class="card-title"><i class="fas fa-database mr-2"></i>Manage Data</h3>
+                    <div class="d-flex gap-2">
+                        <select wire:model.live="selectedOrganization" class="form-control mr-2" style="width: 200px;">
+                            <option value="">Select Organization</option>
+                            @foreach($this->organizations as $org)
+                                <option value="{{ $org->id }}">{{ $org->name }}</option>
+                            @endforeach
+                        </select>
+                        <select wire:model.live="dataType" class="form-control" style="width: 150px;">
                             <option value="service">Service/Test</option>
                             <option value="product">Product</option>
                             <option value="faq">FAQ</option>
@@ -56,6 +63,16 @@
                             <h5><i class="fas fa-plus-circle"></i> Add New {{ ucfirst($dataType) }}</h5>
                             <form wire:submit.prevent="addEntry">
                                 <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="font-weight-bold">Organization *</label>
+                                        <select wire:model="selectedOrganization" class="form-control">
+                                            <option value="">Select Organization</option>
+                                            @foreach($this->organizations as $org)
+                                                <option value="{{ $org->id }}">{{ $org->name }}</option>
+                                            @endforeach
+                                        </select>
+                                        @error('selectedOrganization') <small class="text-danger">{{ $message }}</small> @enderror
+                                    </div>
                                     @foreach($this->formFields as $field => $label)
                                         <div class="col-md-6 mb-3">
                                             <label class="font-weight-bold">{{ $label }}</label>
@@ -81,6 +98,16 @@
                             <h5><i class="fas fa-edit"></i> Edit {{ ucfirst($dataType) }}</h5>
                             <form wire:submit.prevent="updateEntry">
                                 <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="font-weight-bold">Organization *</label>
+                                        <select wire:model="selectedOrganization" class="form-control">
+                                            <option value="">Select Organization</option>
+                                            @foreach($this->organizations as $org)
+                                                <option value="{{ $org->id }}">{{ $org->name }}</option>
+                                            @endforeach
+                                        </select>
+                                        @error('selectedOrganization') <small class="text-danger">{{ $message }}</small> @enderror
+                                    </div>
                                     @foreach($this->formFields as $field => $label)
                                         <div class="col-md-6 mb-3">
                                             <label class="font-weight-bold">{{ $label }}</label>
@@ -109,6 +136,7 @@
                                 <table class="table table-striped table-hover">
                                     <thead class="thead-dark">
                                         <tr>
+                                            <th>Organization</th>
                                             <th>Name/Title</th>
                                             <th>Description</th>
                                             <th>Category</th>
@@ -122,13 +150,38 @@
                                     <tbody>
                                         @foreach($this->existingEntries as $entry)
                                             <tr>
-                                                <td><strong>{{ $entry->name }}</strong></td>
-                                                <td>{{ Str::limit($entry->description, 100) }}</td>
                                                 <td>
-                                                    @if($entry->metadata && isset($entry->metadata['category']))
-                                                        <span class="badge badge-info">{{ $entry->metadata['category'] }}</span>
+                                                    <span class="badge badge-primary">{{ $entry->organization->name }}</span>
+                                                </td>
+                                                <td>
+                                                    <strong>
+                                                        @if($dataType === 'faq')
+                                                            {{ $entry->question }}
+                                                        @else
+                                                            {{ $entry->name }}
+                                                        @endif
+                                                    </strong>
+                                                </td>
+                                                <td>
+                                                    @if($dataType === 'faq')
+                                                        {{ Str::limit($entry->answer, 100) }}
                                                     @else
-                                                        <span class="text-muted">-</span>
+                                                        {{ Str::limit($entry->description, 100) }}
+                                                    @endif
+                                                </td>
+                                                <td>
+                                                    @if($dataType === 'faq')
+                                                        @if($entry->category)
+                                                            <span class="badge badge-info">{{ $entry->category }}</span>
+                                                        @else
+                                                            <span class="text-muted">-</span>
+                                                        @endif
+                                                    @else
+                                                        @if($entry->metadata && isset($entry->metadata['category']))
+                                                            <span class="badge badge-info">{{ $entry->metadata['category'] }}</span>
+                                                        @else
+                                                            <span class="text-muted">-</span>
+                                                        @endif
                                                     @endif
                                                 </td>
                                                 @if($dataType === 'service' || $dataType === 'product')
@@ -157,7 +210,12 @@
                             </div>
                         @else
                             <div class="alert alert-info">
-                                <i class="fas fa-info-circle"></i> No {{ $dataType }} entries found. Add your first entry above!
+                                <i class="fas fa-info-circle"></i> No {{ $dataType }} entries found. 
+                                @if(!$selectedOrganization)
+                                    Select an organization and add your first entry above!
+                                @else
+                                    Add your first entry above!
+                                @endif
                             </div>
                         @endif
                     </div>
@@ -167,7 +225,6 @@
                     </div>
                 </div>
             </div>
-            @endif
         </div>
     </section>
 </div>

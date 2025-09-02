@@ -78,6 +78,9 @@ class InvoiceService
     
     public function sendInvoiceEmail(Invoice $invoice)
     {
+        // Configure email settings from admin panel
+        $this->configureEmailSettings();
+        
         $pdfContent = $this->generatePDF($invoice);
         
         $emailData = [
@@ -88,14 +91,65 @@ class InvoiceService
             'total_amount' => $invoice->getFormattedTotalAttribute(),
         ];
         
-        Mail::send('emails.invoice', $emailData, function ($message) use ($invoice, $pdfContent) {
-            $message->to($invoice->user->email, $invoice->user->name)
-                ->subject('Invoice/Receipt for your AI Support subscription')
-                ->attachData($pdfContent, "invoice-{$invoice->invoice_number}.pdf", [
-                    'mime' => 'application/pdf',
-                ]);
-        });
+        try {
+            Mail::send('emails.invoice', $emailData, function ($message) use ($invoice, $pdfContent) {
+                $message->to($invoice->user->email, $invoice->user->name)
+                    ->subject('Invoice/Receipt for your AI Chat Support subscription')
+                    ->attachData($pdfContent, "invoice-{$invoice->invoice_number}.pdf", [
+                        'mime' => 'application/pdf',
+                    ]);
+            });
+            
+            \Log::info('Invoice email sent successfully', [
+                'invoice_id' => $invoice->id,
+                'user_email' => $invoice->user->email
+            ]);
+            
+            return true;
+        } catch (\Exception $e) {
+            \Log::error('Failed to send invoice email', [
+                'invoice_id' => $invoice->id,
+                'user_email' => $invoice->user->email,
+                'error' => $e->getMessage()
+            ]);
+            
+            throw $e;
+        }
+    }
+    
+    private function configureEmailSettings()
+    {
+        $mailer = \App\Models\AdminSetting::get('mail_mailer', config('mail.default'));
+        $host = \App\Models\AdminSetting::get('mail_host', config('mail.mailers.smtp.host'));
+        $port = \App\Models\AdminSetting::get('mail_port', config('mail.mailers.smtp.port'));
+        $username = \App\Models\AdminSetting::get('mail_username', config('mail.mailers.smtp.username'));
+        $password = \App\Models\AdminSetting::get('mail_password', config('mail.mailers.smtp.password'));
+        $encryption = \App\Models\AdminSetting::get('mail_encryption', config('mail.mailers.smtp.encryption'));
+        $fromAddress = \App\Models\AdminSetting::get('mail_from_address', config('mail.from.address'));
+        $fromName = \App\Models\AdminSetting::get('mail_from_name', config('mail.from.name'));
         
-        return true;
+        // Update configuration at runtime
+        config([
+            'mail.default' => $mailer,
+            'mail.mailers.smtp.host' => $host,
+            'mail.mailers.smtp.port' => $port,
+            'mail.mailers.smtp.username' => $username,
+            'mail.mailers.smtp.password' => $password,
+            'mail.mailers.smtp.encryption' => $encryption,
+            'mail.from.address' => $fromAddress,
+            'mail.from.name' => $fromName,
+        ]);
+        
+        // Reload mail manager with new config
+        app()->forgetInstance('mail.manager');
+        
+        \Log::info('Email configuration updated from admin settings', [
+            'mailer' => $mailer,
+            'host' => $host,
+            'port' => $port,
+            'username' => $username,
+            'from_address' => $fromAddress,
+            'from_name' => $fromName
+        ]);
     }
 }

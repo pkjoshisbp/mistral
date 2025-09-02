@@ -177,7 +177,7 @@
             const messageElement = document.createElement('div');
             messageElement.className = `ai-chat-message ai-chat-message-${sender}`;
             
-            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             
             messageElement.innerHTML = `
                 <div class="ai-chat-message-content">

@@ -85,7 +85,7 @@ function addTestMessage(message, sender) {
     messageDiv.className = 'message ' + sender + '-message';
     messageDiv.style.marginBottom = '15px';
     
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     
     if (sender === 'user') {
         messageDiv.innerHTML = `

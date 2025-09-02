@@ -109,9 +109,21 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{ route('admin.data-entry') }}" class="nav-link {{ request()->routeIs('admin.data-entry') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-database"></i>
+              <p>Data Entry</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.ai-chat') }}" class="nav-link {{ request()->routeIs('admin.ai-chat') ? 'active' : '' }}">
               <i class="nav-icon fas fa-comments"></i>
               <p>AI Chat</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.chat-history') }}" class="nav-link {{ request()->routeIs('admin.chat-history') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-history"></i>
+              <p>Chat History</p>
             </a>
           </li>
           <li class="nav-item">

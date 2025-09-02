@@ -109,7 +109,7 @@
                                     @foreach(\App\Models\Organization::latest()->take(5)->get() as $org)
                                         <tr>
                                             <td>{{ $org->name }}</td>
-                                            <td>{{ $org->domain ?? 'N/A' }}</td>
+                                            <td>{{ $org->website ?? 'N/A' }}</td>
                                             <td>{{ $org->users()->count() }}</td>
                                             <td>
                                                 <span class="badge badge-success">Active</span>

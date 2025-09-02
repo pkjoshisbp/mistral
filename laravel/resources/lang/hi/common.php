@@ -69,4 +69,27 @@ return [
     'ai_is_typing' => 'AI टाइप कर रहा है...',
     'admin_panel' => 'एडमिन पैनल पर जाएं',
     'dashboard' => 'डैशबोर्ड पर जाएं',
+    
+    // Hero Section
+    'hero_title' => 'AI-संचालित सहायता एजेंट',
+    'hero_subtitle' => 'उन्नत डेटा एकीकरण क्षमताओं के साथ बहु-संगठन AI सहायता प्रणाली',
+    
+    // Features Section
+    'features_title' => 'शक्तिशाली सुविधाएं',
+    'features_subtitle' => 'आपकी AI सहायता प्रणाली को शक्ति प्रदान करने के लिए आवश्यक सब कुछ',
+    'features_ai_chat_title' => 'AI-संचालित चैट',
+    'features_ai_chat_desc' => 'प्राकृतिक भाषा समझ के लिए उन्नत AI मॉडल',
+    'features_data_sources_title' => 'कई डेटा स्रोत',
+    'features_data_sources_desc' => 'वेबसाइट क्रॉलिंग, फ़ाइल अपलोड, Google शीट्स, डेटाबेस कनेक्शन',
+    'features_widget_title' => 'एम्बेडेबल विजेट',
+    'features_widget_desc' => 'किसी भी वेबसाइट के लिए आसान-से-एकीकृत जावास्क्रिप्ट विजेट',
+    
+    // Navigation
+    'login' => 'लॉग इन',
+    'get_started' => 'शुरू करें',
+    'home' => 'होम',
+    'about' => 'के बारे में',
+    'blog' => 'ब्लॉग',
+    'contact' => 'संपर्क',
+    'pricing' => 'मूल्य निर्धारण',
 ];

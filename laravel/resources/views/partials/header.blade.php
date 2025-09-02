@@ -1,18 +1,3 @@
-</nav>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    var langDropdown = document.getElementById('langDropdown');
-    if (langDropdown) {
-        langDropdown.addEventListener('click', function(e) {
-            e.preventDefault();
-            var menu = document.querySelector('.dropdown-menu[aria-labelledby="langDropdown"]');
-            if (menu) {
-                menu.classList.toggle('show');
-            }
-        });
-    }
-});
-</script>
 <!-- Header -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
     <div class="container">
@@ -59,9 +44,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         </a>
                         <ul class="dropdown-menu">
                             @if(Auth::user()->role === 'admin')
-                                <li><a class="nav-link" href="{{ route('dashboard') }}">Admin Dashboard</a></li>
+                                <li><a class="nav-link" href="{{ route('admin.dashboard') }}">Admin Dashboard</a></li>
+                            @elseif(Auth::user()->role === 'customer')
+                                <li><a class="nav-link" href="{{ route('customer.dashboard') }}">Customer Dashboard</a></li>
                             @else
-                                <li><a class="nav-link" href="{{ route('customer.dashboard') }}">Dashboard</a></li>
+                                <li><a class="nav-link" href="{{ route('home') }}">Home</a></li>
                             @endif
                             <li><hr class="dropdown-divider"></li>
                             <li>
@@ -84,3 +71,18 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
     </div>
 </nav>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var langDropdown = document.getElementById('langDropdown');
+    if (langDropdown) {
+        langDropdown.addEventListener('click', function(e) {
+            e.preventDefault();
+            var menu = document.querySelector('.dropdown-menu[aria-labelledby="langDropdown"]');
+            if (menu) {
+                menu.classList.toggle('show');
+            }
+        });
+    }
+});
+</script>

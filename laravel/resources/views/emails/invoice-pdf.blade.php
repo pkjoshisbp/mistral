@@ -105,7 +105,7 @@
 </head>
 <body>
     <div class="header">
-        <div class="company-name">AI Support System</div>
+        <div class="company-name">AI Chat Support</div>
         <div>Professional AI-Powered Customer Support</div>
         <div style="margin-top: 10px;">https://ai-chat.support</div>
     </div>
@@ -201,7 +201,7 @@
     <div class="footer">
         <p>Thank you for your business!</p>
         <p>For support inquiries, please contact us at support@ai-chat.support</p>
-        <p>AI Support System - Revolutionizing customer support with intelligent AI conversations.</p>
+        <p>AI Chat Support - Revolutionizing customer support with intelligent AI conversations.</p>
     </div>
 </body>
 </html>

@@ -3,6 +3,8 @@
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SitemapController;
 use Illuminate\Support\Facades\Route;
+
+use App\Models\Blog;
 use Illuminate\Support\Facades\App;
 
 // Public Routes (no authentication required)
@@ -47,19 +49,20 @@ Route::get('/refund-policy', function () {
 })->name('refund-policy');
 
 // Blog Routes
+
 Route::get('/blog', function () {
-    $blogs = App\Models\Blog::published()->orderBy('published_at', 'desc')->paginate(6);
+    $blogs = Blog::published()->orderBy('published_at', 'desc')->paginate(6);
     return view('public.blog.index', compact('blogs'));
 })->name('blog.index');
 
-Route::get('/blog/{blog:slug}', function (App\Models\Blog $blog) {
+
+Route::get('/blog/{blog:slug}', function (Blog $blog) {
     // Get related posts (exclude current post)
-    $relatedPosts = App\Models\Blog::published()
+    $relatedPosts = Blog::published()
         ->where('id', '!=', $blog->id)
         ->inRandomOrder()
         ->limit(3)
         ->get();
-    
     return view('public.blog.show', compact('blog', 'relatedPosts'));
 })->name('blog.show');
 
@@ -101,6 +104,8 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/documents', function () {
         return view('admin.documents');
     })->name('documents');
+    
+    Route::get('/data-entry', \App\Livewire\Admin\DataEntry::class)->name('data-entry');
     
     Route::get('/ai-chat', function () {
         return view('ai-chat');
@@ -154,7 +159,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/settings', function () {
         return view('admin.settings');
     })->name('settings');
-    Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
+    Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('admin.chat-history');
 });
 
 // Customer Routes (for customers to manage their organization data)

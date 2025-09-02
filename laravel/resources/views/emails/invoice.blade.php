@@ -7,7 +7,7 @@
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
     <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #2563eb;">AI Support System</h1>
+            <h1 style="color: #2563eb;">AI Chat Support</h1>
             <p style="color: #666;">Thank you for your payment!</p>
         </div>
         
@@ -40,12 +40,12 @@
         
         <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
             <p>If you have any questions about this invoice, please don't hesitate to contact our support team.</p>
-            <p>Thank you for choosing AI Support System!</p>
+            <p>Thank you for choosing AI Chat Support!</p>
         </div>
         
         <div style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
             <p style="margin: 0; font-size: 14px; color: #666;">
-                AI Support System<br>
+                AI Chat Support<br>
                 <a href="https://ai-chat.support" style="color: #2563eb;">ai-chat.support</a>
             </p>
         </div>

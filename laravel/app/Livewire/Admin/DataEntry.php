@@ -1,10 +1,13 @@
 <?php
 
-namespace App\Livewire\Customer;
+namespace App\Livewire\Admin;
 
 use Livewire\Component;
 use App\Services\AiAgentService;
 use Illuminate\Support\Facades\Auth;
+use App\Models\Organization;
+use App\Models\OrganizationData;
+use App\Models\OrganizationFaq;
 
 class DataEntry extends Component
 {
@@ -12,6 +15,7 @@ class DataEntry extends Component
     public $showAddForm = false;
     public $editingId = null;
     public $showEditForm = false;
+    public $selectedOrganization = null;
 
     // Form fields
     public $name = '';
@@ -31,19 +35,21 @@ class DataEntry extends Component
         'requirements' => 'nullable|string',
         'duration' => 'nullable|string',
         'availability' => 'nullable|string',
-        'keywords' => 'nullable|string'
+        'keywords' => 'nullable|string',
+        'selectedOrganization' => 'required|exists:organizations,id'
     ];
 
     public function addEntry()
     {
         $this->validate();
-        $org = Auth::user()->organization;
-        if (!$org) {
-            session()->flash('error', 'No organization linked to your account.');
+        
+        if (!$this->selectedOrganization) {
+            session()->flash('error', 'Please select an organization.');
             return;
         }
 
         try {
+            $org = Organization::find($this->selectedOrganization);
             $ai = new AiAgentService();
             $data = $this->prepareDataForType();
             $data['org_id'] = $org->id;
@@ -52,7 +58,18 @@ class DataEntry extends Component
             $vector = $ai->embed($text);
             $collection = 'org_' . $org->id . '_data';
             $ai->addToQdrant($collection, $vector, $data);
-            session()->flash('message', ucfirst($this->dataType) . ' added successfully!');
+            
+            // Also save to database
+            OrganizationData::create([
+                'organization_id' => $org->id,
+                'type' => $this->dataType,
+                'name' => $this->name,
+                'description' => $this->description,
+                'content' => $data['content'],
+                'metadata' => $data
+            ]);
+            
+            session()->flash('message', ucfirst($this->dataType) . ' added successfully for ' . $org->name . '!');
             $this->resetForm();
             $this->showAddForm = false;
         } catch (\Exception $e) {
@@ -62,18 +79,11 @@ class DataEntry extends Component
 
     public function editEntry($id)
     {
-        $org = Auth::user()->organization;
-        if (!$org) {
-            session()->flash('error', 'No organization linked to your account.');
-            return;
-        }
-
-        $entry = \App\Models\OrganizationData::where('organization_id', $org->id)
-            ->where('id', $id)
-            ->first();
+        $entry = OrganizationData::find($id);
 
         if ($entry) {
             $this->editingId = $id;
+            $this->selectedOrganization = $entry->organization_id;
             $this->name = $entry->name ?? '';
             $this->description = $entry->description ?? '';
             $this->category = $entry->metadata['category'] ?? '';
@@ -91,24 +101,19 @@ class DataEntry extends Component
     public function updateEntry()
     {
         $this->validate();
-        $org = Auth::user()->organization;
-        if (!$org) {
-            session()->flash('error', 'No organization linked to your account.');
-            return;
-        }
 
         try {
-            $entry = \App\Models\OrganizationData::where('organization_id', $org->id)
-                ->where('id', $this->editingId)
-                ->first();
+            $entry = OrganizationData::find($this->editingId);
 
             if ($entry) {
+                $org = Organization::find($this->selectedOrganization);
                 $data = $this->prepareDataForType();
                 $data['org_id'] = $org->id;
                 $data['keywords'] = $this->keywords;
 
                 // Update in database
                 $entry->update([
+                    'organization_id' => $this->selectedOrganization,
                     'name' => $this->name,
                     'description' => $this->description,
                     'type' => $this->dataType,
@@ -135,24 +140,18 @@ class DataEntry extends Component
 
     public function deleteEntry($id)
     {
-        $org = Auth::user()->organization;
-        if (!$org) {
-            session()->flash('error', 'No organization linked to your account.');
-            return;
-        }
-
         try {
-            $entry = \App\Models\OrganizationData::where('organization_id', $org->id)
-                ->where('id', $id)
-                ->first();
+            $entry = OrganizationData::find($id);
 
             if ($entry) {
+                $orgId = $entry->organization_id;
+                
                 // Delete from database
                 $entry->delete();
 
                 // Delete from Qdrant
                 $ai = new AiAgentService();
-                $collection = 'org_' . $org->id . '_data';
+                $collection = 'org_' . $orgId . '_data';
                 $ai->deleteFromQdrant($collection, $id);
 
                 session()->flash('message', 'Entry deleted successfully!');
@@ -174,20 +173,20 @@ class DataEntry extends Component
         $base = [
             'name' => $this->name,
             'description' => $this->description,
-            'category' => $this->dataType,
-            'type' => 'manual_entry'
+            'category' => $this->category,
+            'type' => 'manual_entry',
+            'price' => $this->price,
+            'requirements' => $this->requirements,
+            'duration' => $this->duration,
+            'availability' => $this->availability
         ];
+
         return match ($this->dataType) {
             'service' => array_merge($base, [
-                'content' => "Service: {$this->name}\nDescription: {$this->description}\nPrice: {$this->price}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}",
-                'price' => $this->price,
-                'requirements' => $this->requirements,
-                'duration' => $this->duration,
-                'availability' => $this->availability
+                'content' => "Service: {$this->name}\nDescription: {$this->description}\nPrice: ₹{$this->price}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}",
             ]),
             'product' => array_merge($base, [
-                'content' => "Product: {$this->name}\nDescription: {$this->description}\nPrice: {$this->price}\nCategory: {$this->category}",
-                'price' => $this->price
+                'content' => "Product: {$this->name}\nDescription: {$this->description}\nPrice: ₹{$this->price}\nCategory: {$this->category}",
             ]),
             'faq' => array_merge($base, [
                 'content' => "FAQ Question: {$this->name}\nAnswer: {$this->description}\nCategory: {$this->category}",
@@ -204,6 +203,7 @@ class DataEntry extends Component
     public function resetForm()
     {
         $this->name = $this->description = $this->price = $this->category = $this->requirements = $this->duration = $this->availability = $this->keywords = '';
+        $this->selectedOrganization = null;
     }
 
     public function getFormFieldsProperty()
@@ -240,21 +240,36 @@ class DataEntry extends Component
         return $fields;
     }
 
+    public function getOrganizationsProperty()
+    {
+        return Organization::orderBy('name')->get();
+    }
+
     public function getExistingEntriesProperty()
     {
-        $org = Auth::user()->organization;
-        if (!$org) {
-            return collect();
+        if ($this->dataType === 'faq') {
+            // For FAQs, use the OrganizationFaq model
+            $query = OrganizationFaq::query();
+            
+            if ($this->selectedOrganization) {
+                $query->where('organization_id', $this->selectedOrganization);
+            }
+            
+            return $query->with('organization')->orderBy('created_at', 'desc')->get();
+        } else {
+            // For other types, use OrganizationData model
+            $query = OrganizationData::where('type', $this->dataType);
+            
+            if ($this->selectedOrganization) {
+                $query->where('organization_id', $this->selectedOrganization);
+            }
+            
+            return $query->with('organization')->orderBy('created_at', 'desc')->get();
         }
-
-        return \App\Models\OrganizationData::where('organization_id', $org->id)
-            ->where('type', $this->dataType)
-            ->orderBy('created_at', 'desc')
-            ->get();
     }
 
     public function render()
     {
-        return view('livewire.customer.data-entry')->layout('layouts.customer');
+        return view('livewire.admin.data-entry')->layout('layouts.admin');
     }
 }
