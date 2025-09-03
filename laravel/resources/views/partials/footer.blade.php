@@ -1,3 +1,6 @@
+<div class="text-center mt-3">
+    <small>ai-chat.support is owned and operated by MYWEB SOLUTIONS.</small>
+</div>
 <!-- Footer -->
 <footer class="section-padding">
     <div class="container">
