@@ -1,162 +1,3 @@
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // ...existing code...
-        if (isToday) return timePart;
-        return `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${timePart}`;
-    }
-
-    function escapeHtml(str) {
-        return str.replace(/[&<>"']/g, function(tag) {
-            const chars = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-            return chars[tag] || tag;
-        });
-    }
-
-    function addTypingIndicator() {
-        const messagesContainer = document.getElementById('ai-chat-messages');
-        const typingDiv = document.createElement('div');
-        const typingId = 'typing-' + Date.now();
-        typingDiv.id = typingId;
-        typingDiv.className = 'ai-message';
-        typingDiv.innerHTML = '<div class="message-bubble">Typing...</div>';
-        messagesContainer.appendChild(typingDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        return typingId;
-    }
-
-    function removeTypingIndicator(typingId) {
-        const typingElement = document.getElementById(typingId);
-        if (typingElement) {
-            typingElement.remove();
-        }
-    }
-
-    function getOrCreateConversationId() {
-        let conversationId = localStorage.getItem('ai-chat-conversation-id');
-        if (!conversationId) {
-            conversationId = 'conv-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('ai-chat-conversation-id', conversationId);
-        }
-        return conversationId;
-    }
-    console.log('Chat widget script loaded');
-});
-</script>
-    <!-- External AI Chat Widget script is included at the end of the file -->
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    window.toggleChat = function() {
-        const chatWindow = document.getElementById('ai-chat-window');
-        const chatButton = document.getElementById('ai-chat-button');
-        if (chatWindow.style.display === 'none' || chatWindow.style.display === '') {
-            chatWindow.style.display = 'flex';
-            chatButton.style.display = 'none';
-        } else {
-            chatWindow.style.display = 'none';
-            chatButton.style.display = 'flex';
-        }
-    };
-
-    window.handleChatKeyPress = function(event) {
-        if (event.key === 'Enter') {
-            window.sendMessage();
-        }
-    };
-
-    window.sendMessage = async function() {
-        const input = document.getElementById('chat-message-input');
-        const message = input.value.trim();
-        if (!message) return;
-        addMessageToChat(message, 'user');
-        input.value = '';
-        const typingId = addTypingIndicator();
-        try {
-            const response = await fetch('https://ai-chat.support/widget/3/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: message,
-                    session_id: getOrCreateConversationId()
-                })
-            });
-            const data = await response.json();
-            removeTypingIndicator(typingId);
-            if (data.response) {
-                addMessageToChat(data.response, 'ai');
-            } else {
-                addMessageToChat('Sorry, I encountered an error. Please try again.', 'ai');
-            }
-        } catch (error) {
-            console.error('Chat error:', error);
-            removeTypingIndicator(typingId);
-            addMessageToChat('Sorry, I\'m having trouble connecting. Please try again later.', 'ai');
-        }
-    };
-
-    function addMessageToChat(message, sender) {
-        const messagesContainer = document.getElementById('ai-chat-messages');
-        const messageDiv = document.createElement('div');
-        messageDiv.className = sender + '-message';
-        const bubbleDiv = document.createElement('div');
-        bubbleDiv.className = 'message-bubble';
-        bubbleDiv.innerHTML = `${escapeHtml(message)}<div class="timestamp">${formatTimestamp(new Date())}</div>`;
-        messageDiv.appendChild(bubbleDiv);
-        messagesContainer.appendChild(messageDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-
-    function formatTimestamp(date) {
-        const now = new Date();
-        const isToday = date.toDateString() === now.toDateString();
-        const hours = date.getHours();
-        const minutes = date.getMinutes().toString().padStart(2, '0');
-        const seconds = date.getSeconds().toString().padStart(2, '0');
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-        const hour12 = hours % 12 || 12;
-        const timePart = `${hour12}:${minutes}:${seconds} ${ampm}`;
-        if (isToday) return timePart;
-        return `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${timePart}`;
-    }
-
-    function escapeHtml(str) {
-        return str.replace(/[&<>"']/g, function(tag) {
-            const chars = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-            return chars[tag] || tag;
-        });
-    }
-
-    function addTypingIndicator() {
-        const messagesContainer = document.getElementById('ai-chat-messages');
-        const typingDiv = document.createElement('div');
-        const typingId = 'typing-' + Date.now();
-        typingDiv.id = typingId;
-        typingDiv.className = 'ai-message';
-        typingDiv.innerHTML = '<div class="message-bubble">Typing...</div>';
-        messagesContainer.appendChild(typingDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        return typingId;
-    }
-
-    function removeTypingIndicator(typingId) {
-        const typingElement = document.getElementById(typingId);
-        if (typingElement) {
-            typingElement.remove();
-        }
-    }
-
-    function getOrCreateConversationId() {
-        let conversationId = localStorage.getItem('ai-chat-conversation-id');
-        if (!conversationId) {
-            conversationId = 'conv-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('ai-chat-conversation-id', conversationId);
-        }
-        return conversationId;
-    }
-});
-</script>
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
 <head>
@@ -414,7 +255,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 
                                 <p class="text-muted">{{ __('common.plan_' . $plan->slug . '_desc') }}</p>
                                 
-                        <script src="https://ai-chat.support/widget/3/script.js"></script>
+                                <div class="mb-3">
                                     @if($plan->token_cap_monthly > 0)
                                         <strong>{{ $plan->formatted_token_cap }} tokens/month</strong>
                                     @else
@@ -927,7 +768,131 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     </style>
 
-    <!-- Move chat widget script to end of body for proper initialization -->
+    <script>
+    function toggleChat() {
+        const chatWindow = document.getElementById('ai-chat-window');
+        const chatButton = document.getElementById('ai-chat-button');
+        
+        if (chatWindow.style.display === 'none') {
+            chatWindow.style.display = 'flex';
+            chatButton.style.display = 'none';
+        } else {
+            chatWindow.style.display = 'none';
+            chatButton.style.display = 'flex';
+        }
+    }
+
+    function handleChatKeyPress(event) {
+        if (event.key === 'Enter') {
+            sendMessage();
+        }
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('chat-message-input');
+        const message = input.value.trim();
+        
+        if (!message) return;
+        
+        // Add user message to chat
+        addMessageToChat(message, 'user');
+        input.value = '';
+        
+        // Show typing indicator
+        const typingId = addTypingIndicator();
+        
+        try {
+            // Send message to AI Chat Support API
+            const response = await fetch('https://ai-chat.support/widget/3/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: message,
+                    session_id: getOrCreateConversationId()
+                })
+            });
+            
+            const data = await response.json();
+            
+            // Remove typing indicator
+            removeTypingIndicator(typingId);
+            
+            if (data.response) {
+                addMessageToChat(data.response, 'ai');
+            } else {
+                addMessageToChat('Sorry, I encountered an error. Please try again.', 'ai');
+            }
+        } catch (error) {
+            console.error('Chat error:', error);
+            removeTypingIndicator(typingId);
+            addMessageToChat('Sorry, I\'m having trouble connecting. Please try again later.', 'ai');
+        }
+    }
+
+    function addMessageToChat(message, sender) {
+        const messagesContainer = document.getElementById('ai-chat-messages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = sender + '-message';
+
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.className = 'message-bubble';
+        bubbleDiv.innerHTML = `${escapeHtml(message)}<div class="timestamp">${formatTimestamp(new Date())}</div>`;
+
+        messageDiv.appendChild(bubbleDiv);
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function formatTimestamp(date) {
+        const now = new Date();
+        const isToday = date.toDateString() === now.toDateString();
+        const hours = date.getHours();
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const hour12 = hours % 12 || 12;
+        const timePart = `${hour12}:${minutes} ${ampm}`;
+        if (isToday) return timePart;
+        return `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${timePart}`;
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/[&<>"']/g, function(tag) {
+            const chars = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+            return chars[tag] || tag;
+        });
+    }
+
+    function addTypingIndicator() {
+        const messagesContainer = document.getElementById('ai-chat-messages');
+        const typingDiv = document.createElement('div');
+        const typingId = 'typing-' + Date.now();
+        typingDiv.id = typingId;
+        typingDiv.className = 'ai-message';
+        typingDiv.innerHTML = '<div class="message-bubble">Typing...</div>';
+        messagesContainer.appendChild(typingDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        return typingId;
+    }
+
+    function removeTypingIndicator(typingId) {
+        const typingElement = document.getElementById(typingId);
+        if (typingElement) {
+            typingElement.remove();
+        }
+    }
+
+    function getOrCreateConversationId() {
+        let conversationId = localStorage.getItem('ai-chat-conversation-id');
+        if (!conversationId) {
+            conversationId = 'conv-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('ai-chat-conversation-id', conversationId);
+        }
+        return conversationId;
+    }
+    </script>
 
     <!-- Footer -->
 

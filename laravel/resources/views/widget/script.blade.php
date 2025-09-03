@@ -129,18 +129,18 @@
                                     <input type="tel" id="${leadPhoneId}" class="ai-chat-form-input" placeholder="Your Phone Number" />
                                 </div>
                                 <div class="ai-chat-form-actions">
-                                    <button id="${leadSubmitId}" class="ai-chat-lead-submit">Start Chatting</button>
-                                    <button id="${leadSkipId}" class="ai-chat-lead-skip">Skip for now</button>
+                                    <button type="button" id="${leadSubmitId}" class="ai-chat-lead-submit">Start Chatting</button>
+                                    <button type="button" id="${leadSkipId}" class="ai-chat-lead-skip">Skip for now</button>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Input -->
                         <div class="ai-chat-input-container">
-                            <input type="text" id="${inputId}" class="ai-chat-input" placeholder="Type your message..." />
-                            <button id="${sendId}" class="ai-chat-send-button">
-                                <svg width="20" height="20" viewBox="0 0 20 20">
-                                    <path d="M2 10L18 2L11 10L18 18L2 10Z" fill="currentColor"/>
+                            <textarea id="${inputId}" class="ai-chat-input" placeholder="Type your message..." rows="1"></textarea>
+                            <button type="button" id="${sendId}" class="ai-chat-send-button">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0M4.5 7.5a.5.5 0 0 0 0 1h5.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 1 0-.708.708L10.293 7.5z"/>
                                 </svg>
                             </button>
                         </div>
@@ -183,7 +183,12 @@
             }
             
             if (leadSubmit) {
-                leadSubmit.addEventListener('click', () => this.submitLeadForm());
+                leadSubmit.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Lead submit button clicked');
+                    this.submitLeadForm();
+                });
             }
             
             if (leadSkip) {
@@ -191,8 +196,16 @@
             }
             
             if (input) {
-                input.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
+                // Setup input auto-resize
+                input.addEventListener('input', () => {
+                    input.style.height = 'auto';
+                    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+                });
+
+                // Handle Enter key for sending message
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
                         this.sendMessage();
                     }
                 });
@@ -307,7 +320,8 @@
         showLeadForm() {
             const leadForm = document.getElementById(this.ids.leadForm);
             const messagesContainer = document.getElementById(this.ids.messages);
-            const inputContainer = document.querySelector('.ai-chat-input-container');
+            const widget = document.getElementById(this.ids.widget);
+            const inputContainer = widget ? widget.querySelector('.ai-chat-input-container') : null;
             
             if (leadForm) leadForm.style.display = 'block';
             if (messagesContainer) messagesContainer.style.display = 'none';
@@ -319,13 +333,32 @@
         }
 
         hideLeadForm() {
+            console.log('hideLeadForm called');
             const leadForm = document.getElementById(this.ids.leadForm);
             const messagesContainer = document.getElementById(this.ids.messages);
-            const inputContainer = document.querySelector('.ai-chat-input-container');
+            const widget = document.getElementById(this.ids.widget);
+            const inputContainer = widget ? widget.querySelector('.ai-chat-input-container') : null;
             
-            if (leadForm) leadForm.style.display = 'none';
-            if (messagesContainer) messagesContainer.style.display = 'flex';
-            if (inputContainer) inputContainer.style.display = 'flex';
+            console.log('leadForm:', leadForm);
+            console.log('messagesContainer:', messagesContainer);
+            console.log('widget:', widget);
+            console.log('inputContainer:', inputContainer);
+            
+            if (leadForm) {
+                leadForm.style.display = 'none';
+                leadForm.style.setProperty('display', 'none', 'important');
+                console.log('Lead form hidden');
+            }
+            if (messagesContainer) {
+                messagesContainer.style.display = 'flex';
+                messagesContainer.style.setProperty('display', 'flex', 'important');
+                console.log('Messages container shown');
+            }
+            if (inputContainer) {
+                inputContainer.style.display = 'flex';
+                inputContainer.style.setProperty('display', 'flex', 'important');
+                console.log('Input container shown');
+            }
             
             // Show welcome message if no messages yet
             if (this.messages.length === 0) {
@@ -339,6 +372,7 @@
         }
 
         submitLeadForm() {
+            console.log('submitLeadForm called');
             const name = document.getElementById(this.ids.leadName).value.trim();
             const email = document.getElementById(this.ids.leadEmail).value.trim();
             const phone = document.getElementById(this.ids.leadPhone).value.trim();
@@ -360,6 +394,7 @@
             
             // Store lead info (you can send this to server if needed)
             console.log('Lead captured:', this.userInfo);
+            console.log('Calling hideLeadForm...');
             
             this.hideLeadForm();
             
