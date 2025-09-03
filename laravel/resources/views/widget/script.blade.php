@@ -2,7 +2,7 @@
     'use strict';
     
     // Widget Configuration
-    const config = {!! json_encode($widgetConfig) !!};
+    const config = @json($widgetConfig);
     
     // Prevent multiple initializations
     if (window.AiChatWidget) {
@@ -196,6 +196,14 @@
             }
             
             if (input) {
+                                   // Debug: Widget created
+                                   console.log('[AI Widget] Widget created, forcing chat window hidden');
+                                   const window = document.getElementById(this.ids.window);
+                                   if (window) {
+                                       window.style.display = 'none';
+                                       window.style.visibility = 'hidden';
+                                       console.log('[AI Widget] Chat window hidden on load:', window.style.display, window.style.visibility);
+                                   }
                 // Setup input auto-resize
                 input.addEventListener('input', () => {
                     input.style.height = 'auto';
@@ -233,6 +241,7 @@
             
             if (this.isOpen) {
                 window.style.setProperty('display', 'flex', 'important');
+                window.style.setProperty('visibility', 'visible', 'important');
                 button.style.transform = 'scale(0.9)';
                 
                 // Check if user is logged in by looking for auth indicators
@@ -249,7 +258,6 @@
                     if (input) {
                         input.focus();
                     }
-                    
                     // Show welcome message if no messages yet
                     if (this.messages.length === 0) {
                         setTimeout(() => {
@@ -259,6 +267,7 @@
                 }
             } else {
                 window.style.setProperty('display', 'none', 'important');
+                window.style.setProperty('visibility', 'hidden', 'important');
                 button.style.transform = 'scale(1)';
             }
         }
@@ -275,6 +284,7 @@
             
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             
+                               console.log('[AI Widget] Closing chat window');
             messageElement.innerHTML = `
                 <div class="ai-chat-message-content">
                     ${content}
@@ -333,6 +343,7 @@
         }
 
         hideLeadForm() {
+               console.log('[AI Widget] showLeadForm called');
             console.log('hideLeadForm called');
             const leadForm = document.getElementById(this.ids.leadForm);
             const messagesContainer = document.getElementById(this.ids.messages);
@@ -340,6 +351,7 @@
             const inputContainer = widget ? widget.querySelector('.ai-chat-input-container') : null;
             
             console.log('leadForm:', leadForm);
+               console.log('[AI Widget] Lead form display:', leadForm ? leadForm.style.display : 'none');
             console.log('messagesContainer:', messagesContainer);
             console.log('widget:', widget);
             console.log('inputContainer:', inputContainer);

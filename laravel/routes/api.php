@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
-});
+
+use App\Http\Controllers\Api\LeadController;
+
+Route::post('/leads', [LeadController::class, 'store']);
+Route::get('/leads', [LeadController::class, 'index']);

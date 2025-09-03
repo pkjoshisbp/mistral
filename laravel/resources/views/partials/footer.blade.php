@@ -72,12 +72,34 @@
 <!-- AI Chat Widget for Organization ID: 3 -->
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Load the AI chat widget script
+        console.log('Footer: DOM loaded, initializing chat widget...');
+        
+        // Add debug information
+        console.log('Current URL:', window.location.href);
+        console.log('Auth meta tag:', document.querySelector('meta[name="user-authenticated"]'));
+        
+        // Load the AI chat widget script from local domain
         var script = document.createElement('script');
-        script.src = 'https://ai-chat.support/widget/3/script.js';
+        script.src = '{{ route('widget.script', ['orgId' => 3]) }}';
         script.async = true;
         script.onload = function() {
             console.log('AI Chat Widget loaded successfully');
+            
+            // Debug widget state after load
+            setTimeout(function() {
+                const widget = document.querySelector('.ai-chat-widget');
+                const button = document.querySelector('.ai-chat-button');
+                const window = document.querySelector('.ai-chat-window');
+                
+                console.log('Widget element:', widget);
+                console.log('Button element:', button);
+                console.log('Window element:', window);
+                
+                if (window) {
+                    console.log('Window display:', window.style.display);
+                    console.log('Window computed display:', getComputedStyle(window).display);
+                }
+            }, 1000);
         };
         script.onerror = function() {
             console.error('Failed to load AI Chat Widget');

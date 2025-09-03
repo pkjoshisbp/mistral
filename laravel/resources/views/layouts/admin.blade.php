@@ -132,6 +132,12 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{ route('admin.leads') }}" class="nav-link {{ request()->routeIs('admin.leads') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-address-card"></i>
+              <p>Leads</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.widget-manager') }}" class="nav-link {{ request()->routeIs('admin.widget-manager') ? 'active' : '' }}">
               <i class="nav-icon fas fa-code"></i>
               <p>Widget Manager</p>

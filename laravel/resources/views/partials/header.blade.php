@@ -1,6 +1,6 @@
 <!-- Header -->
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
-    <div class="container">
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top" style="z-index: 1050;">
+    <div class="container-fluid">
         <a class="navbar-brand text-white fw-bold" href="{{ route('home') }}" style="font-size:1.5rem;">
             <i class="fas fa-robot me-2"></i>AI Agent System
         </a>
@@ -44,11 +44,11 @@
                         </a>
                         <ul class="dropdown-menu">
                             @if(Auth::user()->role === 'admin')
-                                <li><a class="nav-link" href="{{ route('admin.dashboard') }}">Admin Dashboard</a></li>
+                                <li><a class="dropdown-item" href="{{ route('admin.dashboard') }}">Admin Dashboard</a></li>
                             @elseif(Auth::user()->role === 'customer')
-                                <li><a class="nav-link" href="{{ route('customer.dashboard') }}">Customer Dashboard</a></li>
+                                <li><a class="dropdown-item" href="{{ route('customer.dashboard') }}">Customer Dashboard</a></li>
                             @else
-                                <li><a class="nav-link" href="{{ route('home') }}">Home</a></li>
+                                <li><a class="dropdown-item" href="{{ route('home') }}">Home</a></li>
                             @endif
                             <li><hr class="dropdown-divider"></li>
                             <li>
@@ -72,17 +72,9 @@
     </div>
 </nav>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    var langDropdown = document.getElementById('langDropdown');
-    if (langDropdown) {
-        langDropdown.addEventListener('click', function(e) {
-            e.preventDefault();
-            var menu = document.querySelector('.dropdown-menu[aria-labelledby="langDropdown"]');
-            if (menu) {
-                menu.classList.toggle('show');
-            }
-        });
-    }
-});
-</script>
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Font Awesome -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<!-- Bootstrap CSS -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">

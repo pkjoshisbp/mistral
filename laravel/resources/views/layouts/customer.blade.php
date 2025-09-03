@@ -138,6 +138,12 @@
 
           <li class="nav-header">WIDGET</li>
           <li class="nav-item">
+            <a href="{{ route('customer.leads') }}" class="nav-link {{ request()->routeIs('customer.leads') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-address-card"></i>
+              <p>My Leads</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('customer.widget') }}" class="nav-link {{ request()->routeIs('customer.widget') ? 'active' : '' }}">
               <i class="nav-icon fas fa-code"></i>
               <p>Widget Settings</p>
