@@ -159,7 +159,10 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/settings', function () {
         return view('admin.settings');
     })->name('settings');
-    Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('admin.chat-history');
+    Route::get('/services', \App\Livewire\Admin\ServicesManager::class)->name('services');
+    Route::get('/faqs', \App\Livewire\Admin\FaqsManager::class)->name('faqs');
+    Route::get('/general-info', \App\Livewire\Admin\GeneralInfoManager::class)->name('general-info');
+    Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
 });
 
 // Customer Routes (for customers to manage their organization data)
@@ -202,8 +205,10 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         })->name('dashboard');
         
         Route::get('/data-sources', \App\Livewire\Customer\DataSources::class)->name('data-sources');
-    Route::get('/organization', \App\Livewire\Customer\OrganizationManager::class)->name('organization');
-    Route::get('/data-entry', \App\Livewire\Customer\DataEntry::class)->name('data-entry');
+        Route::get('/organization', \App\Livewire\Customer\OrganizationManager::class)->name('organization');
+        Route::get('/services', \App\Livewire\Customer\Services::class)->name('services');
+        Route::get('/faqs', \App\Livewire\Customer\Faqs::class)->name('faqs');
+        Route::get('/general-info', \App\Livewire\Customer\GeneralInfo::class)->name('general-info');
         Route::get('/documents', \App\Livewire\Customer\Documents::class)->name('documents');
         Route::get('/website-crawler', \App\Livewire\Customer\WebsiteCrawler::class)->name('crawler');
         Route::get('/api-integration', \App\Livewire\Customer\ApiIntegration::class)->name('api-integration');

@@ -106,11 +106,16 @@
               <p>Organization</p>
             </a>
           </li>
-          <li class="nav-item">
-            <a href="{{ route('customer.data-entry') }}" class="nav-link {{ request()->routeIs('customer.data-entry') ? 'active' : '' }}">
+          <li class="nav-item has-treeview {{ request()->routeIs('customer.services') || request()->routeIs('customer.faqs') || request()->routeIs('customer.general-info') ? 'menu-open' : '' }}">
+            <a href="#" class="nav-link {{ request()->routeIs('customer.services') || request()->routeIs('customer.faqs') || request()->routeIs('customer.general-info') ? 'active' : '' }}">
               <i class="nav-icon fas fa-keyboard"></i>
-              <p>Data Entry</p>
+              <p>Data Entry <i class="right fas fa-angle-left"></i></p>
             </a>
+            <ul class="nav nav-treeview">
+              <li class="nav-item"><a href="{{ route('customer.services') }}" class="nav-link {{ request()->routeIs('customer.services') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Services</p></a></li>
+              <li class="nav-item"><a href="{{ route('customer.faqs') }}" class="nav-link {{ request()->routeIs('customer.faqs') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>FAQs</p></a></li>
+              <li class="nav-item"><a href="{{ route('customer.general-info') }}" class="nav-link {{ request()->routeIs('customer.general-info') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>General Info</p></a></li>
+            </ul>
           </li>
           <li class="nav-item">
             <a href="{{ route('customer.documents') }}" class="nav-link {{ request()->routeIs('customer.documents') ? 'active' : '' }}">
