@@ -56,5 +56,20 @@
                 {{ __('Register') }}
             </x-primary-button>
         </div>
+            <!-- Trust & Security Section -->
+            <div class="mt-6 text-center text-sm text-gray-500">
+                <hr class="my-4">
+                <div class="mb-2">
+                    <strong>ai-chat.support is owned and operated by MYWEB SOLUTIONS.</strong>
+                </div>
+                <div>
+                    <a href="{{ route('privacy') }}" class="me-3 underline">Privacy Policy</a>
+                    <a href="{{ route('terms') }}" class="me-3 underline">Terms of Service</a>
+                    <a href="{{ route('contact') }}" class="underline">Contact Us</a>
+                </div>
+                <div class="mt-2">
+                    <span class="text-xs">For support or security concerns, email <a href="mailto:info@ai-chat.support" class="underline">info@ai-chat.support</a></span>
+                </div>
+            </div>
     </form>
 </x-guest-layout>
