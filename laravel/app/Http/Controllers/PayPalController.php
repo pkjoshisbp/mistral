@@ -52,18 +52,24 @@ class PayPalController extends Controller
             $plan = SubscriptionPlan::findOrFail($request->plan_id);
             $user = Auth::user();
             $accessToken = $this->getAccessToken();
+            
+            // Get billing cycle from request (default to monthly)
+            $billingCycle = $request->input('billing_cycle', 'monthly');
+            
+            // Get price based on billing cycle
+            $price = $billingCycle === 'yearly' ? $plan->yearly_price : $plan->monthly_price;
 
             // If a PayPal billing plan ID exists, create a recurring subscription
             if ($plan->paypal_plan_id) {
                 $subscriptionPayload = [
                     'plan_id' => $plan->paypal_plan_id,
-                    'custom_id' => 'user_' . $user->id . '_plan_' . $plan->id,
+                    'custom_id' => 'user_' . $user->id . '_plan_' . $plan->id . '_' . $billingCycle,
                     'application_context' => [
                         'brand_name' => config('app.name'),
                         'locale' => 'en-US',
                         'shipping_preference' => 'NO_SHIPPING',
                         'user_action' => 'SUBSCRIBE_NOW',
-                        'return_url' => route('paypal.success') . '?plan_id=' . $plan->id,
+                        'return_url' => route('paypal.success') . '?plan_id=' . $plan->id . '&billing_cycle=' . $billingCycle,
                         'cancel_url' => route('paypal.cancel')
                     ]
                 ];
@@ -94,9 +100,10 @@ class PayPalController extends Controller
                     [
                         'amount' => [
                             'currency_code' => 'USD',
-                            'value' => number_format($plan->monthly_price, 2, '.', '')
+                            'value' => number_format($price, 2, '.', '')
                         ],
-                        'description' => $plan->name . ' Plan - ' . $plan->description
+                        'description' => $plan->name . ' Plan - ' . $plan->description . ' (' . ucfirst($billingCycle) . ')',
+                        'custom_id' => 'user_' . $user->id . '_plan_' . $plan->id . '_' . $billingCycle
                     ]
                 ],
                 'application_context' => [
@@ -147,6 +154,7 @@ class PayPalController extends Controller
         try {
             $token = $request->token; // PayPal order token
             $planId = $request->plan_id;
+            $billingCycle = $request->input('billing_cycle', 'monthly');
             $accessToken = $this->getAccessToken();
 
             // Capture the payment
@@ -160,6 +168,9 @@ class PayPalController extends Controller
                     $plan = SubscriptionPlan::findOrFail($planId);
                     $user = Auth::user();
                     
+                    // Calculate period end date based on billing cycle
+                    $periodEnd = $billingCycle === 'yearly' ? now()->addYear() : now()->addMonth();
+                    
                     // Create local subscription record
                     $subscription = Subscription::create([
                         'user_id' => $user->id,
@@ -167,22 +178,20 @@ class PayPalController extends Controller
                         'subscription_plan_id' => $plan->id,
                         'paypal_subscription_id' => $paypalOrder['id'],
                         'status' => 'active',
+                        'billing_cycle' => $billingCycle,
                         'current_period_start' => now(),
-                        'current_period_end' => now()->addMonth(),
+                        'current_period_end' => $periodEnd,
                         'tokens_used_this_period' => 0
                     ]);
 
                     return redirect()->route('customer.dashboard')
-                        ->with('success', 'Payment successful! Your ' . $plan->name . ' plan has been activated.');
+                        ->with('success', 'Payment successful! Your ' . $plan->name . ' plan (' . ucfirst($billingCycle) . ') has been activated.');
                 }
             }
-
             return redirect()->route('customer.subscription')
                 ->with('error', 'Payment could not be completed. Please try again.');
-
         } catch (\Exception $e) {
             Log::error('PayPal payment completion failed: ' . $e->getMessage());
-            
             return redirect()->route('customer.subscription')
                 ->with('error', 'An error occurred while completing your payment.');
         }

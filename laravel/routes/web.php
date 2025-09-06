@@ -83,6 +83,11 @@ Route::get('/customer', function () {
     return redirect()->route('customer.dashboard');
 })->name('customer.redirect');
 
+// Admin redirect
+Route::get('/admin', function () {
+    return redirect()->route('admin.dashboard');
+})->name('admin.redirect');
+
 // Admin Routes (for system administrators)
 Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(function () {
     Route::get('/dashboard', function () {
@@ -93,27 +98,21 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
         return view('organizations');
     })->name('organizations');
     
-    Route::get('/data-sync', function () {
-        return view('data-sync');
-    })->name('data-sync');
-    
     Route::get('/website-crawler', function () {
         return view('website-crawler');
     })->name('website-crawler');
     
-    Route::get('/documents', function () {
-        return view('admin.documents');
-    })->name('documents');
+    Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('admin.documents');
     
-    Route::get('/data-entry', \App\Livewire\Admin\DataEntry::class)->name('data-entry');
+    // Removed old Manual Data Entry route. Use dedicated child pages for each data type.
     
     Route::get('/ai-chat', function () {
         return view('ai-chat');
     })->name('ai-chat');
     
-    // Debug routes for troubleshooting AI
-    Route::get('/debug/collections', [App\Http\Controllers\DebugController::class, 'checkCollections'])->name('debug.collections');
-    Route::get('/debug/search', [App\Http\Controllers\DebugController::class, 'testSearch'])->name('debug.search');
+    // Debug routes for troubleshooting AI (commented out - controller missing)
+    // Route::get('/debug/collections', [App\Http\Controllers\DebugController::class, 'checkCollections'])->name('debug.collections');
+    // Route::get('/debug/search', [App\Http\Controllers\DebugController::class, 'testSearch'])->name('debug.search');
     
     Route::get('/widget-manager', function () {
         return view('widget-manager');
@@ -156,14 +155,13 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
         return view('admin.terms-management');
     })->name('terms-management');
     
-    Route::get('/settings', function () {
-        return view('admin.settings');
-    })->name('settings');
-    Route::get('/services', \App\Livewire\Admin\ServicesManager::class)->name('admin.services');
-    Route::get('/faqs', \App\Livewire\Admin\FaqsManager::class)->name('admin.faqs');
-    Route::get('/general-info', \App\Livewire\Admin\GeneralInfoManager::class)->name('admin.general-info');
+    Route::get('/settings', \App\Livewire\Admin\SettingsManager::class)->name('settings');
+    Route::get('/services', \App\Livewire\Admin\ServicesManager::class)->name('services');
+    Route::get('/faqs', \App\Livewire\Admin\FaqsManager::class)->name('faqs');
+    Route::get('/general-info', \App\Livewire\Admin\GeneralInfoManager::class)->name('general-info');
+    Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
     Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
-    Route::get('/leads', \App\Livewire\Admin\LeadsManager::class)->name('admin.leads');
+    Route::get('/leads', \App\Livewire\Admin\LeadsManager::class)->name('leads');
 });
 
 // Customer Routes (for customers to manage their organization data)
@@ -285,3 +283,18 @@ Route::prefix('razorpay')->name('razorpay.')->group(function () {
 });
 
 require __DIR__.'/auth.php';
+
+// Helper route to stash intended payment in session before login
+Route::post('/persist-selected-plan', function(\Illuminate\Http\Request $request) {
+    $request->validate([
+        'plan_id' => 'required|integer',
+        'provider' => 'required|in:paypal,razorpay',
+        'billing_cycle' => 'nullable|in:monthly,yearly',
+    ]);
+    session([
+        'selected_plan_id' => $request->input('plan_id'),
+        'payment_provider' => $request->input('provider'),
+        'billing_cycle' => $request->input('billing_cycle', 'monthly'),
+    ]);
+    return response()->json(['ok' => true]);
+})->name('persist-selected-plan');

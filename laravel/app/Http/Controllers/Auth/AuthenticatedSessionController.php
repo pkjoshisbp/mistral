@@ -31,6 +31,14 @@ class AuthenticatedSessionController extends Controller
 
         // Redirect based on user role
         $user = auth()->user();
+            // If a plan selection was stored pre-login (from pricing), redirect to home with flags to resume checkout
+            $selectedPlanId = $request->session()->pull('selected_plan_id');
+            $paymentProvider = $request->session()->pull('payment_provider');
+            $billingCycle = $request->session()->pull('billing_cycle');
+            if ($selectedPlanId && $paymentProvider) {
+                // Append as query params for the welcome page JS to pick up (and as a backup to sessionStorage)
+                return redirect()->to(route('home') . "?resume_payment=1&plan_id={$selectedPlanId}&provider={$paymentProvider}" . ($billingCycle ? "&cycle={$billingCycle}" : ''));
+            }
         if ($user->role === 'admin') {
             return redirect()->intended(route('admin.dashboard'));
         } elseif ($user->role === 'customer') {

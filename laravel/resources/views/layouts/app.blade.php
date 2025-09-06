@@ -118,12 +118,7 @@
           </li>
 
           <li class="nav-header">AI SYSTEM</li>
-          <li class="nav-item">
-            <a href="{{ route('admin.data-sync') }}" class="nav-link {{ request()->routeIs('admin.data-sync') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-keyboard"></i>
-              <p>Data Entry</p>
-            </a>
-          </li>
+          
           <li class="nav-item">
             <a href="{{ route('admin.website-crawler') }}" class="nav-link {{ request()->routeIs('admin.website-crawler') ? 'active' : '' }}">
               <i class="nav-icon fas fa-spider"></i>

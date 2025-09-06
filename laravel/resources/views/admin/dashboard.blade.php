@@ -61,7 +61,7 @@
                     <div class="icon">
                         <i class="fas fa-database"></i>
                     </div>
-                    <a href="{{ route('admin.data-sync') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                    <a href="{{ route('admin.services') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
                 </div>
             </div>
             <!-- ./col -->
@@ -75,7 +75,7 @@
                     <div class="icon">
                         <i class="fas fa-file-alt"></i>
                     </div>
-                    <a href="{{ route('admin.data-sync') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                    <a href="{{ route('admin.documents') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
                 </div>
             </div>
             <!-- ./col -->
@@ -191,8 +191,8 @@
                         </div>
                         <div class="row mt-2">
                             <div class="col-6">
-                                <a href="{{ route('admin.data-sync') }}" class="btn btn-warning btn-block">
-                                    <i class="fas fa-sync"></i> Sync Data
+                                <a href="{{ route('admin.services') }}" class="btn btn-warning btn-block">
+                                    <i class="fas fa-stethoscope"></i> Manage Services
                                 </a>
                             </div>
                             <div class="col-6">

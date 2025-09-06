@@ -180,6 +180,19 @@
             <div class="text-center mb-5">
                 <h2>{{ __('common.pricing_title') }}</h2>
                 <p class="lead">{{ __('common.pricing_subtitle') }}</p>
+                
+                <!-- Billing Toggle -->
+                <div class="billing-toggle mb-4">
+                    <div class="btn-group" role="group" aria-label="Billing cycle">
+                        <input type="radio" class="btn-check" name="billingCycle" id="monthly" value="monthly" checked>
+                        <label class="btn btn-outline-primary" for="monthly">Monthly</label>
+                        
+                        <input type="radio" class="btn-check" name="billingCycle" id="yearly" value="yearly">
+                        <label class="btn btn-outline-primary" for="yearly">
+                            Yearly <small class="badge bg-success ms-1">Save 17%</small>
+                        </label>
+                    </div>
+                </div>
             </div>
             <div class="row">
                 @php
@@ -208,10 +221,9 @@
                                 <h4 class="card-title">{{ __('common.plan_' . $plan->slug . '_title') }}</h4>
                                 <div class="price-section mb-3">
                                     @if($plan->monthly_price > 0)
-                                        <div class="monthly-price">
+                                        <div class="monthly-price price-display" data-cycle="monthly">
                                             @php
                                                 $monthlyPrice = $plan->getMonthlyPriceForCurrency($currency);
-                                                $yearlyPrice = $plan->getYearlyPriceForCurrency($currency);
                                                 $currencySymbol = $currency === 'INR' ? '₹' : '$';
                                             @endphp
                                             @if($plan->slug === 'starter')
@@ -226,19 +238,25 @@
                                             @endif
                                             <small class="text-muted">/month</small>
                                         </div>
-                                        <div class="yearly-price">
+                                        <div class="yearly-price price-display" data-cycle="yearly" style="display: none;">
+                                            @php
+                                                $yearlyPrice = $plan->getYearlyPriceForCurrency($currency);
+                                            @endphp
                                             @if($plan->slug === 'starter')
-                                                <small class="text-muted">
-                                                    {{ $currencySymbol }}{{ number_format($yearlyPrice, 0) }} yearly (promo) 
-                                                    @if($currency === 'INR')
-                                                        / ₹79,000 normal
-                                                    @else 
-                                                        / $790 normal
-                                                    @endif
-                                                </small>
+                                                <span class="h3 text-success">{{ $currencySymbol }}{{ number_format($yearlyPrice, 0) }}</span>
+                                                @if($currency === 'INR')
+                                                    <small class="text-muted"><s>₹{{ number_format(79000, 0) }}</s> regular</small>
+                                                @else
+                                                    <small class="text-muted"><s>${{ number_format(790, 0) }}</s> regular</small>
+                                                @endif
                                             @else
-                                                <small class="text-muted">{{ $currencySymbol }}{{ number_format($yearlyPrice, 0) }} yearly (10× monthly)</small>
+                                                <span class="h3">{{ $currencySymbol }}{{ number_format($yearlyPrice, 0) }}</span>
                                             @endif
+                                            <small class="text-muted">/year</small>
+                                            <div class="text-success small">
+                                                <i class="fas fa-check-circle"></i> 
+                                                Save {{ $currencySymbol }}{{ number_format(($monthlyPrice * 12) - $yearlyPrice, 0) }} 
+                                            </div>
                                         </div>
                                     @elseif($plan->slug === 'payg')
                                         <div class="h3">{{ $currencySymbol }}5</div>
@@ -458,6 +476,7 @@
         async function createSubscription(planId) {
             const button = document.getElementById(`subscribe-btn-${planId}`);
             const originalText = button.innerHTML;
+            const billingCycle = document.querySelector('input[name="billingCycle"]:checked').value;
             
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             button.disabled = true;
@@ -470,11 +489,29 @@
                         'X-CSRF-TOKEN': '{{ csrf_token() }}'
                     },
                     body: JSON.stringify({
-                        plan_id: planId
+                        plan_id: planId,
+                        billing_cycle: billingCycle
                     })
                 });
                 
                 const data = await response.json();
+                
+                // Check if user needs to authenticate
+                if (response.status === 401 || (data.redirect && data.redirect.includes('login'))) {
+                    // Store the plan ID in both sessionStorage (client) and session via query for server-side fallback
+                    sessionStorage.setItem('selected_plan_id', planId);
+                    sessionStorage.setItem('payment_provider', 'paypal');
+                    sessionStorage.setItem('billing_cycle', billingCycle);
+                    // Also hit a lightweight URL to persist to session via server after login
+                    // Persist in server session too for reliability
+                    try { await fetch('{{ route('persist-selected-plan') }}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' }, body: JSON.stringify({ plan_id: planId, provider: 'paypal', billing_cycle: billingCycle }) }); } catch(e) {}
+                    document.cookie = `resume_payment=1; path=/; max-age=600; secure`; // hint for post-login
+                    document.cookie = `plan_id=${planId}; path=/; max-age=600; secure`;
+                    document.cookie = `provider=paypal; path=/; max-age=600; secure`;
+                    document.cookie = `cycle=${billingCycle}; path=/; max-age=600; secure`;
+                    window.location.href = '{{ route("login") }}';
+                    return;
+                }
                 
                 if (data.success) {
                     if (data.approval_url) {
@@ -504,6 +541,7 @@
         async function createRazorpaySubscription(planId) {
             const button = document.getElementById(`subscribe-btn-${planId}`);
             const originalText = button.innerHTML;
+            const billingCycle = document.querySelector('input[name="billingCycle"]:checked').value;
             
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             button.disabled = true;
@@ -516,11 +554,27 @@
                         'X-CSRF-TOKEN': '{{ csrf_token() }}'
                     },
                     body: JSON.stringify({
-                        plan_id: planId
+                        plan_id: planId,
+                        billing_cycle: billingCycle
                     })
                 });
                 
                 const data = await response.json();
+                
+                // Check if user needs to authenticate
+                if (response.status === 401 || (data.redirect && data.redirect.includes('login'))) {
+                    // Store the plan ID in both sessionStorage (client) and session via query for server-side fallback
+                    sessionStorage.setItem('selected_plan_id', planId);
+                    sessionStorage.setItem('payment_provider', 'razorpay');
+                    sessionStorage.setItem('billing_cycle', billingCycle);
+                    try { await fetch('{{ route('persist-selected-plan') }}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' }, body: JSON.stringify({ plan_id: planId, provider: 'razorpay', billing_cycle: billingCycle }) }); } catch(e) {}
+                    document.cookie = `resume_payment=1; path=/; max-age=600; secure`;
+                    document.cookie = `plan_id=${planId}; path=/; max-age=600; secure`;
+                    document.cookie = `provider=razorpay; path=/; max-age=600; secure`;
+                    document.cookie = `cycle=${billingCycle}; path=/; max-age=600; secure`;
+                    window.location.href = '{{ route("login") }}';
+                    return;
+                }
                 
                 if (data.success) {
                     // Initialize Razorpay
@@ -588,6 +642,73 @@
                 button.disabled = false;
             }
         }
+
+        // Check if user was redirected back after login for payment
+        document.addEventListener('DOMContentLoaded', function() {
+            @auth
+            const selectedPlanId = sessionStorage.getItem('selected_plan_id');
+            const paymentProvider = sessionStorage.getItem('payment_provider');
+            const billingCycle = sessionStorage.getItem('billing_cycle') || 'monthly';
+
+            // Also support resuming via URL query params (e.g., after server redirect)
+            const params = new URLSearchParams(window.location.search);
+            const resumeFromQuery = params.get('resume_payment');
+            const planFromQuery = params.get('plan_id');
+            const providerFromQuery = params.get('provider');
+            const cycleFromQuery = params.get('cycle') || billingCycle;
+            
+            const finalPlanId = selectedPlanId || planFromQuery;
+            const finalProvider = paymentProvider || providerFromQuery;
+            const finalCycle = cycleFromQuery;
+
+            if (resumeFromQuery && finalPlanId && finalProvider) {
+                // Set billing cycle in UI
+                document.querySelector(`input[name="billingCycle"][value="${finalCycle}"]`).checked = true;
+                // Trigger the toggle to update pricing display
+                document.querySelector(`input[name="billingCycle"][value="${finalCycle}"]`).dispatchEvent(new Event('change'));
+                
+                // Clear the stored values
+                sessionStorage.removeItem('selected_plan_id');
+                sessionStorage.removeItem('payment_provider');
+                sessionStorage.removeItem('billing_cycle');
+                // Remove query params from URL
+                if (window.history && window.history.replaceState) {
+                    const url = new URL(window.location);
+                    url.searchParams.delete('resume_payment');
+                    url.searchParams.delete('plan_id');
+                    url.searchParams.delete('provider');
+                    url.searchParams.delete('cycle');
+                    window.history.replaceState({}, document.title, url.toString());
+                }
+                
+                // Auto-trigger the payment based on provider
+                setTimeout(() => {
+                    if (finalProvider === 'razorpay') {
+                        createRazorpaySubscription(finalPlanId);
+                    } else if (finalProvider === 'paypal') {
+                        createSubscription(finalPlanId);
+                    }
+                }, 1000); // Small delay to ensure page is fully loaded
+            }
+            @endauth
+        });
+        
+        // Handle billing cycle toggle
+        document.querySelectorAll('input[name="billingCycle"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                const selectedCycle = this.value;
+                
+                // Hide all price displays
+                document.querySelectorAll('.price-display').forEach(display => {
+                    display.style.display = 'none';
+                });
+                
+                // Show selected cycle prices
+                document.querySelectorAll(`.price-display[data-cycle="${selectedCycle}"]`).forEach(display => {
+                    display.style.display = 'block';
+                });
+            });
+        });
     </script>
     @endauth
 

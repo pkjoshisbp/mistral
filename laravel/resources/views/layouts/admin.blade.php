@@ -102,21 +102,18 @@
               <p>Organizations</p>
             </a>
           </li>
-          <li class="nav-item">
-            <a href="{{ route('admin.data-sync') }}" class="nav-link {{ request()->routeIs('admin.data-sync') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-sync"></i>
-              <p>Data Sync</p>
-            </a>
-          </li>
-          <li class="nav-item has-treeview {{ request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') ? 'menu-open' : '' }}">
-            <a href="#" class="nav-link {{ request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-database"></i>
-              <p>Data Management <i class="right fas fa-angle-left"></i></p>
+
+          <li class="nav-header">DATA MANAGEMENT</li>
+          <li class="nav-item has-treeview {{ request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'menu-open' : '' }}">
+            <a href="#" class="nav-link {{ request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-keyboard"></i>
+              <p>Data Entry <i class="right fas fa-angle-left"></i></p>
             </a>
             <ul class="nav nav-treeview">
               <li class="nav-item"><a href="{{ route('admin.services') }}" class="nav-link {{ request()->routeIs('admin.services') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Services</p></a></li>
               <li class="nav-item"><a href="{{ route('admin.faqs') }}" class="nav-link {{ request()->routeIs('admin.faqs') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>FAQs</p></a></li>
               <li class="nav-item"><a href="{{ route('admin.general-info') }}" class="nav-link {{ request()->routeIs('admin.general-info') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>General Info</p></a></li>
+              <li class="nav-item"><a href="{{ route('admin.documents') }}" class="nav-link {{ request()->routeIs('admin.documents') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Documents</p></a></li>
             </ul>
           </li>
           <li class="nav-item">

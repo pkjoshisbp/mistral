@@ -30,39 +30,49 @@ class RazorpayController extends Controller
             $plan = SubscriptionPlan::findOrFail($request->plan_id);
             $user = Auth::user();
             $locationService = app(\App\Services\LocationService::class);
+            
+            // Get billing cycle from request (default to monthly)
+            $billingCycle = $request->input('billing_cycle', 'monthly');
 
             // Initialize Razorpay API
             $api = new Api($this->razorpayId, $this->razorpaySecret);
 
-            // Convert price to INR paise (Razorpay uses paise)
-            $monthlyPriceINR = $locationService->convertToINR($plan->monthly_price);
-            $amountInPaise = $monthlyPriceINR * 100; // Convert to paise
+            // Get price based on billing cycle and convert to INR paise
+            $price = $billingCycle === 'yearly' ? $plan->yearly_price : $plan->monthly_price;
+            $priceINR = $locationService->convertToINR($price);
+            $amountInPaise = $priceINR * 100; // Convert to paise
+
+            // Calculate period end date
+            $periodEnd = $billingCycle === 'yearly' ? now()->addYear() : now()->addMonth();
 
             // Create Razorpay subscription plan if not exists
-            $razorpayPlanId = $this->createOrGetRazorpayPlan($api, $plan, $amountInPaise);
+            $razorpayPlanId = $this->createOrGetRazorpayPlan($api, $plan, $amountInPaise, $billingCycle);
 
             // Create subscription
             $subscription = $api->subscription->create([
                 'plan_id' => $razorpayPlanId,
                 'customer_notify' => 1,
                 'quantity' => 1,
-                'total_count' => 12, // 12 months
+                'total_count' => $billingCycle === 'yearly' ? 1 : 12, // 1 year payment or 12 monthly payments
                 'addons' => [],
                 'notes' => [
                     'user_id' => $user->id,
-                    'plan_name' => $plan->name
+                    'plan_name' => $plan->name,
+                    'billing_cycle' => $billingCycle
                 ]
             ]);
 
             // Create local subscription record
             $localSubscription = Subscription::create([
                 'user_id' => $user->id,
+                'organization_id' => $user->organization_id ?? null,
                 'subscription_plan_id' => $plan->id,
                 'razorpay_subscription_id' => $subscription['id'],
-                'status' => 'created',
+                'status' => 'pending',
+                'billing_cycle' => $billingCycle,
                 'current_period_start' => now(),
-                'current_period_end' => now()->addMonth(),
-                'tokens_used_current_period' => 0
+                'current_period_end' => $periodEnd,
+                'tokens_used_this_period' => 0
             ]);
 
             return response()->json([
@@ -81,11 +91,16 @@ class RazorpayController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Razorpay subscription creation failed: ' . $e->getMessage());
+            Log::error('Razorpay subscription creation failed', [
+                'user_id' => Auth::id(),
+                'plan_id' => $request->plan_id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             
             return response()->json([
                 'success' => false,
-                'message' => 'An error occurred while creating the subscription'
+                'message' => 'An error occurred while creating the subscription: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -93,9 +108,9 @@ class RazorpayController extends Controller
     /**
      * Create or get Razorpay plan
      */
-    private function createOrGetRazorpayPlan($api, $plan, $amountInPaise)
+    private function createOrGetRazorpayPlan($api, $plan, $amountInPaise, $billingCycle = 'monthly')
     {
-        $planId = 'plan_' . $plan->slug . '_inr';
+        $planId = 'plan_' . $plan->slug . '_' . $billingCycle . '_inr';
         
         try {
             // Try to fetch existing plan
@@ -104,16 +119,17 @@ class RazorpayController extends Controller
         } catch (\Exception $e) {
             // Plan doesn't exist, create new one
             $razorpayPlan = $api->plan->create([
-                'period' => 'monthly',
+                'period' => $billingCycle,
                 'interval' => 1,
                 'item' => [
-                    'name' => $plan->name,
+                    'name' => $plan->name . ' (' . ucfirst($billingCycle) . ')',
                     'amount' => $amountInPaise,
                     'currency' => 'INR',
-                    'description' => $plan->description
+                    'description' => $plan->description . ' - ' . ucfirst($billingCycle) . ' billing'
                 ],
                 'notes' => [
                     'local_plan_id' => $plan->id,
+                    'billing_cycle' => $billingCycle,
                     'tokens_cap' => $plan->token_cap_monthly
                 ]
             ]);

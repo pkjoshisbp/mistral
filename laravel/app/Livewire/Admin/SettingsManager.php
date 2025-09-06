@@ -14,8 +14,10 @@ class SettingsManager extends Component
     public $paypal_mode = 'sandbox';
     public $paypal_client_id = '';
     public $paypal_client_secret = '';
+    public $paypal_webhook_url = '';
     public $razorpay_key_id = '';
     public $razorpay_key_secret = '';
+    public $razorpay_webhook_url = '';
     
     // Email Settings
     public $mail_mailer = 'smtp';
@@ -39,12 +41,14 @@ class SettingsManager extends Component
 
     public function loadSettings()
     {
-        // Payment Settings
-        $this->paypal_mode = AdminSetting::get('paypal_mode', 'sandbox');
-        $this->paypal_client_id = AdminSetting::get('paypal_client_id', '');
-        $this->paypal_client_secret = AdminSetting::get('paypal_client_secret', '');
-        $this->razorpay_key_id = AdminSetting::get('razorpay_key_id', '');
-        $this->razorpay_key_secret = AdminSetting::get('razorpay_key_secret', '');
+                // Load payment settings
+    $this->paypal_mode = AdminSetting::get('paypal_mode', 'sandbox');
+    $this->paypal_client_id = AdminSetting::get('paypal_client_id', '');
+    $this->paypal_client_secret = AdminSetting::get('paypal_client_secret', '');
+    $this->paypal_webhook_url = url('/paypal/webhook');
+    $this->razorpay_key_id = AdminSetting::get('razorpay_key_id', '');
+    $this->razorpay_key_secret = AdminSetting::get('razorpay_key_secret', '');
+    $this->razorpay_webhook_url = url('/razorpay/webhook');
         
         // Email Settings
         $this->mail_mailer = AdminSetting::get('mail_mailer', 'smtp');
@@ -181,6 +185,8 @@ class SettingsManager extends Component
 
     public function render()
     {
-        return view('livewire.admin.settings-manager');
+        // Use the admin layout explicitly to avoid MissingLayoutException
+        return view('livewire.admin.settings-manager')
+            ->layout('layouts.admin');
     }
 }

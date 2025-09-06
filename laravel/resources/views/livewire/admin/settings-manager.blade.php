@@ -256,6 +256,143 @@
                     </div>
                 </div>
             @endif
+
+            @if($activeTab === 'payment')
+                <!-- Payment Settings -->
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="card-title mb-0">
+                            <i class="fas fa-credit-card"></i>
+                            Payment Settings
+                        </h4>
+                    </div>
+                    <div class="card-body">
+                        <form wire:submit.prevent="savePaymentSettings">
+                            <!-- PayPal Settings -->
+                            <h5 class="mb-3"><i class="fab fa-paypal text-primary"></i> PayPal Configuration</h5>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group mb-3">
+                                        <label for="paypal_mode" class="form-label">PayPal Mode</label>
+                                        <select class="form-control" wire:model="paypal_mode">
+                                            <option value="sandbox">Sandbox (Testing)</option>
+                                            <option value="live">Live (Production)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group mb-3">
+                                        <label for="paypal_client_id" class="form-label">PayPal Client ID</label>
+                                        <input type="text" class="form-control @error('paypal_client_id') is-invalid @enderror" 
+                                               wire:model="paypal_client_id" placeholder="PayPal Client ID">
+                                        @error('paypal_client_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group mb-3">
+                                        <label for="paypal_client_secret" class="form-label">PayPal Client Secret</label>
+                                        <input type="password" class="form-control @error('paypal_client_secret') is-invalid @enderror" 
+                                               wire:model="paypal_client_secret" placeholder="PayPal Client Secret">
+                                        @error('paypal_client_secret')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group mb-3">
+                                        <label for="paypal_webhook_url" class="form-label">PayPal Webhook URL</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" 
+                                                   value="{{ $paypal_webhook_url }}" 
+                                                   id="paypal_webhook_url" readonly>
+                                            <button type="button" class="btn btn-outline-secondary" 
+                                                    onclick="copyToClipboard('paypal_webhook_url')" 
+                                                    title="Copy to clipboard">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                        </div>
+                                        <small class="form-text text-muted">
+                                            Configure this URL in your PayPal Developer Dashboard webhooks settings.
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr class="my-4">
+
+                            <!-- Razorpay Settings -->
+                            <h5 class="mb-3"><i class="fas fa-rupee-sign text-primary"></i> Razorpay Configuration</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label for="razorpay_key_id" class="form-label">Razorpay Key ID</label>
+                                        <input type="text" class="form-control @error('razorpay_key_id') is-invalid @enderror" 
+                                               wire:model="razorpay_key_id" placeholder="Razorpay Key ID">
+                                        @error('razorpay_key_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label for="razorpay_key_secret" class="form-label">Razorpay Key Secret</label>
+                                        <input type="password" class="form-control @error('razorpay_key_secret') is-invalid @enderror" 
+                                               wire:model="razorpay_key_secret" placeholder="Razorpay Key Secret">
+                                        @error('razorpay_key_secret')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group mb-3">
+                                        <label for="razorpay_webhook_url" class="form-label">Razorpay Webhook URL</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" 
+                                                   value="{{ $razorpay_webhook_url }}" 
+                                                   id="razorpay_webhook_url" readonly>
+                                            <button type="button" class="btn btn-outline-secondary" 
+                                                    onclick="copyToClipboard('razorpay_webhook_url')" 
+                                                    title="Copy to clipboard">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                        </div>
+                                        <small class="form-text text-muted">
+                                            Configure this URL in your Razorpay Dashboard webhooks settings.
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex justify-content-end">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save"></i>
+                                    Save Payment Settings
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            @endif
         </div>
     </div>
 </div>
+
+<script>
+function copyToClipboard(elementId) {
+    const element = document.getElementById(elementId);
+    element.select();
+    element.setSelectionRange(0, 99999); // For mobile devices
+    
+    navigator.clipboard.writeText(element.value).then(function() {
+        // Show success message
+        const button = element.nextElementSibling;
+        const originalIcon = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-check text-success"></i>';
+        
+        setTimeout(() => {
+            button.innerHTML = originalIcon;
+        }, 2000);
+    }).catch(function(err) {
+        console.error('Could not copy text: ', err);
+        // Fallback for older browsers
+        document.execCommand('copy');
+    });
+}

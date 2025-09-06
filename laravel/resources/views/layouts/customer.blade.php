@@ -250,6 +250,29 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
 <!-- AdminLTE App -->
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/js/adminlte.min.js"></script>
+
+<!-- Check for payment redirect after login -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const selectedPlanId = sessionStorage.getItem('selected_plan_id');
+    const paymentProvider = sessionStorage.getItem('payment_provider');
+    
+    if (selectedPlanId && paymentProvider) {
+        // Show notification and redirect
+        setTimeout(() => {
+            if (confirm('You were in the process of subscribing to a plan. Would you like to continue with the payment?')) {
+                // Redirect back to homepage to trigger payment
+                window.location.href = '{{ url("/") }}#plans';
+            } else {
+                // Clear stored values if user cancels
+                sessionStorage.removeItem('selected_plan_id');
+                sessionStorage.removeItem('payment_provider');
+            }
+        }, 1000);
+    }
+});
+</script>
+
 <!-- Livewire Scripts -->
 @livewireScripts
 </body>
