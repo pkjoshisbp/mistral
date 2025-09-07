@@ -16,9 +16,14 @@ class ProfileController extends Controller
      */
     public function edit(Request $request): View
     {
-        return view('profile.edit', [
-            'user' => $request->user(),
-        ]);
+        $user = $request->user();
+        
+        // Use different views based on user role
+        if ($user->role === 'admin') {
+            return view('profile.admin', ['user' => $user]);
+        } else {
+            return view('profile.customer', ['user' => $user]);
+        }
     }
 
     /**
@@ -34,7 +39,13 @@ class ProfileController extends Controller
 
         $request->user()->save();
 
-        return Redirect::route('profile.edit')->with('status', 'profile-updated');
+        // Redirect to appropriate route based on user role
+        $user = $request->user();
+        if ($user->role === 'admin') {
+            return Redirect::route('admin.profile.edit')->with('status', 'profile-updated');
+        } else {
+            return Redirect::route('customer.profile.edit')->with('status', 'profile-updated');
+        }
     }
 
     /**

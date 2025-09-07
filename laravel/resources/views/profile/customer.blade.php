@@ -1,8 +1,4 @@
-@if(auth()->user() && auth()->user()->role === 'admin')
-    @extends('layouts.admin')
-@else
-    @extends('layouts.customer')
-@endif
+@extends('layouts.customer')
 
 @section('title', 'Profile')
 @section('content')
@@ -15,7 +11,7 @@
       </div>
       <div class="col-sm-6">
         <ol class="breadcrumb float-sm-right">
-          <li class="breadcrumb-item"><a href="{{ auth()->user()->role === 'admin' ? route('admin.dashboard') : route('customer.dashboard') }}">Dashboard</a></li>
+          <li class="breadcrumb-item"><a href="{{ route('customer.dashboard') }}">Dashboard</a></li>
           <li class="breadcrumb-item active">Profile</li>
         </ol>
       </div>
@@ -67,5 +63,3 @@
 </section>
 
 @endsection
-
-</x-dynamic-component>

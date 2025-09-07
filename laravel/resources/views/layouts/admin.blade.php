@@ -38,7 +38,7 @@
         <div class="dropdown-menu dropdown-menu-lg dropdown-menu-right">
           <span class="dropdown-item dropdown-header">{{ Auth::user()->name }}</span>
           <div class="dropdown-divider"></div>
-          <a href="{{ route('profile.edit') }}" class="dropdown-item">
+          <a href="{{ route('admin.profile.edit') }}" class="dropdown-item">
             <i class="fas fa-user mr-2"></i> Profile
           </a>
           <div class="dropdown-divider"></div>
@@ -82,7 +82,7 @@
           <i class="fas fa-user-circle fa-2x text-white"></i>
         </div>
         <div class="info">
-          <a href="{{ route('profile.edit') }}" class="d-block">{{ Auth::user()->name }}</a>
+          <a href="{{ route('admin.profile.edit') }}" class="d-block">{{ Auth::user()->name }}</a>
         </div>
       </div>
 
@@ -171,7 +171,7 @@
           
           <li class="nav-header">ACCOUNT</li>
           <li class="nav-item">
-            <a href="{{ route('profile.edit') }}" class="nav-link {{ request()->routeIs('profile.edit') ? 'active' : '' }}">
+            <a href="{{ route('admin.profile.edit') }}" class="nav-link {{ request()->routeIs('admin.profile.edit') ? 'active' : '' }}">
               <i class="nav-icon fas fa-user"></i>
               <p>Profile</p>
             </a>

@@ -44,7 +44,7 @@
             <span class="dropdown-item dropdown-header text-sm">{{ Auth::user()->organization->name }}</span>
           @endif
           <div class="dropdown-divider"></div>
-          <a href="{{ route('customer.profile') }}" class="dropdown-item">
+          <a href="{{ route('customer.profile.edit') }}" class="dropdown-item">
             <i class="fas fa-user mr-2"></i> Profile
           </a>
           <div class="dropdown-divider"></div>
@@ -82,7 +82,7 @@
           <i class="fas fa-user-circle fa-2x text-white"></i>
         </div>
         <div class="info">
-          <a href="{{ route('profile.edit') }}" class="d-block">{{ Auth::user()->name }}</a>
+          <a href="{{ route('customer.profile.edit') }}" class="d-block">{{ Auth::user()->name }}</a>
           @if(Auth::user()->organization)
             <small class="text-muted">{{ Auth::user()->organization->name }}</small>
           @endif
@@ -176,7 +176,7 @@
             </a>
           </li>
           <li class="nav-item">
-            <a href="{{ route('customer.profile') }}" class="nav-link {{ request()->routeIs('customer.profile') ? 'active' : '' }}">
+            <a href="{{ route('customer.profile.edit') }}" class="nav-link {{ request()->routeIs('customer.profile.edit') ? 'active' : '' }}">
               <i class="nav-icon fas fa-user"></i>
               <p>Profile</p>
             </a>

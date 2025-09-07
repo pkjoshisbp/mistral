@@ -19,14 +19,16 @@
     <meta property="og:description" content="Transform your customer support with AI-powered chat solutions. Provide instant 24/7 assistance, reduce costs, and boost customer satisfaction.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="{{ url('/') }}">
-    <meta property="og:image" content="{{ asset('images/ai-chat-support-og.jpg') }}">
+    <meta property="og:image" content="{{ url('/images/ai-chat-support-banner.jpg') }}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
     <meta property="og:site_name" content="AI Chat Support">
     
     <!-- Twitter Card Meta Tags -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="AI Chat Support - Revolutionary Customer Service Automation">
     <meta name="twitter:description" content="Transform your customer support with AI-powered chat solutions. Provide instant 24/7 assistance, reduce costs, and boost customer satisfaction.">
-    <meta name="twitter:image" content="{{ asset('images/ai-chat-support-og.jpg') }}">
+    <meta name="twitter:image" content="{{ url('/images/ai-chat-support-banner.jpg') }}">
     
     <!-- Canonical URL -->
     <link rel="canonical" href="{{ url('/') }}">

@@ -75,9 +75,6 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
-// Alias route for customer namespacing of profile
-Route::middleware('auth')->get('/customer/profile', [ProfileController::class, 'edit'])->name('customer.profile');
-
 // Customer redirect
 Route::get('/customer', function () {
     return redirect()->route('customer.dashboard');
@@ -162,6 +159,11 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
     Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
     Route::get('/leads', \App\Livewire\Admin\LeadsManager::class)->name('leads');
+    
+    // Profile routes for admin
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
 // Customer Routes (for customers to manage their organization data)
@@ -240,6 +242,11 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/chat-test', function () {
             return view('customer.chat-test');
         })->name('chat-test');
+        
+        // Profile routes for customer
+        Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+        Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+        Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
     });
 });
 
