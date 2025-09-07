@@ -154,6 +154,21 @@
             </a>
           </li>
           @endif
+          
+          <li class="nav-header">SYSTEM</li>
+          <li class="nav-item">
+            <a href="{{ route('admin.settings') }}" class="nav-link {{ request()->routeIs('admin.settings') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-cogs"></i>
+              <p>Settings</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.terms-management') }}" class="nav-link {{ request()->routeIs('admin.terms-management') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-file-contract"></i>
+              <p>Terms & Policies</p>
+            </a>
+          </li>
+          
           <li class="nav-header">ACCOUNT</li>
           <li class="nav-item">
             <a href="{{ route('profile.edit') }}" class="nav-link {{ request()->routeIs('profile.edit') ? 'active' : '' }}">
@@ -192,7 +207,7 @@
       <div class="container-fluid">
         <div class="row mb-2">
           <div class="col-sm-6">
-            <h1 class="m-0">@yield('title', 'Dashboard')</h1>
+            <h1 class="m-0">{{ $title ?? 'Dashboard' }}</h1>
           </div>
         </div>
       </div>
@@ -219,7 +234,11 @@
             </div>
         @endif
 
-        @yield('content')
+  @isset($slot)
+    {{ $slot }}
+  @else
+    @yield('content')
+  @endisset
       </div>
     </section>
   </div>

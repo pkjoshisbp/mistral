@@ -14,11 +14,13 @@ class RazorpayController extends Controller
 {
     private $razorpayId;
     private $razorpaySecret;
+    private $razorpayWebhookSecret;
     
     public function __construct()
     {
         $this->razorpayId = env('RAZORPAY_KEY_ID');
-        $this->razorpaySecret = env('RAZORPAY_KEY_SECRET');
+    $this->razorpaySecret = env('RAZORPAY_KEY_SECRET');
+    $this->razorpayWebhookSecret = env('RAZORPAY_WEBHOOK_SECRET');
     }
 
     /**
@@ -197,10 +199,14 @@ class RazorpayController extends Controller
             $payload = $request->getContent();
             $signature = $request->header('X-Razorpay-Signature');
             
-            // Verify webhook signature
-            $expectedSignature = hash_hmac('sha256', $payload, $this->razorpaySecret);
-            
+            // Verify webhook signature using webhook secret
+            $expectedSignature = hash_hmac('sha256', $payload, $this->razorpayWebhookSecret);
             if (!hash_equals($expectedSignature, $signature)) {
+                \Log::warning('Razorpay webhook: invalid signature', [
+                    'expected' => $expectedSignature,
+                    'received' => $signature,
+                    'payload' => $payload
+                ]);
                 return response()->json(['status' => 'invalid signature'], 400);
             }
 

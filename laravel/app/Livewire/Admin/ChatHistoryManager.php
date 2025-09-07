@@ -69,6 +69,7 @@ class ChatHistoryManager extends Component
         $sessions = $query->orderByDesc('created_at')->paginate(15);
         $organizations = Organization::orderBy('name')->get();
 
-        return view('livewire.admin.chat-history-manager', compact('sessions','organizations'));
+        return view('livewire.admin.chat-history-manager', compact('sessions','organizations'))
+            ->layout('layouts.admin');
     }
 }

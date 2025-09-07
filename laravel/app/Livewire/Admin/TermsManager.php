@@ -94,6 +94,7 @@ class TermsManager extends Component
 
     public function render()
     {
-        return view('livewire.admin.terms-manager');
+        return view('livewire.admin.terms-manager')
+            ->layout('layouts.admin');
     }
 }

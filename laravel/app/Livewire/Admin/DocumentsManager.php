@@ -99,6 +99,7 @@ class DocumentsManager extends Component
 
     public function render()
     {
-        return view('livewire.admin.documents-manager');
+        return view('livewire.admin.documents-manager')
+            ->layout('layouts.admin');
     }
 }

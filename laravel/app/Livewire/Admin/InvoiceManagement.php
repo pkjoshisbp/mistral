@@ -104,6 +104,7 @@ class InvoiceManagement extends Component
 
         $statuses = ['pending', 'paid', 'failed', 'refunded'];
 
-        return view('livewire.admin.invoice-management', compact('invoices', 'statuses'));
+        return view('livewire.admin.invoice-management', compact('invoices', 'statuses'))
+            ->layout('layouts.admin');
     }
 }

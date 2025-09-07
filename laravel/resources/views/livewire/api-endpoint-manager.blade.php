@@ -69,7 +69,7 @@
                             <div class="col-md-6 mb-3">
                                 <div class="card card-outline card-secondary">
                                     <div class="card-header">
-                                        <h5 class="card-title">{{ $endpoint['name'] }}</h5>
+                                        <h5 class="card-title">{{ $endpoint['name'] ?? 'Unnamed Endpoint' }}</h5>
                                         <div class="card-tools">
                                             <button wire:click="removeEndpoint('{{ $key }}')" class="btn btn-tool text-danger">
                                                 <i class="fas fa-trash"></i>
@@ -77,11 +77,11 @@
                                         </div>
                                     </div>
                                     <div class="card-body">
-                                        <p class="text-muted">{{ $endpoint['description'] }}</p>
+                                        <p class="text-muted">{{ $endpoint['description'] ?? '' }}</p>
                                         <div class="row">
                                             <div class="col-6">
                                                 <strong>Method:</strong> 
-                                                <span class="badge badge-info">{{ $endpoint['method'] }}</span>
+                                                <span class="badge badge-info">{{ $endpoint['method'] ?? 'GET' }}</span>
                                             </div>
                                             <div class="col-6">
                                                 <strong>Endpoint:</strong> 
@@ -90,7 +90,7 @@
                                         </div>
                                         <div class="mt-2">
                                             <strong>URL:</strong><br>
-                                            <small class="text-muted">{{ $endpoint['url'] }}</small>
+                                            <small class="text-muted">{{ $endpoint['url'] ?? '' }}</small>
                                         </div>
                                         
                                         @if(isset($endpoint['parameters']) && count($endpoint['parameters']) > 0)

@@ -373,7 +373,7 @@
             @endif
         </div>
     </div>
-</div>
+
 
 <script>
 function copyToClipboard(elementId) {
@@ -396,3 +396,4 @@ function copyToClipboard(elementId) {
         document.execCommand('copy');
     });
 }
+</div>

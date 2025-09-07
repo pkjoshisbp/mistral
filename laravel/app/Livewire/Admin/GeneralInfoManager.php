@@ -154,6 +154,7 @@ class GeneralInfoManager extends Component
 
     public function render()
     {
-        return view('livewire.admin.general-info-manager')->layout('layouts.admin');
+        return view('livewire.admin.general-info-manager')
+            ->layout('layouts.admin');
     }
 }

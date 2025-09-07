@@ -153,6 +153,7 @@ class FaqsManager extends Component
 
     public function render()
     {
-        return view('livewire.admin.faqs-manager')->layout('layouts.admin');
+        return view('livewire.admin.faqs-manager')
+            ->layout('layouts.admin');
     }
 }

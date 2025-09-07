@@ -1,4 +1,4 @@
-@extends('layouts.app')
+@extends('layouts.admin')
 
 @section('content')
 <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">

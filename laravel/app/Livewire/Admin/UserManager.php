@@ -125,6 +125,7 @@ class UserManager extends Component
 
         $organizations = Organization::all();
 
-        return view('livewire.admin.user-manager', compact('users', 'organizations'));
+        return view('livewire.admin.user-manager', compact('users', 'organizations'))
+            ->layout('layouts.admin');
     }
 }
