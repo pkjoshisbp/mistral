@@ -88,6 +88,8 @@ return [
     'login' => 'लॉग इन',
     'get_started' => 'शुरू करें',
     'home' => 'होम',
+    'features' => 'Features',
+    'pricing' => 'Pricing',
     'about' => 'के बारे में',
     'blog' => 'ब्लॉग',
     'contact' => 'संपर्क',

@@ -51,6 +51,8 @@ return [
     // Navigation & Basic UI
     'language' => 'ภาษา',
     'home' => 'หน้าแรก',
+    'features' => 'Features',
+    'pricing' => 'Pricing',
     'about' => 'เกี่ยวกับเรา',
     'blog' => 'บล็อก',
     'contact' => 'ติดต่อ',

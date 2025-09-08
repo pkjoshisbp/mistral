@@ -7,7 +7,7 @@ use App\Services\AiAgentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
-class WidgetController extends Controller
+class WidgetController
 {
     private $aiAgentService;
 
@@ -42,11 +42,12 @@ class WidgetController extends Controller
         return response($script)
             ->header('Content-Type', 'application/javascript')
             ->header('Access-Control-Allow-Origin', '*')
-            ->header('Cache-Control', 'public, max-age=3600');
+            ->header('Cache-Control', 'public, max-age=3600')
+            ->header('X-Robots-Tag', 'noindex, nofollow');
     }
 
     /**
-     * Get widget CSS
+     * Get widget CSS styles
      */
     public function getWidgetCSS($orgId)
     {
@@ -68,7 +69,8 @@ class WidgetController extends Controller
         return response($css)
             ->header('Content-Type', 'text/css')
             ->header('Access-Control-Allow-Origin', '*')
-            ->header('Cache-Control', 'public, max-age=3600');
+            ->header('Cache-Control', 'public, max-age=3600')
+            ->header('X-Robots-Tag', 'noindex, nofollow');
     }
 
     /**
@@ -80,7 +82,8 @@ class WidgetController extends Controller
             $organization = Organization::find($orgId);
             
             if (!$organization || !$organization->is_active) {
-                return response()->json(['error' => 'Organization not found or inactive'], 404);
+                return response()->json(['error' => 'Organization not found or inactive'], 404)
+                    ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
             $message = $request->input('message');
@@ -88,7 +91,8 @@ class WidgetController extends Controller
             $userInfo = $request->input('user_info', []);
 
             if (!$message) {
-                return response()->json(['error' => 'Message is required'], 400);
+                return response()->json(['error' => 'Message is required'], 400)
+                    ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
             // Log lead capture if provided
@@ -160,7 +164,7 @@ class WidgetController extends Controller
                 'response' => $aiResponse['answer'],
                 'session_id' => $sessionId,
                 'timestamp' => now()->toISOString()
-            ]);
+            ])->header('X-Robots-Tag', 'noindex, nofollow');
 
         } catch (\Exception $e) {
             Log::error('Widget chat error', [
@@ -172,7 +176,7 @@ class WidgetController extends Controller
             return response()->json([
                 'response' => 'I apologize, but I\'m experiencing technical difficulties. Please try again later or contact support.',
                 'error' => true
-            ], 500);
+            ], 500)->header('X-Robots-Tag', 'noindex, nofollow');
         }
     }
 
@@ -184,7 +188,8 @@ class WidgetController extends Controller
         $organization = Organization::find($orgId);
         
         if (!$organization || !$organization->is_active) {
-            return response()->json(['error' => 'Organization not found or inactive'], 404);
+            return response()->json(['error' => 'Organization not found or inactive'], 404)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
         }
 
         return response()->json([
@@ -193,6 +198,6 @@ class WidgetController extends Controller
             'theme' => $organization->settings['widget_theme'] ?? 'default',
             'position' => $organization->settings['widget_position'] ?? 'bottom-right',
             'primaryColor' => $organization->settings['primary_color'] ?? '#007bff'
-        ]);
+        ])->header('X-Robots-Tag', 'noindex, nofollow');
     }
 }

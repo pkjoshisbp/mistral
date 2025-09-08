@@ -30,6 +30,14 @@
             </label>
         </div>
 
+        <!-- hCaptcha -->
+        @if(config('services.hcaptcha.site_key') && config('services.hcaptcha.secret_key'))
+        <div class="mt-4">
+            <div class="h-captcha" data-sitekey="{{ config('services.hcaptcha.site_key') }}"></div>
+            <x-input-error :messages="$errors->get('h-captcha-response')" class="mt-2" />
+        </div>
+        @endif
+
         <div class="flex items-center justify-end mt-4">
             @if (Route::has('password.request'))
                 <a class="underline text-sm text-gray-600 hover:text-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" href="{{ route('password.request') }}">

@@ -102,6 +102,12 @@
               <p>Organizations</p>
             </a>
           </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.users') }}" class="nav-link {{ request()->routeIs('admin.users') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-users"></i>
+              <p>Users</p>
+            </a>
+          </li>
 
           <li class="nav-header">DATA MANAGEMENT</li>
           <li class="nav-item has-treeview {{ request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'menu-open' : '' }}">

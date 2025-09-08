@@ -251,7 +251,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
 });
 
 // Widget Routes (Public - no auth required)
-Route::prefix('widget')->middleware(\App\Http\Middleware\CorsMiddleware::class)->group(function () {
+Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class, 'noindex'])->group(function () {
     Route::get('{orgId}/script.js', [\App\Http\Controllers\WidgetController::class, 'getWidgetScript'])->name('widget.script');
     Route::get('{orgId}/styles.css', [\App\Http\Controllers\WidgetController::class, 'getWidgetCSS'])->name('widget.styles');
     Route::post('{orgId}/chat', [\App\Http\Controllers\WidgetController::class, 'chat'])->name('widget.chat');
@@ -263,7 +263,7 @@ Route::prefix('widget')->middleware(\App\Http\Middleware\CorsMiddleware::class)-
 });
 
 // API Routes
-Route::prefix('api')->group(function () {
+Route::prefix('api')->middleware('noindex')->group(function () {
     // WhatsApp Webhook
     Route::get('/whatsapp/webhook', [\App\Http\Controllers\WhatsAppController::class, 'verifyWebhook']);
     Route::post('/whatsapp/webhook', [\App\Http\Controllers\WhatsAppController::class, 'handleWebhook']);

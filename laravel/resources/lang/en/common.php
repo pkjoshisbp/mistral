@@ -57,6 +57,8 @@ return [
     'pricing_coming_soon' => 'Pricing information coming soon.',
     'language' => 'Language',
     'home' => 'Home',
+    'features' => 'Features',
+    'pricing' => 'Pricing',
     'about' => 'About',
     'blog' => 'Blog',
     'contact' => 'Contact',

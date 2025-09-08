@@ -58,6 +58,8 @@ return [
     // Navigation
     'language' => 'Sprache',
     'home' => 'Startseite',
+    'features' => 'Features',
+    'pricing' => 'Preise',
     'about' => 'Über uns',
     'blog' => 'Blog',
     'contact' => 'Kontakt',

@@ -5,6 +5,8 @@ Allow: /
 Disallow: /admin/
 Disallow: /customer/
 Disallow: /api/
+Disallow: /widget/*/chat
+Disallow: /widget/*/config
 Disallow: /vendor/
 Disallow: /storage/
 Disallow: /*.json$

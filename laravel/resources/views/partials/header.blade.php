@@ -15,6 +15,12 @@
                     <a class="nav-link" href="{{ route('home') }}">{{ __('common.home') }}</a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link" href="{{ route('features') }}">{{ __('common.features') ?? 'Features' }}</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ route('home') }}#pricing">{{ __('common.pricing') ?? 'Pricing' }}</a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link" href="{{ route('about') }}">{{ __('common.about') }}</a>
                 </li>
                 <li class="nav-item">

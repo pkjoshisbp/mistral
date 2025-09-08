@@ -70,6 +70,8 @@ class Kernel extends HttpKernel
         'customer' => \App\Http\Middleware\CustomerMiddleware::class,
         'admin' => \App\Http\Middleware\AdminMiddleware::class,
         'user.has.organization' => \App\Http\Middleware\UserHasOrganization::class,
+        'noindex' => \App\Http\Middleware\NoIndexMiddleware::class,
+        'security.headers' => \App\Http\Middleware\SecurityHeaders::class,
     'locale.session' => \App\Http\Middleware\SetLocaleFromSession::class,
     'i18n.missing' => \App\Http\Middleware\LogMissingTranslations::class,
     ];

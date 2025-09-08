@@ -51,6 +51,8 @@ return [
     // Navigation & Basic UI
     'language' => 'Langue',
     'home' => 'Accueil',
+    'features' => 'Fonctionnalités',
+    'pricing' => 'Tarifs',
     'about' => 'À Propos',
     'blog' => 'Blog',
     'contact' => 'Contact',
