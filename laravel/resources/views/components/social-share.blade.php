@@ -34,6 +34,15 @@
          shareImage: '{{ $shareImage }}',
          hashtags: '{{ $shareHashtags }}'
      }">
+
+<style>
+.social-share a {
+    text-decoration: none !important;
+}
+.social-share a:hover {
+    text-decoration: none !important;
+}
+</style>
     
     @if($style === 'floating')
     <!-- Floating Social Share -->

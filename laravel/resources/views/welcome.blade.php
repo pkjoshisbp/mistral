@@ -109,7 +109,7 @@
     </section>
 
     <!-- Social Share Section -->
-    <section class="py-4" style="background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); color: white;">
+    <section class="py-4" style="background: #1e293b; color: white;">
         <div class="container text-center">
             <h5 class="mb-3 text-white">{{ __('Share AI Chat Support') }}</h5>
             <x-social-share 

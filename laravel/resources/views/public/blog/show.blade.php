@@ -336,15 +336,27 @@
     </section>
 
     <!-- Floating Social Share -->
-    <x-social-share 
-        :url="route('blog.show', $blog->slug)"
-        :title="$blog->title"
         :description="$blog->excerpt"
         style="floating"
         size="sm"
     />
 
-    <!-- Related Posts -->
+    <!-- Social Share Section -->
+    <section class="py-4" style="background: #1e293b; color: white;">
+        <div class="container text-center">
+            <h5 class="mb-3 text-white">Share this article</h5>
+            <x-social-share 
+                :url="route('blog.show', $blog->slug)"
+                :title="$blog->title"
+                :description="$blog->excerpt"
+                style="buttons"
+                size="md"
+                theme="dark"
+            />
+        </div>
+    </section>
+
+    @include('partials.footer')    <!-- Related Posts -->
     @if($relatedPosts->count() > 0)
     <section class="py-5 bg-light">
         <div class="container">
@@ -373,78 +385,7 @@
     </section>
     @endif
 
-    <!-- Footer -->
-    <footer class="bg-dark text-light py-5">
-        <div class="container">
-            <div class="row g-4">
-                <div class="col-lg-3">
-                    <h5 class="fw-bold mb-3">
-                        <i class="fas fa-robot me-2"></i>AI Chat Support
-                    </h5>
-                    <p class="text-muted">Revolutionizing customer support with intelligent AI solutions that help businesses provide exceptional service 24/7.</p>
-                </div>
-                
-                <div class="col-lg-2">
-                    <h6 class="fw-bold mb-3">Product</h6>
-                    <ul class="list-unstyled">
-                        <li><a href="{{ route('features') }}" class="text-muted text-decoration-none">Features</a></li>
-                        <li><a href="{{ route('blog.index') }}" class="text-muted text-decoration-none">Blog</a></li>
-                        <li><a href="#" class="text-muted text-decoration-none">Pricing</a></li>
-                        <li><a href="#" class="text-muted text-decoration-none">API Docs</a></li>
-                    </ul>
-                </div>
-                
-                <div class="col-lg-2">
-                    <h6 class="fw-bold mb-3">Company</h6>
-                    <ul class="list-unstyled">
-                        <li><a href="{{ route('about') }}" class="text-muted text-decoration-none">About Us</a></li>
-                        <li><a href="{{ route('contact') }}" class="text-muted text-decoration-none">Contact</a></li>
-                        <li><a href="#" class="text-muted text-decoration-none">Careers</a></li>
-                        <li><a href="#" class="text-muted text-decoration-none">Press</a></li>
-                    </ul>
-                </div>
-                
-                <div class="col-lg-2">
-                    <h6 class="fw-bold mb-3">Legal</h6>
-                    <ul class="list-unstyled">
-                        <li><a href="{{ route('terms') }}" class="text-muted text-decoration-none">Terms of Service</a></li>
-                        <li><a href="{{ route('privacy') }}" class="text-muted text-decoration-none">Privacy Policy</a></li>
-                        <li><a href="{{ route('refund-policy') }}" class="text-muted text-decoration-none">Refund Policy</a></li>
-                        <li><a href="#" class="text-muted text-decoration-none">Cookies</a></li>
-                    </ul>
-                </div>
-                
-                <div class="col-lg-3">
-                    <h6 class="fw-bold mb-3">Support</h6>
-                    <ul class="list-unstyled">
-                        <li><a href="#" class="text-muted text-decoration-none">Help Center</a></li>
-                        <li><a href="#" class="text-muted text-decoration-none">Community</a></li>
-                        <li><a href="#" class="text-muted text-decoration-none">Status</a></li>
-                        <li><a href="#" class="text-muted text-decoration-none">Security</a></li>
-                    </ul>
-                    
-                    <div class="mt-3">
-                        <h6 class="fw-bold mb-3">Follow Us</h6>
-                        <a href="#" class="text-muted me-3"><i class="fab fa-twitter fa-lg"></i></a>
-                        <a href="#" class="text-muted me-3"><i class="fab fa-linkedin fa-lg"></i></a>
-                        <a href="#" class="text-muted me-3"><i class="fab fa-github fa-lg"></i></a>
-                        <a href="#" class="text-muted"><i class="fab fa-facebook fa-lg"></i></a>
-                    </div>
-                </div>
-            </div>
-            
-            <hr class="my-4">
-            
-            <div class="row align-items-center">
-                <div class="col-md-6">
-                    <p class="text-muted mb-0">&copy; {{ date('Y') }} AI Chat Support. All rights reserved.</p>
-                </div>
-                <div class="col-md-6 text-md-end">
-                    <p class="text-muted mb-0">Made with <i class="fas fa-heart text-danger"></i> for better customer experiences</p>
-                </div>
-            </div>
-        </div>
-    </footer>
+    @include('partials.footer')
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
