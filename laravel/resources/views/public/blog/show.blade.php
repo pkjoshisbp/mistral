@@ -284,20 +284,15 @@
                     </div>
 
                     <!-- Social Share -->
-                    <div class="social-share text-center">
-                        <h5 class="mb-3"><i class="fas fa-share-alt me-2"></i>Share this article</h5>
-                        <a href="https://twitter.com/intent/tweet?text={{ urlencode($blog->title) }}&url={{ urlencode(route('blog.show', $blog->slug)) }}" target="_blank" class="twitter">
-                            <i class="fab fa-twitter me-2"></i>Twitter
-                        </a>
-                        <a href="https://www.facebook.com/sharer/sharer.php?u={{ urlencode(route('blog.show', $blog->slug)) }}" target="_blank" class="facebook">
-                            <i class="fab fa-facebook me-2"></i>Facebook
-                        </a>
-                        <a href="https://www.linkedin.com/sharing/share-offsite/?url={{ urlencode(route('blog.show', $blog->slug)) }}" target="_blank" class="linkedin">
-                            <i class="fab fa-linkedin me-2"></i>LinkedIn
-                        </a>
-                        <a href="mailto:?subject={{ urlencode($blog->title) }}&body={{ urlencode($blog->excerpt . ' ' . route('blog.show', $blog->slug)) }}" class="email">
-                            <i class="fas fa-envelope me-2"></i>Email
-                        </a>
+                    <div class="text-center py-4">
+                        <h5 class="mb-3">Share</h5>
+                        <x-social-share 
+                            :url="route('blog.show', $blog->slug)"
+                            :title="$blog->title"
+                            :description="$blog->excerpt"
+                            style="buttons"
+                            size="md"
+                        />
                     </div>
 
                     <!-- Back to Blog -->
@@ -339,6 +334,15 @@
             </div>
         </div>
     </section>
+
+    <!-- Floating Social Share -->
+    <x-social-share 
+        :url="route('blog.show', $blog->slug)"
+        :title="$blog->title"
+        :description="$blog->excerpt"
+        style="floating"
+        size="sm"
+    />
 
     <!-- Related Posts -->
     @if($relatedPosts->count() > 0)
@@ -444,6 +448,8 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <!-- Prism.js for code highlighting -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>

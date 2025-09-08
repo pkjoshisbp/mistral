@@ -108,6 +108,21 @@
         </div>
     </section>
 
+    <!-- Social Share Section -->
+    <section class="py-4" style="background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); color: white;">
+        <div class="container text-center">
+            <h5 class="mb-3 text-white">{{ __('Share AI Chat Support') }}</h5>
+            <x-social-share 
+                :url="url('/')"
+                :title="config('app.name') . ' - AI-Powered Customer Support'"
+                :description="__('Transform your customer support with AI-powered chat solutions')"
+                style="buttons"
+                size="md"
+                theme="dark"
+            />
+        </div>
+    </section>
+
     <!-- Features Section -->
     <section class="py-5" id="features">
         <div class="container">

@@ -239,6 +239,16 @@
     @section('content')
     
     <!-- Hero Section -->
+    <section class="hero-section">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-8 mx-auto text-center">
+                    <h1 class="display-4 mb-4">AI Customer Support Blog</h1>
+                    <p class="lead mb-4">Stay updated with the latest insights, tips, and trends in AI customer support. Expert advice to help your business thrive.</p>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <!-- Blog Posts -->
     <section class="py-5">
