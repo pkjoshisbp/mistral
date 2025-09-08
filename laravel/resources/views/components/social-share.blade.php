@@ -46,87 +46,75 @@
     
     @if($style === 'floating')
     <!-- Floating Social Share -->
-    <div class="fixed left-4 top-1/2 transform -translate-y-1/2 z-50 space-y-2">
-        <div class="bg-white rounded-full shadow-lg p-2 transition-all duration-300 hover:shadow-xl">
+    <div class="position-fixed" style="left: 20px; top: 50%; transform: translateY(-50%); z-index: 1050;">
+        <div class="bg-white rounded shadow-lg p-2">
     @else
     <!-- Regular Social Share -->
-    <div class="flex items-center justify-center {{ $style === 'icons' ? 'space-x-2' : 'space-x-3' }}">
+    <div class="d-flex align-items-center justify-content-center">
     @endif
     
     @if($style !== 'floating')
-        <span class="{{ $theme === 'dark' ? 'text-white' : 'text-gray-600' }} font-medium text-sm mr-2">Share:</span>
+        <span class="{{ $theme === 'dark' ? 'text-white' : 'text-muted' }} fw-medium me-3">Share:</span>
     @endif
     
     @foreach($platforms as $platform)
         @if($platform === 'facebook')
             <a href="#" 
                x-on:click.prevent="window.open('https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(shareUrl), 'facebook-share', 'width=600,height=400')"
-               class="social-btn facebook {{ $sizeClass }} inline-flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-all duration-300 hover:scale-110 hover:shadow-lg"
+               class="social-btn facebook btn d-inline-flex align-items-center justify-content-center rounded-circle text-white me-3"
+               style="background-color: #1877f2; border: none; width: 45px; height: 45px; font-size: 18px;"
                title="Share on Facebook">
                 <i class="fab fa-facebook-f"></i>
-                @if($style === 'buttons')
-                    <span class="ml-2 hidden sm:inline">Facebook</span>
-                @endif
             </a>
         @endif
         
         @if($platform === 'twitter')
             <a href="#" 
                x-on:click.prevent="window.open('https://twitter.com/intent/tweet?url=' + encodeURIComponent(shareUrl) + '&text=' + encodeURIComponent(shareTitle) + '&hashtags=' + hashtags, 'twitter-share', 'width=600,height=400')"
-               class="social-btn twitter {{ $sizeClass }} inline-flex items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-600 transition-all duration-300 hover:scale-110 hover:shadow-lg"
+               class="social-btn twitter btn d-inline-flex align-items-center justify-content-center rounded-circle text-white me-3"
+               style="background-color: #1da1f2; border: none; width: 45px; height: 45px; font-size: 18px;"
                title="Share on Twitter">
                 <i class="fab fa-twitter"></i>
-                @if($style === 'buttons')
-                    <span class="ml-2 hidden sm:inline">Twitter</span>
-                @endif
             </a>
         @endif
         
         @if($platform === 'linkedin')
             <a href="#" 
                x-on:click.prevent="window.open('https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(shareUrl), 'linkedin-share', 'width=600,height=400')"
-               class="social-btn linkedin {{ $sizeClass }} inline-flex items-center justify-center rounded-full bg-blue-700 text-white hover:bg-blue-800 transition-all duration-300 hover:scale-110 hover:shadow-lg"
+               class="social-btn linkedin btn d-inline-flex align-items-center justify-content-center rounded-circle text-white me-3"
+               style="background-color: #0077b5; border: none; width: 45px; height: 45px; font-size: 18px;"
                title="Share on LinkedIn">
                 <i class="fab fa-linkedin-in"></i>
-                @if($style === 'buttons')
-                    <span class="ml-2 hidden sm:inline">LinkedIn</span>
-                @endif
             </a>
         @endif
         
         @if($platform === 'whatsapp')
             <a href="#" 
                x-on:click.prevent="window.open('https://wa.me/?text=' + encodeURIComponent(shareTitle + ' ' + shareUrl), 'whatsapp-share', 'width=600,height=400')"
-               class="social-btn whatsapp {{ $sizeClass }} inline-flex items-center justify-center rounded-full bg-green-500 text-white hover:bg-green-600 transition-all duration-300 hover:scale-110 hover:shadow-lg"
+               class="social-btn whatsapp btn d-inline-flex align-items-center justify-content-center rounded-circle text-white me-3"
+               style="background-color: #25d366; border: none; width: 45px; height: 45px; font-size: 18px;"
                title="Share on WhatsApp">
                 <i class="fab fa-whatsapp"></i>
-                @if($style === 'buttons')
-                    <span class="ml-2 hidden sm:inline">WhatsApp</span>
-                @endif
             </a>
         @endif
         
         @if($platform === 'telegram')
             <a href="#" 
                x-on:click.prevent="window.open('https://t.me/share/url?url=' + encodeURIComponent(shareUrl) + '&text=' + encodeURIComponent(shareTitle), 'telegram-share', 'width=600,height=400')"
-               class="social-btn telegram {{ $sizeClass }} inline-flex items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-all duration-300 hover:scale-110 hover:shadow-lg"
+               class="social-btn telegram btn d-inline-flex align-items-center justify-content-center rounded-circle text-white me-3"
+               style="background-color: #0088cc; border: none; width: 45px; height: 45px; font-size: 18px;"
                title="Share on Telegram">
                 <i class="fab fa-telegram-plane"></i>
-                @if($style === 'buttons')
-                    <span class="ml-2 hidden sm:inline">Telegram</span>
-                @endif
             </a>
         @endif
         
         @if($platform === 'email')
             <a href="#" 
                x-on:click.prevent="window.location.href = 'mailto:?subject=' + encodeURIComponent(shareTitle) + '&body=' + encodeURIComponent(shareDescription + ' ' + shareUrl)"
-               class="social-btn email {{ $sizeClass }} inline-flex items-center justify-center rounded-full bg-gray-600 text-white hover:bg-gray-700 transition-all duration-300 hover:scale-110 hover:shadow-lg"
+               class="social-btn email btn d-inline-flex align-items-center justify-content-center rounded-circle text-white me-3"
+               style="background-color: #6c757d; border: none; width: 45px; height: 45px; font-size: 18px;"
                title="Share via Email">
                 <i class="fas fa-envelope"></i>
-                @if($style === 'buttons')
-                    <span class="ml-2 hidden sm:inline">Email</span>
-                @endif
             </a>
         @endif
     @endforeach
