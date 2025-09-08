@@ -287,6 +287,15 @@ Route::prefix('razorpay')->name('razorpay.')->group(function () {
     Route::post('success', [\App\Http\Controllers\RazorpayController::class, 'handleSuccess'])->name('success');
     Route::post('failure', [\App\Http\Controllers\RazorpayController::class, 'handleFailure'])->name('failure');
     Route::post('webhook', [\App\Http\Controllers\RazorpayController::class, 'handleWebhook'])->name('webhook');
+    
+    // Test endpoint for webhook connectivity
+    Route::post('webhook-test', function(\Illuminate\Http\Request $request) {
+        \Log::info('Razorpay webhook test received', [
+            'headers' => $request->headers->all(),
+            'payload' => $request->getContent()
+        ]);
+        return response()->json(['status' => 'success', 'message' => 'Webhook endpoint is accessible']);
+    })->name('webhook-test');
 });
 
 require __DIR__.'/auth.php';

@@ -254,6 +254,21 @@ class PayPalController extends Controller
                 'current_period_start' => now(),
                 'current_period_end' => now()->addMonth()
             ]);
+            
+            // Send subscription confirmation email
+            try {
+                \Mail::to($subscription->user->email)->send(new \App\Mail\SubscriptionConfirmation($subscription->user, $subscription));
+                \Log::info('Subscription confirmation email sent (PayPal)', [
+                    'subscription_id' => $subscription->id,
+                    'user_email' => $subscription->user->email
+                ]);
+            } catch (\Exception $e) {
+                \Log::error('Failed to send subscription confirmation email (PayPal)', [
+                    'subscription_id' => $subscription->id,
+                    'user_email' => $subscription->user->email,
+                    'error' => $e->getMessage()
+                ]);
+            }
         }
     }
 

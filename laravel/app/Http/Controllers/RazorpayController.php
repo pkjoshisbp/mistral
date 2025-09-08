@@ -199,9 +199,15 @@ class RazorpayController extends Controller
             $payload = $request->getContent();
             $signature = $request->header('X-Razorpay-Signature');
             
+            // Check if signature is provided
+            if (empty($signature)) {
+                \Log::warning('Razorpay webhook: missing signature header');
+                return response()->json(['status' => 'missing signature'], 400);
+            }
+            
             // Verify webhook signature using webhook secret
             $expectedSignature = hash_hmac('sha256', $payload, $this->razorpayWebhookSecret);
-            if (!hash_equals($expectedSignature, $signature)) {
+            if (!hash_equals($expectedSignature, (string)$signature)) {
                 \Log::warning('Razorpay webhook: invalid signature', [
                     'expected' => $expectedSignature,
                     'received' => $signature,
@@ -244,6 +250,21 @@ class RazorpayController extends Controller
         $subscription = Subscription::where('razorpay_subscription_id', $subscriptionId)->first();
         if ($subscription) {
             $subscription->update(['status' => 'active']);
+            
+            // Send subscription confirmation email
+            try {
+                \Mail::to($subscription->user->email)->send(new \App\Mail\SubscriptionConfirmation($subscription->user, $subscription));
+                \Log::info('Subscription confirmation email sent', [
+                    'subscription_id' => $subscription->id,
+                    'user_email' => $subscription->user->email
+                ]);
+            } catch (\Exception $e) {
+                \Log::error('Failed to send subscription confirmation email', [
+                    'subscription_id' => $subscription->id,
+                    'user_email' => $subscription->user->email,
+                    'error' => $e->getMessage()
+                ]);
+            }
         }
     }
 

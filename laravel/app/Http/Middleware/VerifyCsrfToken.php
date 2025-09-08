@@ -13,5 +13,8 @@ class VerifyCsrfToken extends Middleware
      */
     protected $except = [
         'widget/*',
+        'paypal/webhook',
+        'razorpay/webhook',
+        'razorpay/webhook-test',
     ];
 }
