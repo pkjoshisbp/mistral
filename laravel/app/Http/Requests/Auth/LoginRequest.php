@@ -29,12 +29,13 @@ class LoginRequest extends FormRequest
     {
         $rules = [
             'email' => ['required', 'string', 'email'],
-            'password' => ['required', 'string'],
         ];
 
-        // Add hCaptcha validation if configured
-        if (config('services.hcaptcha.site_key') && config('services.hcaptcha.secret_key')) {
-            $rules['h-captcha-response'] = ['required', 'string'];
+        // Add OTP validation if OTP step
+        if ($this->has('otp')) {
+            $rules['otp'] = ['required', 'string', 'size:6'];
+        } else {
+            $rules['password'] = ['required', 'string'];
         }
 
         return $rules;
@@ -49,43 +50,37 @@ class LoginRequest extends FormRequest
     public function withValidator($validator)
     {
         $validator->after(function ($validator) {
-            // Validate hCaptcha if configured
-            if (config('services.hcaptcha.site_key') && config('services.hcaptcha.secret_key')) {
-                $this->validateHCaptcha($validator);
+            // Validate OTP if provided
+            if ($this->has('otp')) {
+                $this->validateOtp($validator);
+            } else {
+                // Check if user needs OTP (first time login or not verified in localStorage)
+                $this->checkOtpRequirement($validator);
             }
         });
     }
 
     /**
-     * Validate hCaptcha response
+     * Check if OTP is required for this login attempt
      */
-    private function validateHCaptcha($validator)
+    private function checkOtpRequirement($validator): void
     {
-        $hcaptchaResponse = $this->input('h-captcha-response');
-        
-        if (!$hcaptchaResponse) {
-            $validator->errors()->add('h-captcha-response', 'Please complete the captcha verification.');
-            return;
-        }
+        // For now, we'll always require OTP on first login attempt
+        // The frontend will handle localStorage checking
+    }
 
-        try {
-            $verifyResponse = Http::timeout(10)->asForm()->post('https://hcaptcha.com/siteverify', [
-                'secret' => config('services.hcaptcha.secret_key'),
-                'response' => $hcaptchaResponse,
-                'remoteip' => $this->ip(),
-            ]);
+    /**
+     * Validate OTP
+     */
+    private function validateOtp($validator): void
+    {
+        $email = $this->input('email');
+        $otp = $this->input('otp');
 
-            $hcaptchaResult = $verifyResponse->json();
+        $otpRecord = \App\Models\EmailOtp::verifyOtp($email, $otp, 'login');
 
-            if (!$hcaptchaResult['success']) {
-                $validator->errors()->add('h-captcha-response', 'The captcha verification failed. Please try again.');
-            }
-        } catch (\Exception $e) {
-            // If hCaptcha service is down, log error but don't block login
-            \Log::warning('hCaptcha verification failed due to service error', [
-                'error' => $e->getMessage(),
-                'ip' => $this->ip(),
-            ]);
+        if (!$otpRecord) {
+            $validator->errors()->add('otp', 'The OTP code is invalid or has expired.');
         }
     }
 

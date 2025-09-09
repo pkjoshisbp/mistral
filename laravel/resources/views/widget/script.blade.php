@@ -13,6 +13,7 @@
         constructor(config) {
             this.config = config;
             this.isOpen = false;
+            this.isExpanded = false;
             this.sessionId = this.generateSessionId();
             this.messages = [];
             this.leadCaptured = false;
@@ -51,6 +52,7 @@
             const buttonId = 'ai-chat-button-' + this.config.orgId;
             const windowId = 'ai-chat-window-' + this.config.orgId;
             const closeId = 'ai-chat-close-' + this.config.orgId;
+            const expandId = 'ai-chat-expand-' + this.config.orgId;
             const messagesId = 'ai-chat-messages-' + this.config.orgId;
             const inputId = 'ai-chat-input-' + this.config.orgId;
             const sendId = 'ai-chat-send-' + this.config.orgId;
@@ -68,6 +70,7 @@
                 button: buttonId,
                 window: windowId,
                 close: closeId,
+                expand: expandId,
                 messages: messagesId,
                 input: inputId,
                 send: sendId,
@@ -105,11 +108,18 @@
                                     Online
                                 </div>
                             </div>
-                            <button id="${closeId}" class="ai-chat-close">
-                                <svg width="20" height="20" viewBox="0 0 20 20">
-                                    <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                </svg>
-                            </button>
+                            <div class="ai-chat-header-actions">
+                                <button id="${this.ids.expand}" class="ai-chat-expand" title="Expand chat">
+                                    <svg width="18" height="18" viewBox="0 0 18 18">
+                                        <path d="M3 3h4v2H5v2H3V3zm8 0h4v4h-2V5h-2V3zM3 11v4h4v-2H5v-2H3zm10 0v2h-2v2h4v-4h-2z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                                <button id="${closeId}" class="ai-chat-close" title="Close chat">
+                                    <svg width="20" height="20" viewBox="0 0 20 20">
+                                        <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Messages -->
@@ -156,6 +166,7 @@
         bindEvents() {
             const button = document.getElementById(this.ids.button);
             const closeBtn = document.getElementById(this.ids.close);
+            const expandBtn = document.getElementById(this.ids.expand);
             const sendBtn = document.getElementById(this.ids.send);
             const input = document.getElementById(this.ids.input);
             const leadSubmit = document.getElementById(this.ids.leadSubmit);
@@ -177,6 +188,14 @@
                     e.preventDefault();
                     e.stopPropagation();
                     this.toggleWidget();
+                });
+            }
+
+            if (expandBtn) {
+                expandBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.toggleExpand();
                 });
             }
             
@@ -271,6 +290,36 @@
                 window.style.setProperty('display', 'none', 'important');
                 window.style.setProperty('visibility', 'hidden', 'important');
                 button.style.transform = 'scale(1)';
+            }
+        }
+
+        toggleExpand() {
+            const window = document.getElementById(this.ids.window);
+            const expandBtn = document.getElementById(this.ids.expand);
+            
+            if (!window || !expandBtn) {
+                console.error('AI Chat Widget: Window or expand button not found');
+                return;
+            }
+            
+            this.isExpanded = !this.isExpanded;
+            
+            if (this.isExpanded) {
+                window.classList.add('ai-chat-expanded');
+                expandBtn.innerHTML = `
+                    <svg width="18" height="18" viewBox="0 0 18 18">
+                        <path d="M7 3H3v4h2V5h2V3zm4 0v2h2v2h2V3h-4zM7 15v-2H5v-2H3v4h4zm4 0h4v-4h-2v2h-2v2z" fill="currentColor"/>
+                    </svg>
+                `;
+                expandBtn.title = 'Minimize chat';
+            } else {
+                window.classList.remove('ai-chat-expanded');
+                expandBtn.innerHTML = `
+                    <svg width="18" height="18" viewBox="0 0 18 18">
+                        <path d="M3 3h4v2H5v2H3V3zm8 0h4v4h-2V5h-2V3zM3 11v4h4v-2H5v-2H3zm10 0v2h-2v2h4v-4h-2z" fill="currentColor"/>
+                    </svg>
+                `;
+                expandBtn.title = 'Expand chat';
             }
         }
 
