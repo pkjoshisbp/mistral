@@ -117,19 +117,18 @@ class WidgetController
                 ]);
             }
 
-            // Generate embedding for the message
-            $embedding = $this->aiAgentService->embed($message);
-
-            if (!$embedding || !is_array($embedding)) {
-                throw new \Exception('Failed to generate embedding');
-            }
-
-            // Search organization's Qdrant collection for context
+            // Search organization's Qdrant collection for context using enhanced search
             $collectionName = $organization->slug; // Use organization slug directly
             
-            $searchResults = $this->aiAgentService->searchQdrant(
+            Log::info('Starting enhanced search', [
+                'organization' => $organization->name,
+                'collection' => $collectionName,
+                'query' => $message
+            ]);
+            
+            $searchResults = $this->aiAgentService->enhancedSearch(
                 $collectionName,
-                $embedding, // embedding is already the array
+                $message, // Use original message for rewriting
                 5 // Get top 5 relevant results
             );
             

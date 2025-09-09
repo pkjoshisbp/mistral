@@ -5,16 +5,13 @@ namespace App\Livewire\Admin;
 use Livewire\Component;
 use App\Models\Organization;
 use App\Models\OrganizationFaq;
-use App\Services\UnifiedSyncService;
+use App\Services\AiAgentService;
 
 class FaqsManager extends Component
 {
     public $selectedOrganization = '';
     public $showForm = false;
     public $editingId = null;
-    public $syncStatus = '';
-    public $syncMessage = '';
-    public $isSyncing = false;
 
     public $question = '';
     public $answer = '';
@@ -51,15 +48,6 @@ class FaqsManager extends Component
         $this->question = $this->answer = $this->category = $this->keywords = '';
         $this->is_active = true;
         $this->sort_order = 0;
-        $this->showForm = false;
-        $this->clearSyncStatus();
-    }
-
-    public function clearSyncStatus()
-    {
-        $this->syncStatus = '';
-        $this->syncMessage = '';
-        $this->isSyncing = false;
     }
 
     public function create()
@@ -71,14 +59,15 @@ class FaqsManager extends Component
                 'question' => $this->question,
                 'answer' => $this->answer,
                 'category' => $this->category,
+                'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order ?? 0,
                 'is_active' => $this->is_active
             ]);
             
-            // Auto-sync after creation
-            $this->autoSyncAfterChange();
+            // Auto-sync to Qdrant using new unified system
+            $this->syncFaqToQdrant($faq);
             
-            session()->flash('message', 'FAQ added and synced successfully');
+            session()->flash('message', 'FAQ added and synced to AI system');
             $this->resetForm();
             $this->showForm = false;
         } catch (\Throwable $e) {
@@ -95,6 +84,7 @@ class FaqsManager extends Component
         $this->question = $f->question;
         $this->answer = $f->answer;
         $this->category = $f->category;
+        $this->keywords = $f->keywords;
         $this->sort_order = $f->sort_order ?? 0;
         $this->is_active = (bool)$f->is_active;
         $this->showForm = true;
@@ -111,14 +101,15 @@ class FaqsManager extends Component
                 'question' => $this->question,
                 'answer' => $this->answer,
                 'category' => $this->category,
+                'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order ?? 0,
                 'is_active' => $this->is_active
             ]);
             
-            // Auto-sync after update
-            $this->autoSyncAfterChange();
+            // Auto-sync updated FAQ to Qdrant
+            $this->syncFaqToQdrant($f);
             
-            session()->flash('message', 'FAQ updated and synced successfully');
+            session()->flash('message', 'FAQ updated and synced to AI system');
             $this->resetForm();
             $this->showForm = false;
         } catch (\Throwable $e) {
@@ -130,67 +121,117 @@ class FaqsManager extends Component
     {
         $f = OrganizationFaq::find($id);
         if (!$f) return;
-        $orgId = $f->organization_id;
+        $organization = $f->organization;
         try {
             $f->delete();
             
-            // Auto-sync after deletion
-            $this->selectedOrganization = $orgId;
-            $this->autoSyncAfterChange();
+            // Remove from Qdrant using unified system  
+            $this->deleteFaqFromQdrant($organization->slug, "faq_{$id}");
             
-            session()->flash('message', 'FAQ deleted and synced successfully');
+            session()->flash('message', 'FAQ deleted from database and AI system');
         } catch (\Throwable $e) {
             session()->flash('error', 'Delete failed: ' . $e->getMessage());
         }
     }
-
+    
     /**
-     * Manual sync button action
+     * Sync single FAQ to Qdrant using unified system
      */
-    public function manualSync()
+    private function syncFaqToQdrant($faq)
     {
-        if (!$this->selectedOrganization) {
-            session()->flash('error', 'Please select an organization first');
-            return;
-        }
-
-        $this->isSyncing = true;
-        $this->syncStatus = 'syncing';
-        $this->syncMessage = 'Syncing FAQs to AI system...';
-
+        Log::info('>>> syncFaqToQdrant method called', ['faq_id' => $faq->id, 'question' => $faq->question]);
+        
         try {
-            $syncService = new UnifiedSyncService();
-            $result = $syncService->syncOrganization($this->selectedOrganization, ['faqs']);
-
-            if ($result['success']) {
-                $this->syncStatus = 'success';
-                $this->syncMessage = $result['message'] . " ({$result['total_synced']} items synced)";
-                session()->flash('message', $this->syncMessage);
-            } else {
-                $this->syncStatus = 'error';
-                $this->syncMessage = 'Sync failed: ' . $result['message'];
-                session()->flash('error', $this->syncMessage);
+            $organization = $faq->organization;
+            if (!$organization) {
+                Log::warning('FAQ sync failed - no organization', ['faq_id' => $faq->id]);
+                return;
             }
+            
+            $aiService = new AiAgentService();
+            
+            $items = [
+                [
+                    'id' => "faq_{$faq->id}",
+                    'title' => $faq->question,
+                    'content' => $faq->answer,
+                    'category' => $faq->category ?? 'general',
+                    'metadata' => [
+                        'table_id' => $faq->id,
+                        'updated_at' => $faq->updated_at->toISOString()
+                    ]
+                ]
+            ];
+            
+            Log::info('>>> About to call storeDataToQdrant', [
+                'faq_id' => $faq->id,
+                'organization_slug' => $organization->slug,
+                'question' => $faq->question,
+                'items' => $items
+            ]);
+            
+            $result = $aiService->storeDataToQdrant($organization->slug, 'faq', $items);
+            
+            Log::info('>>> storeDataToQdrant returned', [
+                'faq_id' => $faq->id,
+                'result' => $result
+            ]);
+            
+            if ($result && $result['success'] && $result['successful_stores'] > 0) {
+                Log::info('FAQ auto-sync successful', [
+                    'faq_id' => $faq->id,
+                    'organization_slug' => $organization->slug
+                ]);
+            } else {
+                Log::warning('FAQ auto-sync failed', [
+                    'faq_id' => $faq->id,
+                    'organization_slug' => $organization->slug,
+                    'result' => $result
+                ]);
+            }
+            
         } catch (\Exception $e) {
-            $this->syncStatus = 'error';
-            $this->syncMessage = 'Sync failed: ' . $e->getMessage();
-            session()->flash('error', $this->syncMessage);
+            Log::error('FAQ auto-sync exception', [
+                'faq_id' => $faq->id,
+                'error' => $e->getMessage()
+            ]);
         }
-
-        $this->isSyncing = false;
     }
-
+    
     /**
-     * Auto-sync after data changes
+     * Delete FAQ from Qdrant 
      */
-    private function autoSyncAfterChange()
+    private function deleteFaqFromQdrant($organizationSlug, $faqId)
     {
         try {
-            $syncService = new UnifiedSyncService();
-            $syncService->syncOrganization($this->selectedOrganization, ['faqs']);
+            $aiService = new AiAgentService();
+            
+            Log::info('Deleting FAQ from Qdrant', [
+                'organization_slug' => $organizationSlug,
+                'faq_id' => $faqId
+            ]);
+            
+            $result = $aiService->deleteDataFromQdrant($organizationSlug, [$faqId]);
+            
+            if ($result && $result['success'] && $result['deleted_count'] > 0) {
+                Log::info('FAQ deletion from Qdrant successful', [
+                    'organization_slug' => $organizationSlug,
+                    'faq_id' => $faqId
+                ]);
+            } else {
+                Log::warning('FAQ deletion from Qdrant failed', [
+                    'organization_slug' => $organizationSlug,
+                    'faq_id' => $faqId,
+                    'result' => $result
+                ]);
+            }
+            
         } catch (\Exception $e) {
-            // Log the error but don't interrupt user flow
-            \Log::error('Auto-sync failed after FAQ change: ' . $e->getMessage());
+            Log::error('FAQ delete from Qdrant failed', [
+                'organization_slug' => $organizationSlug,
+                'faq_id' => $faqId,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 

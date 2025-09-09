@@ -249,6 +249,96 @@ class AiAgentService
     }
 
     /**
+     * Enhanced search with query rewriting using Llama-3.2
+     */
+    public function enhancedSearch($collectionName, $originalQuery, $limit = 5)
+    {
+        try {
+            Log::info('Enhanced search started', [
+                'collection' => $collectionName,
+                'original_query' => $originalQuery
+            ]);
+
+            // Step 1: Rewrite query using Llama-3.2
+            $rewrittenQuery = $this->rewriteQueryForSearch($originalQuery);
+            
+            Log::info('Query rewrite completed', [
+                'original_query' => $originalQuery,
+                'rewritten_query' => $rewrittenQuery
+            ]);
+
+            // Step 2: Generate embedding for the rewritten query
+            $embedding = $this->embed($rewrittenQuery ?: $originalQuery);
+
+            if (!$embedding || !is_array($embedding)) {
+                Log::warning('Failed to generate embedding for enhanced search', [
+                    'query' => $rewrittenQuery ?: $originalQuery
+                ]);
+                return null;
+            }
+
+            // Step 3: Search Qdrant with the embedding
+            $searchResults = $this->searchQdrant($collectionName, $embedding, $limit);
+            
+            Log::info('Enhanced search completed', [
+                'collection' => $collectionName,
+                'original_query' => $originalQuery,
+                'rewritten_query' => $rewrittenQuery,
+                'results_count' => isset($searchResults['results']) ? count($searchResults['results']) : 0
+            ]);
+
+            return $searchResults;
+
+        } catch (\Exception $e) {
+            Log::error('Enhanced search failed', [
+                'collection' => $collectionName,
+                'original_query' => $originalQuery,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Rewrite user query using Llama-3.2
+     */
+    public function rewriteQueryForSearch($originalQuery)
+    {
+        try {
+            // Use the regular LLM for query rewriting instead of the GGUF model
+            $systemPrompt = "You are a query rewriter. Rewrite the user's query into a clear, concise, unambiguous form that's optimal for semantic search. Focus on key concepts and intent. Output only the rewritten query without explanations.";
+            
+            $messages = [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $originalQuery]
+            ];
+            
+            $response = $this->llmChat($messages, 'llama3.2:1b');
+            
+            if ($response && isset($response['message']['content'])) {
+                $rewrittenQuery = trim($response['message']['content']);
+                Log::info('Query rewrite successful', [
+                    'original' => $originalQuery,
+                    'rewritten' => $rewrittenQuery
+                ]);
+                return $rewrittenQuery;
+            } else {
+                Log::warning('Query rewrite failed, using original query', [
+                    'original' => $originalQuery,
+                    'response' => $response
+                ]);
+                return $originalQuery;
+            }
+        } catch (\Exception $e) {
+            Log::warning('Query rewrite exception, using original query', [
+                'original' => $originalQuery,
+                'error' => $e->getMessage()
+            ]);
+            return $originalQuery;
+        }
+    }
+
+    /**
      * Get LLM answer
      */
     public function llmAnswer($prompt, $model = 'llama3.2:1b')
@@ -524,6 +614,98 @@ class AiAgentService
         $resp = $this->llmChat($messages, $model);
         if (!$resp || empty($resp['message']['content'])) return $utterance;
         return trim($resp['message']['content']);
+    }
+
+    /**
+     * Store organization data to Qdrant via FastAPI
+     */
+    public function storeDataToQdrant($organizationSlug, $dataType, $items)
+    {
+        try {
+            $payload = [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'items' => $items
+            ];
+
+            Log::info('Storing data to Qdrant', [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'item_count' => count($items)
+            ]);
+
+            $response = Http::timeout(120)->post("{$this->baseUrl}/store_data", $payload);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                Log::info('Successfully stored data to Qdrant', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'successful_stores' => $data['successful_stores'] ?? 0,
+                    'failed_stores' => $data['failed_stores'] ?? 0
+                ]);
+                return $data;
+            } else {
+                Log::error('Failed to store data to Qdrant', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'status' => $response->status(),
+                    'error' => $response->body()
+                ]);
+                return null;
+            }
+        } catch (\Exception $e) {
+            Log::error('Store data to Qdrant exception', [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Delete organization data from Qdrant via FastAPI
+     */
+    public function deleteDataFromQdrant($organizationSlug, $itemIds)
+    {
+        try {
+            $payload = [
+                'organization_slug' => $organizationSlug,
+                'item_ids' => is_array($itemIds) ? $itemIds : [$itemIds]
+            ];
+
+            Log::info('Deleting data from Qdrant', [
+                'organization_slug' => $organizationSlug,
+                'item_ids' => $payload['item_ids']
+            ]);
+
+            $response = Http::timeout(60)->post("{$this->baseUrl}/delete_data", $payload);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                Log::info('Successfully deleted data from Qdrant', [
+                    'organization_slug' => $organizationSlug,
+                    'deleted_count' => $data['deleted_count'] ?? 0,
+                    'failed_deletes' => $data['failed_deletes'] ?? []
+                ]);
+                return $data;
+            } else {
+                Log::error('Failed to delete data from Qdrant', [
+                    'organization_slug' => $organizationSlug,
+                    'status' => $response->status(),
+                    'error' => $response->body()
+                ]);
+                return null;
+            }
+        } catch (\Exception $e) {
+            Log::error('Delete data from Qdrant exception', [
+                'organization_slug' => $organizationSlug,
+                'item_ids' => $itemIds,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
     }
 
 }

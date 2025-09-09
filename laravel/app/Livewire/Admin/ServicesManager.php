@@ -77,20 +77,10 @@ class ServicesManager extends Component
             ];
             $record = OrganizationData::create($data);
 
-            // Embed & store in Qdrant
-            $ai = new AiAgentService();
-            $text = $data['content'] . ' ' . ($this->keywords ?? '');
-            $vector = $ai->embed($text);
-            if ($vector) {
-                $collection = 'org_' . $this->selectedOrganization . '_data';
-                $payload = $data['metadata'];
-                $payload['content'] = $data['content'];
-                $payload['org_id'] = $this->selectedOrganization;
-                $payload['id'] = $record->id;
-                $ai->addToQdrant($collection, $vector, $payload, $record->id);
-            }
+            // Sync to Qdrant using new unified system
+            $this->syncServiceToQdrant($record);
 
-            session()->flash('message', 'Service added');
+            session()->flash('message', 'Service added and synced to AI system');
             $this->resetForm();
             $this->showForm = false;
         } catch (\Throwable $e) {
@@ -139,18 +129,11 @@ class ServicesManager extends Component
                 'content' => $content,
                 'metadata' => $metadata
             ]);
-            $ai = new AiAgentService();
-            $text = $content . ' ' . ($this->keywords ?? '');
-            $vector = $ai->embed($text);
-            if ($vector) {
-                $collection = 'org_' . $this->selectedOrganization . '_data';
-                $payload = $metadata;
-                $payload['content'] = $content;
-                $payload['org_id'] = $this->selectedOrganization;
-                $payload['id'] = $r->id;
-                $ai->addToQdrant($collection, $vector, $payload, $r->id);
-            }
-            session()->flash('message', 'Service updated');
+            
+            // Sync updated service to Qdrant using new unified system
+            $this->syncServiceToQdrant($r);
+            
+            session()->flash('message', 'Service updated and synced to AI system');
             $this->resetForm();
             $this->showForm = false;
         } catch (\Throwable $e) {
@@ -160,20 +143,90 @@ class ServicesManager extends Component
 
     public function delete($id)
     {
-        $r = OrganizationData::find($id);
-        if (!$r) return;
-        $orgId = $r->organization_id;
+        $service = OrganizationData::find($id);
+        if (!$service) return;
+        
         try {
-            $r->delete();
+            $organization = Organization::find($service->organization_id);
             $ai = new AiAgentService();
-            $collection = 'org_' . $orgId . '_data';
-            $ai->deleteFromQdrant($collection, $id); // Method exists in DataEntry usage; assume service has it even if not visible here.
-            session()->flash('message', 'Deleted');
-        } catch (\Throwable $e) {
+            
+            // Delete from Qdrant first using new unified system
+            if ($organization) {
+                $result = $ai->deleteDataFromQdrant($organization->slug, 'service_' . $service->id);
+                \Log::info('Service deleted from Qdrant', [
+                    'service_id' => $service->id,
+                    'organization' => $organization->slug,
+                    'result' => $result
+                ]);
+            }
+            
+            // Delete from database
+            $service->delete();
+            
+            session()->flash('message', 'Service deleted and removed from AI system');
+        } catch (\Exception $e) {
             session()->flash('error', 'Delete failed: ' . $e->getMessage());
+            \Log::error('Error deleting service', [
+                'service_id' => $id,
+                'error' => $e->getMessage()
+            ]);
         }
     }
-
+    
+    /**
+     * Sync service to Qdrant using unified system
+     */
+    private function syncServiceToQdrant(OrganizationData $service)
+    {
+        try {
+            $ai = new AiAgentService();
+            $organization = Organization::find($service->organization_id);
+            
+            if (!$organization) {
+                \Log::warning('Organization not found for service sync', ['service_id' => $service->id]);
+                return;
+            }
+            
+            // Prepare service data for Qdrant
+            $serviceData = [
+                'data_type' => 'service',
+                'item_id' => 'service_' . $service->id,
+                'title' => $service->name,
+                'content' => $service->content,
+                'category' => $service->metadata['category'] ?? '',
+                'organization_slug' => $organization->slug,
+                'table_id' => $service->id,
+                'updated_at' => $service->updated_at->toISOString(),
+                'price' => $service->metadata['price'] ?? '',
+                'requirements' => $service->metadata['requirements'] ?? '',
+                'duration' => $service->metadata['duration'] ?? '',
+                'availability' => $service->metadata['availability'] ?? '',
+                'keywords' => $service->metadata['keywords'] ?? '',
+            ];
+            
+            // Use unified store method
+            $result = $ai->storeDataToQdrant($organization->slug, 'service', [$serviceData]);
+            
+            if ($result) {
+                \Log::info('Service synced to Qdrant', [
+                    'service_id' => $service->id,
+                    'organization' => $organization->slug,
+                    'item_id' => 'service_' . $service->id
+                ]);
+            } else {
+                \Log::error('Failed to sync service to Qdrant', [
+                    'service_id' => $service->id,
+                    'organization' => $organization->slug
+                ]);
+            }
+        } catch (\Exception $e) {
+            \Log::error('Error syncing service to Qdrant', [
+                'service_id' => $service->id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
     private function composeContent(): string
     {
         return "Service: {$this->name}\nDescription: {$this->description}\nPrice: {$this->price}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}";

@@ -14,6 +14,7 @@ class OrganizationFaq extends Model
         'question',
         'answer', 
         'category',
+        'keywords',
         'sort_order',
         'is_active'
     ];

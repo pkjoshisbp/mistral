@@ -92,38 +92,7 @@
         const resendBtn = document.getElementById('resend-otp');
         const otpMessage = document.getElementById('otp-message');
 
-        let isOtpStep = false;
-        const DEVICE_KEY = 'ai_chat_device_id';
-        
-        // Generate or get device ID
-        function getDeviceId() {
-            let deviceId = localStorage.getItem(DEVICE_KEY);
-            if (!deviceId) {
-                deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                localStorage.setItem(DEVICE_KEY, deviceId);
-            }
-            return deviceId;
-        }
-
-        // Check if device is trusted for this email
-        function isDeviceTrusted(email) {
-            const trustedDevices = JSON.parse(localStorage.getItem('trusted_devices') || '{}');
-            const deviceId = getDeviceId();
-            return trustedDevices[email] && trustedDevices[email].includes(deviceId);
-        }
-
-        // Mark device as trusted
-        function markDeviceTrusted(email) {
-            const trustedDevices = JSON.parse(localStorage.getItem('trusted_devices') || '{}');
-            const deviceId = getDeviceId();
-            if (!trustedDevices[email]) {
-                trustedDevices[email] = [];
-            }
-            if (!trustedDevices[email].includes(deviceId)) {
-                trustedDevices[email].push(deviceId);
-                localStorage.setItem('trusted_devices', JSON.stringify(trustedDevices));
-            }
-        }
+        let otpSent = false;
 
         // Handle form submission
         form.addEventListener('submit', async function(e) {
@@ -138,11 +107,11 @@
                 return;
             }
 
-            if (!isOtpStep) {
-                // Step 1: Try regular login first
-                await attemptLogin(email, password);
+            if (!otpSent) {
+                // First step - always send OTP for security
+                await sendOTP(email);
             } else {
-                // Step 2: Verify OTP and complete login
+                // Second step - verify OTP and complete login
                 if (!otp || otp.length !== 6) {
                     alert('Please enter a valid 6-digit OTP code');
                     return;
@@ -151,84 +120,32 @@
             }
         });
 
-        async function attemptLogin(email, password) {
-            // If device is trusted, try normal login first
-            if (isDeviceTrusted(email)) {
-                try {
-                    showSpinner(true);
-                    
-                    const formData = new FormData();
-                    formData.append('email', email);
-                    formData.append('password', password);
-                    formData.append('_token', document.querySelector('meta[name="csrf-token"]').content);
-
-                    const response = await fetch(form.action, {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    if (response.ok) {
-                        // Login successful - redirect
-                        window.location.reload();
-                        return;
-                    }
-                } catch (error) {
-                    console.error('Direct login failed:', error);
-                } finally {
-                    showSpinner(false);
-                }
-            }
-            
-            // Device not trusted or login failed - request OTP
-            await sendOTPAfterCredentialsCheck(email, password);
-        }
-
-        async function sendOTPAfterCredentialsCheck(email, password) {
+        async function sendOTP(email) {
             try {
                 showSpinner(true);
-                
-                // First validate credentials without OTP
-                const formData = new FormData();
-                formData.append('email', email);
-                formData.append('password', password);
-                formData.append('_token', document.querySelector('meta[name="csrf-token"]').content);
-                formData.append('check_credentials_only', '1'); // Flag to just check credentials
-
-                const credentialsResponse = await fetch('/auth/check-credentials', {
+                const response = await fetch('/auth/send-otp', {
                     method: 'POST',
-                    body: formData
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                    },
+                    body: JSON.stringify({ email: email })
                 });
 
-                const credentialsData = await credentialsResponse.json();
+                const data = await response.json();
                 
-                if (credentialsData.valid) {
-                    // Credentials are valid - now send OTP
-                    const response = await fetch('/auth/send-otp', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                        },
-                        body: JSON.stringify({ email: email })
-                    });
-
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        isOtpStep = true;
-                        otpSection.style.display = 'block';
-                        loginText.textContent = 'Verify & Login';
-                        otpMessage.textContent = 'We\'ve sent a 6-digit code to ' + email + '. Please enter it below.';
-                        otpInput.focus();
-                    } else {
-                        alert(data.message || 'Failed to send OTP. Please try again.');
-                    }
+                if (data.success) {
+                    otpSent = true;
+                    otpSection.style.display = 'block';
+                    loginText.textContent = 'Verify & Login';
+                    otpMessage.textContent = 'We\'ve sent a 6-digit code to ' + email + '. Please enter it below.';
+                    otpInput.focus();
                 } else {
-                    alert('Invalid email or password. Please check your credentials.');
+                    alert(data.message || 'Failed to send OTP. Please try again.');
                 }
             } catch (error) {
-                alert('Error validating credentials. Please try again.');
-                console.error('Credentials check error:', error);
+                alert('Error sending OTP. Please try again.');
+                console.error('OTP Error:', error);
             } finally {
                 showSpinner(false);
             }
@@ -250,8 +167,7 @@
                 });
 
                 if (response.ok) {
-                    // Login successful - mark device as trusted
-                    markDeviceTrusted(email);
+                    // Login successful
                     window.location.reload();
                 } else {
                     const data = await response.json();
@@ -292,31 +208,13 @@
             e.preventDefault();
             const email = emailInput.value;
             if (email) {
-                try {
-                    const response = await fetch('/auth/send-otp', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                        },
-                        body: JSON.stringify({ email: email })
-                    });
-
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        this.textContent = 'OTP Sent!';
-                        this.disabled = true;
-                        setTimeout(() => {
-                            this.textContent = 'Resend OTP';
-                            this.disabled = false;
-                        }, 30000); // Re-enable after 30 seconds
-                    } else {
-                        alert('Failed to resend OTP');
-                    }
-                } catch (error) {
-                    alert('Error resending OTP');
-                }
+                await sendOTP(email);
+                this.textContent = 'OTP Sent!';
+                this.disabled = true;
+                setTimeout(() => {
+                    this.textContent = 'Resend OTP';
+                    this.disabled = false;
+                }, 30000); // Re-enable after 30 seconds
             }
         });
     });

@@ -210,21 +210,6 @@
                         </label>
                     </div>
                 </div>
-
-                <!-- Testing Policy Notice -->
-                <div class="alert alert-info mx-auto" style="max-width: 600px;">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <h6 class="alert-heading mb-1">🚀 Start Testing for Just $5</h6>
-                            <small>Try our Pay-as-you-go plan with 200K tokens. No refunds, but you can upgrade anytime!</small>
-                        </div>
-                        <div class="col-md-4 text-end">
-                            <button class="btn btn-sm btn-primary" onclick="document.getElementById('plans').scrollIntoView({behavior: 'smooth'}); document.querySelector('[onclick*=\'payg\']')?.focus();">
-                                View PAYG Plan
-                            </button>
-                        </div>
-                    </div>
-                </div>
             </div>
             <div class="row">
                 @php
@@ -243,14 +228,10 @@
                 @php if(!isset($plans) || !($plans instanceof \Illuminate\Support\Collection)) { $plans = collect(); } @endphp
                 @forelse($plans as $plan)
                     <div class="col-lg-3 col-md-6 mb-4">
-                        <div class="card h-100 {{ $plan->slug === 'pro' ? 'border-primary' : ($plan->slug === 'payg' ? 'border-success' : '') }}">
+                        <div class="card h-100 {{ $plan->slug === 'pro' ? 'border-primary' : '' }}">
                             @if($plan->slug === 'pro')
                                 <div class="card-header bg-primary text-white text-center">
                                     <span class="badge bg-warning text-dark">{{ __('common.most_popular') }}</span>
-                                </div>
-                            @elseif($plan->slug === 'payg')
-                                <div class="card-header bg-success text-white text-center">
-                                    <span class="badge bg-light text-success">🚀 Test Drive</span>
                                 </div>
                             @endif
                             <div class="card-body text-center">
@@ -295,12 +276,8 @@
                                             </div>
                                         </div>
                                     @elseif($plan->slug === 'payg')
-                                        <div class="h3 text-success">${{ $currency === 'INR' ? '₹500' : '5' }}</div>
-                                        <small class="text-muted">
-                                            <strong>Perfect for Testing</strong><br>
-                                            200K tokens included<br>
-                                            <span class="text-danger">No refunds</span>
-                                        </small>
+                                        <div class="h3">{{ $currencySymbol }}5</div>
+                                        <small class="text-muted">Minimum charge (200k tokens)</small>
                                     @else
                                         <div class="h3">Custom</div>
                                         @php
@@ -390,76 +367,8 @@
         </div>
     </section>
 
-    <!-- FAQ Section -->
-    <section class="py-5 bg-light">
-        <div class="container">
-            <div class="text-center mb-5">
-                <h2>Frequently Asked Questions</h2>
-                <p class="lead">Important information about our testing and refund policy</p>
-            </div>
-            <div class="row justify-content-center">
-                <div class="col-lg-8">
-                    <div class="accordion" id="faqAccordion">
-                        <div class="accordion-item">
-                            <h2 class="accordion-header" id="faq1">
-                                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse1">
-                                    <strong>🚀 Can I test your service before committing to a larger plan?</strong>
-                                </button>
-                            </h2>
-                            <div id="collapse1" class="accordion-collapse collapse show" data-bs-parent="#faqAccordion">
-                                <div class="accordion-body">
-                                    <strong>Yes! Start with our Pay-as-you-go plan for just $5 (₹500).</strong> 
-                                    You'll get 200,000 tokens to thoroughly test our AI chat system. This is perfect for evaluating our service quality, response accuracy, and integration capabilities before upgrading to a higher plan.
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="accordion-item">
-                            <h2 class="accordion-header" id="faq2">
-                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse2">
-                                    <strong>❌ Do you offer refunds?</strong>
-                                </button>
-                            </h2>
-                            <div id="collapse2" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                                <div class="accordion-body">
-                                    <strong class="text-danger">No, we do not offer refunds.</strong> However, we encourage you to test our service with the affordable $5 Pay-as-you-go plan first. This gives you ample tokens to evaluate our AI quality and features. If satisfied, you can then upgrade to any higher plan that suits your needs.
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="accordion-item">
-                            <h2 class="accordion-header" id="faq3">
-                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse3">
-                                    <strong>📈 Can I upgrade my plan anytime?</strong>
-                                </button>
-                            </h2>
-                            <div id="collapse3" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                                <div class="accordion-body">
-                                    <strong>Absolutely!</strong> You can upgrade from any plan to a higher tier at any time. Unused tokens from your current plan will be credited to your new plan. This makes it risk-free to start small with our Pay-as-you-go option and scale up as your needs grow.
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="accordion-item">
-                            <h2 class="accordion-header" id="faq4">
-                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse4">
-                                    <strong>🔢 What are tokens and how many do I need?</strong>
-                                </button>
-                            </h2>
-                            <div id="collapse4" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                                <div class="accordion-body">
-                                    Tokens are units of AI processing. Roughly, 1 token ≈ 0.75 words. A typical customer question and AI response uses about 100-300 tokens. With 200K tokens in our $5 test plan, you can handle approximately <strong>600-2000 customer conversations</strong> - plenty for thorough testing!
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <!-- Blog Section -->
-    <section class="py-5">
+    <section class="py-5 bg-light">
         <div class="container">
             <div class="text-center mb-5">
                 <h2>{{ __('common.blog_latest_title') }}</h2>
@@ -768,48 +677,6 @@
             const finalPlanId = selectedPlanId || planFromQuery;
             const finalProvider = paymentProvider || providerFromQuery;
             const finalCycle = cycleFromQuery;
-
-            // Check if user just registered and selected a plan (from server session)
-            @if(session('plan_selected') && session('auto_payment'))
-                const registeredPlanSlug = '{{ session('plan_selected') }}';
-                console.log('User just registered with plan:', registeredPlanSlug);
-                
-                // Find the plan ID by slug
-                const planButtons = document.querySelectorAll('[onclick*="createSubscription"], [onclick*="createRazorpaySubscription"]');
-                let targetPlanId = null;
-                
-                planButtons.forEach(button => {
-                    const onclick = button.getAttribute('onclick');
-                    if (onclick) {
-                        const match = onclick.match(/\((\d+)\)/);
-                        if (match) {
-                            const planId = match[1];
-                            // Check if this button is for the registered plan
-                            const card = button.closest('.card');
-                            if (card && card.innerHTML.includes(registeredPlanSlug)) {
-                                targetPlanId = planId;
-                            }
-                        }
-                    }
-                });
-
-                if (targetPlanId) {
-                    // Auto-scroll to plans section
-                    document.getElementById('plans').scrollIntoView({ behavior: 'smooth' });
-                    
-                    // Show a confirmation dialog and auto-trigger payment
-                    setTimeout(() => {
-                        if (confirm('Welcome! Ready to complete your {{ ucfirst(session('plan_selected')) }} plan subscription?')) {
-                            // Determine payment provider based on location
-                            @if(app(\App\Services\LocationService::class)->isFromIndia())
-                                createRazorpaySubscription(targetPlanId);
-                            @else
-                                createSubscription(targetPlanId);
-                            @endif
-                        }
-                    }, 1500);
-                }
-            @endif
 
             if (resumeFromQuery && finalPlanId && finalProvider) {
                 // Set billing cycle in UI

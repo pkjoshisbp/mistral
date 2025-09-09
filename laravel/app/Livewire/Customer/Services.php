@@ -4,7 +4,9 @@ namespace App\Livewire\Customer;
 
 use Livewire\Component;
 use App\Models\OrganizationData;
+use App\Models\Organization;
 use App\Services\AiAgentService;
+use Illuminate\Support\Facades\Log;
 
 class Services extends Component
 {
@@ -51,6 +53,7 @@ class Services extends Component
     {
         $this->validate();
         $orgId = $this->orgId();
+        
         try {
             $content = $this->composeContent();
             $record = OrganizationData::create([
@@ -69,26 +72,24 @@ class Services extends Component
                     'type' => 'manual_entry'
                 ]
             ]);
-            $ai = new AiAgentService();
-            $vector = $ai->embed($content . ' ' . ($this->keywords ?? ''));
-            if ($vector) {
-                $collection = 'org_' . $orgId . '_data';
-                $payload = $record->metadata;
-                $payload['content'] = $content;
-                $payload['org_id'] = $orgId;
-                $payload['id'] = $record->id;
-                $ai->addToQdrant($collection, $vector, $payload, $record->id);
-            }
-            session()->flash('message','Service added');
+            
+            // Sync to Qdrant using new unified system
+            $this->syncServiceToQdrant($record);
+            
+            session()->flash('message','Service added and synced to AI system');
             $this->resetForm();
             $this->showForm = false;
-        } catch (\Throwable $e) { session()->flash('error','Add failed: '.$e->getMessage()); }
+        } catch (\Throwable $e) { 
+            session()->flash('error','Add failed: '.$e->getMessage()); 
+            Log::error('Customer service create error', ['error' => $e->getMessage()]);
+        }
     }
 
     public function edit($id)
     {
         $r = OrganizationData::where('organization_id',$this->orgId())->find($id);
         if(!$r) return;
+        
         $this->editingId = $id;
         $this->name = $r->name;
         $this->description = $r->description;
@@ -107,45 +108,143 @@ class Services extends Component
         $this->validate();
         $r = OrganizationData::where('organization_id',$this->orgId())->find($this->editingId);
         if(!$r) return;
+        
         try {
             $content = $this->composeContent();
             $metadata = [
-                'category'=>$this->category,
-                'price'=>$this->price,
-                'requirements'=>$this->requirements,
-                'duration'=>$this->duration,
-                'availability'=>$this->availability,
-                'keywords'=>$this->keywords,
-                'type'=>'manual_entry'
+                'category' => $this->category,
+                'price' => $this->price,
+                'requirements' => $this->requirements,
+                'duration' => $this->duration,
+                'availability' => $this->availability,
+                'keywords' => $this->keywords,
+                'type' => 'manual_entry'
             ];
+            
             $r->update([
-                'name'=>$this->name,
-                'description'=>$this->description,
-                'content'=>$content,
-                'metadata'=>$metadata
+                'name' => $this->name,
+                'description' => $this->description,
+                'content' => $content,
+                'metadata' => $metadata
             ]);
-            $ai = new AiAgentService();
-            $vector = $ai->embed($content . ' ' . ($this->keywords ?? ''));
-            if ($vector) {
-                $collection = 'org_' . $this->orgId() . '_data';
-                $payload = $metadata; $payload['content']=$content; $payload['org_id']=$this->orgId(); $payload['id']=$r->id;
-                $ai->addToQdrant($collection,$vector,$payload,$r->id);
-            }
-            session()->flash('message','Service updated');
+            
+            // Sync to Qdrant using new unified system
+            $this->syncServiceToQdrant($r);
+            
+            session()->flash('message','Service updated and synced to AI system');
             $this->resetForm();
-            $this->showForm=false;
-        } catch(\Throwable $e){ session()->flash('error','Update failed: '.$e->getMessage()); }
+            $this->showForm = false;
+        } catch (\Throwable $e) { 
+            session()->flash('error','Update failed: '.$e->getMessage());
+            Log::error('Customer service update error', ['error' => $e->getMessage()]);
+        }
     }
 
     public function delete($id)
     {
         $r = OrganizationData::where('organization_id',$this->orgId())->find($id);
-        if(!$r) return; $org = $this->orgId();
-        try { $r->delete(); $ai=new AiAgentService(); $collection='org_'.$org.'_data'; $ai->deleteFromQdrant($collection,$id); session()->flash('message','Deleted'); } catch(\Throwable $e){ session()->flash('error','Delete failed: '.$e->getMessage()); }
+        if(!$r) return;
+        
+        try {
+            $organization = Organization::find($r->organization_id);
+            $ai = new AiAgentService();
+            
+            // Delete from Qdrant using new unified system
+            if ($organization) {
+                $result = $ai->deleteDataFromQdrant($organization->slug, 'service_' . $r->id);
+                Log::info('Customer service deleted from Qdrant', [
+                    'service_id' => $r->id,
+                    'organization' => $organization->slug,
+                    'result' => $result
+                ]);
+            }
+            
+            // Delete from database
+            $r->delete();
+            
+            session()->flash('message','Service deleted and removed from AI system');
+        } catch (\Throwable $e) { 
+            session()->flash('error','Delete failed: '.$e->getMessage());
+            Log::error('Customer service delete error', ['error' => $e->getMessage()]);
+        }
     }
 
-    private function composeContent(): string
-    { return "Service: {$this->name}\nDescription: {$this->description}\nPrice: {$this->price}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}"; }
+    /**
+     * Sync service to Qdrant using unified system
+     */
+    private function syncServiceToQdrant($service)
+    {
+        Log::info('>>> CUSTOMER syncServiceToQdrant called', ['service_id' => $service->id, 'name' => $service->name]);
+        
+        try {
+            $organization = Organization::find($service->organization_id);
+            if (!$organization) {
+                Log::warning('Customer service sync failed - no organization', ['service_id' => $service->id]);
+                return;
+            }
+            
+            $aiService = new AiAgentService();
+            
+            $items = [
+                [
+                    'id' => "service_{$service->id}",
+                    'title' => $service->name,
+                    'content' => $service->content,
+                    'category' => $service->metadata['category'] ?? 'integration',
+                    'metadata' => [
+                        'table_id' => $service->id,
+                        'updated_at' => $service->updated_at->toISOString(),
+                        'price' => $service->metadata['price'] ?? '',
+                        'requirements' => $service->metadata['requirements'] ?? '',
+                        'duration' => $service->metadata['duration'] ?? '',
+                        'availability' => $service->metadata['availability'] ?? '',
+                        'keywords' => $service->metadata['keywords'] ?? '',
+                    ]
+                ]
+            ];
+            
+            Log::info('>>> CUSTOMER About to call storeDataToQdrant for service', [
+                'service_id' => $service->id,
+                'organization_slug' => $organization->slug,
+                'name' => $service->name,
+                'items' => $items
+            ]);
+            
+            $result = $aiService->storeDataToQdrant($organization->slug, 'service', $items);
+            
+            Log::info('>>> CUSTOMER storeDataToQdrant returned for service', [
+                'service_id' => $service->id,
+                'result' => $result
+            ]);
 
-    public function render(){ return view('livewire.customer.services')->layout('layouts.customer'); }
+            if ($result && $result['success'] && $result['successful_stores'] > 0) {
+                Log::info('Customer service auto-sync successful', [
+                    'service_id' => $service->id,
+                    'organization_slug' => $organization->slug
+                ]);
+            } else {
+                Log::warning('Customer service auto-sync failed', [
+                    'service_id' => $service->id,
+                    'organization_slug' => $organization->slug,
+                    'result' => $result
+                ]);
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('Customer service auto-sync exception', [
+                'service_id' => $service->id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    private function composeContent()
+    {
+        return "Service: {$this->name}\nDescription: {$this->description}\nPrice: {$this->price}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}";
+    }
+
+    public function render()
+    {
+        return view('livewire.customer.services')->layout('layouts.customer');
+    }
 }

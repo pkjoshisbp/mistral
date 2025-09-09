@@ -208,7 +208,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/data-sources', \App\Livewire\Customer\DataSources::class)->name('data-sources');
         Route::get('/organization', \App\Livewire\Customer\OrganizationManager::class)->name('organization');
         Route::get('/services', \App\Livewire\Customer\Services::class)->name('services');
-        Route::get('/faqs', \App\Livewire\Customer\OrganizationFaqManager::class)->name('faqs');
+        Route::get('/faqs', \App\Livewire\Customer\Faqs::class)->name('faqs');
         Route::get('/general-info', \App\Livewire\Customer\GeneralInfo::class)->name('general-info');
         Route::get('/documents', \App\Livewire\Customer\Documents::class)->name('documents');
         Route::get('/website-crawler', \App\Livewire\Customer\WebsiteCrawler::class)->name('crawler');
@@ -299,21 +299,6 @@ Route::prefix('razorpay')->name('razorpay.')->group(function () {
 });
 
 // OTP Routes
-Route::post('/auth/check-credentials', function(\Illuminate\Http\Request $request) {
-    $request->validate([
-        'email' => 'required|email',
-        'password' => 'required|string'
-    ]);
-
-    $credentials = $request->only('email', 'password');
-    
-    if (\Illuminate\Support\Facades\Auth::validate($credentials)) {
-        return response()->json(['valid' => true]);
-    }
-    
-    return response()->json(['valid' => false], 401);
-})->name('auth.check-credentials');
-
 Route::post('/auth/send-otp', function(\Illuminate\Http\Request $request) {
     $request->validate([
         'email' => 'required|email|exists:users,email'

@@ -11,8 +11,9 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // This migration was already handled in data sync
-        // No database changes needed
+        Schema::table('organization_faqs', function (Blueprint $table) {
+            $table->text('keywords')->nullable()->after('category');
+        });
     }
 
     /**
@@ -20,6 +21,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // No rollback needed
+        Schema::table('organization_faqs', function (Blueprint $table) {
+            $table->dropColumn('keywords');
+        });
     }
 };
