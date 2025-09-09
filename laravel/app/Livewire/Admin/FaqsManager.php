@@ -5,13 +5,16 @@ namespace App\Livewire\Admin;
 use Livewire\Component;
 use App\Models\Organization;
 use App\Models\OrganizationFaq;
-use App\Services\AiAgentService;
+use App\Services\UnifiedSyncService;
 
 class FaqsManager extends Component
 {
     public $selectedOrganization = '';
     public $showForm = false;
     public $editingId = null;
+    public $syncStatus = '';
+    public $syncMessage = '';
+    public $isSyncing = false;
 
     public $question = '';
     public $answer = '';
@@ -48,6 +51,15 @@ class FaqsManager extends Component
         $this->question = $this->answer = $this->category = $this->keywords = '';
         $this->is_active = true;
         $this->sort_order = 0;
+        $this->showForm = false;
+        $this->clearSyncStatus();
+    }
+
+    public function clearSyncStatus()
+    {
+        $this->syncStatus = '';
+        $this->syncMessage = '';
+        $this->isSyncing = false;
     }
 
     public function create()
@@ -62,22 +74,11 @@ class FaqsManager extends Component
                 'sort_order' => $this->sort_order ?? 0,
                 'is_active' => $this->is_active
             ]);
-            // Embed into Qdrant
-            $ai = new AiAgentService();
-            $content = "FAQ Question: {$this->question}\nAnswer: {$this->answer}\nCategory: {$this->category}";
-            $vector = $ai->embed($content . ' ' . ($this->keywords ?? ''));
-            if ($vector) {
-                $collection = 'org_' . $this->selectedOrganization . '_data';
-                $payload = [
-                    'content' => $content,
-                    'org_id' => $this->selectedOrganization,
-                    'type' => 'faq',
-                    'keywords' => $this->keywords,
-                    'id' => $faq->id
-                ];
-                $ai->addToQdrant($collection, $vector, $payload, $faq->id);
-            }
-            session()->flash('message', 'FAQ added');
+            
+            // Auto-sync after creation
+            $this->autoSyncAfterChange();
+            
+            session()->flash('message', 'FAQ added and synced successfully');
             $this->resetForm();
             $this->showForm = false;
         } catch (\Throwable $e) {
@@ -113,21 +114,11 @@ class FaqsManager extends Component
                 'sort_order' => $this->sort_order ?? 0,
                 'is_active' => $this->is_active
             ]);
-            $ai = new AiAgentService();
-            $content = "FAQ Question: {$this->question}\nAnswer: {$this->answer}\nCategory: {$this->category}";
-            $vector = $ai->embed($content . ' ' . ($this->keywords ?? ''));
-            if ($vector) {
-                $collection = 'org_' . $this->selectedOrganization . '_data';
-                $payload = [
-                    'content' => $content,
-                    'org_id' => $this->selectedOrganization,
-                    'type' => 'faq',
-                    'keywords' => $this->keywords,
-                    'id' => $f->id
-                ];
-                $ai->addToQdrant($collection, $vector, $payload, $f->id);
-            }
-            session()->flash('message', 'FAQ updated');
+            
+            // Auto-sync after update
+            $this->autoSyncAfterChange();
+            
+            session()->flash('message', 'FAQ updated and synced successfully');
             $this->resetForm();
             $this->showForm = false;
         } catch (\Throwable $e) {
@@ -142,12 +133,64 @@ class FaqsManager extends Component
         $orgId = $f->organization_id;
         try {
             $f->delete();
-            $ai = new AiAgentService();
-            $collection = 'org_' . $orgId . '_data';
-            $ai->deleteFromQdrant($collection, $id);
-            session()->flash('message', 'Deleted');
+            
+            // Auto-sync after deletion
+            $this->selectedOrganization = $orgId;
+            $this->autoSyncAfterChange();
+            
+            session()->flash('message', 'FAQ deleted and synced successfully');
         } catch (\Throwable $e) {
             session()->flash('error', 'Delete failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Manual sync button action
+     */
+    public function manualSync()
+    {
+        if (!$this->selectedOrganization) {
+            session()->flash('error', 'Please select an organization first');
+            return;
+        }
+
+        $this->isSyncing = true;
+        $this->syncStatus = 'syncing';
+        $this->syncMessage = 'Syncing FAQs to AI system...';
+
+        try {
+            $syncService = new UnifiedSyncService();
+            $result = $syncService->syncOrganization($this->selectedOrganization, ['faqs']);
+
+            if ($result['success']) {
+                $this->syncStatus = 'success';
+                $this->syncMessage = $result['message'] . " ({$result['total_synced']} items synced)";
+                session()->flash('message', $this->syncMessage);
+            } else {
+                $this->syncStatus = 'error';
+                $this->syncMessage = 'Sync failed: ' . $result['message'];
+                session()->flash('error', $this->syncMessage);
+            }
+        } catch (\Exception $e) {
+            $this->syncStatus = 'error';
+            $this->syncMessage = 'Sync failed: ' . $e->getMessage();
+            session()->flash('error', $this->syncMessage);
+        }
+
+        $this->isSyncing = false;
+    }
+
+    /**
+     * Auto-sync after data changes
+     */
+    private function autoSyncAfterChange()
+    {
+        try {
+            $syncService = new UnifiedSyncService();
+            $syncService->syncOrganization($this->selectedOrganization, ['faqs']);
+        } catch (\Exception $e) {
+            // Log the error but don't interrupt user flow
+            \Log::error('Auto-sync failed after FAQ change: ' . $e->getMessage());
         }
     }
 

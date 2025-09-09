@@ -648,6 +648,137 @@ async def sync_faqs_to_qdrant(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to sync FAQs: {str(e)}")
 
 
+@app.post("/sync-unified-data")
+async def sync_unified_data(request: Request):
+    """Unified sync endpoint for all organization data types (FAQs, General Info, etc.)"""
+    try:
+        data = await request.json()
+        organization_slug = data["organization_slug"]
+        organization_id = data["organization_id"]
+        all_data = data["data"]  # Mixed array of different data types
+        clear_existing = data.get("clear_existing", True)
+        
+        logging.info(f"Syncing {len(all_data)} unified data items to collection: {organization_slug}")
+        
+        # Ensure collection exists
+        try:
+            qdrant.create_collection(
+                collection_name=organization_slug,
+                vectors_config=VectorParams(size=768, distance=Distance.COSINE)
+            )
+            logging.info(f"Created collection: {organization_slug}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                logging.info(f"Collection {organization_slug} already exists")
+            else:
+                raise e
+        
+        # Clear existing data if requested (prevents duplicates)
+        if clear_existing:
+            try:
+                # Delete all points in the collection
+                qdrant.delete(
+                    collection_name=organization_slug,
+                    points_selector={"filter": {"must": [{"key": "organization_id", "match": {"value": organization_id}}]}}
+                )
+                logging.info(f"Cleared existing data from {organization_slug}")
+            except Exception as e:
+                logging.warning(f"Could not clear existing data: {e}")
+        
+        # Process data in batches
+        batch_size = 10
+        synced_count = 0
+        
+        for i in range(0, len(all_data), batch_size):
+            batch = all_data[i:i + batch_size]
+            points = []
+            
+            for item in batch:
+                try:
+                    # Create text for embedding based on data type
+                    if item['type'] == 'faq':
+                        embed_text = f"Question: {item['question']} Answer: {item['answer']}"
+                        if item.get('keywords'):
+                            embed_text += f" Keywords: {item['keywords']}"
+                    elif item['type'] == 'general_info':
+                        embed_text = f"Title: {item['title']} Content: {item['content']}"
+                        if item.get('keywords'):
+                            embed_text += f" Keywords: {item['keywords']}"
+                    else:
+                        embed_text = item.get('content', str(item))
+                    
+                    # Get embedding
+                    embedding = await get_embedding_with_fallback(embed_text)
+                    if not embedding:
+                        logging.error(f"Failed to get embedding for {item['type']} {item['id']}")
+                        continue
+                    
+                    # Create point with unique ID
+                    point_id = item['id']  # Should be unique like 'faq_123' or 'info_456'
+                    
+                    # Create payload
+                    payload = {
+                        "type": item['type'],
+                        "organization_id": organization_id,
+                        "database_id": item.get('database_id'),
+                        "category": item.get('category', 'General')
+                    }
+                    
+                    # Add type-specific fields
+                    if item['type'] == 'faq':
+                        payload.update({
+                            "question": item['question'],
+                            "answer": item['answer'],
+                            "keywords": item.get('keywords', ''),
+                            "sort_order": item.get('sort_order', 0),
+                            "text": embed_text
+                        })
+                    elif item['type'] == 'general_info':
+                        payload.update({
+                            "title": item['title'],
+                            "content": item['content'],
+                            "description": item.get('description', ''),
+                            "keywords": item.get('keywords', ''),
+                            "text": embed_text
+                        })
+                    
+                    points.append(PointStruct(
+                        id=point_id,
+                        vector=embedding,
+                        payload=payload
+                    ))
+                    
+                except Exception as e:
+                    logging.error(f"Failed to process item {item.get('id', 'unknown')}: {e}")
+                    continue
+            
+            # Upload batch to Qdrant
+            if points:
+                try:
+                    qdrant.upsert(
+                        collection_name=organization_slug,
+                        points=points
+                    )
+                    synced_count += len(points)
+                    logging.info(f"Synced batch of {len(points)} items to {organization_slug}")
+                except Exception as e:
+                    logging.error(f"Failed to upload batch to Qdrant: {e}")
+        
+        logging.info(f"Completed unified sync: {synced_count}/{len(all_data)} items synced to {organization_slug}")
+        
+        return {
+            "status": "success",
+            "message": f"Synced {synced_count} items to collection {organization_slug}",
+            "synced_count": synced_count,
+            "total_items": len(all_data),
+            "organization_slug": organization_slug
+        }
+        
+    except Exception as e:
+        logging.error(f"Unified sync error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync unified data: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8111, reload=False)
