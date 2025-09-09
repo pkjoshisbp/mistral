@@ -4,13 +4,13 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\EmailOtp;
 use App\Providers\RouteServiceProvider;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rules;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -37,27 +37,15 @@ class RegisteredUserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
+            'otp' => ['required_if:has_otp,true', 'string', 'size:6'],
         ]);
 
-        // Validate hCaptcha if configured
-        if (config('services.hcaptcha.site_key') && config('services.hcaptcha.secret_key')) {
-            $request->validate([
-                'h-captcha-response' => 'required|string',
-            ]);
-
-            // Verify hCaptcha with server-side validation
-            $hcaptchaResponse = $request->input('h-captcha-response');
-            $verifyResponse = Http::asForm()->post('https://hcaptcha.com/siteverify', [
-                'secret' => config('services.hcaptcha.secret_key'),
-                'response' => $hcaptchaResponse,
-                'remoteip' => $request->ip(),
-            ]);
-
-            $hcaptchaResult = $verifyResponse->json();
-            
-            if (!$hcaptchaResult['success']) {
+        // Validate OTP if provided
+        if ($request->filled('otp')) {
+            $validationResult = $this->validateOtp($request);
+            if (!$validationResult['valid']) {
                 throw ValidationException::withMessages([
-                    'h-captcha-response' => ['The hCaptcha verification failed. Please try again.'],
+                    'otp' => [$validationResult['message']],
                 ]);
             }
         }
@@ -82,5 +70,48 @@ class RegisteredUserController extends Controller
         }
 
         return redirect(RouteServiceProvider::HOME);
+    }
+
+    /**
+     * Validate OTP for registration
+     */
+    private function validateOtp(Request $request): array
+    {
+        $otp = $request->input('otp');
+        $email = $request->input('email');
+
+        if (!$otp || !$email) {
+            return [
+                'valid' => false,
+                'message' => 'OTP and email are required.'
+            ];
+        }
+
+        $emailOtp = EmailOtp::where('email', $email)
+            ->where('otp', $otp)
+            ->where('expires_at', '>', now())
+            ->first();
+
+        if (!$emailOtp) {
+            return [
+                'valid' => false,
+                'message' => 'Invalid or expired OTP.'
+            ];
+        }
+
+        if ($emailOtp->verified_at) {
+            return [
+                'valid' => false,
+                'message' => 'OTP has already been used.'
+            ];
+        }
+
+        // Mark OTP as verified
+        $emailOtp->markAsVerified();
+
+        return [
+            'valid' => true,
+            'message' => 'OTP verified successfully.'
+        ];
     }
 }

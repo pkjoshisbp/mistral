@@ -6,7 +6,6 @@ use Illuminate\Auth\Events\Lockout;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -23,7 +22,7 @@ class LoginRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\Rule|array|string>
+     * @return array<string, \Illuminate\Contracts\Validation\Rule|array|string
      */
     public function rules(): array
     {
@@ -53,20 +52,8 @@ class LoginRequest extends FormRequest
             // Validate OTP if provided
             if ($this->has('otp')) {
                 $this->validateOtp($validator);
-            } else {
-                // Check if user needs OTP (first time login or not verified in localStorage)
-                $this->checkOtpRequirement($validator);
             }
         });
-    }
-
-    /**
-     * Check if OTP is required for this login attempt
-     */
-    private function checkOtpRequirement($validator): void
-    {
-        // For now, we'll always require OTP on first login attempt
-        // The frontend will handle localStorage checking
     }
 
     /**
@@ -76,6 +63,12 @@ class LoginRequest extends FormRequest
     {
         $email = $this->input('email');
         $otp = $this->input('otp');
+
+        // Check if OTP is provided and not empty
+        if (!$otp || empty(trim($otp))) {
+            $validator->errors()->add('otp', 'The OTP code is required.');
+            return;
+        }
 
         $otpRecord = \App\Models\EmailOtp::verifyOtp($email, $otp, 'login');
 
@@ -93,12 +86,25 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
-        if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
-            RateLimiter::hit($this->throttleKey());
+        if ($this->has('otp')) {
+            // OTP verification was already done in withValidator
+            // Now attempt to authenticate with email/password
+            if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+                RateLimiter::hit($this->throttleKey());
 
-            throw ValidationException::withMessages([
-                'email' => trans('auth.failed'),
-            ]);
+                throw ValidationException::withMessages([
+                    'email' => trans('auth.failed'),
+                ]);
+            }
+        } else {
+            // Regular authentication without OTP
+            if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+                RateLimiter::hit($this->throttleKey());
+
+                throw ValidationException::withMessages([
+                    'email' => trans('auth.failed'),
+                ]);
+            }
         }
 
         RateLimiter::clear($this->throttleKey());

@@ -551,6 +551,103 @@ async def warm_model():
         logging.error(f"Model warmup failed: {str(e)}")
         pass
 
+@app.post("/sync-faqs")
+async def sync_faqs_to_qdrant(request: Request):
+    """Sync FAQs to Qdrant collection for an organization"""
+    try:
+        data = await request.json()
+        organization_slug = data["organization_slug"]
+        organization_id = data["organization_id"]
+        faqs = data["faqs"]
+        
+        logging.info(f"Syncing {len(faqs)} FAQs to collection: {organization_slug}")
+        
+        # Ensure collection exists
+        try:
+            qdrant.create_collection(
+                collection_name=organization_slug,
+                vectors_config=VectorParams(size=768, distance=Distance.COSINE)
+            )
+            logging.info(f"Created collection: {organization_slug}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                logging.info(f"Collection {organization_slug} already exists")
+            else:
+                raise e
+        
+        # Clear existing FAQ points for this organization
+        try:
+            # Delete existing FAQ points
+            qdrant.delete(
+                collection_name=organization_slug,
+                points_selector={"filter": {"must": [{"key": "type", "match": {"value": "faq"}}]}}
+            )
+            logging.info(f"Cleared existing FAQ points from {organization_slug}")
+        except Exception as e:
+            logging.warning(f"Could not clear existing points: {e}")
+        
+        # Process FAQs in batches
+        batch_size = 10
+        synced_count = 0
+        
+        for i in range(0, len(faqs), batch_size):
+            batch = faqs[i:i + batch_size]
+            points = []
+            
+            for faq in batch:
+                try:
+                    # Create combined text for embedding
+                    combined_text = f"Question: {faq['question']} Answer: {faq['answer']}"
+                    
+                    # Get embedding
+                    embedding = await get_embedding_with_fallback(combined_text)
+                    if not embedding:
+                        logging.error(f"Failed to get embedding for FAQ {faq['id']}")
+                        continue
+                    
+                    # Create point
+                    point_id = f"faq_{faq['id']}"
+                    points.append(PointStruct(
+                        id=point_id,
+                        vector=embedding,
+                        payload={
+                            "type": "faq",
+                            "question": faq["question"],
+                            "answer": faq["answer"],
+                            "category": faq.get("category", "General"),
+                            "organization_id": organization_id,
+                            "faq_id": faq["id"]
+                        }
+                    ))
+                    
+                except Exception as e:
+                    logging.error(f"Error processing FAQ {faq['id']}: {e}")
+                    continue
+            
+            # Upsert batch to Qdrant
+            if points:
+                try:
+                    qdrant.upsert(collection_name=organization_slug, points=points)
+                    synced_count += len(points)
+                    logging.info(f"Synced batch of {len(points)} FAQs to {organization_slug}")
+                except Exception as e:
+                    logging.error(f"Error upserting batch: {e}")
+                    raise e
+        
+        logging.info(f"Successfully synced {synced_count} FAQs to collection {organization_slug}")
+        
+        return {
+            "status": "success",
+            "message": f"Synced {synced_count} FAQs to collection {organization_slug}",
+            "synced_count": synced_count,
+            "organization_slug": organization_slug
+        }
+        
+    except Exception as e:
+        logging.error(f"FAQ sync error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync FAQs: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8111, reload=False)

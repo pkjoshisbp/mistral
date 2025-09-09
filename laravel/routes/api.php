@@ -16,6 +16,14 @@ use Illuminate\Support\Facades\Route;
 
 
 use App\Http\Controllers\Api\LeadController;
+use App\Http\Controllers\Api\FaqSyncController;
 
 Route::post('/leads', [LeadController::class, 'store']);
 Route::get('/leads', [LeadController::class, 'index']);
+
+// FAQ Sync Routes (protected by API middleware)
+Route::prefix('faq')->group(function () {
+    Route::post('/sync', [FaqSyncController::class, 'syncFaqs']);
+    Route::post('/import-csv', [FaqSyncController::class, 'importFromCsv']);
+    Route::get('/stats/{organizationId}', [FaqSyncController::class, 'getFaqStats']);
+});
