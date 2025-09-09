@@ -64,9 +64,14 @@ class RegisteredUserController extends Controller
         // Check if a plan was selected during registration
         $selectedPlan = $request->get('plan');
         if ($selectedPlan && $selectedPlan !== 'enterprise') {
-            // Store the selected plan in session for after login redirect
-            session(['selected_plan' => $selectedPlan]);
-            return redirect()->route('customer.subscription')->with('plan', $selectedPlan);
+            // Store the selected plan for JavaScript to pick up and auto-trigger payment
+            session(['selected_plan_slug' => $selectedPlan]);
+            // Redirect to homepage with plan selection info
+            return redirect()->route('home')->with([
+                'plan_selected' => $selectedPlan,
+                'auto_payment' => true,
+                'message' => 'Registration successful! Please complete your subscription payment.'
+            ]);
         }
 
         return redirect(RouteServiceProvider::HOME);
