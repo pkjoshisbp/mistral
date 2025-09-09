@@ -26,4 +26,9 @@ Route::prefix('faq')->group(function () {
     Route::post('/sync', [FaqSyncController::class, 'syncFaqs']);
     Route::post('/import-csv', [FaqSyncController::class, 'importFromCsv']);
     Route::get('/stats/{organizationId}', [FaqSyncController::class, 'getFaqStats']);
+    
+    // Auto-sync endpoints
+    Route::post('/store', [FaqSyncController::class, 'storeSingleFaq']);
+    Route::delete('/delete', [FaqSyncController::class, 'deleteSingleFaq']);
+    Route::post('/manual-sync', [FaqSyncController::class, 'manualSync']);
 });

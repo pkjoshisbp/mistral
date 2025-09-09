@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 
 class FaqSyncController extends Controller
 {
-    private $fastApiUrl = 'http://localhost:8111';
+    private $fastApiUrl = 'http://127.0.0.1:8111';  // Correct FastAPI port
     private $qdrantUrl = 'http://127.0.0.1:6333';
 
     /**
@@ -99,49 +99,79 @@ class FaqSyncController extends Controller
     /**
      * Sync organization FAQs to Qdrant via FastAPI
      */
-    public function syncToQdrant(Organization $organization)
+    private function syncToQdrant($organization)
     {
         try {
-            // Get all active FAQs for the organization
-            $faqs = OrganizationFaq::where('organization_id', $organization->id)
-                ->where('is_active', true)
-                ->get();
-
+            $faqs = $organization->faqs()->where('is_active', 1)->get();
+            
             if ($faqs->isEmpty()) {
-                Log::info("No active FAQs found for organization: {$organization->name}");
-                return;
+                return ['success' => true, 'message' => 'No active FAQs to sync'];
             }
 
-            // Prepare data for FastAPI
-            $faqData = $faqs->map(function ($faq) use ($organization) {
-                return [
-                    'id' => $faq->id,
+            $faqData = [];
+            foreach ($faqs as $faq) {
+                $faqData[] = [
+                    'id' => $faq->id,  // Include ID that FastAPI expects
                     'question' => $faq->question,
                     'answer' => $faq->answer,
-                    'category' => $faq->category,
-                    'organization_id' => $organization->id,
-                    'collection_name' => $organization->slug
+                    'category' => $faq->category ?? 'General',
+                    'type' => 'faq',
+                    'organization_id' => $organization->id
                 ];
-            })->toArray();
+            }
 
-            // Call FastAPI to sync with Qdrant
-            $response = Http::timeout(60)->post("{$this->fastApiUrl}/sync-faqs", [
-                'organization_slug' => $organization->slug,
+            // Use the correct organization slug
+            $organizationSlug = $this->getOrganizationSlug($organization);
+
+            $response = Http::timeout(45)->post("{$this->fastApiUrl}/sync-faqs", [
+                'organization_slug' => $organizationSlug,
                 'organization_id' => $organization->id,
                 'faqs' => $faqData
             ]);
 
             if ($response->successful()) {
-                Log::info("Successfully synced {$faqs->count()} FAQs to Qdrant for organization: {$organization->name}");
+                $responseData = $response->json();
+                Log::info("Successfully synced FAQs to Qdrant for {$organization->name}", $responseData);
+                return [
+                    'success' => true,
+                    'message' => $responseData['message'] ?? 'Synced successfully',
+                    'synced_count' => $responseData['synced_count'] ?? count($faqData)
+                ];
             } else {
-                Log::error("Failed to sync FAQs to Qdrant: " . $response->body());
-                throw new \Exception("FastAPI sync failed: " . $response->status());
+                Log::error("Failed to sync to Qdrant: " . $response->body());
+                return [
+                    'success' => false,
+                    'message' => 'Failed to sync to Qdrant: ' . $response->body()
+                ];
             }
 
         } catch (\Exception $e) {
-            Log::error("Qdrant sync error for organization {$organization->name}: " . $e->getMessage());
-            throw $e;
+            Log::error("Qdrant sync error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => 'Sync error: ' . $e->getMessage()
+            ];
         }
+    }
+
+    /**
+     * Get organization slug for Qdrant collection name
+     */
+    private function getOrganizationSlug($organization)
+    {
+        // Use organization slug or generate one
+        if (isset($organization->slug) && $organization->slug) {
+            return $organization->slug;
+        }
+        
+        // Fallback slugs based on organization ID
+        $slugMap = [
+            1 => 'ai-chat-support',
+            2 => 'diagnostic-center', 
+            3 => 'ai-chat-support'
+        ];
+
+        return $slugMap[$organization->id] ?? Str::slug($organization->name ?? 'org-' . $organization->id);
     }
 
     /**
@@ -244,6 +274,126 @@ class FaqSyncController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to get FAQ stats: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Add or update single FAQ and auto-sync to Qdrant
+     */
+    public function storeSingleFaq(Request $request)
+    {
+        $request->validate([
+            'organization_id' => 'required|exists:organizations,id',
+            'question' => 'required|string|max:500',
+            'answer' => 'required|string',
+            'category' => 'nullable|string|max:255',
+            'is_active' => 'boolean'
+        ]);
+
+        try {
+            $organization = Organization::find($request->organization_id);
+            
+            // Update or insert FAQ in database
+            $faq = OrganizationFaq::updateOrCreate(
+                [
+                    'organization_id' => $request->organization_id,
+                    'question' => $request->question
+                ],
+                [
+                    'answer' => $request->answer,
+                    'category' => $request->category,
+                    'is_active' => $request->get('is_active', true),
+                ]
+            );
+
+            // Auto-sync to Qdrant
+            $syncResult = $this->syncToQdrant($organization);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'FAQ saved and synced successfully',
+                'faq' => $faq,
+                'qdrant_sync' => $syncResult
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('FAQ store error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to save FAQ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete FAQ and auto-sync to Qdrant
+     */
+    public function deleteSingleFaq(Request $request)
+    {
+        $request->validate([
+            'organization_id' => 'required|exists:organizations,id',
+            'faq_id' => 'required|exists:organization_faqs,id'
+        ]);
+
+        try {
+            $organization = Organization::find($request->organization_id);
+            $faq = OrganizationFaq::where('id', $request->faq_id)
+                ->where('organization_id', $request->organization_id)
+                ->first();
+
+            if (!$faq) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'FAQ not found'
+                ], 404);
+            }
+
+            $faq->delete();
+
+            // Auto-sync to Qdrant
+            $syncResult = $this->syncToQdrant($organization);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'FAQ deleted and synced successfully',
+                'qdrant_sync' => $syncResult
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('FAQ delete error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete FAQ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Manual sync button endpoint - sync all FAQs for an organization
+     */
+    public function manualSync(Request $request)
+    {
+        $request->validate([
+            'organization_id' => 'required|exists:organizations,id'
+        ]);
+
+        try {
+            $organization = Organization::find($request->organization_id);
+            $result = $this->syncToQdrant($organization);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Manual sync completed successfully',
+                'organization' => $organization->name,
+                'sync_details' => $result
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Manual sync error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Manual sync failed: ' . $e->getMessage()
             ], 500);
         }
     }
