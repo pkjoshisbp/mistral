@@ -4,7 +4,8 @@ namespace App\Livewire\Customer;
 
 use Livewire\Component;
 use Livewire\WithPagination;
-use App\Models\ChatSession;
+use App\Models\ChatConversation;
+use App\Models\ChatMessage;
 use Illuminate\Support\Facades\Auth;
 
 class ChatHistory extends Component
@@ -12,12 +13,11 @@ class ChatHistory extends Component
     use WithPagination;
 
     public $search = '';
-    public $selectedOrganization = '';
     public $dateFrom = '';
     public $dateTo = '';
     public $showDetails = [];
 
-    protected $queryString = ['search', 'selectedOrganization', 'dateFrom', 'dateTo'];
+    protected $queryString = ['search', 'dateFrom', 'dateTo'];
 
     public function mount()
     {
@@ -26,11 +26,6 @@ class ChatHistory extends Component
     }
 
     public function updatedSearch()
-    {
-        $this->resetPage();
-    }
-
-    public function updatedSelectedOrganization()
     {
         $this->resetPage();
     }
@@ -57,7 +52,6 @@ class ChatHistory extends Component
     public function clearFilters()
     {
         $this->search = '';
-        $this->selectedOrganization = '';
         $this->dateFrom = now()->subDays(30)->format('Y-m-d');
         $this->dateTo = now()->format('Y-m-d');
         $this->resetPage();
@@ -65,28 +59,28 @@ class ChatHistory extends Component
 
     public function deleteSession($sessionId)
     {
-        $session = ChatSession::where('id', $sessionId)
-            ->where('user_id', Auth::id())
+        $conversation = ChatConversation::where('id', $sessionId)
+            ->where('organization_id', Auth::user()->organization_id)
             ->first();
 
-        if ($session) {
-            $session->delete();
-            session()->flash('success', 'Chat session deleted successfully.');
+        if ($conversation) {
+            $conversation->delete();
+            session()->flash('success', 'Chat conversation deleted successfully.');
         }
     }
 
     public function exportSession($sessionId)
     {
-        $session = ChatSession::with('messages')
+        $conversation = ChatConversation::with('messages')
             ->where('id', $sessionId)
-            ->where('user_id', Auth::id())
+            ->where('organization_id', Auth::user()->organization_id)
             ->first();
 
-        if ($session) {
+        if ($conversation) {
             // Basic HTML content for PDF/text export
-            $html = view('exports.chat-session', [
-                'session' => $session,
-                'duration' => $this->formatDuration($session->created_at, $session->updated_at)
+            $html = view('exports.chat-conversation', [
+                'conversation' => $conversation,
+                'duration' => $this->formatDuration($conversation->created_at, $conversation->updated_at)
             ])->render();
 
             if (class_exists(\Dompdf\Dompdf::class)) {
@@ -94,13 +88,13 @@ class ChatHistory extends Component
                 $pdf->loadHTML($html)->setPaper('a4', 'portrait');
                 return response()->streamDownload(function() use ($pdf) {
                     echo $pdf->output();
-                }, 'chat-session-' . $sessionId . '.pdf');
+                }, 'chat-conversation-' . $sessionId . '.pdf');
             }
 
             // Fallback to txt export
             return response()->streamDownload(function () use ($html) {
                 echo strip_tags($html);
-            }, 'chat-session-' . $sessionId . '.txt');
+            }, 'chat-conversation-' . $sessionId . '.txt');
         }
     }
 
@@ -115,22 +109,17 @@ class ChatHistory extends Component
 
     public function render()
     {
-        $query = ChatSession::with(['organization', 'messages'])
-            ->where('user_id', Auth::id());
+        $query = ChatConversation::with(['messages'])
+            ->where('organization_id', Auth::user()->organization_id);
 
         if ($this->search) {
             $query->where(function ($q) {
                 $q->whereHas('messages', function ($mq) {
-                    $mq->where('content', 'like', '%' . $this->search . '%');
+                    $mq->where('message', 'like', '%' . $this->search . '%');
                 })
-                ->orWhereHas('organization', function ($oq) {
-                    $oq->where('name', 'like', '%' . $this->search . '%');
-                });
+                ->orWhere('visitor_name', 'like', '%' . $this->search . '%')
+                ->orWhere('visitor_email', 'like', '%' . $this->search . '%');
             });
-        }
-
-        if ($this->selectedOrganization) {
-            $query->where('organization_id', $this->selectedOrganization);
         }
 
         if ($this->dateFrom) {
@@ -141,16 +130,10 @@ class ChatHistory extends Component
             $query->whereDate('created_at', '<=', $this->dateTo);
         }
 
-        $sessions = $query->orderBy('created_at', 'desc')->paginate(10);
-
-        $primary = Auth::user()->primaryOrganization();
-        $organizations = $primary ? 
-            collect([$primary]) : 
-            collect([]);
+        $conversations = $query->orderBy('last_activity_at', 'desc')->paginate(10);
 
         return view('livewire.customer.chat-history', [
-            'sessions' => $sessions,
-            'organizations' => $organizations
+            'conversations' => $conversations
         ])->layout('layouts.customer', [
             'layoutData' => [
                 'title' => 'Chat History'

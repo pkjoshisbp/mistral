@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Organization;
+use App\Models\ChatConversation;
+use App\Models\ChatMessage;
 use App\Services\AiAgentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class WidgetController
 {
@@ -89,6 +92,15 @@ class WidgetController
             $message = $request->input('message');
             $sessionId = $request->input('session_id', uniqid());
             $userInfo = $request->input('user_info', []);
+            $visitorInfo = $request->input('visitor_info', []); // For backward compatibility
+            
+            // Merge user_info and visitor_info
+            $allUserInfo = array_merge($userInfo, $visitorInfo);
+
+            // Extract location information
+            $country = $request->input('country') ?? $allUserInfo['country'] ?? null;
+            $region = $request->input('region') ?? $allUserInfo['region'] ?? null;
+            $location = $request->input('location') ?? $allUserInfo['location'] ?? null;
 
             if (!$message) {
                 return response()->json(['error' => 'Message is required'], 400)
@@ -96,11 +108,12 @@ class WidgetController
             }
 
             // Log lead capture if provided
-            if (!empty($userInfo) && isset($userInfo['name'])) {
+            if (!empty($allUserInfo) && isset($allUserInfo['name'])) {
                 Log::info('Lead captured via widget', [
                     'org_id' => $orgId,
                     'session_id' => $sessionId,
-                    'user_info' => $userInfo
+                    'user_info' => $allUserInfo,
+                    'location' => compact('country', 'region', 'location')
                 ]);
             }
 
@@ -134,10 +147,19 @@ class WidgetController
                 }
             }
 
-            // Create system prompt
+            // Create system prompt with location awareness
             $systemPrompt = "You are a helpful customer service assistant for {$organization->name}. ";
             $systemPrompt .= "Answer questions based on the provided context. Be friendly, helpful, and concise. ";
             $systemPrompt .= "If you don't have specific information, politely say so and offer to help in other ways.\n\n";
+            
+            // Add location context if available
+            if ($country || $region || $location) {
+                $systemPrompt .= "Customer Location: ";
+                if ($country) $systemPrompt .= "Country: {$country} ";
+                if ($region) $systemPrompt .= "Region: {$region} ";
+                if ($location) $systemPrompt .= "Location: {$location} ";
+                $systemPrompt .= "\nPlease provide location-appropriate responses for pricing, availability, and services.\n\n";
+            }
             
             if ($context) {
                 $systemPrompt .= "Context:\n{$context}\n\n";
@@ -151,6 +173,9 @@ class WidgetController
             if (!$aiResponse || !isset($aiResponse['answer'])) {
                 throw new \Exception('Failed to get AI response');
             }
+
+            // Save conversation to database
+            $this->saveConversationToDatabase($organization, $sessionId, $message, $aiResponse['answer'], $allUserInfo, compact('country', 'region', 'location'));
 
             // Log the conversation for analytics
             Log::info('Widget chat', [
@@ -199,5 +224,83 @@ class WidgetController
             'position' => $organization->settings['widget_position'] ?? 'bottom-right',
             'primaryColor' => $organization->settings['primary_color'] ?? '#007bff'
         ])->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    /**
+     * Save conversation to database
+     */
+    private function saveConversationToDatabase($organization, $sessionId, $userMessage, $aiResponse, $userInfo = [], $locationInfo = [])
+    {
+        try {
+            // Find or create conversation
+            $conversation = ChatConversation::firstOrCreate(
+                [
+                    'conversation_id' => $sessionId,
+                    'organization_id' => $organization->id
+                ],
+                [
+                    'visitor_id' => $sessionId,
+                    'visitor_name' => $userInfo['name'] ?? null,
+                    'visitor_email' => $userInfo['email'] ?? null,
+                    'visitor_phone' => $userInfo['phone'] ?? null,
+                    'visitor_country' => $locationInfo['country'] ?? null,
+                    'visitor_region' => $locationInfo['region'] ?? null,
+                    'visitor_location' => $locationInfo['location'] ?? null,
+                    'status' => 'active',
+                    'agent_status' => 'ai',
+                    'last_activity_at' => now()
+                ]
+            );
+
+            // Save user message
+            ChatMessage::create([
+                'conversation_id' => $conversation->id,
+                'sender_type' => 'user',
+                'sender_name' => $userInfo['name'] ?? 'Visitor',
+                'message' => $userMessage,
+                'sent_at' => now(),
+                'metadata' => [
+                    'session_id' => $sessionId,
+                    'user_info' => $userInfo,
+                    'location_info' => $locationInfo
+                ]
+            ]);
+
+            // Save AI response
+            ChatMessage::create([
+                'conversation_id' => $conversation->id,
+                'sender_type' => 'ai',
+                'sender_name' => 'AI Assistant',
+                'message' => $aiResponse,
+                'sent_at' => now(),
+                'metadata' => [
+                    'session_id' => $sessionId,
+                    'organization_name' => $organization->name
+                ]
+            ]);
+
+            // Update conversation activity
+            $conversation->update([
+                'last_activity_at' => now()
+            ]);
+
+            // Generate conversation title from first message if not set
+            if (!$conversation->title) {
+                $conversation->generateTitle();
+            }
+
+            Log::info('Conversation saved to database', [
+                'conversation_id' => $conversation->id,
+                'session_id' => $sessionId,
+                'org_id' => $organization->id
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to save conversation to database', [
+                'session_id' => $sessionId,
+                'org_id' => $organization->id,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 }

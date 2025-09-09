@@ -4,7 +4,7 @@ namespace App\Livewire\Admin;
 
 use Livewire\Component;
 use Livewire\WithPagination;
-use App\Models\ChatSession;
+use App\Models\ChatConversation;
 use App\Models\Organization;
 
 class ChatHistoryManager extends Component
@@ -39,26 +39,32 @@ class ChatHistoryManager extends Component
 
     public function exportSession($sessionId)
     {
-        $session = ChatSession::with('messages','organization')->find($sessionId);
-        if ($session) {
-            $html = view('exports.chat-session', [
-                'session' => $session,
-                'duration' => $session->created_at->diffForHumans($session->updated_at, true)
+        $conversation = ChatConversation::with('messages')->find($sessionId);
+        if ($conversation) {
+            $html = view('exports.chat-conversation', [
+                'conversation' => $conversation,
+                'duration' => $conversation->created_at->diffForHumans($conversation->updated_at, true)
             ])->render();
             if (class_exists(\Dompdf\Dompdf::class)) {
                 $pdf = app('dompdf.wrapper');
                 $pdf->loadHTML($html)->setPaper('a4');
-                return response()->streamDownload(function() use ($pdf) { echo $pdf->output(); }, 'chat-session-' . $sessionId . '.pdf');
+                return response()->streamDownload(function() use ($pdf) { echo $pdf->output(); }, 'chat-conversation-' . $sessionId . '.pdf');
             }
-            return response()->streamDownload(function() use ($html) { echo strip_tags($html); }, 'chat-session-' . $sessionId . '.txt');
+            return response()->streamDownload(function() use ($html) { echo strip_tags($html); }, 'chat-conversation-' . $sessionId . '.txt');
         }
     }
 
     public function render()
     {
-        $query = ChatSession::with(['organization','messages']);
+        $query = ChatConversation::with(['organization','messages']);
         if ($this->search) {
-            $query->whereHas('messages', function($q){ $q->where('content','like','%'.$this->search.'%'); });
+            $query->where(function ($q) {
+                $q->whereHas('messages', function ($mq) {
+                    $mq->where('message', 'like', '%' . $this->search . '%');
+                })
+                ->orWhere('visitor_name', 'like', '%' . $this->search . '%')
+                ->orWhere('visitor_email', 'like', '%' . $this->search . '%');
+            });
         }
         if ($this->organizationId) {
             $query->where('organization_id', $this->organizationId); 
@@ -66,10 +72,10 @@ class ChatHistoryManager extends Component
         if ($this->dateFrom) { $query->whereDate('created_at','>=',$this->dateFrom); }
         if ($this->dateTo) { $query->whereDate('created_at','<=',$this->dateTo); }
 
-        $sessions = $query->orderByDesc('created_at')->paginate(15);
+        $conversations = $query->orderByDesc('created_at')->paginate(15);
         $organizations = Organization::orderBy('name')->get();
 
-        return view('livewire.admin.chat-history-manager', compact('sessions','organizations'))
+        return view('livewire.admin.chat-history-manager', compact('conversations','organizations'))
             ->layout('layouts.admin');
     }
 }

@@ -36,41 +36,53 @@
                 </div>
             </div>
             <div class="card">
-                <div class="card-header"><h3 class="card-title"><i class="fas fa-comments mr-2"></i> Sessions ({{ $sessions->total() }})</h3></div>
+                <div class="card-header"><h3 class="card-title"><i class="fas fa-comments mr-2"></i> Conversations ({{ $conversations->total() }})</h3></div>
                 <div class="card-body p-0">
                     <table class="table table-striped mb-0">
-                        <thead><tr><th>Date</th><th>Organization</th><th>Messages</th><th>Actions</th></tr></thead>
+                        <thead><tr><th>Date</th><th>Organization</th><th>Visitor</th><th>Messages</th><th>Actions</th></tr></thead>
                         <tbody>
-                        @forelse($sessions as $s)
+                        @forelse($conversations as $conversation)
                             <tr>
-                                <td>{{ $s->created_at->format('Y-m-d H:i') }}</td>
-                                <td>{{ $s->organization->name ?? 'N/A' }}</td>
-                                <td>{{ $s->messages->count() }}</td>
+                                <td>{{ $conversation->created_at->format('Y-m-d H:i') }}</td>
+                                <td>{{ $conversation->organization->name ?? 'N/A' }}</td>
                                 <td>
-                                    <button class="btn btn-xs btn-outline-primary" wire:click="toggleDetails({{ $s->id }})"><i class="fas fa-eye"></i></button>
-                                    <button class="btn btn-xs btn-outline-success" wire:click="exportSession({{ $s->id }})"><i class="fas fa-file-export"></i></button>
+                                    <div>{{ $conversation->visitor_name ?? 'Anonymous' }}</div>
+                                    @if($conversation->visitor_email)
+                                        <small class="text-muted d-block">{{ $conversation->visitor_email }}</small>
+                                    @endif
+                                    @if($conversation->visitor_country || $conversation->visitor_location)
+                                        <small class="text-muted d-block">
+                                            <i class="fas fa-map-marker-alt"></i>
+                                            {{ $conversation->visitor_location }}{{ $conversation->visitor_location && $conversation->visitor_country ? ', ' : '' }}{{ $conversation->visitor_country }}
+                                        </small>
+                                    @endif
+                                </td>
+                                <td>{{ $conversation->messages->count() }}</td>
+                                <td>
+                                    <button class="btn btn-xs btn-outline-primary" wire:click="toggleDetails({{ $conversation->id }})"><i class="fas fa-eye"></i></button>
+                                    <button class="btn btn-xs btn-outline-success" wire:click="exportSession({{ $conversation->id }})"><i class="fas fa-file-export"></i></button>
                                 </td>
                             </tr>
-                            @if(isset($showDetails[$s->id]))
-                                <tr class="bg-light"><td colspan="4">
+                            @if(isset($showDetails[$conversation->id]))
+                                <tr class="bg-light"><td colspan="5">
                                     <div style="max-height:260px;overflow:auto;" class="p-2">
-                                        @foreach($s->messages as $m)
+                                        @foreach($conversation->messages as $message)
                                             <div class="mb-2">
-                                                <strong>{{ ucfirst($m->sender) }}</strong>
-                                                <small class="text-muted">{{ $m->created_at->format('H:i') }}</small>
-                                                <div>{{ $m->content }}</div>
+                                                <strong>{{ ucfirst($message->sender) }}</strong>
+                                                <small class="text-muted">{{ $message->created_at->format('H:i') }}</small>
+                                                <div>{{ $message->message }}</div>
                                             </div>
                                         @endforeach
                                     </div>
                                 </td></tr>
                             @endif
                         @empty
-                            <tr><td colspan="4" class="text-center p-4 text-muted">No sessions found.</td></tr>
+                            <tr><td colspan="5" class="text-center p-4 text-muted">No conversations found.</td></tr>
                         @endforelse
                         </tbody>
                     </table>
                 </div>
-                <div class="card-footer">{{ $sessions->links() }}</div>
+                <div class="card-footer">{{ $conversations->links() }}</div>
             </div>
         </div>
     </section>

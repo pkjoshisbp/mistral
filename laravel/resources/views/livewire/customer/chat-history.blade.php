@@ -16,7 +16,7 @@
             </div>
             <div class="card-body">
                 <div class="row">
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <div class="form-group">
                             <label for="search">Search Messages</label>
                             <input type="text" class="form-control" id="search" 
@@ -24,29 +24,18 @@
                                    placeholder="Search in messages...">
                         </div>
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-md-3">
                         <div class="form-group">
                             <label for="dateFrom">From Date</label>
                             <input type="date" class="form-control" id="dateFrom" 
                                    wire:model.live="dateFrom">
                         </div>
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-md-3">
                         <div class="form-group">
                             <label for="dateTo">To Date</label>
                             <input type="date" class="form-control" id="dateTo" 
                                    wire:model.live="dateTo">
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="form-group">
-                            <label for="organization">Organization</label>
-                            <select class="form-control" id="organization" wire:model.live="selectedOrganization">
-                                <option value="">All Organizations</option>
-                                @foreach($organizations as $org)
-                                    <option value="{{ $org->id }}">{{ $org->name }}</option>
-                                @endforeach
-                            </select>
                         </div>
                     </div>
                     <div class="col-md-2">
@@ -63,63 +52,72 @@
             </div>
         </div>
 
-        <!-- Chat Sessions -->
+        <!-- Chat Conversations -->
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">
                     <i class="fas fa-comments mr-2"></i>
-                    Chat Sessions ({{ $sessions->total() }})
+                    Chat Conversations ({{ $conversations->total() }})
                 </h3>
             </div>
             <div class="card-body">
-                @if($sessions->count() > 0)
+                @if($conversations->count() > 0)
                     <div class="table-responsive">
                         <table class="table table-striped">
                             <thead>
                                 <tr>
                                     <th>Date & Time</th>
-                                    <th>Organization</th>
+                                    <th>Visitor Info</th>
                                     <th>Messages</th>
                                     <th>Duration</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach($sessions as $session)
+                                @foreach($conversations as $conversation)
                                     <tr>
                                         <td>
                                             <div class="font-weight-bold">
-                                                {{ $session->created_at->format('M d, Y') }}
+                                                {{ $conversation->created_at->format('M d, Y') }}
                                             </div>
                                             <small class="text-muted">
-                                                {{ $session->created_at->format('h:i A') }}
+                                                {{ $conversation->created_at->format('h:i A') }}
                                             </small>
                                         </td>
                                         <td>
                                             <div class="font-weight-bold">
-                                                {{ $session->organization->name ?? 'N/A' }}
+                                                {{ $conversation->visitor_name ?? 'Anonymous' }}
                                             </div>
-                                            @if($session->organization)
-                                                <small class="text-muted">{{ $session->organization->slug }}</small>
+                                            @if($conversation->visitor_email)
+                                                <small class="text-muted d-block">{{ $conversation->visitor_email }}</small>
+                                            @endif
+                                            @if($conversation->visitor_phone)
+                                                <small class="text-muted d-block">{{ $conversation->visitor_phone }}</small>
+                                            @endif
+                                            @if($conversation->visitor_country || $conversation->visitor_location)
+                                                <small class="text-muted d-block">
+                                                    <i class="fas fa-map-marker-alt"></i>
+                                                    {{ $conversation->visitor_location }}{{ $conversation->visitor_location && $conversation->visitor_country ? ', ' : '' }}{{ $conversation->visitor_country }}
+                                                </small>
                                             @endif
                                         </td>
                                         <td>
                                             <span class="badge badge-info">
-                                                {{ $session->messages->count() }} messages
+                                                {{ $conversation->messages->count() }} messages
                                             </span>
                                         </td>
                                         <td>
                                             <small class="text-muted">
-                                                {{ $session->created_at->diffForHumans($session->updated_at, true) }}
+                                                {{ $conversation->created_at->diffForHumans($conversation->updated_at, true) }}
                                             </small>
                                         </td>
                                         <td>
                                             <div class="btn-group">
                                                 <button type="button" 
                                                         class="btn btn-sm btn-outline-primary"
-                                                        wire:click="toggleDetails({{ $session->id }})">
+                                                        wire:click="toggleDetails({{ $conversation->id }})">
                                                     <i class="fas fa-eye"></i>
-                                                    @if(isset($showDetails[$session->id]))
+                                                    @if(isset($showDetails[$conversation->id]))
                                                         Hide
                                                     @else
                                                         View
@@ -127,25 +125,25 @@
                                                 </button>
                                                 <button type="button" 
                                                         class="btn btn-sm btn-outline-success"
-                                                        wire:click="exportSession({{ $session->id }})">
+                                                        wire:click="exportSession({{ $conversation->id }})">
                                                     <i class="fas fa-file-export"></i>
                                                     Export PDF
                                                 </button>
                                                 <button type="button" 
                                                         class="btn btn-sm btn-outline-danger"
-                                                        wire:click="deleteSession({{ $session->id }})"
-                                                        onclick="return confirm('Are you sure you want to delete this chat session?')">
+                                                        wire:click="deleteSession({{ $conversation->id }})"
+                                                        onclick="return confirm('Are you sure you want to delete this chat conversation?')">
                                                     <i class="fas fa-trash"></i>
                                                     Delete
                                                 </button>
                                             </div>
                                         </td>
                                     </tr>
-                                    @if(isset($showDetails[$session->id]))
+                                    @if(isset($showDetails[$conversation->id]))
                                         <tr>
                                             <td colspan="5" class="bg-light">
                                                 <div class="chat-messages p-3" style="max-height: 300px; overflow-y: auto;">
-                                                    @foreach($session->messages as $message)
+                                                    @foreach($conversation->messages as $message)
                                                         <div class="message mb-2 
                                                             @if($message->sender === 'user') text-right @else text-left @endif">
                                                             <div class="message-content 
@@ -156,7 +154,7 @@
                                                                 @endif
                                                                 d-inline-block p-2 rounded" 
                                                                 style="max-width: 70%;">
-                                                                {{ $message->content }}
+                                                                {{ $message->message }}
                                                             </div>
                                                             <div class="message-time">
                                                                 <small class="text-muted">
@@ -176,16 +174,16 @@
 
                     <!-- Pagination -->
                     <div class="d-flex justify-content-center">
-                        {{ $sessions->links() }}
+                        {{ $conversations->links() }}
                     </div>
                 @else
                     <div class="text-center py-4">
                         <div class="mb-3">
                             <i class="fas fa-comments fa-3x text-muted"></i>
                         </div>
-                        <h5 class="text-muted">No chat sessions found</h5>
+                        <h5 class="text-muted">No chat conversations found</h5>
                         <p class="text-muted">
-                            @if($search || $selectedOrganization || $dateFrom || $dateTo)
+                            @if($search || $dateFrom || $dateTo)
                                 Try adjusting your filters or 
                                 <button type="button" class="btn btn-link p-0" wire:click="clearFilters">clear all filters</button>.
                             @else

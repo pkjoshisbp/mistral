@@ -17,7 +17,9 @@
             this.messages = [];
             this.leadCaptured = false;
             this.userInfo = {};
+            this.locationInfo = {};
             this.init();
+            this.detectLocation();
         }
 
         generateSessionId() {
@@ -419,6 +421,33 @@
             this.hideLeadForm();
         }
 
+        async detectLocation() {
+            try {
+                // Try to get location from a geolocation service
+                const response = await fetch('https://ipapi.co/json/');
+                const data = await response.json();
+                
+                this.locationInfo = {
+                    country: data.country_name || data.country,
+                    region: data.region || data.region_code,
+                    city: data.city,
+                    countryCode: data.country_code
+                };
+                
+                console.log('Location detected:', this.locationInfo);
+            } catch (error) {
+                console.log('Could not detect location:', error);
+                // Fallback - try to get timezone info
+                try {
+                    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                    this.locationInfo = { timezone };
+                } catch (e) {
+                    // Location detection failed completely
+                    this.locationInfo = {};
+                }
+            }
+        }
+
         async sendMessage() {
             const input = document.getElementById(this.ids.input);
             if (!input) return;
@@ -437,12 +466,13 @@
             try {
                 const requestBody = {
                     message: message,
-                    session_id: this.sessionId
+                    session_id: this.sessionId,
+                    ...this.locationInfo
                 };
 
                 // Include lead information if captured
                 if (this.leadCaptured && this.userInfo.name) {
-                    requestBody.user_info = this.userInfo;
+                    requestBody.visitor_info = this.userInfo;
                 }
 
                 const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/chat`, {

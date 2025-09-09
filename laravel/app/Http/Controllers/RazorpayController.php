@@ -208,10 +208,24 @@ class RazorpayController extends Controller
             // Verify webhook signature using webhook secret
             $expectedSignature = hash_hmac('sha256', $payload, $this->razorpayWebhookSecret);
             if (!hash_equals($expectedSignature, (string)$signature)) {
+                // Parse event to check if it's a downtime notification (which we can ignore)
+                $eventData = json_decode($payload, true);
+                $eventType = $eventData['event'] ?? '';
+                
+                if (strpos($eventType, 'payment.downtime') !== false) {
+                    // Log downtime events as info instead of warning since they're just system status
+                    \Log::info('Razorpay downtime notification (signature validation skipped)', [
+                        'event' => $eventType,
+                        'account_id' => $eventData['account_id'] ?? null
+                    ]);
+                    return response()->json(['status' => 'downtime notification received'], 200);
+                }
+                
                 \Log::warning('Razorpay webhook: invalid signature', [
                     'expected' => $expectedSignature,
                     'received' => $signature,
-                    'payload' => $payload
+                    'event_type' => $eventType,
+                    'payload' => substr($payload, 0, 200) . '...' // Truncate payload for cleaner logs
                 ]);
                 return response()->json(['status' => 'invalid signature'], 400);
             }
@@ -231,6 +245,20 @@ class RazorpayController extends Controller
                     
                 case 'payment.captured':
                     $this->handlePaymentCaptured($event);
+                    break;
+                    
+                case 'payment.downtime.started':
+                case 'payment.downtime.resolved':
+                    // Just log downtime events for monitoring, no action needed
+                    Log::info('Razorpay payment downtime event', [
+                        'event' => $event['event'],
+                        'method' => $event['payload']['payment.downtime']['entity']['method'] ?? 'unknown',
+                        'status' => $event['payload']['payment.downtime']['entity']['status'] ?? 'unknown'
+                    ]);
+                    break;
+                    
+                default:
+                    Log::info('Unhandled Razorpay webhook event', ['event' => $event['event']]);
                     break;
             }
 
