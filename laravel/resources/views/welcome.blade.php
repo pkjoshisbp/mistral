@@ -376,6 +376,38 @@
             </div>
             
             <div class="row g-4">
+                @forelse($latestBlogs as $blog)
+                <div class="col-lg-4 col-md-6">
+                    <div class="card blog-card h-100 shadow-sm">
+                        @if($blog->featured_image)
+                        <img src="{{ $blog->featured_image }}" class="card-img-top" alt="{{ $blog->title }}" style="height: 200px; object-fit: cover;">
+                        @endif
+                        <div class="card-body d-flex flex-column">
+                            <div class="mb-3">
+                                @foreach(array_slice($blog->tags, 0, 2) as $tag)
+                                <span class="badge bg-primary">{{ $tag }}</span>
+                                @endforeach
+                            </div>
+                            
+                            <h5 class="card-title">{{ $blog->title }}</h5>
+                            <p class="card-text flex-grow-1">{{ $blog->excerpt }}</p>
+                            
+                            <div class="blog-meta mb-3 text-muted small">
+                                <i class="fas fa-calendar-alt me-2"></i>
+                                {{ $blog->published_at->format('M d, Y') }}
+                                <span class="ms-3">
+                                    <i class="fas fa-clock me-2"></i>
+                                    {{ $blog->reading_time }} {{ __('common.blog_read_time') }}
+                                </span>
+                            </div>
+                            
+                            <a href="{{ route('blog.show', $blog->slug) }}" class="btn btn-primary">
+                                {{ __('common.blog_read_more') }} <i class="fas fa-arrow-right ms-2"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                @empty
                 <div class="col-lg-4 col-md-6">
                     <div class="card blog-card h-100 shadow-sm">
                         <img src="https://images.unsplash.com/photo-1677442136019-21780ecad995?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="AI Customer Support Guide" style="height: 200px; object-fit: cover;">
@@ -403,67 +435,26 @@
                         </div>
                     </div>
                 </div>
-                
-                <div class="col-lg-4 col-md-6">
-                    <div class="card blog-card h-100 shadow-sm">
-                        <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="Sales Growth with AI" style="height: 200px; object-fit: cover;">
-                        <div class="card-body d-flex flex-column">
-                            <div class="mb-3">
-                                <span class="badge bg-success">{{ __('common.blog_sales_badge') }}</span>
-                                <span class="badge bg-warning">{{ __('common.blog_growth_badge') }}</span>
+                @endforelse
+            </div>
+            
+            <div class="text-center mt-5">
+                <a href="{{ route('blog.index') }}" class="btn btn-outline-primary btn-lg">
+                    View All Articles <i class="fas fa-arrow-right ms-2"></i>
+                </a>
+            </div>
+        </div>
+    </section>
+                                  
                             </div>
                             
-                            <h5 class="card-title">{{ __('common.blog_article_2_title') }}</h5>
-                            <p class="card-text flex-grow-1">{{ __('common.blog_article_2_desc') }}</p>
-                            
-                            <div class="blog-meta mb-3 text-muted small">
-                                <i class="fas fa-calendar-alt me-2"></i>
-                                Aug 26, 2025
-                                <span class="ms-3">
-                                    <i class="fas fa-clock me-2"></i>
-                                    3 {{ __('common.blog_read_time') }}
-                                </span>
-                            </div>
-                            
-                            <a href="{{ route('blog.index') }}" class="btn btn-primary">
-                                {{ __('common.blog_read_more') }} <i class="fas fa-arrow-right ms-2"></i>
-                            </a>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="col-lg-4 col-md-6">
-                    <div class="card blog-card h-100 shadow-sm">
-                        <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=500&h=300&fit=crop&crop=center" class="card-img-top" alt="Future of Customer Communications" style="height: 200px; object-fit: cover;">
-                        <div class="card-body d-flex flex-column">
-                            <div class="mb-3">
-                                <span class="badge bg-info">{{ __('common.blog_tips_badge') }}</span>
-                                <span class="badge bg-dark">{{ __('common.blog_implementation_badge') }}</span>
-                            </div>
-                            
-                            <h5 class="card-title">{{ __('common.blog_article_3_title') }}</h5>
-                            <p class="card-text flex-grow-1">{{ __('common.blog_article_3_desc') }}</p>
-                            
-                            <div class="blog-meta mb-3 text-muted small">
-                                <i class="fas fa-calendar-alt me-2"></i>
-                                Aug 24, 2025
-                                <span class="ms-3">
-                                    <i class="fas fa-clock me-2"></i>
-                                    3 {{ __('common.blog_read_time') }}
-                                </span>
-                            </div>
-                            
-                            <a href="{{ route('blog.index') }}" class="btn btn-primary">
-                                {{ __('common.blog_read_more') }} <i class="fas fa-arrow-right ms-2"></i>
-                            </a>
+                           
                         </div>
                     </div>
                 </div>
             </div>
             
-            <div class="text-center mt-4">
-                <a href="{{ route('blog.index') }}" class="btn btn-primary">{{ __('common.view_all_articles') }}</a>
-            </div>
+           
         </div>
     </section>
 

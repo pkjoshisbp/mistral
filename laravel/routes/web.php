@@ -10,7 +10,11 @@ use Illuminate\Support\Facades\App;
 
 // Public Routes (no authentication required)
 Route::get('/', function () {
-    return view('welcome');
+    $latestBlogs = Blog::published()
+        ->orderBy('published_at', 'desc')
+        ->take(3)
+        ->get();
+    return view('welcome', compact('latestBlogs'));
 })->name('home');
 
 // Language switch
@@ -351,6 +355,98 @@ Route::post('/auth/send-otp', function(\Illuminate\Http\Request $request) {
 })->name('auth.send-otp');
 
 require __DIR__.'/auth.php';
+
+/*
+|--------------------------------------------------------------------------
+| Sitemap Routes for SEO
+|--------------------------------------------------------------------------
+*/
+
+Route::get('/sitemap.xml', function () {
+    $sitemap = '<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">';
+
+    // Static pages
+    $pages = [
+        ['url' => '', 'priority' => '1.0', 'changefreq' => 'daily'],
+        ['url' => '/features', 'priority' => '0.9', 'changefreq' => 'weekly'],
+        ['url' => '/about', 'priority' => '0.8', 'changefreq' => 'monthly'],
+        ['url' => '/contact', 'priority' => '0.8', 'changefreq' => 'monthly'],
+        ['url' => '/blog', 'priority' => '0.9', 'changefreq' => 'daily'],
+    ];
+
+    foreach ($pages as $page) {
+        $sitemap .= '
+    <url>
+        <loc>' . config('app.url') . $page['url'] . '</loc>
+        <changefreq>' . $page['changefreq'] . '</changefreq>
+        <priority>' . $page['priority'] . '</priority>
+        <lastmod>' . now()->toISOString() . '</lastmod>
+    </url>';
+    }
+
+    // Blog posts
+    $blogs = Blog::published()->get();
+    foreach ($blogs as $blog) {
+        $sitemap .= '
+    <url>
+        <loc>' . config('app.url') . '/blog/' . $blog->slug . '</loc>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+        <lastmod>' . $blog->updated_at->toISOString() . '</lastmod>';
+        
+        if ($blog->featured_image) {
+            $sitemap .= '
+        <image:image>
+            <image:loc>' . $blog->featured_image . '</image:loc>
+            <image:title>' . htmlspecialchars($blog->title) . '</image:title>
+        </image:image>';
+        }
+        
+        $sitemap .= '
+    </url>';
+    }
+
+    $sitemap .= '
+</urlset>';
+
+    return response($sitemap, 200)
+        ->header('Content-Type', 'application/xml');
+})->name('sitemap');
+
+Route::get('/robots.txt', function () {
+    $robotsTxt = "User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: " . config('app.url') . "/sitemap.xml
+
+# Optimize crawling
+Crawl-delay: 1
+
+# Allow important directories
+Allow: /blog/
+Allow: /features/
+Allow: /about/
+Allow: /contact/
+
+# Disallow admin areas
+Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /livewire/
+Disallow: /_debugbar/
+Disallow: /telescope/
+
+# Disallow file types
+Disallow: *.json
+Disallow: *.xml$
+Disallow: *.txt$
+";
+
+    return response($robotsTxt, 200)
+        ->header('Content-Type', 'text/plain');
+})->name('robots');
 
 // Helper route to stash intended payment in session before login
 Route::post('/persist-selected-plan', function(\Illuminate\Http\Request $request) {

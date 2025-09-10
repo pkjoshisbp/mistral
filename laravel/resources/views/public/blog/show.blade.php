@@ -20,6 +20,38 @@
     <meta name="twitter:description" content="{{ $blog->excerpt }}">
     <meta name="twitter:image" content="{{ $blog->featured_image }}">
     
+    <!-- JSON-LD Schema Markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "headline": "{{ $blog->title }}",
+        "description": "{{ $blog->excerpt }}",
+        "image": "{{ $blog->featured_image }}",
+        "author": {
+            "@type": "Person",
+            "name": "{{ $blog->author_name ?? 'AI Chat Support Team' }}"
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "AI Chat Support",
+            "logo": {
+                "@type": "ImageObject",
+                "url": "{{ config('app.url') }}/images/logo.png"
+            }
+        },
+        "datePublished": "{{ $blog->published_at->toISOString() }}",
+        "dateModified": "{{ $blog->updated_at->toISOString() }}",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "{{ route('blog.show', $blog->slug) }}"
+        },
+        "keywords": [{{ '"' . implode('", "', $blog->tags) . '"' }}],
+        "articleSection": "AI Technology",
+        "wordCount": "{{ str_word_count(strip_tags($blog->content)) }}"
+    }
+    </script>
+    
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome -->
