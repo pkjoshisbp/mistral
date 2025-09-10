@@ -55,6 +55,20 @@ class AuthenticatedSessionController extends Controller
         // OTP validation is already done in LoginRequest
         Auth::login($user, $request->boolean('remember'));
 
+        // Store device as trusted if remember_device is checked
+        if ($request->boolean('remember_device')) {
+            $deviceFingerprint = $request->header('X-Device-Fingerprint');
+            if ($deviceFingerprint) {
+                $trustedDevices = json_decode($request->cookie('trusted_devices', '[]'), true);
+                if (!in_array($deviceFingerprint, $trustedDevices)) {
+                    $trustedDevices[] = $deviceFingerprint;
+                    // Keep only last 3 trusted devices
+                    $trustedDevices = array_slice($trustedDevices, -3);
+                    cookie()->queue('trusted_devices', json_encode($trustedDevices), 60 * 24 * 30); // 30 days
+                }
+            }
+        }
+
         $request->session()->regenerate();
 
         return $this->redirectAfterLogin($request);

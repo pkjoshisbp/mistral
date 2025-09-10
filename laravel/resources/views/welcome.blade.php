@@ -277,7 +277,7 @@
                                         </div>
                                     @elseif($plan->slug === 'payg')
                                         <div class="h3">{{ $currencySymbol }}5</div>
-                                        <small class="text-muted">Minimum charge (200k tokens)</small>
+                                        <small class="text-muted">Minimum charge (100k tokens)</small>
                                     @else
                                         <div class="h3">Custom</div>
                                         @php

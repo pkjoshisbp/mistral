@@ -25,9 +25,9 @@ return [
 
     'plan_payg_title' => 'Paiement à l\'usage',
     'plan_payg_desc' => 'Tarification flexible avec frais minimum de 5 $ pour les modèles d\'utilisation variables',
-    'plan_payg_tokens' => '200K tokens/mois',
+    'plan_payg_tokens' => '100K tokens/mois',
     'plan_payg_overage' => 'Dépassement : 5 $ par 100k tokens',
-    'plan_payg_feature_5_minimum_charge_200k_tokens' => 'Frais minimum de 5 $ (200k tokens)',
+    'plan_payg_feature_5_minimum_charge_200k_tokens' => 'Frais minimum de 5 $ (100k tokens)',
     'plan_payg_feature_tokens_never_expire' => 'Les tokens n\'expirent jamais',
     'plan_payg_feature_api_access' => 'Accès API',
     'plan_payg_feature_email_support' => 'Support par e-mail',

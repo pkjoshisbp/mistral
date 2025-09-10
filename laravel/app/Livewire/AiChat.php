@@ -5,6 +5,7 @@ namespace App\Livewire;
 use Livewire\Component;
 use App\Models\Organization;
 use App\Services\AiAgentService;
+use Illuminate\Support\Facades\Auth;
 
 class AiChat extends Component
 {
@@ -41,6 +42,27 @@ class AiChat extends Component
     public function sendMessage()
 {
     if (empty($this->query) || !$this->selectedOrgId) {
+        return;
+    }
+
+    // Check subscription status
+    $user = Auth::user();
+    if (!$user) {
+        $this->messages[] = [
+            'role' => 'system',
+            'content' => 'Please log in to continue using the AI chat.',
+            'timestamp' => now()
+        ];
+        return;
+    }
+
+    $activeSubscription = $user->activeSubscription;
+    if (!$activeSubscription) {
+        $this->messages[] = [
+            'role' => 'system',
+            'content' => 'Your subscription has expired. Please renew your subscription to continue using the AI chat service.',
+            'timestamp' => now()
+        ];
         return;
     }
 
@@ -128,7 +150,7 @@ $nluUser = [
             $nluResp = $aiService->llmChat([
                 ['role' => 'system', 'content' => $nluSystem],
                 ['role' => 'user',   'content' => json_encode($nluUser, JSON_UNESCAPED_UNICODE)]
-            ], $mdl);
+            ], $mdl, $user->id, $this->selectedOrgId);
             $raw = $nluResp['message']['content'] ?? '';
             $clean = $this->sanitizeJsonContent($raw);
             $parsed = json_decode($clean, true);
@@ -408,7 +430,7 @@ $nluUser = [
 
     // ---- LLM ANSWER (final) ----
     $genStart = microtime(true);
-    $response = $aiService->llmChat($chatMessages, 'llama3.2:3b');
+    $response = $aiService->llmChat($chatMessages, 'llama3.2:3b', $user->id, $this->selectedOrgId);
     $perf['generation_ms'] = (microtime(true) - $genStart) * 1000;
 
     if ($response && isset($response['message']['content'])) {

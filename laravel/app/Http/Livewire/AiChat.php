@@ -5,6 +5,7 @@ namespace App\Livewire;
 use Livewire\Component;
 use App\Models\Organization;
 use App\Services\AiAgentService;
+use Illuminate\Support\Facades\Auth;
 
 class AiChat extends Component
 {
@@ -36,6 +37,27 @@ class AiChat extends Component
     public function sendMessage()
     {
         if (empty($this->query) || !$this->selectedOrgId) {
+            return;
+        }
+
+        // Check subscription status
+        $user = Auth::user();
+        if (!$user) {
+            $this->messages[] = [
+                'role' => 'system',
+                'content' => 'Please log in to continue using the AI chat.',
+                'timestamp' => now()
+            ];
+            return;
+        }
+
+        $activeSubscription = $user->activeSubscription;
+        if (!$activeSubscription) {
+            $this->messages[] = [
+                'role' => 'system',
+                'content' => 'Your subscription has expired. Please renew your subscription to continue using the AI chat service.',
+                'timestamp' => now()
+            ];
             return;
         }
 
@@ -151,7 +173,7 @@ class AiChat extends Component
                         'content' => $msg['content']
                     ];
                 }
-                $response = $aiService->llmChat($conversationMessages, 'llama3.2:1b');
+                $response = $aiService->llmChat($conversationMessages, 'llama3.2:1b', $user->id, $this->selectedOrgId);
                 if ($response && isset($response['message']['content'])) {
                     $this->messages[] = [
                         'role' => 'assistant',

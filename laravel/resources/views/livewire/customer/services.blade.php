@@ -10,8 +10,20 @@
                 <form wire:submit.prevent="{{ $editingId ? 'update' : 'create' }}">
                     <div class="row">
                         <div class="col-md-4 mb-2"><label>Name *</label><input type="text" wire:model="name" class="form-control">@error('name')<small class="text-danger">{{ $message }}</small>@enderror</div>
-                        <div class="col-md-4 mb-2"><label>Price</label><input type="text" wire:model="price" class="form-control"></div>
-                        <div class="col-md-4 mb-2"><label>Category</label><input type="text" wire:model="category" class="form-control"></div>
+                        <div class="col-md-3 mb-2">
+                            <label>Price</label>
+                            <input type="number" step="0.01" wire:model="price" class="form-control" placeholder="Enter amount">
+                            @error('price')<small class="text-danger">{{ $message }}</small>@enderror
+                        </div>
+                        <div class="col-md-2 mb-2">
+                            <label>Currency *</label>
+                            <select wire:model="currency" class="form-control">
+                                <option value="INR">INR (₹)</option>
+                                <option value="USD">USD ($)</option>
+                            </select>
+                            @error('currency')<small class="text-danger">{{ $message }}</small>@enderror
+                        </div>
+                        <div class="col-md-3 mb-2"><label>Category</label><input type="text" wire:model="category" class="form-control"></div>
                         <div class="col-md-12 mb-2"><label>Description *</label><textarea wire:model="description" class="form-control" rows="3"></textarea>@error('description')<small class="text-danger">{{ $message }}</small>@enderror</div>
                         <div class="col-md-3 mb-2"><label>Requirements</label><input type="text" wire:model="requirements" class="form-control"></div>
                         <div class="col-md-3 mb-2"><label>Duration</label><input type="text" wire:model="duration" class="form-control"></div>
@@ -22,7 +34,17 @@
                 </form>
             </div>@endif
             <h5 class="mb-2"><i class="fas fa-list"></i> List</h5>
-            <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Created</th><th></th></tr></thead><tbody>@forelse($this->services as $svc)<tr><td>{{ $svc->name }}</td><td>{{ $svc->metadata['category'] ?? '-' }}</td><td>{{ $svc->metadata['price'] ?? '-' }}</td><td>{{ $svc->created_at->format('Y-m-d') }}</td><td><button class="btn btn-sm btn-warning" wire:click="edit({{ $svc->id }})"><i class="fas fa-edit"></i></button> <button class="btn btn-sm btn-danger" wire:click="delete({{ $svc->id }})" onclick="return confirm('Delete?')"><i class="fas fa-trash"></i></button></td></tr>@empty<tr><td colspan="5" class="text-muted">No services added.</td></tr>@endforelse</tbody></table></div>
+            <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Created</th><th></th></tr></thead><tbody>@forelse($this->services as $svc)<tr><td>{{ $svc->name }}</td><td>{{ $svc->metadata['category'] ?? '-' }}</td><td>
+                @if($svc->metadata['price'] ?? false)
+                    @php
+                        $currency = $svc->metadata['currency'] ?? 'INR';
+                        $symbol = $currency === 'USD' ? '$' : '₹';
+                    @endphp
+                    {{ $symbol }}{{ $svc->metadata['price'] }} {{ $currency }}
+                @else
+                    -
+                @endif
+            </td><td>{{ $svc->created_at->format('Y-m-d') }}</td><td><button class="btn btn-sm btn-warning" wire:click="edit({{ $svc->id }})"><i class="fas fa-edit"></i></button> <button class="btn btn-sm btn-danger" wire:click="delete({{ $svc->id }})" onclick="return confirm('Delete?')"><i class="fas fa-trash"></i></button></td></tr>@empty<tr><td colspan="5" class="text-muted">No services added.</td></tr>@endforelse</tbody></table></div>
             <div class="alert alert-info mt-3"><i class="fas fa-info-circle"></i> Services become searchable by the AI instantly.</div>
         </div></div>
     </div></section>

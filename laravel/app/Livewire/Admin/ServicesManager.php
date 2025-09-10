@@ -13,10 +13,11 @@ class ServicesManager extends Component
     public $showForm = false;
     public $editingId = null;
 
-    // Fields
+        // Fields
     public $name = '';
     public $description = '';
     public $price = '';
+    public $currency = 'INR';
     public $category = '';
     public $requirements = '';
     public $duration = '';
@@ -28,6 +29,7 @@ class ServicesManager extends Component
         'name' => 'required|string|min:2',
         'description' => 'required|string|min:5',
         'price' => 'nullable|numeric',
+        'currency' => 'required|in:INR,USD',
         'category' => 'nullable|string',
         'requirements' => 'nullable|string',
         'duration' => 'nullable|string',
@@ -53,6 +55,7 @@ class ServicesManager extends Component
     {
         $this->editingId = null;
         $this->name = $this->description = $this->price = $this->category = $this->requirements = $this->duration = $this->availability = $this->keywords = '';
+        $this->currency = 'INR';
     }
 
     public function create()
@@ -68,6 +71,7 @@ class ServicesManager extends Component
                 'metadata' => [
                     'category' => $this->category,
                     'price' => $this->price,
+                    'currency' => $this->currency,
                     'requirements' => $this->requirements,
                     'duration' => $this->duration,
                     'availability' => $this->availability,
@@ -98,6 +102,7 @@ class ServicesManager extends Component
         $this->description = $r->description;
         $meta = $r->metadata ?? [];
         $this->price = $meta['price'] ?? '';
+        $this->currency = $meta['currency'] ?? 'INR';
         $this->category = $meta['category'] ?? '';
         $this->requirements = $meta['requirements'] ?? '';
         $this->duration = $meta['duration'] ?? '';
@@ -116,6 +121,7 @@ class ServicesManager extends Component
             $metadata = [
                 'category' => $this->category,
                 'price' => $this->price,
+                'currency' => $this->currency,
                 'requirements' => $this->requirements,
                 'duration' => $this->duration,
                 'availability' => $this->availability,
@@ -229,7 +235,13 @@ class ServicesManager extends Component
     
     private function composeContent(): string
     {
-        return "Service: {$this->name}\nDescription: {$this->description}\nPrice: {$this->price}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}";
+        $priceText = '';
+        if ($this->price) {
+            $symbol = $this->currency === 'USD' ? '$' : '₹';
+            $priceText = "Price: {$symbol}{$this->price} {$this->currency}";
+        }
+        
+        return "Service: {$this->name}\nDescription: {$this->description}\n{$priceText}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}";
     }
 
     public function render()

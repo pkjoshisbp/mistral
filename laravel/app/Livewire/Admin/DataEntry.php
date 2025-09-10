@@ -125,12 +125,35 @@ class DataEntry extends Component
                     'metadata' => $data
                 ]);
 
-                // Update in Qdrant
+                // Update in Qdrant using the proper update method
                 $ai = new AiAgentService();
-                $text = ($data['content'] ?? '') . ' ' . ($this->keywords ?? '');
-                $vector = $ai->embed($text);
-                $collection = 'org_' . $org->id . '_data';
-                $ai->updateInQdrant($collection, $this->editingId, $vector, $data);
+                $organization = auth()->user()->organizations->first();
+                
+                if ($organization) {
+                    $items = [
+                        [
+                            'id' => "{$this->dataType}_{$this->editingId}",
+                            'title' => $data['title'] ?? $data['name'] ?? 'Untitled',
+                            'content' => $data['content'] ?? '',
+                            'category' => $data['category'] ?? $this->dataType,
+                            'metadata' => array_merge($data, [
+                                'table_id' => $this->editingId,
+                                'updated_at' => now()->toISOString(),
+                                'keywords' => $this->keywords ?? ''
+                            ])
+                        ]
+                    ];
+                    
+                    $result = $ai->updateDataToQdrant($organization->slug, $this->dataType, $items);
+                    
+                    if (!$result || !$result['success']) {
+                        Log::warning('Failed to update data in Qdrant', [
+                            'data_type' => $this->dataType,
+                            'id' => $this->editingId,
+                            'result' => $result
+                        ]);
+                    }
+                }
 
                 session()->flash('message', ucfirst($this->dataType) . ' updated successfully!');
                 $this->resetForm();

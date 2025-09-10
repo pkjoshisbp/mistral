@@ -43,6 +43,14 @@
                     Resend OTP
                 </button>
             </div>
+            
+            <!-- Remember Device for OTP -->
+            <div class="mt-3">
+                <label for="remember_device" class="inline-flex items-center">
+                    <input id="remember_device" type="checkbox" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500" name="remember_device">
+                    <span class="ms-2 text-sm text-gray-600">{{ __('Remember this device (skip OTP for 30 days)') }}</span>
+                </label>
+            </div>
         </div>
 
         <div class="flex items-center justify-end mt-4">
@@ -94,6 +102,34 @@
 
         let otpSent = false;
 
+        // Generate device fingerprint
+        function generateDeviceFingerprint() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillText('Device fingerprint', 2, 2);
+            
+            const fingerprint = [
+                navigator.userAgent,
+                navigator.language,
+                screen.width + 'x' + screen.height,
+                new Date().getTimezoneOffset(),
+                canvas.toDataURL()
+            ].join('|');
+            
+            // Simple hash function
+            let hash = 0;
+            for (let i = 0; i < fingerprint.length; i++) {
+                const char = fingerprint.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash; // Convert to 32-bit integer
+            }
+            return Math.abs(hash).toString(36);
+        }
+
+        const deviceFingerprint = generateDeviceFingerprint();
+
         // Handle form submission
         form.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -127,7 +163,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        'X-Device-Fingerprint': deviceFingerprint
                     },
                     body: JSON.stringify({ email: email })
                 });
@@ -135,11 +172,31 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    otpSent = true;
-                    otpSection.style.display = 'block';
-                    loginText.textContent = 'Verify & Login';
-                    otpMessage.textContent = 'We\'ve sent a 6-digit code to ' + email + '. Please enter it below.';
-                    otpInput.focus();
+                    if (data.trusted_device) {
+                        // Device is trusted, proceed directly to login
+                        const formData = new FormData();
+                        formData.append('email', email);
+                        formData.append('password', passwordInput.value);
+                        formData.append('_token', document.querySelector('meta[name="csrf-token"]').content);
+
+                        const loginResponse = await fetch(form.action, {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        if (loginResponse.ok) {
+                            window.location.reload();
+                        } else {
+                            alert('Login failed. Please try again.');
+                        }
+                    } else {
+                        // OTP required
+                        otpSent = true;
+                        otpSection.style.display = 'block';
+                        loginText.textContent = 'Verify & Login';
+                        otpMessage.textContent = 'We\'ve sent a 6-digit code to ' + email + '. Please enter it below.';
+                        otpInput.focus();
+                    }
                 } else {
                     alert(data.message || 'Failed to send OTP. Please try again.');
                 }
@@ -160,9 +217,18 @@
                 formData.append('password', password);
                 formData.append('otp', otp);
                 formData.append('_token', document.querySelector('meta[name="csrf-token"]').content);
+                
+                // Add remember device if checked
+                const rememberDevice = document.getElementById('remember_device');
+                if (rememberDevice && rememberDevice.checked) {
+                    formData.append('remember_device', '1');
+                }
 
                 const response = await fetch(form.action, {
                     method: 'POST',
+                    headers: {
+                        'X-Device-Fingerprint': deviceFingerprint
+                    },
                     body: formData
                 });
 

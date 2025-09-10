@@ -1,6 +1,10 @@
 <?php
 return [
-    // Pricing Plan Features & Buttons
+      
+    'plan_payg_tokens' => '100K tokens/month',
+    'plan_payg_feature_4_overage' => 'Overage: ₹500 per 100k tokens',
+    'plan_payg_feature_5_minimum_charge_200k_tokens' => '$5 minimum charge (100k tokens)',
+    'plan_payg_feature_5_minimum_charge_200_k_tokens' => '$5 minimum charge (100k tokens)',
     'plan_starter_title' => 'Starter',
     'plan_starter_desc' => 'Perfect for small businesses getting started with AI chat',
     'plan_starter_tokens' => '2M tokens/month',
@@ -27,10 +31,10 @@ return [
 
     'plan_payg_title' => 'Pay-as-you-go',
     'plan_payg_desc' => 'Flexible pricing with $5 minimum charge for variable usage patterns',
-    'plan_payg_tokens' => '200K tokens/month',
+    'plan_payg_tokens' => '100K tokens/month',
     'plan_payg_overage' => 'Overage: $5 per 100k tokens',
-    'plan_payg_feature_5_minimum_charge_200k_tokens' => '$5 minimum charge (200k tokens)',
-    'plan_payg_feature_5_minimum_charge_200_k_tokens' => '$5 minimum charge (200k tokens)',
+    'plan_payg_feature_5_minimum_charge_200k_tokens' => '$5 minimum charge (100k tokens)',
+    'plan_payg_feature_5_minimum_charge_200_k_tokens' => '$5 minimum charge (100k tokens)',
     'plan_payg_feature_tokens_never_expire' => 'Tokens never expire',
     'plan_payg_feature_api_access' => 'API access',
     'plan_payg_feature_email_support' => 'Email support',
@@ -131,7 +135,7 @@ return [
         'plan_pro_feature_custom_alerts' => 'Custom alerts',
         'plan_pro_feature_up_to_10m_tokensmonth' => 'Up to 10M tokens/month',
         
-        'plan_payg_feature_5_minimum_charge_200k_tokens' => '$5 minimum charge (200k tokens)',
+        'plan_payg_feature_5_minimum_charge_200k_tokens' => '$5 minimum charge (100k tokens)',
         'plan_payg_feature_tokens_never_expire' => 'Tokens never expire',
         'plan_payg_feature_api_access' => 'API access',
         'plan_payg_feature_email_support' => 'Email support',

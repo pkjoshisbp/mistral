@@ -25,9 +25,9 @@ return [
 
     'plan_payg_title' => 'Pago por uso',
     'plan_payg_desc' => 'Precios flexibles con cargo mínimo de $5 para patrones de uso variables',
-    'plan_payg_tokens' => '200K tokens/mes',
+    'plan_payg_tokens' => '100K tokens/mes',
     'plan_payg_overage' => 'Exceso: $5 por 100k tokens',
-    'plan_payg_feature_5_minimum_charge_200k_tokens' => 'Cargo mínimo de $5 (200k tokens)',
+    'plan_payg_feature_5_minimum_charge_200k_tokens' => 'Cargo mínimo de $5 (100k tokens)',
     'plan_payg_feature_tokens_never_expire' => 'Los tokens nunca expiran',
     'plan_payg_feature_api_access' => 'Acceso API',
     'plan_payg_feature_email_support' => 'Soporte por email',

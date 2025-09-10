@@ -108,8 +108,8 @@
           </li>
           <li class="nav-item has-treeview {{ request()->routeIs('customer.services') || request()->routeIs('customer.faqs') || request()->routeIs('customer.general-info') ? 'menu-open' : '' }}">
             <a href="#" class="nav-link {{ request()->routeIs('customer.services') || request()->routeIs('customer.faqs') || request()->routeIs('customer.general-info') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-keyboard"></i>
-              <p>Data Entry <i class="right fas fa-angle-left"></i></p>
+              <i class="nav-icon fas fa-magic"></i>
+              <p>Content Hub <i class="right fas fa-angle-left"></i></p>
             </a>
             <ul class="nav nav-treeview">
               <li class="nav-item"><a href="{{ route('customer.services') }}" class="nav-link {{ request()->routeIs('customer.services') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Services</p></a></li>

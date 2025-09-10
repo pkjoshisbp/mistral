@@ -15,6 +15,7 @@ class Services extends Component
     public $name='';
     public $description='';
     public $price='';
+    public $currency='INR'; // Default to INR
     public $category='';
     public $requirements='';
     public $duration='';
@@ -25,6 +26,7 @@ class Services extends Component
         'name' => 'required|string|min:2',
         'description' => 'required|string|min:5',
         'price' => 'nullable|numeric',
+        'currency' => 'required|in:INR,USD',
         'category' => 'nullable|string',
         'requirements' => 'nullable|string',
         'duration' => 'nullable|string',
@@ -47,6 +49,7 @@ class Services extends Component
     {
         $this->editingId = null;
         $this->name = $this->description = $this->price = $this->category = $this->requirements = $this->duration = $this->availability = $this->keywords = '';
+        $this->currency = 'INR'; // Reset to default currency
     }
 
     public function create()
@@ -65,6 +68,7 @@ class Services extends Component
                 'metadata' => [
                     'category' => $this->category,
                     'price' => $this->price,
+                    'currency' => $this->currency,
                     'requirements' => $this->requirements,
                     'duration' => $this->duration,
                     'availability' => $this->availability,
@@ -95,6 +99,7 @@ class Services extends Component
         $this->description = $r->description;
         $m = $r->metadata ?? [];
         $this->price = $m['price'] ?? '';
+        $this->currency = $m['currency'] ?? 'INR'; // Default to INR if not set
         $this->category = $m['category'] ?? '';
         $this->requirements = $m['requirements'] ?? '';
         $this->duration = $m['duration'] ?? '';
@@ -114,6 +119,7 @@ class Services extends Component
             $metadata = [
                 'category' => $this->category,
                 'price' => $this->price,
+                'currency' => $this->currency,
                 'requirements' => $this->requirements,
                 'duration' => $this->duration,
                 'availability' => $this->availability,
@@ -195,6 +201,7 @@ class Services extends Component
                         'table_id' => $service->id,
                         'updated_at' => $service->updated_at->toISOString(),
                         'price' => $service->metadata['price'] ?? '',
+                        'currency' => $service->metadata['currency'] ?? 'INR',
                         'requirements' => $service->metadata['requirements'] ?? '',
                         'duration' => $service->metadata['duration'] ?? '',
                         'availability' => $service->metadata['availability'] ?? '',
@@ -240,7 +247,14 @@ class Services extends Component
 
     private function composeContent()
     {
-        return "Service: {$this->name}\nDescription: {$this->description}\nPrice: {$this->price}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}";
+        // Format price with proper currency symbol and context
+        $priceText = $this->price;
+        if (is_numeric($this->price) && $this->price > 0) {
+            $currencySymbol = $this->currency === 'USD' ? '$' : '₹';
+            $priceText = "{$currencySymbol}{$this->price} {$this->currency}";
+        }
+        
+        return "Service: {$this->name}\nDescription: {$this->description}\nPrice: {$priceText}\nCategory: {$this->category}\nRequirements: {$this->requirements}\nDuration: {$this->duration}\nAvailability: {$this->availability}";
     }
 
     public function render()

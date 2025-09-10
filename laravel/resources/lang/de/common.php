@@ -200,7 +200,7 @@ return [
     'plan_pro_feature_custom_alerts' => 'Benutzerdefinierte Benachrichtigungen',
     'plan_pro_feature_up_to_10m_tokensmonth' => 'Bis zu 10M Tokens/Monat',
     
-    'plan_payg_feature_5_minimum_charge_200k_tokens' => '5€ Mindestgebühr (200k Tokens)',
+    'plan_payg_feature_5_minimum_charge_200k_tokens' => '5€ Mindestgebühr (100k Tokens)',
     'plan_payg_feature_tokens_never_expire' => 'Tokens verfallen nie',
     'plan_payg_feature_api_access' => 'API-Zugang',
     'plan_payg_feature_email_support' => 'E-Mail-Support',

@@ -55,10 +55,10 @@ class SubscriptionPlanSeeder extends Seeder
                 'description' => 'Flexible pricing with $5 minimum charge for variable usage patterns',
                 'monthly_price' => 5.00, // $5 minimum charge
                 'yearly_price' => 5.00, // Same minimum
-                'token_cap_monthly' => 200000, // 200k tokens for $5
+                'token_cap_monthly' => 100000, // 100k tokens for $5
                 'overage_price_per_100k' => 5.00,
                 'features' => [
-                    '$5 minimum charge (200k tokens)',
+                    '$5 minimum charge (100k tokens)',
                     'Tokens never expire',
                     'API access',
                     'Email support',

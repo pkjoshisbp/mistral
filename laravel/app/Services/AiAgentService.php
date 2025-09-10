@@ -213,21 +213,26 @@ class AiAgentService
 
             if ($response->successful()) {
                 $data = $response->json();
-                // Prioritize MRI/magnetic resonance results in PHP before returning
+                // Prioritize service results for service queries, then other results
                 if (isset($data['results']) && is_array($data['results'])) {
+                    $serviceResults = [];
                     $mriResults = [];
                     $otherResults = [];
                     foreach ($data['results'] as $result) {
                         $payload = $result['payload'] ?? [];
+                        $dataType = $payload['data_type'] ?? '';
                         $content = $payload['content'] ?? '';
-                        if (stripos($content, 'MRI') !== false || stripos($content, 'magnetic resonance') !== false) {
+                        
+                        if ($dataType === 'service') {
+                            $serviceResults[] = $result;
+                        } elseif (stripos($content, 'MRI') !== false || stripos($content, 'magnetic resonance') !== false) {
                             $mriResults[] = $result;
                         } else {
                             $otherResults[] = $result;
                         }
                     }
-                    // Merge MRI results first, then others, and trim to requested limit
-                    $data['results'] = array_slice(array_merge($mriResults, $otherResults), 0, $limit);
+                    // Merge service results first, then MRI results, then others, and trim to requested limit
+                    $data['results'] = array_slice(array_merge($serviceResults, $mriResults, $otherResults), 0, $limit);
                 }
                 Log::info('AI Agent Qdrant search response', ['response' => $data]);
                 return $data;
@@ -277,8 +282,35 @@ class AiAgentService
                 return null;
             }
 
-            // Step 3: Search Qdrant with the embedding
-            $searchResults = $this->searchQdrant($collectionName, $embedding, $limit);
+            // Step 3: Search Qdrant with the embedding - use higher limit to get more comprehensive results
+            $searchResults = $this->searchQdrant($collectionName, $embedding, max($limit, 10));
+            
+            // Step 4: If rewritten query doesn't yield good results, try original query
+            $hasGoodResults = false;
+            if ($searchResults && isset($searchResults['results'])) {
+                foreach ($searchResults['results'] as $result) {
+                    if (($result['score'] ?? 0) > 0.6) { // Good similarity score
+                        $hasGoodResults = true;
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback to original query if rewritten query didn't work well
+            if (!$hasGoodResults && $rewrittenQuery && $rewrittenQuery !== $originalQuery) {
+                Log::info('Rewritten query results not good, trying original query', [
+                    'rewritten_query' => $rewrittenQuery,
+                    'original_query' => $originalQuery
+                ]);
+                
+                $originalEmbedding = $this->embed($originalQuery);
+                if ($originalEmbedding && is_array($originalEmbedding)) {
+                    $originalResults = $this->searchQdrant($collectionName, $originalEmbedding, max($limit, 10));
+                    if ($originalResults && isset($originalResults['results']) && count($originalResults['results']) > 0) {
+                        $searchResults = $originalResults;
+                    }
+                }
+            }
             
             Log::info('Enhanced search completed', [
                 'collection' => $collectionName,
@@ -306,7 +338,7 @@ class AiAgentService
     {
         try {
             // Use the regular LLM for query rewriting instead of the GGUF model
-            $systemPrompt = "You are a query rewriter. Rewrite the user's query into a clear, concise, unambiguous form that's optimal for semantic search. Focus on key concepts and intent. Output only the rewritten query without explanations.";
+            $systemPrompt = "You are a query rewriter for semantic search. Your job is to extract and preserve the key nouns, topics, and concepts from the user's question while making it search-friendly. For questions like 'do you provide X?', focus on 'X'. For 'what is Y?', focus on 'Y'. Preserve important keywords, product names, and service names. Remove question words but keep the core topic. Output only the rewritten query.";
             
             $messages = [
                 ['role' => 'system', 'content' => $systemPrompt],
@@ -359,7 +391,7 @@ class AiAgentService
     /**
      * LLM chat with conversation context
      */
-    public function llmChat($messages, $model = 'mistral:7b')  // Default to mistral:7b for better answers
+    public function llmChat($messages, $model = 'mistral:7b', $userId = null, $organizationId = null)  // Default to mistral:7b for better answers
     {
         try {
             $payload = [
@@ -386,7 +418,24 @@ class AiAgentService
                 'body_preview' => substr($body, 0, 100)
             ]);
 
-            return $response->successful() ? $response->json() : null;
+            if ($response->successful()) {
+                $result = $response->json();
+                
+                // Log token usage if user and organization are provided
+                if ($userId && $organizationId && isset($result['usage']['total_tokens'])) {
+                    $this->logTokenUsage(
+                        $userId,
+                        $organizationId,
+                        'llm_chat',
+                        $result['usage']['total_tokens'],
+                        substr($payloadPreview, 0, 255)
+                    );
+                }
+                
+                return $result;
+            }
+            
+            return null;
         } catch (\Exception $e) {
             Log::error('AI Agent LLM chat exception', ['error' => $e->getMessage()]);
             return null;
@@ -705,6 +754,91 @@ class AiAgentService
                 'error' => $e->getMessage()
             ]);
             return null;
+        }
+    }
+
+    /**
+     * Update existing data in Qdrant (wrapper for storeDataToQdrant with update semantics)
+     */
+    public function updateDataToQdrant($organizationSlug, $dataType, $items)
+    {
+        try {
+            Log::info('Updating data to Qdrant', [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'item_count' => count($items)
+            ]);
+
+            $payload = [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'items' => $items
+            ];
+
+            $response = Http::timeout(60)->post("{$this->baseUrl}/update_data", $payload);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                Log::info('Successfully updated data in Qdrant', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'successful_stores' => $data['successful_stores'] ?? 0,
+                    'failed_stores' => $data['failed_stores'] ?? 0
+                ]);
+                return $data;
+            } else {
+                Log::error('Failed to update data in Qdrant', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'status' => $response->status(),
+                    'error' => $response->body()
+                ]);
+                return null;
+            }
+        } catch (\Exception $e) {
+            Log::error('Update data to Qdrant exception', [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'items' => $items,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Log token usage for billing and monitoring purposes
+     */
+    private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary)
+    {
+        try {
+            // Get user's active subscription
+            $user = \App\Models\User::find($userId);
+            $subscription = $user ? $user->activeSubscription : null;
+            
+            \App\Models\TokenUsageLog::create([
+                'user_id' => $userId,
+                'organization_id' => $organizationId,
+                'subscription_id' => $subscription ? $subscription->id : null,
+                'endpoint_type' => $endpointType,
+                'tokens_used' => $tokensUsed,
+                'request_summary' => $requestSummary,
+                'used_at' => now()
+            ]);
+            
+            Log::info('Token usage logged', [
+                'user_id' => $userId,
+                'organization_id' => $organizationId,
+                'tokens_used' => $tokensUsed,
+                'endpoint_type' => $endpointType
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to log token usage', [
+                'user_id' => $userId,
+                'organization_id' => $organizationId,
+                'tokens_used' => $tokensUsed,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 

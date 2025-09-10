@@ -318,6 +318,19 @@ Route::post('/auth/send-otp', function(\Illuminate\Http\Request $request) {
         ], 404);
     }
 
+    // Check if device is trusted
+    $deviceFingerprint = $request->header('X-Device-Fingerprint');
+    if ($deviceFingerprint) {
+        $trustedDevices = json_decode($request->cookie('trusted_devices', '[]'), true);
+        if (in_array($deviceFingerprint, $trustedDevices)) {
+            return response()->json([
+                'success' => true,
+                'trusted_device' => true,
+                'message' => 'Device is trusted, no OTP required'
+            ]);
+        }
+    }
+
     // Generate and send OTP
     $otpRecord = \App\Models\EmailOtp::generateForEmail($request->email, 'login');
     
@@ -326,6 +339,7 @@ Route::post('/auth/send-otp', function(\Illuminate\Http\Request $request) {
 
     return response()->json([
         'success' => true,
+        'trusted_device' => false,
         'message' => 'OTP sent successfully'
     ]);
 })->name('auth.send-otp');

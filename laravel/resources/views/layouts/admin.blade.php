@@ -112,8 +112,8 @@
           <li class="nav-header">DATA MANAGEMENT</li>
           <li class="nav-item has-treeview {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'menu-open' : '' }}">
             <a href="#" class="nav-link {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-keyboard"></i>
-              <p>Data Entry <i class="right fas fa-angle-left"></i></p>
+              <i class="nav-icon fas fa-magic"></i>
+              <p>Content Hub <i class="right fas fa-angle-left"></i></p>
             </a>
             <ul class="nav nav-treeview">
               <li class="nav-item"><a href="{{ route('admin.data-entry') }}" class="nav-link {{ request()->routeIs('admin.data-entry') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Overview</p></a></li>
