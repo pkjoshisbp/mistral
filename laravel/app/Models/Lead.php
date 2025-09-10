@@ -16,6 +16,8 @@ class Lead extends Model
         'source', // e.g. 'chat', 'widget', etc.
         'organization_id',
         'user_id', // if captured after login
+        'session_id',
+        'location_data'
     ];
 
     public function organization()

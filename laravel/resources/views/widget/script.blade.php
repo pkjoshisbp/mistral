@@ -16,11 +16,36 @@
             this.isExpanded = false;
             this.sessionId = this.generateSessionId();
             this.messages = [];
-            this.leadCaptured = false;
-            this.userInfo = {};
+            this.leadCaptured = this.checkLeadCaptured();
+            this.userInfo = this.loadUserInfo();
             this.locationInfo = {};
             this.init();
             this.detectLocation();
+        }
+
+        checkLeadCaptured() {
+            // Check if lead was already captured for this organization
+            const key = `ai_lead_captured_${this.config.orgId}`;
+            return localStorage.getItem(key) === 'true';
+        }
+
+        loadUserInfo() {
+            // Load previously captured user info
+            const key = `ai_user_info_${this.config.orgId}`;
+            const stored = localStorage.getItem(key);
+            return stored ? JSON.parse(stored) : {};
+        }
+
+        saveLeadCaptured() {
+            // Save lead captured status
+            const key = `ai_lead_captured_${this.config.orgId}`;
+            localStorage.setItem(key, 'true');
+        }
+
+        saveUserInfo() {
+            // Save user info for future sessions
+            const key = `ai_user_info_${this.config.orgId}`;
+            localStorage.setItem(key, JSON.stringify(this.userInfo));
         }
 
         generateSessionId() {
@@ -249,14 +274,9 @@
             });
         }
 
-        toggleWidget() {
-            const window = document.getElementById(this.ids.window);
+        toggle() {
             const button = document.getElementById(this.ids.button);
-            
-            if (!window || !button) {
-                console.error('AI Chat Widget: Window or button not found');
-                return;
-            }
+            const window = document.getElementById(this.ids.window);
             
             this.isOpen = !this.isOpen;
             
@@ -264,6 +284,9 @@
                 window.style.setProperty('display', 'flex', 'important');
                 window.style.setProperty('visibility', 'visible', 'important');
                 button.style.transform = 'scale(0.9)';
+                
+                // Track widget open
+                this.trackAnalytics('widget_open');
                 
                 // Check if user is logged in by looking for auth indicators
                 const isLoggedIn = document.querySelector('meta[name="user-authenticated"]') || 
@@ -275,6 +298,7 @@
                     this.showLeadForm();
                 } else {
                     this.leadCaptured = true; // Skip lead capture for logged in users
+                    this.saveLeadCaptured(); // Persist this state
                     const input = document.getElementById(this.ids.input);
                     if (input) {
                         input.focus();
@@ -454,6 +478,8 @@
 
             this.userInfo = { name, email, phone };
             this.leadCaptured = true;
+            this.saveLeadCaptured();
+            this.saveUserInfo();
             
             // Store lead info (you can send this to server if needed)
             console.log('Lead captured:', this.userInfo);
@@ -467,6 +493,7 @@
 
         skipLeadForm() {
             this.leadCaptured = true;
+            this.saveLeadCaptured();
             this.hideLeadForm();
         }
 
@@ -497,6 +524,39 @@
             }
         }
 
+        trackAnalytics(eventType, data = {}) {
+            // Track widget interactions in analytics
+            try {
+                const payload = {
+                    org_id: this.config.orgId,
+                    visitor_id: this.sessionId, // Use session ID as visitor ID for widgets
+                    session_id: this.sessionId,
+                    event_type: eventType,
+                    page_url: window.location.href,
+                    page_title: document.title,
+                    event_data: {
+                        widget_event: true,
+                        ...data
+                    }
+                };
+
+                // Send analytics data
+                fetch('{{ config("app.url") }}/analytics/track', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                    keepalive: true
+                }).catch(e => {
+                    // Silent fail - analytics shouldn't break widget
+                    console.debug('Analytics tracking failed:', e);
+                });
+            } catch (e) {
+                // Silent fail
+            }
+        }
+
         async sendMessage() {
             const input = document.getElementById(this.ids.input);
             if (!input) return;
@@ -504,6 +564,12 @@
             const message = input.value.trim();
 
             if (!message) return;
+
+            // Track chat message
+            this.trackAnalytics('chat_message', {
+                message_length: message.length,
+                has_user_info: !!this.userInfo.name
+            });
 
             // Add user message
             this.addMessage(message, 'user');

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Organization;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
+use App\Models\Lead;
 use App\Services\AiAgentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -107,7 +108,7 @@ class WidgetController
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            // Log lead capture if provided
+            // Log and save lead capture if provided
             if (!empty($allUserInfo) && isset($allUserInfo['name'])) {
                 Log::info('Lead captured via widget', [
                     'org_id' => $orgId,
@@ -115,6 +116,22 @@ class WidgetController
                     'user_info' => $allUserInfo,
                     'location' => compact('country', 'region', 'location')
                 ]);
+                
+                // Save lead to database
+                try {
+                    Lead::create([
+                        'name' => $allUserInfo['name'] ?? null,
+                        'email' => $allUserInfo['email'] ?? null,
+                        'phone' => $allUserInfo['phone'] ?? null,
+                        'source' => 'widget',
+                        'organization_id' => $orgId,
+                        'session_id' => $sessionId,
+                        'location_data' => json_encode(compact('country', 'region', 'location'))
+                    ]);
+                    Log::info('Lead saved to database', ['org_id' => $orgId, 'session_id' => $sessionId]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to save lead to database', ['error' => $e->getMessage(), 'org_id' => $orgId]);
+                }
             }
 
             // Search organization's Qdrant collection for context using enhanced search

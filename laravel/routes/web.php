@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SitemapController;
+use App\Http\Controllers\AnalyticsController;
 use Illuminate\Support\Facades\Route;
 
 use App\Models\Blog;
@@ -68,6 +69,10 @@ Route::get('/blog/{blog:slug}', function (Blog $blog) {
 
 // SEO Routes
 Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('sitemap');
+
+// Analytics tracking routes
+Route::post('/analytics/track', [AnalyticsController::class, 'track'])->name('analytics.track');
+Route::get('/analytics/dashboard/{orgId}', [AnalyticsController::class, 'dashboard'])->name('analytics.dashboard');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
@@ -165,6 +170,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
     Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
     Route::get('/leads', \App\Livewire\Admin\LeadsManager::class)->name('leads');
+    Route::get('/analytics', \App\Livewire\Admin\AnalyticsDashboard::class)->name('analytics');
     
     // Profile routes for admin
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
