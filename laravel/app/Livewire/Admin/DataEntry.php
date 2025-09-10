@@ -5,6 +5,7 @@ namespace App\Livewire\Admin;
 use Livewire\Component;
 use App\Services\AiAgentService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use App\Models\Organization;
 use App\Models\OrganizationData;
 use App\Models\OrganizationFaq;
@@ -50,17 +51,12 @@ class DataEntry extends Component
 
         try {
             $org = Organization::find($this->selectedOrganization);
-            $ai = new AiAgentService();
             $data = $this->prepareDataForType();
             $data['org_id'] = $org->id;
             $data['keywords'] = $this->keywords;
-            $text = ($data['content'] ?? '') . ' ' . ($this->keywords ?? '');
-            $vector = $ai->embed($text);
-            $collection = 'org_' . $org->id . '_data';
-            $ai->addToQdrant($collection, $vector, $data);
             
-            // Also save to database
-            OrganizationData::create([
+            // Save to database first
+            $record = OrganizationData::create([
                 'organization_id' => $org->id,
                 'type' => $this->dataType,
                 'name' => $this->name,
@@ -69,7 +65,15 @@ class DataEntry extends Component
                 'metadata' => $data
             ]);
             
-            session()->flash('message', ucfirst($this->dataType) . ' added successfully for ' . $org->name . '!');
+            // Sync to Qdrant using unified system
+            $syncSuccess = $this->syncDataEntryToQdrant($org->slug, $data, $this->dataType);
+            
+            if ($syncSuccess) {
+                session()->flash('message', ucfirst($this->dataType) . ' added and synced successfully for ' . $org->name . '!');
+            } else {
+                session()->flash('message', ucfirst($this->dataType) . ' added but sync failed. Please check logs.');
+            }
+            
             $this->resetForm();
             $this->showAddForm = false;
         } catch (\Exception $e) {
@@ -166,6 +170,60 @@ class DataEntry extends Component
         $this->resetForm();
         $this->showEditForm = false;
         $this->editingId = null;
+    }
+
+    /**
+     * Sync data entry to Qdrant using unified system
+     */
+    private function syncDataEntryToQdrant($organizationSlug, $data, $dataType)
+    {
+        try {
+            $aiService = new AiAgentService();
+            
+            $items = [
+                [
+                    'id' => "{$dataType}_" . md5($data['name'] . $data['content'] . time()),
+                    'title' => $data['name'],
+                    'content' => $data['content'],
+                    'category' => $dataType,
+                    'metadata' => array_merge($data, [
+                        'data_type' => $dataType,
+                        'created_at' => now()->toISOString(),
+                        'keywords' => $data['keywords'] ?? '',
+                    ])
+                ]
+            ];
+            
+            $result = $aiService->storeDataToQdrant($organizationSlug, $dataType, $items);
+            
+            if ($result && $result['success'] && $result['successful_stores'] > 0) {
+                Log::info('>>> Admin DataEntry sync successful', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'name' => $data['name'],
+                    'result' => $result
+                ]);
+                return true;
+            } else {
+                Log::warning('>>> Admin DataEntry sync failed', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'name' => $data['name'],
+                    'result' => $result
+                ]);
+                return false;
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('>>> Admin DataEntry sync error', [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'name' => $data['name'] ?? 'unknown',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return false;
+        }
     }
 
     private function prepareDataForType()

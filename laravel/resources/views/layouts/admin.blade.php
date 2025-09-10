@@ -110,12 +110,15 @@
           </li>
 
           <li class="nav-header">DATA MANAGEMENT</li>
-          <li class="nav-item has-treeview {{ request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'menu-open' : '' }}">
-            <a href="#" class="nav-link {{ request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'active' : '' }}">
+          <li class="nav-item has-treeview {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'menu-open' : '' }}">
+            <a href="#" class="nav-link {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'active' : '' }}">
               <i class="nav-icon fas fa-keyboard"></i>
               <p>Data Entry <i class="right fas fa-angle-left"></i></p>
             </a>
             <ul class="nav nav-treeview">
+              <li class="nav-item"><a href="{{ route('admin.data-entry') }}" class="nav-link {{ request()->routeIs('admin.data-entry') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Overview</p></a></li>
+              <li class="nav-item"><a href="{{ route('admin.data-entry-manager') }}" class="nav-link {{ request()->routeIs('admin.data-entry-manager') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Data Manager</p></a></li>
+              <li class="nav-item"><a href="{{ route('admin.data-entry-advanced') }}" class="nav-link {{ request()->routeIs('admin.data-entry-advanced') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Advanced Entry</p></a></li>
               <li class="nav-item"><a href="{{ route('admin.services') }}" class="nav-link {{ request()->routeIs('admin.services') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Services</p></a></li>
               <li class="nav-item"><a href="{{ route('admin.faqs') }}" class="nav-link {{ request()->routeIs('admin.faqs') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>FAQs</p></a></li>
               <li class="nav-item"><a href="{{ route('admin.general-info') }}" class="nav-link {{ request()->routeIs('admin.general-info') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>General Info</p></a></li>

@@ -5,6 +5,7 @@ namespace App\Livewire\Customer;
 use Livewire\Component;
 use App\Services\AiAgentService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class DataEntry extends Component
 {
@@ -44,15 +45,19 @@ class DataEntry extends Component
         }
 
         try {
-            $ai = new AiAgentService();
             $data = $this->prepareDataForType();
             $data['org_id'] = $org->id;
             $data['keywords'] = $this->keywords;
-            $text = ($data['content'] ?? '') . ' ' . ($this->keywords ?? '');
-            $vector = $ai->embed($text);
-            $collection = 'org_' . $org->id . '_data';
-            $ai->addToQdrant($collection, $vector, $data);
-            session()->flash('message', ucfirst($this->dataType) . ' added successfully!');
+            
+            // Sync to Qdrant using unified system
+            $syncSuccess = $this->syncDataEntryToQdrant($org->slug, $data, $this->dataType);
+            
+            if ($syncSuccess) {
+                session()->flash('message', ucfirst($this->dataType) . ' added and synced successfully!');
+            } else {
+                session()->flash('message', ucfirst($this->dataType) . ' added but sync failed. Please check logs.');
+            }
+            
             $this->resetForm();
             $this->showAddForm = false;
         } catch (\Exception $e) {
@@ -116,14 +121,14 @@ class DataEntry extends Component
                     'metadata' => $data
                 ]);
 
-                // Update in Qdrant
-                $ai = new AiAgentService();
-                $text = ($data['content'] ?? '') . ' ' . ($this->keywords ?? '');
-                $vector = $ai->embed($text);
-                $collection = 'org_' . $org->id . '_data';
-                $ai->updateInQdrant($collection, $this->editingId, $vector, $data);
-
-                session()->flash('message', ucfirst($this->dataType) . ' updated successfully!');
+                // Update in Qdrant using unified system
+                $syncSuccess = $this->syncDataEntryToQdrant($org->slug, $data, $this->dataType);
+                
+                if ($syncSuccess) {
+                    session()->flash('message', ucfirst($this->dataType) . ' updated and synced successfully!');
+                } else {
+                    session()->flash('message', ucfirst($this->dataType) . ' updated but sync failed. Please check logs.');
+                }
                 $this->resetForm();
                 $this->showEditForm = false;
                 $this->editingId = null;
@@ -147,13 +152,23 @@ class DataEntry extends Component
                 ->first();
 
             if ($entry) {
+                $entryName = $entry->name;
+                $entryType = $entry->type ?? 'unknown';
+                
                 // Delete from database
                 $entry->delete();
 
-                // Delete from Qdrant
+                // Delete from Qdrant using unified system
                 $ai = new AiAgentService();
-                $collection = 'org_' . $org->id . '_data';
-                $ai->deleteFromQdrant($collection, $id);
+                $entryId = "{$entryType}_" . md5($entry->name . $entry->content . $entry->id);
+                $ai->deleteDataFromQdrant($org->slug, $entryType, $entryId);
+                
+                Log::info(">>> Customer DataEntry deleted from Qdrant", [
+                    'organization_slug' => $org->slug,
+                    'data_type' => $entryType,
+                    'name' => $entryName,
+                    'deleted_id' => $entryId
+                ]);
 
                 session()->flash('message', 'Entry deleted successfully!');
             }
@@ -167,6 +182,60 @@ class DataEntry extends Component
         $this->resetForm();
         $this->showEditForm = false;
         $this->editingId = null;
+    }
+
+    /**
+     * Sync data entry to Qdrant using unified system
+     */
+    private function syncDataEntryToQdrant($organizationSlug, $data, $dataType)
+    {
+        try {
+            $aiService = new AiAgentService();
+            
+            $items = [
+                [
+                    'id' => "{$dataType}_" . md5($data['name'] . $data['content'] . time()),
+                    'title' => $data['name'],
+                    'content' => $data['content'],
+                    'category' => $dataType,
+                    'metadata' => array_merge($data, [
+                        'data_type' => $dataType,
+                        'created_at' => now()->toISOString(),
+                        'keywords' => $data['keywords'] ?? '',
+                    ])
+                ]
+            ];
+            
+            $result = $aiService->storeDataToQdrant($organizationSlug, $dataType, $items);
+            
+            if ($result && $result['success'] && $result['successful_stores'] > 0) {
+                Log::info('>>> Customer DataEntry sync successful', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'name' => $data['name'],
+                    'result' => $result
+                ]);
+                return true;
+            } else {
+                Log::warning('>>> Customer DataEntry sync failed', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'name' => $data['name'],
+                    'result' => $result
+                ]);
+                return false;
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('>>> Customer DataEntry sync error', [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'name' => $data['name'] ?? 'unknown',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return false;
+        }
     }
 
     private function prepareDataForType()

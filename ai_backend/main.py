@@ -551,233 +551,187 @@ async def warm_model():
         logging.error(f"Model warmup failed: {str(e)}")
         pass
 
-@app.post("/sync-faqs")
-async def sync_faqs_to_qdrant(request: Request):
-    """Sync FAQs to Qdrant collection for an organization"""
+@app.post("/store_data")
+async def store_data(request: Request):
+    """
+    Unified endpoint to store any type of organization data to Qdrant
+    Expected payload:
+    {
+        "organization_slug": "ai-chat-support",
+        "data_type": "faq|info|service|document",
+        "items": [
+            {
+                "id": "unique_id",
+                "title": "title",
+                "content": "main content",
+                "category": "category",
+                "metadata": {...}
+            }
+        ]
+    }
+    """
     try:
         data = await request.json()
         organization_slug = data["organization_slug"]
-        organization_id = data["organization_id"]
-        faqs = data["faqs"]
+        data_type = data["data_type"]
+        items = data["items"]
         
-        logging.info(f"Syncing {len(faqs)} FAQs to collection: {organization_slug}")
+        logging.info(f"Store data request: org={organization_slug}, type={data_type}, count={len(items)}")
         
-        # Ensure collection exists
+        # Create collection if it doesn't exist
+        collection_name = organization_slug
         try:
             qdrant.create_collection(
-                collection_name=organization_slug,
+                collection_name=collection_name,
                 vectors_config=VectorParams(size=768, distance=Distance.COSINE)
             )
-            logging.info(f"Created collection: {organization_slug}")
         except Exception as e:
-            if "already exists" in str(e).lower():
-                logging.info(f"Collection {organization_slug} already exists")
-            else:
-                raise e
+            if "already exists" not in str(e):
+                logging.warning(f"Collection creation issue: {str(e)}")
         
-        # Clear existing FAQ points for this organization
-        try:
-            # Delete existing FAQ points
-            qdrant.delete(
-                collection_name=organization_slug,
-                points_selector={"filter": {"must": [{"key": "type", "match": {"value": "faq"}}]}}
-            )
-            logging.info(f"Cleared existing FAQ points from {organization_slug}")
-        except Exception as e:
-            logging.warning(f"Could not clear existing points: {e}")
+        successful_stores = 0
+        failed_stores = []
         
-        # Process FAQs in batches
-        batch_size = 10
-        synced_count = 0
-        
-        for i in range(0, len(faqs), batch_size):
-            batch = faqs[i:i + batch_size]
-            points = []
-            
-            for faq in batch:
-                try:
-                    # Create combined text for embedding
-                    combined_text = f"Question: {faq['question']} Answer: {faq['answer']}"
-                    
-                    # Get embedding
-                    embedding = await get_embedding_with_fallback(combined_text)
-                    if not embedding:
-                        logging.error(f"Failed to get embedding for FAQ {faq['id']}")
-                        continue
-                    
-                    # Create point
-                    point_id = f"faq_{faq['id']}"
-                    points.append(PointStruct(
-                        id=point_id,
-                        vector=embedding,
-                        payload={
-                            "type": "faq",
-                            "question": faq["question"],
-                            "answer": faq["answer"],
-                            "category": faq.get("category", "General"),
-                            "organization_id": organization_id,
-                            "faq_id": faq["id"]
-                        }
-                    ))
-                    
-                except Exception as e:
-                    logging.error(f"Error processing FAQ {faq['id']}: {e}")
-                    continue
-            
-            # Upsert batch to Qdrant
-            if points:
-                try:
-                    qdrant.upsert(collection_name=organization_slug, points=points)
-                    synced_count += len(points)
-                    logging.info(f"Synced batch of {len(points)} FAQs to {organization_slug}")
-                except Exception as e:
-                    logging.error(f"Error upserting batch: {e}")
-                    raise e
-        
-        logging.info(f"Successfully synced {synced_count} FAQs to collection {organization_slug}")
-        
-        return {
-            "status": "success",
-            "message": f"Synced {synced_count} FAQs to collection {organization_slug}",
-            "synced_count": synced_count,
-            "organization_slug": organization_slug
-        }
-        
-    except Exception as e:
-        logging.error(f"FAQ sync error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to sync FAQs: {str(e)}")
-
-
-@app.post("/sync-unified-data")
-async def sync_unified_data(request: Request):
-    """Unified sync endpoint for all organization data types (FAQs, General Info, etc.)"""
-    try:
-        data = await request.json()
-        organization_slug = data["organization_slug"]
-        organization_id = data["organization_id"]
-        all_data = data["data"]  # Mixed array of different data types
-        clear_existing = data.get("clear_existing", True)
-        
-        logging.info(f"Syncing {len(all_data)} unified data items to collection: {organization_slug}")
-        
-        # Ensure collection exists
-        try:
-            qdrant.create_collection(
-                collection_name=organization_slug,
-                vectors_config=VectorParams(size=768, distance=Distance.COSINE)
-            )
-            logging.info(f"Created collection: {organization_slug}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                logging.info(f"Collection {organization_slug} already exists")
-            else:
-                raise e
-        
-        # Clear existing data if requested (prevents duplicates)
-        if clear_existing:
+        for item in items:
             try:
-                # Delete all points in the collection
-                qdrant.delete(
-                    collection_name=organization_slug,
-                    points_selector={"filter": {"must": [{"key": "organization_id", "match": {"value": organization_id}}]}}
-                )
-                logging.info(f"Cleared existing data from {organization_slug}")
-            except Exception as e:
-                logging.warning(f"Could not clear existing data: {e}")
-        
-        # Process data in batches
-        batch_size = 10
-        synced_count = 0
-        
-        for i in range(0, len(all_data), batch_size):
-            batch = all_data[i:i + batch_size]
-            points = []
-            
-            for item in batch:
-                try:
-                    # Create text for embedding based on data type
-                    if item['type'] == 'faq':
-                        embed_text = f"Question: {item['question']} Answer: {item['answer']}"
-                        if item.get('keywords'):
-                            embed_text += f" Keywords: {item['keywords']}"
-                    elif item['type'] == 'general_info':
-                        embed_text = f"Title: {item['title']} Content: {item['content']}"
-                        if item.get('keywords'):
-                            embed_text += f" Keywords: {item['keywords']}"
-                    else:
-                        embed_text = item.get('content', str(item))
-                    
-                    # Get embedding
-                    embedding = await get_embedding_with_fallback(embed_text)
-                    if not embedding:
-                        logging.error(f"Failed to get embedding for {item['type']} {item['id']}")
-                        continue
-                    
-                    # Create point with unique ID
-                    point_id = item['id']  # Should be unique like 'faq_123' or 'info_456'
-                    
-                    # Create payload
-                    payload = {
-                        "type": item['type'],
-                        "organization_id": organization_id,
-                        "database_id": item.get('database_id'),
-                        "category": item.get('category', 'General')
-                    }
-                    
-                    # Add type-specific fields
-                    if item['type'] == 'faq':
-                        payload.update({
-                            "question": item['question'],
-                            "answer": item['answer'],
-                            "keywords": item.get('keywords', ''),
-                            "sort_order": item.get('sort_order', 0),
-                            "text": embed_text
-                        })
-                    elif item['type'] == 'general_info':
-                        payload.update({
-                            "title": item['title'],
-                            "content": item['content'],
-                            "description": item.get('description', ''),
-                            "keywords": item.get('keywords', ''),
-                            "text": embed_text
-                        })
-                    
-                    points.append(PointStruct(
+                # Prepare text for embedding
+                text_parts = []
+                if item.get('title'):
+                    text_parts.append(f"Title: {item['title']}")
+                if item.get('content'):
+                    text_parts.append(f"Content: {item['content']}")
+                if item.get('category'):
+                    text_parts.append(f"Category: {item['category']}")
+                
+                full_text = " ".join(text_parts)
+                
+                if not full_text.strip():
+                    failed_stores.append({"item_id": item.get('id'), "error": "No text content to embed"})
+                    continue
+                
+                # Generate embedding
+                start_time = time.time()
+                embedding, elapsed_ms = await _generate_embedding(DEFAULT_EMBED_MODEL, full_text, start_time)
+                
+                # Prepare payload
+                payload = {
+                    "data_type": data_type,
+                    "item_id": item.get('id'),
+                    "title": item.get('title', ''),
+                    "content": item.get('content', ''),
+                    "category": item.get('category', ''),
+                    "organization_slug": organization_slug
+                }
+                
+                # Add any additional metadata
+                if item.get('metadata'):
+                    payload.update(item['metadata'])
+                
+                # Store in Qdrant
+                point_id = str(uuid.uuid4())
+                qdrant.upsert(
+                    collection_name=collection_name,
+                    points=[PointStruct(
                         id=point_id,
                         vector=embedding,
                         payload=payload
-                    ))
-                    
-                except Exception as e:
-                    logging.error(f"Failed to process item {item.get('id', 'unknown')}: {e}")
-                    continue
-            
-            # Upload batch to Qdrant
-            if points:
-                try:
-                    qdrant.upsert(
-                        collection_name=organization_slug,
-                        points=points
-                    )
-                    synced_count += len(points)
-                    logging.info(f"Synced batch of {len(points)} items to {organization_slug}")
-                except Exception as e:
-                    logging.error(f"Failed to upload batch to Qdrant: {e}")
+                    )]
+                )
+                
+                successful_stores += 1
+                logging.info(f"Stored item {item.get('id')} to {collection_name}")
+                
+            except Exception as e:
+                failed_stores.append({
+                    "item_id": item.get('id'), 
+                    "error": str(e)
+                })
+                logging.error(f"Failed to store item {item.get('id')}: {str(e)}")
         
-        logging.info(f"Completed unified sync: {synced_count}/{len(all_data)} items synced to {organization_slug}")
-        
-        return {
-            "status": "success",
-            "message": f"Synced {synced_count} items to collection {organization_slug}",
-            "synced_count": synced_count,
-            "total_items": len(all_data),
-            "organization_slug": organization_slug
+        response = {
+            "success": True,
+            "organization_slug": organization_slug,
+            "data_type": data_type,
+            "total_items": len(items),
+            "successful_stores": successful_stores,
+            "failed_stores": len(failed_stores),
+            "failures": failed_stores
         }
         
+        logging.info(f"Store data complete: {successful_stores}/{len(items)} successful")
+        return response
+        
     except Exception as e:
-        logging.error(f"Unified sync error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to sync unified data: {str(e)}")
+        logging.error(f"Store data error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Store data failed: {str(e)}")
 
+@app.post("/delete_data")
+async def delete_data(request: Request):
+    """
+    Delete specific data points from Qdrant collection
+    Expected payload:
+    {
+        "organization_slug": "ai-chat-support", 
+        "item_ids": ["faq_123", "info_456"]
+    }
+    """
+    try:
+        data = await request.json()
+        organization_slug = data["organization_slug"]
+        item_ids = data["item_ids"]
+        
+        logging.info(f"Delete data request: org={organization_slug}, items={len(item_ids)}")
+        
+        collection_name = organization_slug
+        deleted_count = 0
+        failed_deletes = []
+        
+        # Get all points to find the ones to delete by payload matching
+        scroll_result = qdrant.scroll(
+            collection_name=collection_name,
+            scroll_filter=None,
+            limit=1000,  # Adjust if you have more items
+            with_payload=True,
+            with_vectors=False
+        )
+        
+        points_to_delete = []
+        for point in scroll_result[0]:  # scroll returns (points, next_page_offset)
+            payload = point.payload
+            if payload.get('item_id') in item_ids:
+                points_to_delete.append(point.id)
+        
+        # Delete the points
+        if points_to_delete:
+            qdrant.delete(
+                collection_name=collection_name,
+                points_selector=points_to_delete
+            )
+            deleted_count = len(points_to_delete)
+            logging.info(f"Deleted {deleted_count} items from {collection_name}")
+        
+        # Check which items weren't found
+        found_items = set()
+        for point in scroll_result[0]:
+            payload = point.payload
+            if payload.get('item_id') in item_ids and point.id in points_to_delete:
+                found_items.add(payload.get('item_id'))
+        
+        failed_deletes = [item_id for item_id in item_ids if item_id not in found_items]
+        
+        response = {
+            "success": True,
+            "organization_slug": organization_slug,
+            "total_requested": len(item_ids),
+            "deleted_count": deleted_count,
+            "failed_deletes": failed_deletes
+        }
+        
+        return response
+        
+    except Exception as e:
+        logging.error(f"Delete data error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Delete data failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

@@ -99,7 +99,13 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
         return view('website-crawler');
     })->name('website-crawler');
     
-    Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('admin.documents');
+    // Data entry routes
+    Route::get('/data-entry', function () {
+        return view('admin.data-entry');
+    })->name('data-entry');
+    
+    Route::get('/data-entry-manager', \App\Livewire\Admin\DataEntry::class)->name('data-entry-manager');
+    Route::get('/data-entry-advanced', \App\Livewire\DataEntryManager::class)->name('data-entry-advanced');
     
     // Removed old Manual Data Entry route. Use dedicated child pages for each data type.
     

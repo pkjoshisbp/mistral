@@ -5,6 +5,7 @@ namespace App\Livewire;
 use Livewire\Component;
 use App\Models\Organization;
 use App\Services\AiAgentService;
+use Illuminate\Support\Facades\Log;
 
 class DataEntryManager extends Component
 {
@@ -58,6 +59,60 @@ class DataEntryManager extends Component
         $this->entries = collect();
     }
 
+    /**
+     * Sync data entry to Qdrant using unified system
+     */
+    private function syncDataEntryToQdrant($organizationSlug, $data, $dataType)
+    {
+        try {
+            $aiService = new AiAgentService();
+            
+            $items = [
+                [
+                    'id' => "{$dataType}_" . md5($data['name'] . $data['content'] . time()),
+                    'title' => $data['name'],
+                    'content' => $data['content'],
+                    'category' => $dataType,
+                    'metadata' => array_merge($data, [
+                        'data_type' => $dataType,
+                        'created_at' => now()->toISOString(),
+                        'keywords' => $data['keywords'] ?? '',
+                    ])
+                ]
+            ];
+            
+            $result = $aiService->storeDataToQdrant($organizationSlug, $dataType, $items);
+            
+            if ($result && $result['success'] && $result['successful_stores'] > 0) {
+                Log::info('>>> DataEntryManager sync successful', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'name' => $data['name'],
+                    'result' => $result
+                ]);
+                return true;
+            } else {
+                Log::warning('>>> DataEntryManager sync failed', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType,
+                    'name' => $data['name'],
+                    'result' => $result
+                ]);
+                return false;
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('>>> DataEntryManager sync error', [
+                'organization_slug' => $organizationSlug,
+                'data_type' => $dataType,
+                'name' => $data['name'] ?? 'unknown',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return false;
+        }
+    }
+
     public function addEntry()
     {
         $this->validate();
@@ -71,43 +126,16 @@ class DataEntryManager extends Component
             $organization = Organization::find($this->selectedOrgId);
             $data = $this->prepareDataForType();
             $data['keywords'] = $this->keywords;
-            $collection = "org_{$organization->id}_data";
-            $aiService = new AiAgentService();
-
-            // Check for duplicate by name, category, and type
-            $searchPayload = [
-                'name' => $data['name'],
-                'category' => $data['category'],
-                'type' => $data['type']
-            ];
-            $existing = $aiService->searchQdrant($collection, $data['name'] . ' ' . $data['category'] . ' ' . $data['type'], 10);
-            $isDuplicate = false;
-            if (!empty($existing)) {
-                foreach ($existing as $item) {
-                    $payload = $item['payload'] ?? [];
-                    if (
-                        isset($payload['name'], $payload['category'], $payload['type']) &&
-                        $payload['name'] === $data['name'] &&
-                        $payload['category'] === $data['category'] &&
-                        $payload['type'] === $data['type']
-                    ) {
-                        $isDuplicate = true;
-                        break;
-                    }
-                }
+            
+            // Use unified sync system instead of old method
+            $syncSuccess = $this->syncDataEntryToQdrant($organization->slug, $data, $this->dataType);
+            
+            if ($syncSuccess) {
+                session()->flash('message', ucfirst($this->dataType) . ' added and synced successfully!');
+            } else {
+                session()->flash('message', ucfirst($this->dataType) . ' added but sync failed. Please check logs.');
             }
-            if ($isDuplicate) {
-                session()->flash('error', 'Duplicate entry detected. This record already exists.');
-                return;
-            }
-
-            // Generate embedding vector using embed() method (include keywords)
-            $embedText = ($data['content'] ?? '') . ' ' . ($this->keywords ?? '');
-            $vector = $aiService->embed($embedText);
-            $payload = $data;
-            $result = $aiService->addToQdrant($collection, $vector, $payload);
-            \Log::debug('Qdrant addToQdrant response', ['result' => $result, 'collection' => $collection, 'payload' => $payload]);
-            session()->flash('message', ucfirst($this->dataType) . ' added successfully!');
+            
             $this->resetForm();
             $this->showAddForm = false;
         } catch (\Exception $e) {

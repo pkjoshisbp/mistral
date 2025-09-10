@@ -6,6 +6,7 @@ use Livewire\Component;
 use App\Models\Organization;
 use App\Models\OrganizationData;
 use App\Services\AiAgentService;
+use Illuminate\Support\Facades\Log;
 
 class GeneralInfoManager extends Component
 {
@@ -44,6 +45,58 @@ class GeneralInfoManager extends Component
         $this->title = $this->information = $this->category = $this->keywords = '';
     }
 
+    private function composeContent()
+    {
+        return "Information: {$this->title}\nDetails: {$this->information}\nCategory: {$this->category}";
+    }
+
+    /**
+     * Sync info to Qdrant using unified system
+     */
+    private function syncInfoToQdrant($organizationSlug, $infoItems)
+    {
+        try {
+            $aiService = new AiAgentService();
+            
+            $items = [];
+            foreach ($infoItems as $info) {
+                $items[] = [
+                    'id' => "info_{$info->id}",
+                    'title' => $info->name,
+                    'content' => $info->content,
+                    'category' => $info->metadata['category'] ?? 'general',
+                    'metadata' => [
+                        'table_id' => $info->id,
+                        'updated_at' => $info->updated_at->toISOString(),
+                        'keywords' => $info->metadata['keywords'] ?? '',
+                    ]
+                ];
+            }
+            
+            $result = $aiService->storeDataToQdrant($organizationSlug, 'general_info', $items);
+            
+            if ($result && $result['success'] && $result['successful_stores'] > 0) {
+                Log::info('>>> Admin GeneralInfoManager sync successful', [
+                    'organization_slug' => $organizationSlug,
+                    'items_count' => count($items),
+                    'result' => $result
+                ]);
+            } else {
+                Log::warning('>>> Admin GeneralInfoManager sync failed', [
+                    'organization_slug' => $organizationSlug,
+                    'items_count' => count($items),
+                    'result' => $result
+                ]);
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('>>> Admin GeneralInfoManager sync error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+
     public function create()
     {
         $this->validate();
@@ -62,17 +115,14 @@ class GeneralInfoManager extends Component
                 ]
             ];
             $record = OrganizationData::create($data);
-            $ai = new AiAgentService();
-            $vector = $ai->embed($content . ' ' . ($this->keywords ?? ''));
-            if ($vector) {
-                $collection = 'org_' . $this->selectedOrganization . '_data';
-                $payload = $data['metadata'];
-                $payload['content'] = $content;
-                $payload['org_id'] = $this->selectedOrganization;
-                $payload['id'] = $record->id;
-                $ai->addToQdrant($collection, $vector, $payload, $record->id);
+
+            // Sync to Qdrant using unified system
+            $organization = Organization::find($this->selectedOrganization);
+            if ($organization) {
+                $this->syncInfoToQdrant($organization->slug, [$record]);
             }
-            session()->flash('message', 'Information added');
+
+            session()->flash('message', 'Information added and synced to AI system');
             $this->resetForm();
             $this->showForm = false;
         } catch (\Throwable $e) {
@@ -113,16 +163,13 @@ class GeneralInfoManager extends Component
                 'content' => $content,
                 'metadata' => $metadata
             ]);
-            $ai = new AiAgentService();
-            $vector = $ai->embed($content . ' ' . ($this->keywords ?? ''));
-            if ($vector) {
-                $collection = 'org_' . $this->selectedOrganization . '_data';
-                $payload = $metadata;
-                $payload['content'] = $content;
-                $payload['org_id'] = $this->selectedOrganization;
-                $payload['id'] = $r->id;
-                $ai->addToQdrant($collection, $vector, $payload, $r->id);
+
+            // Sync to Qdrant using unified system
+            $organization = Organization::find($this->selectedOrganization);
+            if ($organization) {
+                $this->syncInfoToQdrant($organization->slug, [$r]);
             }
+            
             session()->flash('message', 'Information updated');
             $this->resetForm();
             $this->showForm = false;
@@ -138,18 +185,23 @@ class GeneralInfoManager extends Component
         $orgId = $r->organization_id;
         try {
             $r->delete();
-            $ai = new AiAgentService();
-            $collection = 'org_' . $orgId . '_data';
-            $ai->deleteFromQdrant($collection, $id);
+            
+            // Delete from Qdrant using unified system
+            $organization = Organization::find($orgId);
+            if ($organization) {
+                $ai = new AiAgentService();
+                $ai->deleteDataFromQdrant($organization->slug, 'general_info', "info_$id");
+                Log::info(">>> Admin GeneralInfoManager deleted from Qdrant", [
+                    'organization_slug' => $organization->slug,
+                    'data_type' => 'general_info',
+                    'deleted_id' => "info_$id"
+                ]);
+            }
+            
             session()->flash('message', 'Deleted');
         } catch (\Throwable $e) {
             session()->flash('error', 'Delete failed: ' . $e->getMessage());
         }
-    }
-
-    private function composeContent(): string
-    {
-        return "Information: {$this->title}\nDetails: {$this->information}\nCategory: {$this->category}";
     }
 
     public function render()

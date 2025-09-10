@@ -7,6 +7,7 @@ use Livewire\WithFileUploads;
 use App\Services\AiAgentService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class Documents extends Component
@@ -46,6 +47,60 @@ class Documents extends Component
                     'type' => pathinfo($file, PATHINFO_EXTENSION)
                 ];
             })->sortByDesc('created');
+        }
+    }
+
+    /**
+     * Sync document to Qdrant using unified system
+     */
+    private function syncDocumentToQdrant($organizationSlug, $documentData)
+    {
+        try {
+            $aiService = new AiAgentService();
+            
+            $items = [
+                [
+                    'id' => "document_" . md5($documentData['filename'] . $documentData['path']),
+                    'title' => $documentData['filename'],
+                    'content' => $documentData['content'],
+                    'category' => 'document',
+                    'metadata' => [
+                        'source' => 'document_upload',
+                        'filename' => $documentData['filename'],
+                        'uploaded_by' => $documentData['uploaded_by'],
+                        'file_path' => $documentData['path'],
+                        'file_type' => $documentData['file_type'] ?? '',
+                        'uploaded_at' => now()->toISOString(),
+                    ]
+                ]
+            ];
+            
+            $result = $aiService->storeDataToQdrant($organizationSlug, 'documents', $items);
+            
+            if ($result && $result['success'] && $result['successful_stores'] > 0) {
+                Log::info('>>> Customer Documents sync successful', [
+                    'organization_slug' => $organizationSlug,
+                    'filename' => $documentData['filename'],
+                    'result' => $result
+                ]);
+                return true;
+            } else {
+                Log::warning('>>> Customer Documents sync failed', [
+                    'organization_slug' => $organizationSlug,
+                    'filename' => $documentData['filename'],
+                    'result' => $result
+                ]);
+                return false;
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('>>> Customer Documents sync error', [
+                'organization_slug' => $organizationSlug,
+                'filename' => $documentData['filename'] ?? 'unknown',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return false;
         }
     }
 
@@ -94,22 +149,16 @@ class Documents extends Component
             }
             
             if ($content) {
-                // Add to vector database
-                $embedding = $aiAgentService->embed($content);
+                // Sync to Qdrant using unified system
+                $documentData = [
+                    'filename' => $originalName,
+                    'content' => $content,
+                    'path' => $path,
+                    'uploaded_by' => Auth::id(),
+                    'file_type' => $extension
+                ];
                 
-                if ($embedding) {
-                    $aiAgentService->storeInQdrant(
-                        $organization->slug,
-                        $embedding,
-                        [
-                            'content' => $content,
-                            'source' => 'document_upload',
-                            'filename' => $originalName,
-                            'org_id' => $organization->id,
-                            'uploaded_by' => Auth::id()
-                        ]
-                    );
-                }
+                $this->syncDocumentToQdrant($organization->slug, $documentData);
             }
             
             $this->reset(['file']);
@@ -128,7 +177,25 @@ class Documents extends Component
     {
         try {
             if (Storage::exists($filePath)) {
+                $organization = Auth::user()->primaryOrganization();
+                $filename = basename($filePath);
+                
+                // Delete from storage
                 Storage::delete($filePath);
+                
+                // Delete from Qdrant using unified system
+                if ($organization) {
+                    $ai = new AiAgentService();
+                    $documentId = "document_" . md5($filename . $filePath);
+                    $ai->deleteDataFromQdrant($organization->slug, 'documents', $documentId);
+                    
+                    Log::info(">>> Customer Documents deleted from Qdrant", [
+                        'organization_slug' => $organization->slug,
+                        'filename' => $filename,
+                        'deleted_id' => $documentId
+                    ]);
+                }
+                
                 $this->loadDocuments();
                 session()->flash('message', 'File deleted successfully!');
             }
