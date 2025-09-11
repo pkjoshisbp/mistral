@@ -260,7 +260,7 @@
                                                 <small class="text-muted">/month</small>
                                             @endif
                                         </div>
-                                        <div class="yearly-price price-display" data-cycle="yearly" style="display: none;">
+                                        <div class="yearly-price price-display" data-cycle="yearly">
                                             @php
                                                 $yearlyPrice = $plan->getYearlyPriceForCurrency($currency);
                                             @endphp
@@ -853,37 +853,62 @@
             @endauth
         });
         
-        // Handle billing cycle toggle
-        document.querySelectorAll('input[name="billingCycle"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                const selectedCycle = this.value;
-                
-                // Hide all price displays
-                document.querySelectorAll('.price-display').forEach(display => {
-                    display.style.display = 'none';
-                });
-                
-                // Show selected cycle prices
-                document.querySelectorAll(`.price-display[data-cycle="${selectedCycle}"]`).forEach(display => {
-                    display.style.display = 'block';
-                });
-                
-                // Update payment button URLs to use the selected billing cycle
-                document.querySelectorAll('.payment-btn').forEach(link => {
-                    if (link.href && (link.href.includes('cycle=monthly') || link.href.includes('cycle=yearly'))) {
-                        const url = new URL(link.href);
-                        url.searchParams.set('cycle', selectedCycle);
-                        link.href = url.toString();
-                    }
+        // Handle billing cycle toggle - ensure DOM is ready
+        function initBillingToggle() {
+            const billingRadios = document.querySelectorAll('input[name="billingCycle"]');
+            console.log('Found billing cycle radios:', billingRadios.length);
+            
+            billingRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    const selectedCycle = this.value;
+                    console.log('Billing cycle changed to:', selectedCycle);
+                    
+                    // Hide all price displays
+                    const allDisplays = document.querySelectorAll('.price-display');
+                    console.log('Found price displays:', allDisplays.length);
+                    allDisplays.forEach(display => {
+                        display.style.setProperty('display', 'none', 'important');
+                    });
+                    
+                    // Show selected cycle prices
+                    const targetDisplays = document.querySelectorAll(`.price-display[data-cycle="${selectedCycle}"]`);
+                    console.log('Showing displays for', selectedCycle, ':', targetDisplays.length);
+                    targetDisplays.forEach(display => {
+                        display.style.setProperty('display', 'block', 'important');
+                    });
+                    
+                    // Update payment button URLs to use the selected billing cycle
+                    document.querySelectorAll('.payment-btn').forEach(link => {
+                        if (link.href && (link.href.includes('cycle=monthly') || link.href.includes('cycle=yearly'))) {
+                            const url = new URL(link.href);
+                            url.searchParams.set('cycle', selectedCycle);
+                            link.href = url.toString();
+                        }
+                    });
                 });
             });
-        });
+        }
+        
+        // Initialize billing toggle when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initBillingToggle);
+        } else {
+            initBillingToggle();
+        }
     </script>
     @endauth
 
     <!-- Footer -->
 
     <style>
+    /* Pricing toggle styles */
+    .price-display[data-cycle="yearly"] {
+        display: none !important;
+    }
+    .price-display[data-cycle="monthly"] {
+        display: block !important;
+    }
+    
     footer .social-links a:hover {
         color: #667eea !important;
         transition: color 0.3s ease;
