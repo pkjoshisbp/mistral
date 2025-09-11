@@ -213,7 +213,7 @@
                     </div>
                 </div>
             </div>
-            <div class="row">
+            <div class="row pricing-container show-monthly">
                 @php
                     try {
                         $plans = App\Models\SubscriptionPlan::where('is_active', true)
@@ -853,31 +853,31 @@
             @endauth
         });
         
-        // Handle billing cycle toggle - ensure DOM is ready
+        // Handle billing cycle toggle - simplified approach
         function initBillingToggle() {
             const billingRadios = document.querySelectorAll('input[name="billingCycle"]');
-            console.log('Found billing cycle radios:', billingRadios.length);
+            const pricingContainer = document.querySelector('.pricing-container');
+            
+            if (!pricingContainer) {
+                console.error('Pricing container not found');
+                return;
+            }
             
             billingRadios.forEach(radio => {
                 radio.addEventListener('change', function() {
                     const selectedCycle = this.value;
-                    console.log('Billing cycle changed to:', selectedCycle);
                     
-                    // Hide all price displays
-                    const allDisplays = document.querySelectorAll('.price-display');
-                    console.log('Found price displays:', allDisplays.length);
-                    allDisplays.forEach(display => {
-                        display.style.setProperty('display', 'none', 'important');
-                    });
+                    // Remove both classes first
+                    pricingContainer.classList.remove('show-monthly', 'show-yearly');
                     
-                    // Show selected cycle prices
-                    const targetDisplays = document.querySelectorAll(`.price-display[data-cycle="${selectedCycle}"]`);
-                    console.log('Showing displays for', selectedCycle, ':', targetDisplays.length);
-                    targetDisplays.forEach(display => {
-                        display.style.setProperty('display', 'block', 'important');
-                    });
+                    // Add the appropriate class
+                    if (selectedCycle === 'yearly') {
+                        pricingContainer.classList.add('show-yearly');
+                    } else {
+                        pricingContainer.classList.add('show-monthly');
+                    }
                     
-                    // Update payment button URLs to use the selected billing cycle
+                    // Update payment button URLs
                     document.querySelectorAll('.payment-btn').forEach(link => {
                         if (link.href && (link.href.includes('cycle=monthly') || link.href.includes('cycle=yearly'))) {
                             const url = new URL(link.href);
@@ -889,7 +889,7 @@
             });
         }
         
-        // Initialize billing toggle when DOM is ready
+        // Initialize when DOM is ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', initBillingToggle);
         } else {
@@ -902,11 +902,25 @@
 
     <style>
     /* Pricing toggle styles */
-    .price-display[data-cycle="yearly"] {
+    .pricing-container.show-monthly .monthly-price {
+        display: block !important;
+    }
+    .pricing-container.show-monthly .yearly-price {
         display: none !important;
     }
-    .price-display[data-cycle="monthly"] {
+    .pricing-container.show-yearly .monthly-price {
+        display: none !important;
+    }
+    .pricing-container.show-yearly .yearly-price {
         display: block !important;
+    }
+    
+    /* Default state - show monthly */
+    .pricing-container .monthly-price {
+        display: block;
+    }
+    .pricing-container .yearly-price {
+        display: none;
     }
     
     footer .social-links a:hover {
