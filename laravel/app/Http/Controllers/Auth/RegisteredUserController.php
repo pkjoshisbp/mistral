@@ -64,12 +64,23 @@ class RegisteredUserController extends Controller
         // Check if a plan was selected during registration
         $selectedPlan = $request->get('plan');
         if ($selectedPlan && $selectedPlan !== 'enterprise') {
-            // Store the selected plan in session for payment redirect
-            session(['selected_plan' => $selectedPlan]);
-            return redirect()->route('customer.subscription')->with([
-                'plan' => $selectedPlan,
-                'message' => 'Registration successful! Please choose your subscription plan.'
-            ]);
+            // Find the plan and redirect to appropriate payment method
+            $plan = \App\Models\SubscriptionPlan::where('slug', $selectedPlan)->first();
+            if ($plan) {
+                $locationService = app()->bound(\App\Services\LocationService::class) ? app(\App\Services\LocationService::class) : null;
+                $isFromIndia = $locationService && method_exists($locationService, 'isFromIndia') ? $locationService->isFromIndia() : false;
+                
+                if ($isFromIndia) {
+                    // For PAYG plan, default to one-time payment; others try recurring first
+                    if ($selectedPlan === 'payg') {
+                        return redirect()->route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']);
+                    } else {
+                        return redirect()->route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']);
+                    }
+                } else {
+                    return redirect()->route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']);
+                }
+            }
         }
 
         // Default redirect to customer dashboard for users without plan selection

@@ -108,6 +108,88 @@ class RazorpayController extends Controller
     }
 
     /**
+     * Create one-time payment order for subscription plans
+     */
+    public function createOnetimePayment(Request $request)
+    {
+        try {
+            $plan = SubscriptionPlan::findOrFail($request->plan_id);
+            $user = Auth::user();
+            $locationService = app(\App\Services\LocationService::class);
+            
+            // Get billing cycle from request (default to monthly)
+            $billingCycle = $request->input('billing_cycle', 'monthly');
+
+            // Initialize Razorpay API
+            $api = new Api($this->razorpayId, $this->razorpaySecret);
+
+            // Get price based on billing cycle and convert to INR paise
+            $price = $billingCycle === 'yearly' ? $plan->yearly_price : $plan->monthly_price;
+            $priceINR = $locationService->convertToINR($price);
+            $amountInPaise = $priceINR * 100; // Convert to paise
+
+            // Calculate period end date
+            $periodEnd = $billingCycle === 'yearly' ? now()->addYear() : now()->addMonth();
+
+            // Create Razorpay order for one-time payment
+            $order = $api->order->create([
+                'amount' => $amountInPaise,
+                'currency' => 'INR',
+                'receipt' => 'order_' . time() . '_' . $user->id,
+                'notes' => [
+                    'user_id' => $user->id,
+                    'plan_id' => $plan->id,
+                    'plan_name' => $plan->name,
+                    'billing_cycle' => $billingCycle,
+                    'subscription_type' => 'onetime'
+                ]
+            ]);
+
+            // Create local subscription record as pending
+            $localSubscription = Subscription::create([
+                'user_id' => $user->id,
+                'organization_id' => $user->organization_id ?? null,
+                'subscription_plan_id' => $plan->id,
+                'razorpay_payment_id' => $order['id'], // Store order ID temporarily
+                'status' => 'pending',
+                'billing_cycle' => $billingCycle,
+                'current_period_start' => now(),
+                'current_period_end' => $periodEnd,
+                'tokens_used_this_period' => 0
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'order_id' => $order['id'],
+                'razorpay_key' => $this->razorpayId,
+                'amount' => $amountInPaise,
+                'currency' => 'INR',
+                'name' => config('app.name'),
+                'description' => $plan->name . ' Subscription (' . ucfirst($billingCycle) . ' - One-time Payment)',
+                'subscription_type' => 'onetime',
+                'prefill' => [
+                    'email' => $user->email,
+                    'contact' => $user->phone ?? '',
+                    'name' => $user->name
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Razorpay one-time payment creation failed', [
+                'user_id' => Auth::id(),
+                'plan_id' => $request->plan_id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while creating the payment: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Create or get Razorpay plan
      */
     private function createOrGetRazorpayPlan($api, $plan, $amountInPaise, $billingCycle = 'monthly')
@@ -175,6 +257,56 @@ class RazorpayController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Razorpay success handling failed: ' . $e->getMessage());
+            
+            return redirect()->route('customer.dashboard')
+                ->with('error', 'Payment verification failed');
+        }
+    }
+
+    /**
+     * Handle successful one-time payment
+     */
+    public function handleOnetimeSuccess(Request $request)
+    {
+        try {
+            $paymentId = $request->razorpay_payment_id;
+            $orderId = $request->razorpay_order_id;
+            $signature = $request->razorpay_signature;
+
+            // Verify signature
+            $api = new Api($this->razorpayId, $this->razorpaySecret);
+            
+            $attributes = [
+                'razorpay_order_id' => $orderId,
+                'razorpay_payment_id' => $paymentId,
+                'razorpay_signature' => $signature
+            ];
+
+            $api->utility->verifyPaymentSignature($attributes);
+
+            // Update local subscription
+            $subscription = Subscription::where('razorpay_payment_id', $orderId)->first();
+            if ($subscription) {
+                $subscription->update([
+                    'status' => 'active',
+                    'razorpay_payment_id' => $paymentId,
+                ]);
+
+                // Send confirmation email
+                $subscription->user->notify(new \App\Notifications\SubscriptionCreated($subscription));
+
+                return redirect()->route('customer.dashboard')
+                    ->with('success', 'Payment successful! Your subscription is now active.');
+            }
+            
+            return redirect()->route('customer.dashboard')
+                ->with('error', 'Subscription not found');
+                
+        } catch (\Exception $e) {
+            Log::error('Razorpay one-time payment verification failed', [
+                'error' => $e->getMessage(),
+                'request' => $request->all()
+            ]);
             
             return redirect()->route('customer.dashboard')
                 ->with('error', 'Payment verification failed');

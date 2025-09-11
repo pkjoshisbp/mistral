@@ -34,6 +34,10 @@ Route::get('/features', function () {
     return view('public.features');
 })->name('features');
 
+Route::get('/credits-and-services', function () {
+    return view('public.credits-and-services');
+})->name('credits-and-services');
+
 Route::get('/contact', function () {
     return view('contact');
 })->name('contact');
@@ -245,9 +249,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/settings', function () {
             return view('customer.settings');
         })->name('settings');
-        Route::get('/crawler', function () {
-            return view('customer.crawler');
-        })->name('crawler');
+
         Route::get('/google-sheets', function () {
             return view('customer.google-sheets');
         })->name('google-sheets');
@@ -292,6 +294,9 @@ Route::prefix('paypal')->name('paypal.')->group(function () {
     Route::post('create-subscription', [\App\Http\Controllers\PayPalController::class, 'createSubscription'])
         ->middleware('auth')
         ->name('create-subscription');
+    Route::get('create-subscription-direct/{planId}/{cycle}', function ($planId, $cycle = 'monthly') {
+        return view('payment.paypal-redirect', compact('planId', 'cycle'));
+    })->middleware('auth')->name('create-subscription-direct');
     Route::get('success', [\App\Http\Controllers\PayPalController::class, 'handleSuccess'])->name('success');
     Route::get('cancel', [\App\Http\Controllers\PayPalController::class, 'handleCancel'])->name('cancel');
     Route::post('webhook', [\App\Http\Controllers\PayPalController::class, 'handleWebhook'])->name('webhook');
@@ -302,7 +307,17 @@ Route::prefix('razorpay')->name('razorpay.')->group(function () {
     Route::post('create-subscription', [\App\Http\Controllers\RazorpayController::class, 'createSubscription'])
         ->middleware('auth')
         ->name('create-subscription');
+    Route::post('create-onetime-payment', [\App\Http\Controllers\RazorpayController::class, 'createOnetimePayment'])
+        ->middleware('auth')
+        ->name('create-onetime-payment');
+    Route::get('create-subscription-direct/{planId}/{cycle}', function ($planId, $cycle = 'monthly') {
+        return view('payment.razorpay-redirect', compact('planId', 'cycle'));
+    })->middleware('auth')->name('create-subscription-direct');
+    Route::get('create-onetime-direct/{planId}/{cycle}', function ($planId, $cycle = 'monthly') {
+        return view('payment.razorpay-onetime-redirect', compact('planId', 'cycle'));
+    })->middleware('auth')->name('create-onetime-direct');
     Route::post('success', [\App\Http\Controllers\RazorpayController::class, 'handleSuccess'])->name('success');
+    Route::post('onetime-success', [\App\Http\Controllers\RazorpayController::class, 'handleOnetimeSuccess'])->name('onetime-success');
     Route::post('failure', [\App\Http\Controllers\RazorpayController::class, 'handleFailure'])->name('failure');
     Route::post('webhook', [\App\Http\Controllers\RazorpayController::class, 'handleWebhook'])->name('webhook');
     

@@ -59,6 +59,10 @@ Route::middleware('auth')->group(function () {
 
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
                 ->name('logout');
+                
+    // Handle GET requests to logout (for direct URL access)
+    Route::get('logout', [AuthenticatedSessionController::class, 'destroy'])
+                ->name('logout.get');
 });
 
 }); // End security headers middleware group

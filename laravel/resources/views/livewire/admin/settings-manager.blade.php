@@ -30,74 +30,6 @@
 
         <!-- Settings Content -->
         <div class="col-md-9">
-            @if($activeTab === 'payment')
-                <!-- Payment Settings -->
-                <div class="card">
-                    <div class="card-header">
-                        <h4 class="card-title mb-0">
-                            <i class="fas fa-credit-card"></i>
-                            Payment Gateway Settings
-                        </h4>
-                    </div>
-                    <div class="card-body">
-                        <form wire:submit.prevent="savePaymentSettings">
-                            <!-- PayPal Settings -->
-                            <h5 class="mb-3">PayPal Configuration</h5>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="form-group mb-3">
-                                        <label for="paypal_mode" class="form-label">PayPal Mode</label>
-                                        <select class="form-control" wire:model="paypal_mode">
-                                            <option value="sandbox">Sandbox (Testing)</option>
-                                            <option value="live">Live (Production)</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="form-group mb-3">
-                                        <label for="paypal_client_id" class="form-label">PayPal Client ID</label>
-                                        <input type="text" class="form-control" wire:model="paypal_client_id" placeholder="PayPal Client ID">
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-group mb-3">
-                                        <label for="paypal_client_secret" class="form-label">PayPal Client Secret</label>
-                                        <input type="password" class="form-control" wire:model="paypal_client_secret" placeholder="PayPal Client Secret">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <hr>
-
-                            <!-- Razorpay Settings -->
-                            <h5 class="mb-3">Razorpay Configuration (For Indian Customers)</h5>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="form-group mb-3">
-                                        <label for="razorpay_key_id" class="form-label">Razorpay Key ID</label>
-                                        <input type="text" class="form-control" wire:model="razorpay_key_id" placeholder="Razorpay Key ID">
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-group mb-3">
-                                        <label for="razorpay_key_secret" class="form-label">Razorpay Key Secret</label>
-                                        <input type="password" class="form-control" wire:model="razorpay_key_secret" placeholder="Razorpay Key Secret">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="d-flex justify-content-end">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-save"></i>
-                                    Save Payment Settings
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            @endif
 
             @if($activeTab === 'email')
                 <!-- Email Settings -->
@@ -267,17 +199,40 @@
                         </h4>
                     </div>
                     <div class="card-body">
+                        <!-- Important Notice -->
+                        <div class="alert alert-info mb-4">
+                            <h6><i class="fas fa-info-circle"></i> Important Notice</h6>
+                            <p class="mb-2"><strong>These settings are automatically synced with your .env file.</strong></p>
+                            <ul class="mb-0">
+                                <li>Use <strong>Sandbox mode</strong> for testing with test credentials</li>
+                                <li>Switch to <strong>Live mode</strong> for production with real credentials</li>
+                                <li>Changes here will update both database and .env file automatically</li>
+                                <li>No need to manually edit .env file - use this panel instead</li>
+                            </ul>
+                        </div>
+                        
                         <form wire:submit.prevent="savePaymentSettings">
                             <!-- PayPal Settings -->
                             <h5 class="mb-3"><i class="fab fa-paypal text-primary"></i> PayPal Configuration</h5>
                             <div class="row">
                                 <div class="col-md-4">
                                     <div class="form-group mb-3">
-                                        <label for="paypal_mode" class="form-label">PayPal Mode</label>
-                                        <select class="form-control" wire:model="paypal_mode">
+                                        <label for="paypal_mode" class="form-label">PayPal Mode 
+                                            <span class="badge badge-{{ $paypal_mode === 'live' ? 'success' : 'warning' }}">
+                                                {{ $paypal_mode === 'live' ? 'LIVE' : 'SANDBOX' }}
+                                            </span>
+                                        </label>
+                                        <select class="form-control" wire:model="paypal_mode" wire:change="$refresh">
                                             <option value="sandbox">Sandbox (Testing)</option>
                                             <option value="live">Live (Production)</option>
                                         </select>
+                                        <small class="text-muted">
+                                            @if($paypal_mode === 'sandbox')
+                                                Use test credentials from PayPal Developer Dashboard
+                                            @else
+                                                Use live credentials from PayPal business account
+                                            @endif
+                                        </small>
                                     </div>
                                 </div>
                                 <div class="col-md-4">

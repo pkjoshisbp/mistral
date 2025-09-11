@@ -252,10 +252,13 @@
                                                 @else
                                                     <small class="text-muted"><s>${{ number_format(79, 0) }}</s> promo</small>
                                                 @endif
+                                            @elseif($plan->slug === 'payg')
+                                                <span class="h3">{{ $currencySymbol }}{{ number_format($monthlyPrice, 0) }}</span>
+                                                <small class="text-muted"> for credits</small>
                                             @else
                                                 <span class="h3">{{ $currencySymbol }}{{ number_format($monthlyPrice, 0) }}</span>
+                                                <small class="text-muted">/month</small>
                                             @endif
-                                            <small class="text-muted">/month</small>
                                         </div>
                                         <div class="yearly-price price-display" data-cycle="yearly" style="display: none;">
                                             @php
@@ -328,33 +331,49 @@
                                             {{ __('common.plan_enterprise_button') }}
                                         </a>
                                     @elseif($plan->slug === 'payg')
-                                        @if($isFromIndia)
-                                            <button onclick="createRazorpaySubscription({{ $plan->id }})" 
-                                                    class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
-                                                    id="subscribe-btn-{{ $plan->id }}">
-                                                {{ __('common.plan_payg_button') }}
-                                            </button>
-                                        @else
-                                            <button onclick="createSubscription({{ $plan->id }})" 
-                                                    class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
-                                                    id="subscribe-btn-{{ $plan->id }}">
-                                                {{ __('common.plan_payg_button') }}
-                                            </button>
-                                        @endif
+                                        <div class="btn-group-vertical w-100">
+                                            @if($isFromIndia)
+                                                <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                   class="btn btn-primary mb-2">
+                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                </a>
+                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                   class="btn btn-outline-primary">
+                                                    <i class="fab fa-paypal"></i> Pay with PayPal
+                                                </a>
+                                            @else
+                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                   class="btn btn-primary mb-2">
+                                                    <i class="fab fa-paypal"></i> Pay with PayPal
+                                                </a>
+                                                <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                   class="btn btn-outline-primary">
+                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                </a>
+                                            @endif
+                                        </div>
                                     @else
-                                        @if($isFromIndia)
-                                            <button onclick="createRazorpaySubscription({{ $plan->id }})" 
-                                                    class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
-                                                    id="subscribe-btn-{{ $plan->id }}">
-                                                {{ __('common.plan_' . $plan->slug . '_button') }}
-                                            </button>
-                                        @else
-                                            <button onclick="createSubscription({{ $plan->id }})" 
-                                                    class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100"
-                                                    id="subscribe-btn-{{ $plan->id }}">
-                                                {{ __('common.plan_' . $plan->slug . '_button') }}
-                                            </button>
-                                        @endif
+                                        <div class="btn-group-vertical w-100">
+                                            @if($isFromIndia)
+                                                <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                   class="btn btn-primary mb-2">
+                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                </a>
+                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                   class="btn btn-outline-primary">
+                                                    <i class="fab fa-paypal"></i> Pay with PayPal
+                                                </a>
+                                            @else
+                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                   class="btn btn-primary mb-2">
+                                                    <i class="fab fa-paypal"></i> Pay with PayPal
+                                                </a>
+                                                <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                   class="btn btn-outline-primary">
+                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                </a>
+                                            @endif
+                                        </div>
                                     @endif
                                 @endguest
                             </div>
@@ -653,6 +672,133 @@
             }
         }
 
+        async function createRazorpayOnetimePayment(planId) {
+            const button = document.getElementById(`subscribe-btn-${planId}`);
+            const originalText = button.innerHTML;
+            const billingCycle = document.querySelector('input[name="billingCycle"]:checked').value;
+            
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            button.disabled = true;
+            
+            try {
+                const response = await fetch('{{ route("razorpay.create-onetime-payment") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({
+                        plan_id: planId,
+                        billing_cycle: billingCycle
+                    })
+                });
+                
+                const data = await response.json();
+                
+                // Check if user needs to authenticate
+                if (response.status === 401 || (data.redirect && data.redirect.includes('login'))) {
+                    // Store the plan ID in both sessionStorage (client) and session via query for server-side fallback
+                    sessionStorage.setItem('selected_plan_id', planId);
+                    sessionStorage.setItem('payment_provider', 'razorpay_onetime');
+                    sessionStorage.setItem('billing_cycle', billingCycle);
+                    try { await fetch('{{ route('persist-selected-plan') }}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' }, body: JSON.stringify({ plan_id: planId, provider: 'razorpay_onetime', billing_cycle: billingCycle }) }); } catch(e) {}
+                    document.cookie = `resume_payment=1; path=/; max-age=600; secure`;
+                    document.cookie = `plan_id=${planId}; path=/; max-age=600; secure`;
+                    document.cookie = `provider=razorpay_onetime; path=/; max-age=600; secure`;
+                    document.cookie = `cycle=${billingCycle}; path=/; max-age=600; secure`;
+                    window.location.href = '{{ route("login") }}';
+                    return;
+                }
+                
+                if (data.success) {
+                    // Initialize Razorpay for one-time payment
+                    const options = {
+                        key: data.razorpay_key,
+                        order_id: data.order_id,
+                        amount: data.amount,
+                        currency: data.currency,
+                        name: data.name,
+                        description: data.description,
+                        handler: function (response) {
+                            // Handle successful payment
+                            const form = document.createElement('form');
+                            form.method = 'POST';
+                            form.action = '{{ route("razorpay.onetime-success") }}';
+                            
+                            const csrfInput = document.createElement('input');
+                            csrfInput.type = 'hidden';
+                            csrfInput.name = '_token';
+                            csrfInput.value = '{{ csrf_token() }}';
+                            form.appendChild(csrfInput);
+                            
+                            const orderInput = document.createElement('input');
+                            orderInput.type = 'hidden';
+                            orderInput.name = 'razorpay_order_id';
+                            orderInput.value = response.razorpay_order_id;
+                            form.appendChild(orderInput);
+                            
+                            const paymentInput = document.createElement('input');
+                            paymentInput.type = 'hidden';
+                            paymentInput.name = 'razorpay_payment_id';
+                            paymentInput.value = response.razorpay_payment_id;
+                            form.appendChild(paymentInput);
+                            
+                            const signatureInput = document.createElement('input');
+                            signatureInput.type = 'hidden';
+                            signatureInput.name = 'razorpay_signature';
+                            signatureInput.value = response.razorpay_signature;
+                            form.appendChild(signatureInput);
+                            
+                            document.body.appendChild(form);
+                            form.submit();
+                        },
+                        prefill: data.prefill,
+                        theme: {
+                            color: '#007bff'
+                        },
+                        modal: {
+                            ondismiss: function() {
+                                button.innerHTML = originalText;
+                                button.disabled = false;
+                            }
+                        }
+                    };
+                    
+                    const rzp = new Razorpay(options);
+                    rzp.open();
+                } else {
+                    alert('Error: ' + (data.message || 'Failed to create payment'));
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while processing your request');
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        // Helper functions
+        function getPlansIdBySlug(slug) {
+            // Get plan ID from button data attributes
+            const buttons = document.querySelectorAll('[id^="subscribe-btn-"]');
+            for (let button of buttons) {
+                const buttonId = button.id;
+                const planId = buttonId.replace('subscribe-btn-', '');
+                const card = button.closest('.card');
+                const titleElement = card.querySelector('.card-title');
+                if (titleElement && titleElement.textContent.toLowerCase().includes(slug)) {
+                    return planId;
+                }
+            }
+            return null;
+        }
+        
+        function getUserLocationBasedProvider() {
+            return {{ $isFromIndia ? "'razorpay'" : "'paypal'" }};
+        }
+
         // Check if user was redirected back after login for payment
         document.addEventListener('DOMContentLoaded', function() {
             @auth
@@ -667,11 +813,15 @@
             const providerFromQuery = params.get('provider');
             const cycleFromQuery = params.get('cycle') || billingCycle;
             
-            const finalPlanId = selectedPlanId || planFromQuery;
-            const finalProvider = paymentProvider || providerFromQuery;
+            // Check for post-registration session data
+            const postRegPlan = '{{ session("selected_plan") }}';
+            const resumePayment = {{ session("resume_payment") ? 'true' : 'false' }};
+            
+            const finalPlanId = selectedPlanId || planFromQuery || (postRegPlan && resumePayment ? getPlansIdBySlug(postRegPlan) : null);
+            const finalProvider = paymentProvider || providerFromQuery || (postRegPlan ? getUserLocationBasedProvider() : null);
             const finalCycle = cycleFromQuery;
 
-            if (resumeFromQuery && finalPlanId && finalProvider) {
+            if ((resumeFromQuery || resumePayment) && finalPlanId && finalProvider) {
                 // Set billing cycle in UI
                 document.querySelector(`input[name="billingCycle"][value="${finalCycle}"]`).checked = true;
                 // Trigger the toggle to update pricing display

@@ -39,7 +39,17 @@
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <strong>Monthly Price:</strong>
-                                    <span class="h5 text-primary">${{ number_format($currentSubscription->subscriptionPlan->monthly_price, 0) }}</span>
+                                    @php 
+                                        $isFromIndia = request()->header('CF-IPCountry') === 'IN' || 
+                                                      str_contains(request()->ip(), '127.') ||
+                                                      str_contains(request()->ip(), '192.168.') ||
+                                                      in_array(request()->ip(), ['::1', '127.0.0.1']);
+                                    @endphp
+                                    @if($isFromIndia)
+                                        <span class="h5 text-primary">₹{{ number_format($currentSubscription->subscriptionPlan->monthly_price * 83, 0) }}</span>
+                                    @else
+                                        <span class="h5 text-primary">${{ number_format($currentSubscription->subscriptionPlan->monthly_price, 0) }}</span>
+                                    @endif
                                 </div>
                                 
                                 @if($currentSubscription->status === 'active')
@@ -57,6 +67,16 @@
                             <i class="fas fa-credit-card fa-3x text-muted mb-3"></i>
                             <h5>No Active Subscription</h5>
                             <p class="text-muted">Choose a plan below to get started</p>
+                            
+                            <div class="alert alert-info mt-3">
+                                <h6><i class="fas fa-info-circle"></i> Payment Options Available</h6>
+                                <ul class="mb-0 text-start">
+                                    <li><strong>Recurring Payment:</strong> Automatic monthly/yearly billing (requires supported bank cards)</li>
+                                    <li><strong>One-time Payment:</strong> Manual payment option if recurring payment is not supported by your bank</li>
+                                    <li><strong>PayPal:</strong> Available for international customers</li>
+                                </ul>
+                                <small class="text-muted">If you experience issues with recurring payments, you'll be offered a one-time payment option.</small>
+                            </div>
                         </div>
                     @endif
                 </div>
@@ -160,8 +180,26 @@
                                         <p class="card-text small text-muted mb-2">{{ __('common.plan_' . $plan->slug . '_desc') }}</p>
                                         
                                         @if($plan->monthly_price > 0)
+                                            @php 
+                                                $isFromIndia = request()->header('CF-IPCountry') === 'IN' || 
+                                                              str_contains(request()->ip(), '127.') ||
+                                                              str_contains(request()->ip(), '192.168.') ||
+                                                              in_array(request()->ip(), ['::1', '127.0.0.1']);
+                                            @endphp
                                             <div class="text-primary">
-                                                <strong>${{ number_format($plan->monthly_price, 0) }}/mo</strong>
+                                                @if($isFromIndia)
+                                                    @if($plan->slug === 'payg')
+                                                        <strong>₹{{ number_format($plan->monthly_price * 83, 0) }} for credits</strong>
+                                                    @else
+                                                        <strong>₹{{ number_format($plan->monthly_price * 83, 0) }}/mo</strong>
+                                                    @endif
+                                                @else
+                                                    @if($plan->slug === 'payg')
+                                                        <strong>${{ number_format($plan->monthly_price, 0) }} for credits</strong>
+                                                    @else
+                                                        <strong>${{ number_format($plan->monthly_price, 0) }}/mo</strong>
+                                                    @endif
+                                                @endif
                                             </div>
                                         @elseif($plan->slug === 'payg')
                                             <div class="text-primary">
@@ -195,11 +233,62 @@
                                             <a href="mailto:sales@ai-chat.support" class="btn btn-outline-primary btn-sm">
                                                 {{ __('common.plan_enterprise_button') }}
                                             </a>
+                                        @elseif($plan->slug === 'payg')
+                                            @php 
+                                                $isFromIndia = request()->header('CF-IPCountry') === 'IN' || 
+                                                              str_contains(request()->ip(), '127.') ||
+                                                              str_contains(request()->ip(), '192.168.') ||
+                                                              in_array(request()->ip(), ['::1', '127.0.0.1']);
+                                            @endphp
+                                            <div class="btn-group-vertical" style="width: 100%;">
+                                                @if($isFromIndia)
+                                                    <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-primary btn-sm mb-1">
+                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                    </a>
+                                                    <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-outline-primary btn-sm">
+                                                        <i class="fab fa-paypal"></i> Pay with PayPal
+                                                    </a>
+                                                @else
+                                                    <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-primary btn-sm mb-1">
+                                                        <i class="fab fa-paypal"></i> Pay with PayPal
+                                                    </a>
+                                                    <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-outline-primary btn-sm">
+                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                    </a>
+                                                @endif
+                                            </div>
                                         @else
-                                            <button class="btn btn-primary btn-sm" 
-                                                    onclick="location.href='{{ route('home') }}#pricing'">
-                                                {{ __('common.plan_' . $plan->slug . '_button') }}
-                                            </button>
+                                            @php 
+                                                $isFromIndia = request()->header('CF-IPCountry') === 'IN' || 
+                                                              str_contains(request()->ip(), '127.') ||
+                                                              str_contains(request()->ip(), '192.168.') ||
+                                                              in_array(request()->ip(), ['::1', '127.0.0.1']);
+                                            @endphp
+                                            <div class="btn-group-vertical" style="width: 100%;">
+                                                @if($isFromIndia)
+                                                    <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-primary btn-sm mb-1">
+                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                    </a>
+                                                    <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-outline-primary btn-sm">
+                                                        <i class="fab fa-paypal"></i> Pay with PayPal
+                                                    </a>
+                                                @else
+                                                    <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-primary btn-sm mb-1">
+                                                        <i class="fab fa-paypal"></i> Pay with PayPal
+                                                    </a>
+                                                    <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-outline-primary btn-sm">
+                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                    </a>
+                                                @endif
+                                            </div>
                                         @endif
                                     @endif
                                 </div>

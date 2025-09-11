@@ -11,7 +11,11 @@
             </div>
             <div class="col-sm-6">
                 <ol class="breadcrumb float-sm-right">
-                    <li class="breadcrumb-item"><a href="{{ route('customer.dashboard') }}">Dashboard</a></li>
+                    @if(auth()->user()->organizations->count() > 0)
+                        <li class="breadcrumb-item"><a href="{{ route('customer.dashboard') }}">Dashboard</a></li>
+                    @else
+                        <li class="breadcrumb-item"><a href="{{ route('home') }}">Home</a></li>
+                    @endif
                     <li class="breadcrumb-item active">Subscription</li>
                 </ol>
             </div>
