@@ -853,6 +853,11 @@
             @endauth
         });
         
+    </script>
+    @endauth
+
+    <!-- Billing Cycle Toggle Script - Works for all visitors -->
+    <script>
         // Handle billing cycle toggle - simplified approach
         function initBillingToggle() {
             const billingRadios = document.querySelectorAll('input[name="billingCycle"]');
@@ -896,7 +901,6 @@
             initBillingToggle();
         }
     </script>
-    @endauth
 
     <!-- Footer -->
 
