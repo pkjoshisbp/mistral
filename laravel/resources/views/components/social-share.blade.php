@@ -42,6 +42,28 @@
 .social-share a:hover {
     text-decoration: none !important;
 }
+
+/* Mobile responsive fixes */
+@media (max-width: 576px) {
+    .social-share .d-flex {
+        flex-wrap: wrap !important;
+        justify-content: center !important;
+    }
+    
+    .social-share .social-btn {
+        width: 40px !important;
+        height: 40px !important;
+        font-size: 16px !important;
+        margin: 5px !important;
+    }
+    
+    .social-share .fw-medium {
+        width: 100% !important;
+        text-align: center !important;
+        margin-bottom: 10px !important;
+        margin-right: 0 !important;
+    }
+}
 </style>
     
     @if($style === 'floating')

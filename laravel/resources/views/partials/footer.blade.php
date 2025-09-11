@@ -20,7 +20,7 @@
                 </div>
             </div>
             
-            <div class="col-lg-2 col-md-6 mb-4">
+            <div class="col-lg-2 col-md-6 col-6 mb-4">
                 <h6 class="fw-bold mb-3">{{ __('marketing.product') }}</h6>
                 <ul class="list-unstyled">
                     <li><a href="{{ route('home') }}#features">{{ __('marketing.features') }}</a></li>
@@ -30,7 +30,7 @@
                 </ul>
             </div>
             
-            <div class="col-lg-2 col-md-6 mb-4">
+            <div class="col-lg-2 col-md-6 col-6 mb-4">
                 <h6 class="fw-bold mb-3">{{ __('marketing.company') }}</h6>
                 <ul class="list-unstyled">
                     <li><a href="{{ route('about') }}">{{ __('common.about_us') }}</a></li>
@@ -40,7 +40,7 @@
                 </ul>
             </div>
             
-            <div class="col-lg-2 col-md-6 mb-4">
+            <div class="col-lg-2 col-md-6 col-6 mb-4">
                 <h6 class="fw-bold mb-3">{{ __('marketing.support') }}</h6>
                 <ul class="list-unstyled">
                     <li><a href="#">{{ __('marketing.help_center') }}</a></li>
@@ -50,7 +50,7 @@
                 </ul>
             </div>
             
-            <div class="col-lg-2 col-md-6 mb-4">
+            <div class="col-lg-2 col-md-6 col-6 mb-4">
                 <h6 class="fw-bold mb-3">{{ __('marketing.legal') }}</h6>
                 <ul class="list-unstyled">
                     <li><a href="{{ route('privacy') }}">{{ __('marketing.privacy') }}</a></li>

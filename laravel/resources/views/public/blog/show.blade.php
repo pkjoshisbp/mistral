@@ -215,6 +215,23 @@
         footer .text-muted:hover {
             color: white !important;
         }
+        
+        /* Mobile sharing section improvements */
+        @media (max-width: 576px) {
+            .social-share h5 {
+                font-size: 1.1rem !important;
+                margin-bottom: 15px !important;
+            }
+            
+            .social-share .py-4 {
+                padding-top: 20px !important;
+                padding-bottom: 20px !important;
+            }
+            
+            .social-share .rounded {
+                border-radius: 10px !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -325,8 +342,8 @@
                     </div>
 
                     <!-- Social Share -->
-                    <div class="text-center py-4 rounded" style="background: #1e293b; color: white;">
-                        <h5 class="mb-3 text-white">Share</h5>
+                    <div class="text-center py-4 px-3 rounded" style="background: #1e293b;">
+                        <h5 class="mb-3 text-white fw-bold">Share this article</h5>
                         <x-social-share 
                             :url="route('blog.show', $blog->slug)"
                             :title="$blog->title"
