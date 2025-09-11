@@ -146,6 +146,12 @@
 
           <li class="nav-header">BILLING</li>
           <li class="nav-item">
+            <a href="{{ route('admin.pricing.index') }}" class="nav-link {{ request()->routeIs('admin.pricing.*') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-dollar-sign"></i>
+              <p>Pricing Management</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.invoices') }}" class="nav-link {{ request()->routeIs('admin.invoices') ? 'active' : '' }}">
               <i class="nav-icon fas fa-file-invoice-dollar"></i>
               <p>Invoice Management</p>

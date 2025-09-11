@@ -24,146 +24,70 @@
                 </div>
                 <div class="card-body">
                     <div class="row">
-                        <!-- Small Credit Package -->
-                        <div class="col-md-4">
-                            <div class="card border-success h-100">
-                                <div class="card-header bg-light">
-                                    <h5 class="text-center">Basic Credits</h5>
-                                </div>
-                                <div class="card-body text-center">
-                                    <div class="mb-3">
-                                        <span class="h3 text-success">₹2,500</span>
-                                        <div><small class="text-muted">$29</small></div>
+                        @php 
+                            $isFromIndia = request()->header('CF-IPCountry') === 'IN' || 
+                                          str_contains(request()->ip(), '127.') ||
+                                          str_contains(request()->ip(), '192.168.') ||
+                                          in_array(request()->ip(), ['::1', '127.0.0.1']);
+                            $currency = $isFromIndia ? 'INR' : 'USD';
+                            $colors = ['success', 'primary', 'info', 'warning'];
+                        @endphp
+                        
+                        @foreach($creditPackages as $index => $package)
+                            <div class="col-md-4">
+                                <div class="card border-{{ $colors[$index % count($colors)] }} h-100">
+                                    <div class="card-header {{ $index == 1 ? 'bg-primary text-white' : 'bg-light' }}">
+                                        <h5 class="text-center">{{ $package->name }}</h5>
+                                        @if($index == 1)
+                                            <div class="text-center">
+                                                <span class="badge badge-warning">Best Value</span>
+                                            </div>
+                                        @endif
                                     </div>
-                                    <ul class="list-unstyled mb-4">
-                                        <li><strong>1M tokens</strong></li>
-                                        <li>✓ Never expires</li>
-                                        <li>✓ Pay once, use anytime</li>
-                                        <li>✓ Perfect for small projects</li>
-                                    </ul>
-                                    @auth
-                                        @php 
-                                            $isFromIndia = request()->header('CF-IPCountry') === 'IN' || 
-                                                          str_contains(request()->ip(), '127.') ||
-                                                          str_contains(request()->ip(), '192.168.') ||
-                                                          in_array(request()->ip(), ['::1', '127.0.0.1']);
-                                        @endphp
-                                        <div class="btn-group-vertical w-100">
-                                            @if($isFromIndia)
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-success mb-2">
-                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                </a>
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-success">
-                                                    <i class="fab fa-paypal"></i> Pay with PayPal
-                                                </a>
+                                    <div class="card-body text-center">
+                                        <div class="mb-3">
+                                            @if($currency === 'INR')
+                                                <span class="h3 text-{{ $colors[$index % count($colors)] }}">₹{{ number_format($package->inr_price, 0) }}</span>
+                                                <div><small class="text-muted">${{ number_format($package->usd_price, 0) }}</small></div>
                                             @else
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-success mb-2">
-                                                    <i class="fab fa-paypal"></i> Pay with PayPal
-                                                </a>
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-success">
-                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                </a>
+                                                <span class="h3 text-{{ $colors[$index % count($colors)] }}">${{ number_format($package->usd_price, 0) }}</span>
+                                                <div><small class="text-muted">₹{{ number_format($package->inr_price, 0) }}</small></div>
                                             @endif
                                         </div>
-                                    @else
-                                        <a href="{{ route('login') }}" class="btn btn-success btn-block">
-                                            Login to Purchase
-                                        </a>
-                                    @endauth
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Medium Credit Package -->
-                        <div class="col-md-4">
-                            <div class="card border-primary h-100">
-                                <div class="card-header bg-primary text-white">
-                                    <h5 class="text-center">Popular Credits</h5>
-                                    <div class="text-center">
-                                        <span class="badge badge-warning">Best Value</span>
-                                    </div>
-                                </div>
-                                <div class="card-body text-center">
-                                    <div class="mb-3">
-                                        <span class="h3 text-primary">₹4,900</span>
-                                        <div><small class="text-muted">$59</small></div>
-                                    </div>
-                                    <ul class="list-unstyled mb-4">
-                                        <li><strong>2.5M tokens</strong></li>
-                                        <li>✓ Never expires</li>
-                                        <li>✓ 25% more tokens</li>
-                                        <li>✓ Priority support</li>
-                                    </ul>
-                                    @auth
-                                        <div class="btn-group-vertical w-100">
-                                            @if($isFromIndia ?? true)
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-primary mb-2">
-                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                </a>
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-primary">
-                                                    <i class="fab fa-paypal"></i> Pay with PayPal
-                                                </a>
-                                            @else
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-primary mb-2">
-                                                    <i class="fab fa-paypal"></i> Pay with PayPal
-                                                </a>
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-primary">
-                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                </a>
+                                        <ul class="list-unstyled mb-4">
+                                            @if($package->features)
+                                                @foreach($package->features as $feature)
+                                                    <li>{{ $feature }}</li>
+                                                @endforeach
                                             @endif
-                                        </div>
-                                    @else
-                                        <a href="{{ route('login') }}" class="btn btn-primary btn-block">
-                                            Login to Purchase
-                                        </a>
-                                    @endauth
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Large Credit Package -->
-                        <div class="col-md-4">
-                            <div class="card border-info h-100">
-                                <div class="card-header bg-light">
-                                    <h5 class="text-center">Enterprise Credits</h5>
-                                </div>
-                                <div class="card-body text-center">
-                                    <div class="mb-3">
-                                        <span class="h3 text-info">₹9,800</span>
-                                        <div><small class="text-muted">$118</small></div>
+                                        </ul>
+                                        @auth
+                                            <div class="btn-group-vertical w-100">
+                                                @if($isFromIndia)
+                                                    <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2">
+                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                    </a>
+                                                    <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-{{ $colors[$index % count($colors)] }}">
+                                                        <i class="fab fa-paypal"></i> Pay with PayPal
+                                                    </a>
+                                                @else
+                                                    <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2">
+                                                        <i class="fab fa-paypal"></i> Pay with PayPal
+                                                    </a>
+                                                    <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-{{ $colors[$index % count($colors)] }}">
+                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                    </a>
+                                                @endif
+                                            </div>
+                                        @else
+                                            <a href="{{ route('login') }}" class="btn btn-{{ $colors[$index % count($colors)] }} btn-block">
+                                                Login to Purchase
+                                            </a>
+                                        @endauth
                                     </div>
-                                    <ul class="list-unstyled mb-4">
-                                        <li><strong>6M tokens</strong></li>
-                                        <li>✓ Never expires</li>
-                                        <li>✓ 50% more tokens</li>
-                                        <li>✓ Dedicated support</li>
-                                    </ul>
-                                    @auth
-                                        <div class="btn-group-vertical w-100">
-                                            @if($isFromIndia ?? true)
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-info mb-2">
-                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                </a>
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-info">
-                                                    <i class="fab fa-paypal"></i> Pay with PayPal
-                                                </a>
-                                            @else
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-info mb-2">
-                                                    <i class="fab fa-paypal"></i> Pay with PayPal
-                                                </a>
-                                                <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-info">
-                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                </a>
-                                            @endif
-                                        </div>
-                                    @else
-                                        <a href="{{ route('login') }}" class="btn btn-info btn-block">
-                                            Login to Purchase
-                                        </a>
-                                    @endauth
                                 </div>
                             </div>
-                        </div>
+                        @endforeach
                     </div>
                 </div>
             </div>

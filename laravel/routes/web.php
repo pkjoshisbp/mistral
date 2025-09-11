@@ -35,7 +35,8 @@ Route::get('/features', function () {
 })->name('features');
 
 Route::get('/credits-and-services', function () {
-    return view('public.credits-and-services');
+    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    return view('public.credits-and-services', compact('creditPackages'));
 })->name('credits-and-services');
 
 Route::get('/contact', function () {
@@ -178,6 +179,17 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
     Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
     Route::get('/leads', \App\Livewire\Admin\LeadsManager::class)->name('leads');
+    
+    // Pricing Management Routes
+    Route::prefix('pricing')->name('pricing.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\PricingController::class, 'index'])->name('index');
+        Route::get('/subscription-plans/{id}/edit', [\App\Http\Controllers\Admin\PricingController::class, 'editSubscriptionPlan'])->name('subscription-plans.edit');
+        Route::put('/subscription-plans/{id}', [\App\Http\Controllers\Admin\PricingController::class, 'updateSubscriptionPlan'])->name('subscription-plans.update');
+        Route::get('/credit-packages/{id}/edit', [\App\Http\Controllers\Admin\PricingController::class, 'editCreditPackage'])->name('credit-packages.edit');
+        Route::put('/credit-packages/{id}', [\App\Http\Controllers\Admin\PricingController::class, 'updateCreditPackage'])->name('credit-packages.update');
+        Route::get('/credit-packages/create', [\App\Http\Controllers\Admin\PricingController::class, 'createCreditPackage'])->name('credit-packages.create');
+        Route::post('/credit-packages', [\App\Http\Controllers\Admin\PricingController::class, 'storeCreditPackage'])->name('credit-packages.store');
+    });
     Route::get('/analytics', \App\Livewire\Admin\AnalyticsDashboard::class)->name('analytics');
     
     // Profile routes for admin
