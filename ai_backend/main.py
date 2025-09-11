@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconn
 import httpx
 import logging
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 import uuid
 import time
 import asyncio
@@ -448,7 +448,22 @@ async def llm_chat(request: Request):
             result = resp.json()
             elapsed_ms = int((time.time() - start_time) * 1000)
             logging.info(f"LLM chat completed model={model} elapsed_ms={elapsed_ms}")
-            return {"message": result.get("message", {})}
+            
+            # Estimate token usage (simple approximation: ~4 chars per token)
+            input_text = " ".join([msg.get("content", "") for msg in messages])
+            output_text = result.get("message", {}).get("content", "")
+            input_tokens = len(input_text) // 4
+            output_tokens = len(output_text) // 4
+            total_tokens = input_tokens + output_tokens
+            
+            return {
+                "message": result.get("message", {}),
+                "usage": {
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": total_tokens
+                }
+            }
             
     except Exception as e:
         # Try fallback model if primary fails
@@ -464,7 +479,22 @@ async def llm_chat(request: Request):
                     result = resp.json()
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     logging.info(f"LLM chat completed with fallback model={FALLBACK_CHAT_MODEL} elapsed_ms={elapsed_ms}")
-                    return {"message": result.get("message", {})}
+                    
+                    # Estimate token usage for fallback too
+                    input_text = " ".join([msg.get("content", "") for msg in messages])
+                    output_text = result.get("message", {}).get("content", "")
+                    input_tokens = len(input_text) // 4
+                    output_tokens = len(output_text) // 4
+                    total_tokens = input_tokens + output_tokens
+                    
+                    return {
+                        "message": result.get("message", {}),
+                        "usage": {
+                            "prompt_tokens": input_tokens,
+                            "completion_tokens": output_tokens,
+                            "total_tokens": total_tokens
+                        }
+                    }
             except Exception as fallback_error:
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 logging.error(f"Both models failed. Primary: {str(e)}, Fallback: {str(fallback_error)} elapsed_ms={elapsed_ms}")
@@ -627,8 +657,39 @@ async def store_data(request: Request):
                 if item.get('metadata'):
                     payload.update(item['metadata'])
                 
-                # Store in Qdrant
-                point_id = str(uuid.uuid4())
+                # Create consistent point ID based on data type and item ID
+                # This ensures updates replace existing entries instead of creating duplicates
+                # Use hash to convert string identifier to integer for Qdrant compatibility
+                item_identifier = item.get('id', f"{data_type}_{successful_stores}")
+                point_id_string = f"{organization_slug}_{data_type}_{item_identifier}"
+                point_id = hash(point_id_string) & 0x7FFFFFFF  # Convert to positive 32-bit integer
+                
+                # First, try to delete existing points with the same item_id to avoid duplicates
+                try:
+                    existing_points = qdrant.scroll(
+                        collection_name=collection_name,
+                        scroll_filter=Filter(
+                            must=[
+                                FieldCondition(key="organization_slug", match=MatchValue(value=organization_slug)),
+                                FieldCondition(key="data_type", match=MatchValue(value=data_type)),
+                                FieldCondition(key="item_id", match=MatchValue(value=item.get('id')))
+                            ]
+                        ),
+                        limit=100  # Should be enough for duplicates of same item
+                    )
+                    
+                    if existing_points[0]:  # If any existing points found
+                        existing_ids = [point.id for point in existing_points[0]]
+                        if existing_ids:
+                            qdrant.delete(
+                                collection_name=collection_name,
+                                points_selector=existing_ids
+                            )
+                            logging.info(f"Deleted {len(existing_ids)} existing points for item {item.get('id')}")
+                except Exception as delete_error:
+                    logging.warning(f"Could not delete existing points for {item.get('id')}: {str(delete_error)}")
+                
+                # Store in Qdrant with consistent point ID
                 qdrant.upsert(
                     collection_name=collection_name,
                     points=[PointStruct(
@@ -664,6 +725,27 @@ async def store_data(request: Request):
     except Exception as e:
         logging.error(f"Store data error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Store data failed: {str(e)}")
+
+@app.post("/update_data")
+async def update_data(request: Request):
+    """
+    Update existing data in Qdrant (same as store_data but with explicit update logging)
+    This is essentially an alias to store_data with clearer semantics for updates
+    """
+    try:
+        data = await request.json()
+        organization_slug = data["organization_slug"]
+        data_type = data["data_type"]
+        items = data["items"]
+        
+        logging.info(f"Update data request: org={organization_slug}, type={data_type}, count={len(items)}")
+        
+        # Use the same logic as store_data since it now handles updates properly
+        return await store_data(request)
+        
+    except Exception as e:
+        logging.error(f"Update data error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Update data failed: {str(e)}")
 
 @app.post("/delete_data")
 async def delete_data(request: Request):

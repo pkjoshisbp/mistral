@@ -334,20 +334,20 @@
                                         <div class="btn-group-vertical w-100">
                                             @if($isFromIndia)
                                                 <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-primary mb-2">
+                                                   class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
                                                     <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                 </a>
                                                 <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-outline-primary">
+                                                   class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
                                                     <i class="fab fa-paypal"></i> Pay with PayPal
                                                 </a>
                                             @else
                                                 <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-primary mb-2">
+                                                   class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
                                                     <i class="fab fa-paypal"></i> Pay with PayPal
                                                 </a>
                                                 <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-outline-primary">
+                                                   class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
                                                     <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                 </a>
                                             @endif
@@ -356,20 +356,20 @@
                                         <div class="btn-group-vertical w-100">
                                             @if($isFromIndia)
                                                 <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-primary mb-2">
+                                                   class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
                                                     <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                 </a>
                                                 <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-outline-primary">
+                                                   class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
                                                     <i class="fab fa-paypal"></i> Pay with PayPal
                                                 </a>
                                             @else
                                                 <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-primary mb-2">
+                                                   class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
                                                     <i class="fab fa-paypal"></i> Pay with PayPal
                                                 </a>
                                                 <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-outline-primary">
+                                                   class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
                                                     <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                 </a>
                                             @endif
@@ -866,6 +866,15 @@
                 // Show selected cycle prices
                 document.querySelectorAll(`.price-display[data-cycle="${selectedCycle}"]`).forEach(display => {
                     display.style.display = 'block';
+                });
+                
+                // Update payment button URLs to use the selected billing cycle
+                document.querySelectorAll('.payment-btn').forEach(link => {
+                    if (link.href && (link.href.includes('cycle=monthly') || link.href.includes('cycle=yearly'))) {
+                        const url = new URL(link.href);
+                        url.searchParams.set('cycle', selectedCycle);
+                        link.href = url.toString();
+                    }
                 });
             });
         });

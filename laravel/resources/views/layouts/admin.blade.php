@@ -161,6 +161,14 @@
               <p>API Endpoints</p>
             </a>
           </li>
+          
+          <li class="nav-header">BILLING</li>
+          <li class="nav-item">
+            <a href="{{ route('admin.pricing.index') }}" class="nav-link {{ request()->routeIs('admin.pricing.*') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-dollar-sign"></i>
+              <p>Pricing Management</p>
+            </a>
+          </li>
           @else
           <li class="nav-item">
             <a href="{{ route('customer.dashboard') }}" class="nav-link">
