@@ -254,7 +254,7 @@ class AiAgentService
     }
 
     /**
-     * Enhanced search with query rewriting using Llama-3.2
+     * Enhanced search with optional query rewriting 
      */
     public function enhancedSearch($collectionName, $originalQuery, $limit = 5)
     {
@@ -264,58 +264,33 @@ class AiAgentService
                 'original_query' => $originalQuery
             ]);
 
-            // Step 1: Rewrite query using Llama-3.2
-            $rewrittenQuery = $this->rewriteQueryForSearch($originalQuery);
+            // TEMPORARILY DISABLE QUERY REWRITE - use original query directly
+            // This fixes the issue where query rewrite was producing conversational responses
+            // that confused the search and final AI response
+            $queryToUse = $originalQuery;
             
-            Log::info('Query rewrite completed', [
+            Log::info('Query rewrite skipped (disabled)', [
                 'original_query' => $originalQuery,
-                'rewritten_query' => $rewrittenQuery
+                'query_used' => $queryToUse
             ]);
 
-            // Step 2: Generate embedding for the rewritten query
-            $embedding = $this->embed($rewrittenQuery ?: $originalQuery);
+            // Generate embedding for the original query
+            $embedding = $this->embed($queryToUse);
 
             if (!$embedding || !is_array($embedding)) {
                 Log::warning('Failed to generate embedding for enhanced search', [
-                    'query' => $rewrittenQuery ?: $originalQuery
+                    'query' => $queryToUse
                 ]);
                 return null;
             }
 
-            // Step 3: Search Qdrant with the embedding - use higher limit to get more comprehensive results
+            // Search Qdrant with the embedding
             $searchResults = $this->searchQdrant($collectionName, $embedding, max($limit, 10));
-            
-            // Step 4: If rewritten query doesn't yield good results, try original query
-            $hasGoodResults = false;
-            if ($searchResults && isset($searchResults['results'])) {
-                foreach ($searchResults['results'] as $result) {
-                    if (($result['score'] ?? 0) > 0.6) { // Good similarity score
-                        $hasGoodResults = true;
-                        break;
-                    }
-                }
-            }
-            
-            // Fallback to original query if rewritten query didn't work well
-            if (!$hasGoodResults && $rewrittenQuery && $rewrittenQuery !== $originalQuery) {
-                Log::info('Rewritten query results not good, trying original query', [
-                    'rewritten_query' => $rewrittenQuery,
-                    'original_query' => $originalQuery
-                ]);
-                
-                $originalEmbedding = $this->embed($originalQuery);
-                if ($originalEmbedding && is_array($originalEmbedding)) {
-                    $originalResults = $this->searchQdrant($collectionName, $originalEmbedding, max($limit, 10));
-                    if ($originalResults && isset($originalResults['results']) && count($originalResults['results']) > 0) {
-                        $searchResults = $originalResults;
-                    }
-                }
-            }
             
             Log::info('Enhanced search completed', [
                 'collection' => $collectionName,
                 'original_query' => $originalQuery,
-                'rewritten_query' => $rewrittenQuery,
+                'query_used' => $queryToUse,
                 'results_count' => isset($searchResults['results']) ? count($searchResults['results']) : 0
             ]);
 
@@ -338,7 +313,16 @@ class AiAgentService
     {
         try {
             // Use the regular LLM for query rewriting instead of the GGUF model
-            $systemPrompt = "You are a query rewriter for semantic search. Your job is to extract and preserve the key nouns, topics, and concepts from the user's question while making it search-friendly. For questions like 'do you provide X?', focus on 'X'. For 'what is Y?', focus on 'Y'. Preserve important keywords, product names, and service names. Remove question words but keep the core topic. Output only the rewritten query.";
+            $systemPrompt = "You are a query rewriter for database search. Convert the user's question into search keywords ONLY. Extract just the main topic/subject they're asking about.
+
+EXAMPLES:
+- 'What pricing plans do you offer?' → 'pricing plans'
+- 'Do you have any refund policy?' → 'refund policy'  
+- 'How much does it cost?' → 'cost pricing'
+- 'What are your business hours?' → 'business hours'
+- 'Can you provide WhatsApp integration?' → 'WhatsApp integration'
+
+Output ONLY the search keywords, no sentences, no explanations, no conversational text.";
             
             $messages = [
                 ['role' => 'system', 'content' => $systemPrompt],
@@ -349,6 +333,21 @@ class AiAgentService
             
             if ($response && isset($response['message']['content'])) {
                 $rewrittenQuery = trim($response['message']['content']);
+                
+                // Validation: If the rewritten query is too long or conversational, use original
+                if (strlen($rewrittenQuery) > 100 || 
+                    str_word_count($rewrittenQuery) > 10 ||
+                    stripos($rewrittenQuery, 'I offer') !== false ||
+                    stripos($rewrittenQuery, 'you can') !== false ||
+                    stripos($rewrittenQuery, 'we provide') !== false) {
+                    
+                    Log::warning('Query rewrite produced conversational text, using original', [
+                        'original' => $originalQuery,
+                        'rewritten' => $rewrittenQuery
+                    ]);
+                    return $originalQuery;
+                }
+                
                 Log::info('Query rewrite successful', [
                     'original' => $originalQuery,
                     'rewritten' => $rewrittenQuery

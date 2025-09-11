@@ -189,6 +189,11 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         return view('customer.setup-organization');
     })->name('setup-organization');
     
+    // Subscription route (available without organization for payment)
+    Route::get('/subscription', function () {
+        return view('customer.subscription');
+    })->name('subscription');
+    
     // All other customer routes require an organization
     Route::middleware(['user.has.organization'])->group(function () {
         Route::get('/dashboard', function () {
@@ -237,9 +242,6 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/analytics', function () {
             return view('customer.analytics');
         })->name('analytics');
-        Route::get('/subscription', function () {
-            return view('customer.subscription');
-        })->name('subscription');
         Route::get('/settings', function () {
             return view('customer.settings');
         })->name('settings');
@@ -354,6 +356,37 @@ Route::post('/auth/send-otp', function(\Illuminate\Http\Request $request) {
     ]);
 })->name('auth.send-otp');
 
+// Registration OTP Routes
+Route::post('/auth/send-registration-otp', function(\Illuminate\Http\Request $request) {
+    $request->validate([
+        'email' => 'required|email|unique:users,email'
+    ]);
+
+    try {
+        // Generate OTP for registration
+        $otpRecord = \App\Models\EmailOtp::generateForEmail($request->email, 'registration');
+        
+        // Send email notification
+        \Illuminate\Support\Facades\Notification::route('mail', $request->email)
+            ->notify(new \App\Notifications\OtpRegistrationNotification($otpRecord->otp));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Verification code sent to your email address'
+        ]);
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\Log::error('Registration OTP failed', [
+            'email' => $request->email,
+            'error' => $e->getMessage()
+        ]);
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to send verification code. Please try again.'
+        ], 500);
+    }
+})->name('auth.send-registration-otp');
+
 require __DIR__.'/auth.php';
 
 /*
@@ -379,7 +412,7 @@ Route::get('/sitemap.xml', function () {
     foreach ($pages as $page) {
         $sitemap .= '
     <url>
-        <loc>' . config('app.url') . $page['url'] . '</loc>
+        <loc>' . htmlspecialchars(config('app.url') . $page['url']) . '</loc>
         <changefreq>' . $page['changefreq'] . '</changefreq>
         <priority>' . $page['priority'] . '</priority>
         <lastmod>' . now()->toISOString() . '</lastmod>
@@ -391,7 +424,7 @@ Route::get('/sitemap.xml', function () {
     foreach ($blogs as $blog) {
         $sitemap .= '
     <url>
-        <loc>' . config('app.url') . '/blog/' . $blog->slug . '</loc>
+        <loc>' . htmlspecialchars(config('app.url') . '/blog/' . $blog->slug) . '</loc>
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
         <lastmod>' . $blog->updated_at->toISOString() . '</lastmod>';
@@ -399,7 +432,7 @@ Route::get('/sitemap.xml', function () {
         if ($blog->featured_image) {
             $sitemap .= '
         <image:image>
-            <image:loc>' . $blog->featured_image . '</image:loc>
+            <image:loc>' . htmlspecialchars($blog->featured_image) . '</image:loc>
             <image:title>' . htmlspecialchars($blog->title) . '</image:title>
         </image:image>';
         }

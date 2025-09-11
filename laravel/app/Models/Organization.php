@@ -14,6 +14,7 @@ class Organization extends Model
         'slug',
         'description',
         'website', // unified field used in forms
+        'timezone',
         'api_key',
         'settings',
         'api_endpoints',

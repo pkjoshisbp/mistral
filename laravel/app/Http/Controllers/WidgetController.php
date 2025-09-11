@@ -151,12 +151,59 @@ class WidgetController
             
             $context = '';
             if ($searchResults && isset($searchResults['results'])) {
+                // Separate FAQ results from service results to prioritize FAQs for general questions
+                $faqResults = [];
+                $serviceResults = [];
+                
                 foreach ($searchResults['results'] as $result) {
                     $payload = $result['payload'] ?? [];
-                    // Aggregate all available fields for context
-                    foreach ($payload as $key => $value) {
-                        if (is_string($value) && !empty($value) && $key !== 'org_id') {
-                            $context .= ucfirst($key) . ": " . $value . "\n";
+                    $dataType = $payload['data_type'] ?? '';
+                    
+                    if ($dataType === 'faq') {
+                        $faqResults[] = $result;
+                    } else {
+                        $serviceResults[] = $result;
+                    }
+                }
+                
+                // For general questions (like pricing), prioritize FAQ content and exclude services
+                $hasServiceKeywords = stripos($message, 'whatsapp') !== false ||
+                                    stripos($message, 'integration') !== false;
+                
+                $isGeneralQuestion = (stripos($message, 'subscription') !== false || 
+                                    stripos($message, 'pricing') !== false || 
+                                    stripos($message, 'plan') !== false ||
+                                    stripos($message, 'cost') !== false ||
+                                    stripos($message, 'price') !== false) &&
+                                   !$hasServiceKeywords;
+                
+                if ($isGeneralQuestion) {
+                    // Only use FAQ results for general questions, exclude service-specific results
+                    $orderedResults = $faqResults;
+                } else {
+                    // For specific questions, use both service and FAQ results
+                    $orderedResults = array_merge($serviceResults, $faqResults);
+                }
+                
+                foreach ($orderedResults as $result) {
+                    $payload = $result['payload'] ?? [];
+                    $dataType = $payload['data_type'] ?? '';
+                    
+                    // Format context differently based on data type
+                    if ($dataType === 'service') {
+                        // For services, include all relevant pricing and service info
+                        if (isset($payload['title'])) $context .= "Service: " . $payload['title'] . "\n";
+                        if (isset($payload['content'])) $context .= "Description: " . $payload['content'] . "\n";
+                        if (isset($payload['price'])) $context .= "Price: " . $payload['price'] . " " . ($payload['currency'] ?? '') . "\n";
+                        if (isset($payload['duration'])) $context .= "Duration: " . $payload['duration'] . "\n";
+                        if (isset($payload['requirements'])) $context .= "Requirements: " . $payload['requirements'] . "\n";
+                    } else {
+                        // For FAQs, keep it simple
+                        $contextFields = ['title', 'content', 'category'];
+                        foreach ($contextFields as $field) {
+                            if (isset($payload[$field]) && is_string($payload[$field]) && !empty($payload[$field])) {
+                                $context .= ucfirst($field) . ": " . $payload[$field] . "\n";
+                            }
                         }
                     }
                     $context .= "\n";
@@ -165,8 +212,13 @@ class WidgetController
 
             // Create system prompt with location awareness
             $systemPrompt = "You are a helpful customer service assistant for {$organization->name}. ";
-            $systemPrompt .= "Answer questions based on the provided context. Be friendly, helpful, and concise. ";
-            $systemPrompt .= "If you don't have specific information, politely say so and offer to help in other ways.\n\n";
+            $systemPrompt .= "IMPORTANT: You must answer questions based ONLY on the provided context below. ";
+            $systemPrompt .= "Do not make up information or provide generic responses. ";
+            $systemPrompt .= "Do not assume the customer is asking about a specific service unless they explicitly mention it. ";
+            $systemPrompt .= "If you don't have specific information in the context, say 'I don't have that specific information available' and offer to help in other ways.\n\n";
+            
+            // Add the customer's question FIRST to provide focus
+            $systemPrompt .= "CUSTOMER QUESTION: \"{$message}\"\n\n";
             
             // Add location context if available
             if ($country || $region || $location) {
@@ -178,10 +230,12 @@ class WidgetController
             }
             
             if ($context) {
-                $systemPrompt .= "Context:\n{$context}\n\n";
+                $systemPrompt .= "RELEVANT CONTEXT (Use this information to answer the customer's question above):\n{$context}\n\n";
             }
 
-            $systemPrompt .= "Customer Question: {$message}\n\nPlease provide a helpful response:";
+            $systemPrompt .= "Based on the context provided, please give a direct, helpful answer to the customer's question. ";
+            $systemPrompt .= "Answer only what they specifically asked about. ";
+            $systemPrompt .= "Do not mention specific services unless the customer's question relates to them:";
 
             // Get AI response
             $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt);
@@ -189,6 +243,21 @@ class WidgetController
             if (!$aiResponse || !isset($aiResponse['answer'])) {
                 throw new \Exception('Failed to get AI response');
             }
+
+            // Detailed logging for debugging
+            Log::info('Widget AI Response Debug', [
+                'org_id' => $orgId,
+                'session_id' => $sessionId,
+                'user_message' => $message,
+                'context_length' => strlen($context),
+                'context_found' => !empty($context),
+                'context_preview' => $context ? substr($context, 0, 300) . '...' : 'No context',
+                'system_prompt_length' => strlen($systemPrompt),
+                'system_prompt_preview' => substr($systemPrompt, 0, 400) . '...',
+                'ai_response_length' => strlen($aiResponse['answer']),
+                'ai_response_preview' => substr($aiResponse['answer'], 0, 300) . '...',
+                'full_ai_response' => $aiResponse['answer']
+            ]);
 
             // Save conversation to database
             $this->saveConversationToDatabase($organization, $sessionId, $message, $aiResponse['answer'], $allUserInfo, compact('country', 'region', 'location'));

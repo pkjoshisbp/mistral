@@ -22,7 +22,7 @@
 &lt;script&gt;<br>
 &nbsp;&nbsp;(function() {<br>
 &nbsp;&nbsp;&nbsp;&nbsp;const script = document.createElement('script');<br>
-&nbsp;&nbsp;&nbsp;&nbsp;script.src = 'https://ai-chat.support/widget/{{ auth()->user()->organization_id ?? 3 }}/script.js';<br>
+&nbsp;&nbsp;&nbsp;&nbsp;script.src = 'https://ai-chat.support/widget/{{ auth()->user()->primaryOrganization()?->id ?? auth()->user()->organization_id ?? 3 }}/script.js';<br>
 &nbsp;&nbsp;&nbsp;&nbsp;script.async = true;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;document.head.appendChild(script);<br>
 &nbsp;&nbsp;})();<br>
@@ -80,11 +80,11 @@
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between mb-2">
                                         <span>Total Conversations:</span>
-                                        <strong>{{ \App\Models\ChatConversation::where('organization_id', auth()->user()->organization_id ?? 3)->count() }}</strong>
+                                        <strong>{{ \App\Models\ChatConversation::where('organization_id', auth()->user()->primaryOrganization()?->id ?? auth()->user()->organization_id ?? 3)->count() }}</strong>
                                     </div>
                                     <div class="d-flex justify-content-between mb-2">
                                         <span>Today's Chats:</span>
-                                        <strong>{{ \App\Models\ChatConversation::where('organization_id', auth()->user()->organization_id ?? 3)->whereDate('created_at', today())->count() }}</strong>
+                                        <strong>{{ \App\Models\ChatConversation::where('organization_id', auth()->user()->primaryOrganization()?->id ?? auth()->user()->organization_id ?? 3)->whereDate('created_at', today())->count() }}</strong>
                                     </div>
                                     <div class="d-flex justify-content-between">
                                         <span>Response Rate:</span>
@@ -102,16 +102,27 @@
 
 <script>
 function copyWidgetCode() {
+    const organizationId = {{ auth()->user()->primaryOrganization()?->id ?? auth()->user()->organization_id ?? 3 }};
     const code = `<script>
 (function() {
     const script = document.createElement('script');
-    script.src = 'https://ai-chat.support/widget/{{ auth()->user()->organization_id ?? 3 }}/script.js';
+    script.src = 'https://ai-chat.support/widget/${organizationId}/script.js';
     script.async = true;
     document.head.appendChild(script);
 })();
-</script>`;
+<\/script>`;
     
     navigator.clipboard.writeText(code).then(function() {
+        alert('Widget code copied to clipboard!');
+    }).catch(function(err) {
+        console.error('Failed to copy: ', err);
+        // Fallback for older browsers
+        const textArea = document.createElement("textarea");
+        textArea.value = code;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
         alert('Widget code copied to clipboard!');
     });
 }

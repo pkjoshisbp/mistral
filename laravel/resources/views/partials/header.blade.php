@@ -2,7 +2,7 @@
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top" style="z-index: 1050;">
     <div class="container-fluid">
         <a class="navbar-brand text-white fw-bold" href="{{ route('home') }}" style="font-size:1.5rem;">
-            <i class="fas fa-robot me-2"></i>AI Agent System
+            <i class="fas fa-robot me-2"></i>AI Chat Support
         </a>
         
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">

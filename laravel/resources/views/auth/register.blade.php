@@ -1,6 +1,29 @@
 <x-guest-layout>
+    @if(request('plan'))
+        <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <div class="flex items-center">
+                <svg class="w-5 h-5 text-blue-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                </svg>
+                <span class="text-sm font-medium text-blue-800">
+                    Selected Plan: {{ ucfirst(request('plan')) }} 
+                    @if(request('plan') == 'starter')
+                        ($49/month)
+                    @elseif(request('plan') == 'pro')
+                        ($199/month)
+                    @endif
+                </span>
+            </div>
+        </div>
+    @endif
+
     <form method="POST" action="{{ route('register') }}">
         @csrf
+
+        <!-- Hidden field for selected plan -->
+        @if(request('plan'))
+            <input type="hidden" name="plan" value="{{ request('plan') }}">
+        @endif
 
         <!-- Name -->
         <div>
@@ -53,8 +76,8 @@
         </div>
 
         <!-- Email Verification Button -->
-        <div class="mt-4">
-            <button type="button" id="verify-email" class="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+        <div class="mt-4" id="verify-email-container" style="display: block !important; visibility: visible !important;">
+            <button type="button" id="verify-email" class="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600" style="display: block !important; visibility: visible !important; width: 100%; padding: 8px 16px; background-color: #3b82f6; color: white; border-radius: 4px; border: none; cursor: pointer;">
                 Verify Email Address
             </button>
         </div>
@@ -99,26 +122,22 @@
         const hasOtpInput = document.getElementById('has-otp');
         const otpStatus = document.getElementById('otp-status');
 
+        // Ensure register button starts disabled
+        if (registerButton) {
+            registerButton.disabled = true;
+        }
+
+        // Ensure verify email button is visible
+        if (verifyEmailBtn) {
+            verifyEmailBtn.style.display = 'block';
+            verifyEmailBtn.style.visibility = 'visible';
+        }
+
         let otpSent = false;
         let otpVerified = false;
 
-        // Check if OTP is already verified from localStorage
-        const storedOtpData = localStorage.getItem('registerOtpVerified');
-        if (storedOtpData) {
-            const otpData = JSON.parse(storedOtpData);
-            const currentEmail = emailInput.value || '';
-            
-            if (otpData.email === currentEmail && otpData.timestamp > Date.now() - 10 * 60 * 1000) {
-                // OTP is still valid (within 10 minutes)
-                otpVerified = true;
-                hasOtpInput.value = 'true';
-                registerButton.disabled = false;
-                registerButton.textContent = 'Register';
-                verifyEmailBtn.style.display = 'none';
-                otpStatus.textContent = 'Email verified ✓';
-                otpStatus.className = 'mt-1 text-sm text-green-600';
-            }
-        }
+        // For registration, we ALWAYS require OTP verification
+        localStorage.removeItem('registerOtpVerified');
 
         verifyEmailBtn.addEventListener('click', function() {
             const email = emailInput.value;
@@ -162,15 +181,29 @@
             verifyEmailBtn.textContent = 'Sending...';
             showOtpStatus('Sending verification code...', 'info');
 
-            fetch('/auth/send-otp', {
+            // Get CSRF token
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || 
+                             document.querySelector('input[name="_token"]')?.value;
+
+            if (!csrfToken) {
+                showOtpStatus('Security token missing. Please refresh the page.', 'error');
+                verifyEmailBtn.disabled = false;
+                verifyEmailBtn.textContent = 'Verify Email Address';
+                return;
+            }
+
+            fetch('/auth/send-registration-otp', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    'X-CSRF-TOKEN': csrfToken,
+                    'Accept': 'application/json'
                 },
                 body: JSON.stringify({ email: email })
             })
-            .then(response => response.json())
+            .then(response => {
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     otpSent = true;
@@ -186,7 +219,7 @@
             })
             .catch(error => {
                 console.error('Error:', error);
-                showOtpStatus('Network error. Please try again.', 'error');
+                showOtpStatus('Network error. Please check your internet connection and try again.', 'error');
                 verifyEmailBtn.disabled = false;
                 verifyEmailBtn.textContent = 'Verify Email Address';
             });
@@ -205,9 +238,15 @@
             }`;
         }
 
-        // Clear localStorage on successful registration
+        // Form submission handler
         const form = document.querySelector('form');
-        form.addEventListener('submit', function() {
+        form.addEventListener('submit', function(e) {
+            if (!otpVerified && hasOtpInput.value !== 'true') {
+                e.preventDefault();
+                alert('Please verify your email address before registering.');
+                return false;
+            }
+            
             if (otpVerified) {
                 localStorage.removeItem('registerOtpVerified');
             }

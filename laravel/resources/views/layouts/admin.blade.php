@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <title>{{ config('app.name', 'AI Agent Admin Panel') }}</title>
+  <title>{{ config('app.name', 'AI Chat Support Admin Panel') }}</title>
 
   <!-- Google Font: Source Sans Pro -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,400i,700&display=fallback">
@@ -70,7 +70,7 @@
     <!-- Brand Logo -->
     <a href="{{ route('admin.dashboard') }}" class="brand-link">
       <i class="fas fa-robot brand-image"></i>
-      <span class="brand-text font-weight-light">AI Agent Panel</span>
+      <span class="brand-text font-weight-light">AI Chat Support</span>
     </a>
 
     <!-- Sidebar -->
@@ -260,7 +260,7 @@
 
   <!-- Footer -->
   <footer class="main-footer">
-    <strong>Copyright &copy; 2025 AI Agent System.</strong>
+    <strong>Copyright &copy; 2025 AI Chat Support.</strong>
     All rights reserved.
     <div class="float-right d-none d-sm-inline-block">
       <b>Version</b> 1.0.0

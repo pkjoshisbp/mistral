@@ -16,6 +16,7 @@
             this.isExpanded = false;
             this.sessionId = this.generateSessionId();
             this.messages = [];
+            this.welcomeShown = false; // Flag to track if welcome message was shown
             this.leadCaptured = this.checkLeadCaptured();
             this.userInfo = this.loadUserInfo();
             this.locationInfo = {};
@@ -40,6 +41,20 @@
             // Save lead captured status
             const key = `ai_lead_captured_${this.config.orgId}`;
             localStorage.setItem(key, 'true');
+        }
+
+        showWelcomeMessage(customMessage = null) {
+            // Only show welcome message once per session
+            if (this.welcomeShown) {
+                return;
+            }
+            
+            this.welcomeShown = true;
+            const message = customMessage || this.config.welcomeMessage;
+            
+            setTimeout(() => {
+                this.addMessage(message, 'bot');
+            }, 500);
         }
 
         saveUserInfo() {
@@ -205,14 +220,14 @@
             button.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                this.toggleWidget();
+                this.toggle();
             });
             
             if (closeBtn) {
                 closeBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    this.toggleWidget();
+                    this.toggle();
                 });
             }
 
@@ -305,9 +320,7 @@
                     }
                     // Show welcome message if no messages yet
                     if (this.messages.length === 0) {
-                        setTimeout(() => {
-                            this.addMessage(this.config.welcomeMessage, 'bot');
-                        }, 500);
+                        this.showWelcomeMessage();
                     }
                 }
             } else {
@@ -449,9 +462,7 @@
             
             // Show welcome message if no messages yet
             if (this.messages.length === 0) {
-                setTimeout(() => {
-                    this.addMessage(this.config.welcomeMessage, 'bot');
-                }, 500);
+                this.showWelcomeMessage();
             }
             
             const input = document.getElementById(this.ids.input);
@@ -488,7 +499,7 @@
             this.hideLeadForm();
             
             // Welcome message with name
-            this.addMessage(`Hello ${name}! ${this.config.welcomeMessage}`, 'bot');
+            this.showWelcomeMessage(`Hello ${name}! ${this.config.welcomeMessage}`);
         }
 
         skipLeadForm() {
@@ -499,28 +510,19 @@
 
         async detectLocation() {
             try {
-                // Try to get location from a geolocation service
-                const response = await fetch('https://ipapi.co/json/');
-                const data = await response.json();
-                
-                this.locationInfo = {
-                    country: data.country_name || data.country,
-                    region: data.region || data.region_code,
-                    city: data.city,
-                    countryCode: data.country_code
+                // Only use browser timezone info, no external API calls
+                const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                this.locationInfo = { 
+                    timezone,
+                    // Extract basic region info from timezone if possible
+                    region: timezone.includes('/') ? timezone.split('/')[0] : '',
+                    city: timezone.includes('/') ? timezone.split('/').pop() : ''
                 };
-                
-                console.log('Location detected:', this.locationInfo);
+                console.log('Location detected (browser timezone):', this.locationInfo);
             } catch (error) {
                 console.log('Could not detect location:', error);
-                // Fallback - try to get timezone info
-                try {
-                    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                    this.locationInfo = { timezone };
-                } catch (e) {
-                    // Location detection failed completely
-                    this.locationInfo = {};
-                }
+                // Fallback to empty location info
+                this.locationInfo = {};
             }
         }
 

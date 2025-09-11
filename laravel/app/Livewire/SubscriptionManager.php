@@ -24,7 +24,7 @@ class SubscriptionManager extends Component
 
     public function loadSubscriptionData()
     {
-        $this->currentSubscription = Auth::user()->subscription;
+        $this->currentSubscription = Auth::user()->activeSubscription;
     }
 
     public function loadAvailablePlans()

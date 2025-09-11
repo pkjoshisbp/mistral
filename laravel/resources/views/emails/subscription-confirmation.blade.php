@@ -9,7 +9,7 @@ Thank you for subscribing to our AI Chat Support service! Your subscription has 
 
 **Plan:** {{ $planName }}
 **Billing Cycle:** {{ ucfirst($billingCycle) }}
-**Next Billing Date:** {{ $subscription->period_end ? $subscription->period_end->format('F d, Y') : 'N/A' }}
+**Next Billing Date:** {{ $subscription->current_period_end ? $subscription->current_period_end->format('F d, Y') : 'N/A' }}
 **Status:** {{ ucfirst($subscription->status ?? 'Active') }}
 
 ## What's Next?

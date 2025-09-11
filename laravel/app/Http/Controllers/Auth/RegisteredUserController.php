@@ -64,12 +64,16 @@ class RegisteredUserController extends Controller
         // Check if a plan was selected during registration
         $selectedPlan = $request->get('plan');
         if ($selectedPlan && $selectedPlan !== 'enterprise') {
-            // Store the selected plan in session for after login redirect
+            // Store the selected plan in session for payment redirect
             session(['selected_plan' => $selectedPlan]);
-            return redirect()->route('customer.subscription')->with('plan', $selectedPlan);
+            return redirect()->route('customer.subscription')->with([
+                'plan' => $selectedPlan,
+                'message' => 'Registration successful! Please choose your subscription plan.'
+            ]);
         }
 
-        return redirect(RouteServiceProvider::HOME);
+        // Default redirect to customer dashboard for users without plan selection
+        return redirect()->route('customer.dashboard')->with('message', 'Registration successful! Welcome to AI Chat Support.');
     }
 
     /**
