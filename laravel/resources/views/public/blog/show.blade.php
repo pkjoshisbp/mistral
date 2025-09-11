@@ -434,7 +434,7 @@
                     <p class="text-muted">Revolutionizing customer support with intelligent AI solutions that help businesses provide exceptional service 24/7.</p>
                 </div>
                 
-                <div class="col-lg-2">
+                <div class="col-lg-2 col-md-6 col-6">
                     <h6 class="fw-bold mb-3">Product</h6>
                     <ul class="list-unstyled">
                         <li><a href="{{ route('features') }}" class="text-muted text-decoration-none">Features</a></li>
@@ -444,7 +444,7 @@
                     </ul>
                 </div>
                 
-                <div class="col-lg-2">
+                <div class="col-lg-2 col-md-6 col-6">
                     <h6 class="fw-bold mb-3">Company</h6>
                     <ul class="list-unstyled">
                         <li><a href="{{ route('about') }}" class="text-muted text-decoration-none">About Us</a></li>
@@ -454,7 +454,7 @@
                     </ul>
                 </div>
                 
-                <div class="col-lg-2">
+                <div class="col-lg-2 col-md-6 col-6">
                     <h6 class="fw-bold mb-3">Legal</h6>
                     <ul class="list-unstyled">
                         <li><a href="{{ route('terms') }}" class="text-muted text-decoration-none">Terms of Service</a></li>
@@ -464,7 +464,7 @@
                     </ul>
                 </div>
                 
-                <div class="col-lg-3">
+                <div class="col-lg-3 col-md-6 col-6">
                     <h6 class="fw-bold mb-3">Support</h6>
                     <ul class="list-unstyled">
                         <li><a href="#" class="text-muted text-decoration-none">Help Center</a></li>
