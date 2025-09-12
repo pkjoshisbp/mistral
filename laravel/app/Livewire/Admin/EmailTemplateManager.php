@@ -11,6 +11,8 @@ class EmailTemplateManager extends Component
     use WithPagination;
 
     public $showModal = false;
+    public $showPreviewModal = false;
+    public $previewContent = '';
     public $editingTemplate = null;
     public $name = '';
     public $subject = '';
@@ -142,6 +144,46 @@ class EmailTemplateManager extends Component
             $template->update(['is_active' => !$template->is_active]);
             session()->flash('success', 'Template status updated successfully!');
         }
+    }
+
+    public function previewTemplate($templateId = null)
+    {
+        $template = $templateId ? EmailTemplate::find($templateId) : null;
+        
+        if ($template) {
+            // Use existing template content
+            $content = $template->content;
+        } else {
+            // Use current form content for preview during editing
+            $content = $this->content;
+        }
+
+        // Replace variables with sample data for preview
+        $sampleData = [
+            'contact_name' => 'John Smith',
+            'company_name' => 'Sample Company Inc.',
+            'hospital_name' => 'City General Hospital',
+            'institution_name' => 'Metro University',
+            'organization_name' => 'Community Support NGO',
+            'dealership_name' => 'Premier Auto Sales',
+            'store_name' => 'Online Store Pro',
+            'firm_name' => 'Legal Associates LLC',
+            'sender_name' => 'Sarah Johnson',
+            'contact_phone' => '+1 (555) 123-4567',
+        ];
+
+        $this->previewContent = $content;
+        foreach ($sampleData as $variable => $value) {
+            $this->previewContent = str_replace('{' . $variable . '}', $value, $this->previewContent);
+        }
+
+        $this->showPreviewModal = true;
+    }
+
+    public function closePreviewModal()
+    {
+        $this->showPreviewModal = false;
+        $this->previewContent = '';
     }
 
     private function resetInputs()

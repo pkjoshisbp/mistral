@@ -197,6 +197,9 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/email-campaigns', \App\Livewire\Admin\EmailCampaignManager::class)->name('email-campaigns');
     Route::get('/email-composer', \App\Livewire\Admin\EmailComposer::class)->name('email-composer');
     
+    // Widget Management Route
+    Route::get('/widget-script-manager', \App\Livewire\Admin\WidgetScriptManager::class)->name('widget-script-manager');
+    
     // Profile routes for admin
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');

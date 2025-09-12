@@ -71,6 +71,11 @@
                                         <td>{{ $template->created_at->format('M d, Y') }}</td>
                                         <td>
                                             <div class="btn-group" role="group">
+                                                <button type="button" class="btn btn-sm btn-outline-info" 
+                                                        wire:click="previewTemplate({{ $template->id }})"
+                                                        title="Preview Template">
+                                                    <i class="fas fa-eye"></i>
+                                                </button>
                                                 <button type="button" class="btn btn-sm btn-outline-primary" 
                                                         wire:click="openModal({{ $template->id }})">
                                                     <i class="fas fa-edit"></i>
@@ -205,10 +210,77 @@
                     </div>
                     
                     <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-info" wire:click="previewTemplate()">
+                            <i class="fas fa-eye"></i> Preview
+                        </button>
                         <button type="button" class="btn btn-secondary" wire:click="closeModal()">Cancel</button>
                         <button type="button" class="btn btn-primary" wire:click="save()">
                             {{ $editingTemplate ? 'Update Template' : 'Create Template' }}
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    <!-- Preview Modal -->
+    @if($showPreviewModal)
+        <div class="modal fade show" style="display: block;" tabindex="-1" aria-labelledby="previewModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="previewModalLabel">
+                            <i class="fas fa-eye"></i> Email Template Preview
+                        </h5>
+                        <button type="button" class="btn-close" wire:click="closePreviewModal()"></button>
+                    </div>
+                    
+                    <div class="modal-body p-0">
+                        <div class="row g-0">
+                            <!-- Desktop Preview -->
+                            <div class="col-lg-8">
+                                <div class="p-3 border-end">
+                                    <h6 class="mb-3 text-muted">
+                                        <i class="fas fa-desktop"></i> Desktop View
+                                    </h6>
+                                    <div class="border rounded p-3" style="background: #f8f9fa; max-height: 600px; overflow-y: auto;">
+                                        <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                                            {!! $previewContent !!}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Mobile Preview -->
+                            <div class="col-lg-4">
+                                <div class="p-3">
+                                    <h6 class="mb-3 text-muted">
+                                        <i class="fas fa-mobile-alt"></i> Mobile View
+                                    </h6>
+                                    <div class="border rounded p-2" style="background: #f8f9fa; max-height: 600px; overflow-y: auto;">
+                                        <div style="width: 320px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); transform: scale(0.8); transform-origin: top;">
+                                            {!! $previewContent !!}
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mt-3">
+                                        <small class="text-muted">
+                                            <strong>Preview Notes:</strong><br>
+                                            • Variables are replaced with sample data<br>
+                                            • Mobile view shows approximate scaling<br>
+                                            • Actual emails may render slightly differently across email clients
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-primary" onclick="window.print()">
+                            <i class="fas fa-print"></i> Print Preview
+                        </button>
+                        <button type="button" class="btn btn-secondary" wire:click="closePreviewModal()">Close</button>
                     </div>
                 </div>
             </div>

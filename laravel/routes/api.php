@@ -16,6 +16,10 @@ use Illuminate\Support\Facades\Route;
 
 
 use App\Http\Controllers\Api\LeadController;
+use App\Http\Controllers\Api\AnalyticsTrackingController;
 
 Route::post('/leads', [LeadController::class, 'store']);
 Route::get('/leads', [LeadController::class, 'index']);
+
+// Analytics tracking endpoints
+Route::post('/analytics/track', [AnalyticsTrackingController::class, 'track']);

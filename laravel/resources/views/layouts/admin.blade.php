@@ -156,6 +156,12 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{ route('admin.widget-script-manager') }}" class="nav-link {{ request()->routeIs('admin.widget-script-manager') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-cogs"></i>
+              <p>Script Generator</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.api-endpoints') }}" class="nav-link {{ request()->routeIs('admin.api-endpoints') ? 'active' : '' }}">
               <i class="nav-icon fas fa-plug"></i>
               <p>API Endpoints</p>
