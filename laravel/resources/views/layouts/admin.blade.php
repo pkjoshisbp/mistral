@@ -195,6 +195,12 @@
               <p>Compose Email</p>
             </a>
           </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.demo-manager') }}" class="nav-link {{ request()->routeIs('admin.demo-manager') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-desktop"></i>
+              <p>Demo Manager</p>
+            </a>
+          </li>
           @else
           <li class="nav-item">
             <a href="{{ route('customer.dashboard') }}" class="nav-link">

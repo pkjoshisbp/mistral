@@ -450,6 +450,138 @@ class AdditionalEmailTemplateSeeder extends Seeder
                 'variables' => ['firm_name', 'contact_name', 'sender_name', 'contact_phone'],
                 'description' => 'Outreach template for legal firms focusing on client intake and professional service delivery'
             ],
+
+            // Hotel Templates
+            [
+                'name' => 'Hotel - Guest Experience Enhancement',
+                'subject' => 'Elevate Guest Experience with 24/7 AI Concierge - {hotel_name}',
+                'content' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="text-align: center; margin-bottom: 30px;">
+        <img src="https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&h=200&fit=crop&crop=center" alt="Luxury Hotel Lobby" style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px;">
+    </div>
+    
+    <h2 style="color: #d97706;">Dear {contact_name},</h2>
+    
+    <p>Hotels worldwide are revolutionizing guest services with AI-powered concierge assistants. <strong>AI Chat Support</strong> helps hotels provide exceptional 24/7 guest support while reducing front desk workload and increasing guest satisfaction.</p>
+    
+    <div style="background: #fffbeb; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #d97706;">
+        <h3 style="color: #d97706; margin-top: 0;">🏨 Transform Guest Services:</h3>
+        <ul style="color: #374151; margin: 0;">
+            <li><strong>Room Reservations:</strong> Instant booking and availability checks</li>
+            <li><strong>Concierge Services:</strong> Local recommendations and directions</li>
+            <li><strong>Amenities Information:</strong> Pool hours, spa services, dining options</li>
+            <li><strong>Room Service:</strong> Order food, request housekeeping, report issues</li>
+            <li><strong>Guest Communications:</strong> Multilingual support for international guests</li>
+        </ul>
+    </div>
+    
+    <div style="background: #f0fdf4; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <h4 style="color: #059669; margin-top: 0;">📈 Hospitality Success Metrics:</h4>
+        <ul style="color: #374151; margin: 0;">
+            <li>45% increase in guest satisfaction scores</li>
+            <li>60% reduction in front desk call volume</li>
+            <li>35% increase in ancillary service bookings</li>
+            <li>50% faster response to guest requests</li>
+            <li>24/7 multilingual guest support</li>
+        </ul>
+    </div>
+    
+    <div style="background: #dbeafe; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
+        <p style="margin: 0; color: #1e40af; font-weight: bold;">🌟 Perfect for Resort Hotels & Boutique Properties</p>
+        <p style="margin: 5px 0 0 0; color: #374151; font-size: 14px;">Enhance guest experience from check-in to check-out</p>
+    </div>
+    
+    <div style="text-align: center; margin: 30px 0;">
+        <a href="https://ai-chat.support/demo?industry=hospitality" style="background: #d97706; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">Request Hotel Demo</a>
+    </div>
+    
+    <p>Ready to enhance your guest experience? Let\'s explore how AI Chat Support can help {hotel_name} deliver world-class hospitality services.</p>
+    
+    <p><strong>Book a demo today:</strong><br>
+    📧 Email: hospitality@ai-chat.support<br>
+    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    📞 Call: {contact_phone}</p>
+    
+    <p>Best regards,<br>
+    {sender_name}<br>
+    AI Chat Support Hospitality Team</p>
+    
+    <hr style="margin: 30px 0;">
+    <p style="font-size: 12px; color: #666; text-align: center;">
+        <a href="https://ai-chat.support">AI Chat Support</a> - Elevating Hospitality Excellence<br>
+        <a href="https://ai-chat.support/unsubscribe" style="color: #666;">Unsubscribe</a>
+    </p>
+</div>',
+                'industry_type' => 'hospitality',
+                'variables' => ['hotel_name', 'contact_name', 'sender_name', 'contact_phone'],
+                'description' => 'Outreach template for hotels focusing on guest experience and concierge services'
+            ],
+
+            // Real Estate Templates
+            [
+                'name' => 'Real Estate - Property Sales Acceleration',
+                'subject' => 'Accelerate Property Sales with AI Assistant - {agency_name}',
+                'content' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="text-align: center; margin-bottom: 30px;">
+        <img src="https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=600&h=200&fit=crop&crop=center" alt="Modern Real Estate" style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px;">
+    </div>
+    
+    <h2 style="color: #059669;">Dear {contact_name},</h2>
+    
+    <p>Real estate agencies are accelerating sales with AI-powered property assistants. <strong>AI Chat Support</strong> helps real estate professionals capture leads, qualify prospects, and provide instant property information 24/7.</p>
+    
+    <div style="background: #f0fdf4; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #059669;">
+        <h3 style="color: #059669; margin-top: 0;">🏠 Boost Property Sales:</h3>
+        <ul style="color: #374151; margin: 0;">
+            <li><strong>Property Search:</strong> Instant listings based on buyer criteria</li>
+            <li><strong>Viewing Appointments:</strong> Schedule showings automatically</li>
+            <li><strong>Market Analysis:</strong> Provide comparative market data</li>
+            <li><strong>Mortgage Guidance:</strong> Connect with financing options</li>
+            <li><strong>Neighborhood Info:</strong> Schools, amenities, local insights</li>
+        </ul>
+    </div>
+    
+    <div style="background: #dbeafe; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <h4 style="color: #1e40af; margin-top: 0;">🏆 Real Estate Success Results:</h4>
+        <ul style="color: #374151; margin: 0;">
+            <li>70% increase in qualified leads</li>
+            <li>45% more property viewings scheduled</li>
+            <li>30% faster sales cycle completion</li>
+            <li>60% improvement in client response time</li>
+            <li>25% increase in listing inquiries</li>
+        </ul>
+    </div>
+    
+    <div style="background: #fef3c7; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
+        <p style="margin: 0; color: #d97706; font-weight: bold;">💰 Perfect for Residential & Commercial Properties</p>
+        <p style="margin: 5px 0 0 0; color: #374151; font-size: 14px;">Capture leads outside business hours and weekend shoppers</p>
+    </div>
+    
+    <div style="text-align: center; margin: 30px 0;">
+        <a href="https://ai-chat.support/demo?industry=realestate" style="background: #059669; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">Request Real Estate Demo</a>
+    </div>
+    
+    <p>Ready to accelerate your property sales? Let\'s show you how AI Chat Support can help {agency_name} convert more leads and close more deals.</p>
+    
+    <p><strong>Schedule your consultation:</strong><br>
+    📧 Email: realestate@ai-chat.support<br>
+    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    📞 Call: {contact_phone}</p>
+    
+    <p>Building success together,<br>
+    {sender_name}<br>
+    AI Chat Support Real Estate Team</p>
+    
+    <hr style="margin: 30px 0;">
+    <p style="font-size: 12px; color: #666; text-align: center;">
+        <a href="https://ai-chat.support">AI Chat Support</a> - Powering Real Estate Success<br>
+        <a href="https://ai-chat.support/unsubscribe" style="color: #666;">Unsubscribe</a>
+    </p>
+</div>',
+                'industry_type' => 'realestate',
+                'variables' => ['agency_name', 'contact_name', 'sender_name', 'contact_phone'],
+                'description' => 'Outreach template for real estate agencies focusing on lead generation and property sales'
+            ],
         ];
 
         foreach ($templates as $template) {

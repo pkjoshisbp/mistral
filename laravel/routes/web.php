@@ -58,6 +58,13 @@ Route::get('/refund-policy', function () {
     return view('public.refund-policy', compact('refund'));
 })->name('refund-policy');
 
+// Industry Demo Routes - Debug Route
+Route::get('/demo-test', function() {
+    return response()->json(['message' => 'Demo route works', 'layout' => 'public', 'time' => now()]);
+})->name('demo-test');
+
+Route::get('/demo/{industry?}', \App\Livewire\Public\IndustryDemo::class)->name('demo');
+
 // Blog Routes
 
 Route::get('/blog', function () {
@@ -199,6 +206,9 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     
     // Widget Management Route
     Route::get('/widget-script-manager', \App\Livewire\Admin\WidgetScriptManager::class)->name('widget-script-manager');
+    
+    // Demo Management Route
+    Route::get('/demo-manager', \App\Livewire\Admin\DemoManager::class)->name('demo-manager');
     
     // Profile routes for admin
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

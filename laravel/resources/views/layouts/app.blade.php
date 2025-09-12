@@ -15,6 +15,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <!-- AdminLTE Theme style -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/css/adminlte.min.css">
+    <!-- Tailwind CSS for demo pages -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <!-- Livewire Styles -->
     @livewireStyles
 </head>

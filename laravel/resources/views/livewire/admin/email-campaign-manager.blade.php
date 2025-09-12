@@ -125,7 +125,7 @@
 
     <!-- Campaign Creation Modal -->
     @if($showModal)
-        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal fade show email-campaign-modal" style="display: block; background-color: rgba(0,0,0,0.5);" tabindex="-1" wire:ignore.self>
             <div class="modal-dialog modal-xl">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -280,7 +280,7 @@
                     
                     <div class="modal-footer">
                         @if($step > 1)
-                            <button type="button" class="btn btn-secondary" wire:click="previousStep()">
+                            <button type="button" class="btn btn-secondary" wire:click="previousStep()" wire:loading.attr="disabled">
                                 <i class="fas fa-arrow-left"></i> Previous
                             </button>
                         @endif
@@ -288,12 +288,14 @@
                         <button type="button" class="btn btn-outline-secondary" wire:click="closeModal()">Cancel</button>
                         
                         @if($step < 3)
-                            <button type="button" class="btn btn-primary" wire:click="nextStep()">
-                                Next <i class="fas fa-arrow-right"></i>
+                            <button type="button" class="btn btn-primary" wire:click="nextStep()" wire:loading.attr="disabled">
+                                <span wire:loading.remove wire:target="nextStep">Next <i class="fas fa-arrow-right"></i></span>
+                                <span wire:loading wire:target="nextStep"><i class="fas fa-spinner fa-spin"></i> Processing...</span>
                             </button>
                         @else
-                            <button type="button" class="btn btn-success" wire:click="sendCampaign()">
-                                <i class="fas fa-paper-plane"></i> Send Campaign
+                            <button type="button" class="btn btn-success" wire:click="sendCampaign()" wire:loading.attr="disabled">
+                                <span wire:loading.remove wire:target="sendCampaign"><i class="fas fa-paper-plane"></i> Send Campaign</span>
+                                <span wire:loading wire:target="sendCampaign"><i class="fas fa-spinner fa-spin"></i> Sending...</span>
                             </button>
                         @endif
                     </div>
@@ -301,4 +303,37 @@
             </div>
         </div>
     @endif
+
+    <!-- Inline styles within the root div -->
+    <style>
+    .email-campaign-modal .modal-xl {
+        max-width: 90%;
+    }
+
+    .email-campaign-modal .modal-content {
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .email-campaign-modal .modal-footer {
+        border-top: 1px solid #dee2e6;
+        padding: 1rem;
+        background: #fff;
+        position: sticky;
+        bottom: 0;
+        z-index: 1;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+    }
+
+    .email-campaign-modal .modal-body {
+        max-height: calc(90vh - 120px);
+        overflow-y: auto;
+    }
+
+    @media (max-width: 768px) {
+        .email-campaign-modal .modal-xl {
+            max-width: 95%;
+        }
+    }
+    </style>
 </div>
