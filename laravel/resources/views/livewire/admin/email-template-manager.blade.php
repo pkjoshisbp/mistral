@@ -113,7 +113,7 @@
 
     <!-- Modal -->
     @if($showModal)
-        <div class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);" tabindex="-1" wire:ignore.self>
+        <div class="modal fade show email-template-modal" style="display: block; background-color: rgba(0,0,0,0.5);" tabindex="-1" wire:ignore.self>
             <div class="modal-dialog modal-xl">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -226,7 +226,7 @@
 
     <!-- Preview Modal -->
     @if($showPreviewModal)
-        <div class="modal fade show" style="display: block;" tabindex="-1" aria-labelledby="previewModalLabel" aria-hidden="true">
+        <div class="modal fade show email-template-modal" style="display: block;" tabindex="-1" aria-labelledby="previewModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-xl">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -287,30 +287,31 @@
             </div>
         </div>
     @endif
-</div>
 
-<style>
-.modal-xl {
-    max-width: 90%;
-}
-
-.modal-content {
-    max-height: 90vh;
-    overflow-y: auto;
-}
-
-.modal-footer {
-    border-top: 1px solid #dee2e6;
-    padding: 1rem;
-    background: #fff;
-    position: sticky;
-    bottom: 0;
-    z-index: 1;
-}
-
-@media (max-width: 768px) {
-    .modal-xl {
-        max-width: 95%;
+    <!-- Inline styles within the root div -->
+    <style>
+    .email-template-modal .modal-xl {
+        max-width: 90%;
     }
-}
-</style>
+
+    .email-template-modal .modal-content {
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .email-template-modal .modal-footer {
+        border-top: 1px solid #dee2e6;
+        padding: 1rem;
+        background: #fff;
+        position: sticky;
+        bottom: 0;
+        z-index: 1;
+    }
+
+    @media (max-width: 768px) {
+        .email-template-modal .modal-xl {
+            max-width: 95%;
+        }
+    }
+    </style>
+</div>
