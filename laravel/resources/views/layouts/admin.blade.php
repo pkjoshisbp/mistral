@@ -169,6 +169,26 @@
               <p>Pricing Management</p>
             </a>
           </li>
+          
+          <li class="nav-header">EMAIL MARKETING</li>
+          <li class="nav-item">
+            <a href="{{ route('admin.email-templates') }}" class="nav-link {{ request()->routeIs('admin.email-templates') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-file-alt"></i>
+              <p>Email Templates</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.email-campaigns') }}" class="nav-link {{ request()->routeIs('admin.email-campaigns') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-paper-plane"></i>
+              <p>Email Campaigns</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.email-composer') }}" class="nav-link {{ request()->routeIs('admin.email-composer') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-edit"></i>
+              <p>Compose Email</p>
+            </a>
+          </li>
           @else
           <li class="nav-item">
             <a href="{{ route('customer.dashboard') }}" class="nav-link">
