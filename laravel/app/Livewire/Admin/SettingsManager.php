@@ -34,9 +34,23 @@ class SettingsManager extends Component
     public $app_url = '';
     public $app_timezone = 'UTC';
     
+    // AI Settings
+    public $ai_model_provider = 'llama';
+    public $openai_api_key = '';
+    public $openai_default_model = 'gpt-5-mini'; // Only allowed model
+    public $llama_default_model = 'llama3.2:3b';
+    
     public function mount()
     {
         $this->loadSettings();
+    }
+    
+    public function getAvailableLlamaModels()
+    {
+        return [
+            'llama3.2:3b' => 'Llama 3.2:3B',
+            'mistral:7b' => 'Mistral 7B'
+        ];
     }
 
     public function loadSettings()
@@ -64,6 +78,12 @@ class SettingsManager extends Component
         $this->app_name = AdminSetting::get('app_name', config('app.name'));
         $this->app_url = AdminSetting::get('app_url', config('app.url'));
         $this->app_timezone = AdminSetting::get('app_timezone', 'UTC');
+        
+        // AI Settings
+        $this->ai_model_provider = AdminSetting::get('ai_model_provider', config('app.ai_model_provider', 'llama'));
+        $this->openai_api_key = AdminSetting::get('openai_api_key', '');
+        $this->openai_default_model = AdminSetting::get('openai_default_model', 'gpt-5-mini');
+        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3.2:3b');
     }
 
     public function savePaymentSettings()
@@ -181,6 +201,21 @@ class SettingsManager extends Component
         } catch (\Exception $e) {
             session()->flash('error', 'Failed to send test email: ' . $e->getMessage());
         }
+    }
+
+    public function saveAiSettings()
+    {
+        \Log::info('AI Settings save method called', [
+            'provider' => $this->ai_model_provider,
+            'llama_model' => $this->llama_default_model,
+            'openai_model' => $this->openai_default_model
+        ]);
+        
+        // Simple success response for testing
+        session()->flash('success', 'AI settings saved successfully! (Test mode)');
+        
+        // Refresh the component to show the success message
+        return redirect()->to(request()->header('Referer'));
     }
 
     public function render()

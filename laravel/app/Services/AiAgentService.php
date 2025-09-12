@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use OpenAI;
 
 class AiAgentService
 {
@@ -12,6 +13,30 @@ class AiAgentService
     public function __construct()
     {
         $this->baseUrl = config('services.ai_agent.url', 'http://localhost:8111');
+    }
+
+    /**
+     * Get the configured AI provider (llama or openai)
+     */
+    public function getAiProvider()
+    {
+        // Check database settings first, then fall back to config/env
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $provider = \App\Models\AdminSetting::get('ai_model_provider');
+            if ($provider) {
+                return $provider;
+            }
+        }
+        
+        return config('app.ai_model_provider', env('AI_MODEL_PROVIDER', 'llama'));
+    }
+
+    /**
+     * Check if OpenAI is the active provider
+     */
+    public function isOpenAiProvider()
+    {
+        return $this->getAiProvider() === 'openai';
     }
 
     /**
@@ -204,21 +229,47 @@ class AiAgentService
     public function searchQdrant($collectionName, $queryVector, $limit = 5)
     {
         try {
-            // Increase limit to get more results for filtering
+            // Get more results for filtering but respect score thresholds
+            $searchLimit = min(max($limit * 2, 15), 25); // Get 2x requested or max 25
             $response = Http::timeout(30)->post("{$this->baseUrl}/qdrant/search", [
                 'collection_name' => $collectionName,
                 'query_vector' => $queryVector,
-                'limit' => max($limit, 10)
+                'limit' => $searchLimit
             ]);
 
             if ($response->successful()) {
                 $data = $response->json();
-                // Prioritize service results for service queries, then other results
+                
                 if (isset($data['results']) && is_array($data['results'])) {
+                    // Filter by relevance score first - only keep results above threshold
+                    $minScore = 0.4; // Minimum relevance threshold
+                    $relevantResults = [];
+                    
+                    foreach ($data['results'] as $result) {
+                        $score = $result['score'] ?? 0;
+                        if ($score >= $minScore) {
+                            $relevantResults[] = $result;
+                        }
+                    }
+                    
+                    // If we have high-quality results (score > 0.7), prefer fewer, better results
+                    $hasHighQualityResult = false;
+                    foreach ($relevantResults as $result) {
+                        if (($result['score'] ?? 0) > 0.7) {
+                            $hasHighQualityResult = true;
+                            break;
+                        }
+                    }
+                    
+                    // Adjust limit based on result quality
+                    $effectiveLimit = $hasHighQualityResult ? min($limit, 5) : $limit;
+                    
+                    // Prioritize service results for service queries, then other results
                     $serviceResults = [];
                     $mriResults = [];
                     $otherResults = [];
-                    foreach ($data['results'] as $result) {
+                    
+                    foreach ($relevantResults as $result) {
                         $payload = $result['payload'] ?? [];
                         $dataType = $payload['data_type'] ?? '';
                         $content = $payload['content'] ?? '';
@@ -231,8 +282,10 @@ class AiAgentService
                             $otherResults[] = $result;
                         }
                     }
-                    // Merge service results first, then MRI results, then others, and trim to requested limit
-                    $data['results'] = array_slice(array_merge($serviceResults, $mriResults, $otherResults), 0, $limit);
+                    
+                    // Merge prioritized results and trim to effective limit
+                    $finalResults = array_merge($serviceResults, $mriResults, $otherResults);
+                    $data['results'] = array_slice($finalResults, 0, $effectiveLimit);
                 }
                 Log::info('AI Agent Qdrant search response', ['response' => $data]);
                 return $data;
@@ -285,7 +338,7 @@ class AiAgentService
             }
 
             // Search Qdrant with the embedding
-            $searchResults = $this->searchQdrant($collectionName, $embedding, max($limit, 10));
+            $searchResults = $this->searchQdrant($collectionName, $embedding, $limit);
             
             Log::info('Enhanced search completed', [
                 'collection' => $collectionName,
@@ -438,6 +491,90 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
         } catch (\Exception $e) {
             Log::error('AI Agent LLM chat exception', ['error' => $e->getMessage()]);
             return null;
+        }
+    }
+
+    /**
+     * OpenAI chat completion
+     */
+    public function openAiChat($messages, $model = 'gpt-5-mini', $userId = null, $organizationId = null)
+    {
+        try {
+            Log::info('OpenAI chat request', [
+                'model' => $model,
+                'messages_count' => count($messages),
+                'user_id' => $userId,
+                'organization_id' => $organizationId
+            ]);
+
+            // Get API key from admin settings or fallback to config
+            $apiKey = null;
+            if (class_exists(\App\Models\AdminSetting::class)) {
+                $apiKey = \App\Models\AdminSetting::get('openai_api_key');
+            }
+            
+            if (!$apiKey) {
+                $apiKey = config('services.openai.api_key');
+            }
+            
+            $client = OpenAI::client($apiKey);
+            
+            $result = $client->chat()->create([
+                'model' => $model,
+                'messages' => $messages,
+                'max_completion_tokens' => 1000,
+            ]);
+
+            Log::info('OpenAI chat response', [
+                'id' => $result->id,
+                'model' => $result->model,
+                'usage' => $result->usage->toArray()
+            ]);
+
+            // Convert OpenAI response format to match our existing format
+            $response = [
+                'message' => [
+                    'role' => $result->choices[0]->message->role,
+                    'content' => $result->choices[0]->message->content,
+                ],
+                'usage' => [
+                    'prompt_tokens' => $result->usage->promptTokens,
+                    'completion_tokens' => $result->usage->completionTokens,
+                    'total_tokens' => $result->usage->totalTokens,
+                ]
+            ];
+
+            // Log token usage if user and organization are provided
+            if ($userId && $organizationId) {
+                $this->logTokenUsage(
+                    $userId,
+                    $organizationId,
+                    'openai_chat',
+                    $response['usage']['total_tokens'],
+                    "OpenAI {$model} chat"
+                );
+            }
+
+            return $response;
+
+        } catch (\Exception $e) {
+            Log::error('OpenAI chat exception', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Smart LLM chat that routes to the appropriate provider
+     */
+    public function smartLlmChat($messages, $model = null, $userId = null, $organizationId = null)
+    {
+        if ($this->isOpenAiProvider()) {
+            // Always use GPT-5-mini as it's the only allowed model
+            $openAiModel = 'gpt-5-mini';
+            return $this->openAiChat($messages, $openAiModel, $userId, $organizationId);
+        } else {
+            $llamaModel = $model ?: 'mistral:7b';
+            return $this->llmChat($messages, $llamaModel, $userId, $organizationId);
         }
     }
 

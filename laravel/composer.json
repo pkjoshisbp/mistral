@@ -13,6 +13,7 @@
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
         "livewire/livewire": "^3.6",
+        "openai-php/client": "^0.10.3",
         "razorpay/razorpay": "^2.9",
         "simple-html-dom/simple-html-dom": "^1.5"
     },

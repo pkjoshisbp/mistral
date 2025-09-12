@@ -100,25 +100,25 @@ class IndustryDemo extends Component
                 ]
             ],
             'automotive' => [
-                'title' => 'Automotive Demo - AI Sales Assistant',
-                'subtitle' => 'Experience how our AI helps car buyers',
-                'organization' => 'Premier Auto Sales',
-                'description' => 'See how our AI assistant helps customers with vehicle information, financing options, test drive scheduling, and service bookings.',
+                'title' => 'Car Dealership Demo - AI Sales Assistant',
+                'subtitle' => 'Experience how our AI helps car buyers find their perfect vehicle',
+                'organization' => 'AutoMax Dealership',
+                'description' => 'Full-service automotive repair and maintenance center with certified technicians and state-of-the-art equipment.',
                 'sample_questions' => [
-                    'Show me SUVs under $30,000',
-                    'I want to schedule a test drive',
-                    'What financing options do you have?',
-                    'Do you have any Honda Accords?',
-                    'I need to book a service appointment',
-                    'What is your trade-in value for my car?'
+                    'What car models do you have available?',
+                    'Do you offer financing options?',
+                    'Can I trade in my current vehicle?',
+                    'Do you have certified pre-owned vehicles?',
+                    'Can I schedule a test drive?',
+                    'What are your current promotions?'
                 ],
                 'features' => [
-                    'Vehicle Search',
-                    'Test Drive Scheduling',
+                    'New Vehicle Sales',
+                    'Certified Pre-Owned',
                     'Financing Options',
-                    'Trade-in Valuation',
-                    'Service Booking',
-                    'Inventory Updates'
+                    'Trade-In Services',
+                    'Home Delivery',
+                    'Extended Warranties'
                 ]
             ],
             'ecommerce' => [
@@ -250,7 +250,7 @@ class IndustryDemo extends Component
                 ['role' => 'user', 'content' => $userMessage]
             ];
             
-            $response = $aiService->llmChat($chatMessages, 'llama3.2:3b');
+            $response = $aiService->smartLlmChat($chatMessages);
             
             if ($response && isset($response['message']['content'])) {
                 $aiResponse = $response['message']['content'];
@@ -326,7 +326,7 @@ class IndustryDemo extends Component
                 ];
                 
                 // Query the LLM
-                $response = $aiService->llmChat($messages, 'llama3.2:3b');
+                $response = $aiService->smartLlmChat($messages);
                 
                 if ($response && isset($response['message']['content'])) {
                     \Log::info('Demo AI response generated successfully', [

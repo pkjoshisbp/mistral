@@ -1,7 +1,7 @@
-<div>
-    <div class="row">
+<div class="container-fluid">
+    <div class="row g-3">
         <!-- Settings Navigation -->
-        <div class="col-md-3">
+        <div class="col-12 col-md-3 col-xl-2">
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">Settings</h5>
@@ -23,13 +23,18 @@
                             <i class="fas fa-cog"></i>
                             Application
                         </button>
+                        <button wire:click="$set('activeTab', 'ai')" 
+                                class="list-group-item list-group-item-action {{ $activeTab === 'ai' ? 'active' : '' }}">
+                            <i class="fas fa-robot"></i>
+                            AI Settings
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Settings Content -->
-        <div class="col-md-9">
+        <div class="col-12 col-md-9 col-xl-10">
 
             @if($activeTab === 'email')
                 <!-- Email Settings -->
@@ -182,6 +187,99 @@
                                 <button type="submit" class="btn btn-primary">
                                     <i class="fas fa-save"></i>
                                     Save Application Settings
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            @endif
+
+            @if($activeTab === 'ai')
+                <!-- AI Settings -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-robot"></i>
+                            AI Model Settings
+                        </h5>
+                        <small class="text-muted">Configure AI providers and models for chat responses</small>
+                    </div>
+                    <div class="card-body">
+                        <form wire:submit.prevent="saveAiSettings">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="ai_model_provider">AI Provider</label>
+                                        <select wire:model="ai_model_provider" class="form-control @error('ai_model_provider') is-invalid @enderror">
+                                            <option value="llama">Llama (Local/Ollama)</option>
+                                            <option value="openai">OpenAI (GPT)</option>
+                                        </select>
+                                        @error('ai_model_provider')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Choose between local Llama models or OpenAI's GPT models</small>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="llama_default_model">Llama Default Model</label>
+                                        <select wire:model="llama_default_model" 
+                                                class="form-control @error('llama_default_model') is-invalid @enderror">
+                                            @foreach($this->getAvailableLlamaModels() as $value => $label)
+                                                <option value="{{ $value }}">{{ $label }}</option>
+                                            @endforeach
+                                        </select>
+                                        @error('llama_default_model')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Default model when using Llama provider</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="openai_api_key">OpenAI API Key</label>
+                                        <input type="password" wire:model="openai_api_key" 
+                                               class="form-control @error('openai_api_key') is-invalid @enderror"
+                                               placeholder="sk-proj-...">
+                                        @error('openai_api_key')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Required only when using OpenAI provider</small>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="openai_default_model">OpenAI Model</label>
+                                        <select wire:model="openai_default_model" class="form-control @error('openai_default_model') is-invalid @enderror">
+                                            <option value="gpt-5-mini">GPT-5 Mini (Only Available Model)</option>
+                                        </select>
+                                        @error('openai_default_model')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">GPT-5-mini is the only allowed model for your account</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle"></i>
+                                <strong>Current Provider:</strong> 
+                                @if($ai_model_provider === 'openai')
+                                    <span class="badge badge-primary">OpenAI GPT</span>
+                                    Using GPT-5 Mini model
+                                @else
+                                    <span class="badge badge-success">Llama (Local)</span>
+                                    Using {{ $llama_default_model }} model
+                                @endif
+                            </div>
+
+                            <div class="d-flex justify-content-end">
+                                <button type="submit" class="btn btn-primary" wire:loading.attr="disabled" wire:target="saveAiSettings">
+                                    <span wire:loading.remove wire:target="saveAiSettings">
+                                        <i class="fas fa-save"></i>
+                                        Save AI Settings
+                                    </span>
+                                    <span wire:loading wire:target="saveAiSettings">
+                                        <i class="fas fa-spinner fa-spin"></i>
+                                        Saving...
+                                    </span>
                                 </button>
                             </div>
                         </form>

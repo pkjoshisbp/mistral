@@ -316,5 +316,27 @@
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/js/adminlte.min.js"></script>
 <!-- Livewire Scripts -->
 @livewireScripts
+
+<script>
+    // Debug Livewire initialization
+    console.log('Livewire config check:', window.livewireScriptConfig);
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOM loaded, Livewire available:', typeof window.Livewire !== 'undefined');
+        
+        // Add form submission debugging
+        document.addEventListener('livewire:init', function() {
+            console.log('Livewire initialized successfully');
+        });
+        
+        document.addEventListener('livewire:start', function() {
+            console.log('Livewire request started');
+        });
+        
+        document.addEventListener('livewire:finish', function() {
+            console.log('Livewire request finished');
+        });
+    });
+</script>
 </body>
 </html>

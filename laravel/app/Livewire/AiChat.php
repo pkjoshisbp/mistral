@@ -147,7 +147,7 @@ $nluUser = [
         $nluModels = ['llama3.2:1b', 'llama3.2:3b'];
         $nlu = null;
         foreach ($nluModels as $mdl) {
-            $nluResp = $aiService->llmChat([
+            $nluResp = $aiService->smartLlmChat([
                 ['role' => 'system', 'content' => $nluSystem],
                 ['role' => 'user',   'content' => json_encode($nluUser, JSON_UNESCAPED_UNICODE)]
             ], $mdl, $user->id, $this->selectedOrgId);
@@ -430,7 +430,7 @@ $nluUser = [
 
     // ---- LLM ANSWER (final) ----
     $genStart = microtime(true);
-    $response = $aiService->llmChat($chatMessages, 'llama3.2:3b', $user->id, $this->selectedOrgId);
+    $response = $aiService->smartLlmChat($chatMessages, null, $user->id, $this->selectedOrgId);
     $perf['generation_ms'] = (microtime(true) - $genStart) * 1000;
 
     if ($response && isset($response['message']['content'])) {
