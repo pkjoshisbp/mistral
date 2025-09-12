@@ -57,23 +57,38 @@
                     </div>
 
                     <!-- Chat Messages -->
-                    <div class="h-96 overflow-y-auto p-4 bg-gray-50" id="chatMessages">
-                        @foreach($chatMessages as $message)
-                            <div class="mb-4 {{ $message['type'] === 'user' ? 'text-right' : 'text-left' }}">
+                    <div class="h-96 overflow-y-auto p-4 bg-gray-50" id="chatMessages" wire:key="chat-messages-{{ count($messages) }}">
+                        @foreach($messages as $index => $message)
+                            <div class="mb-4 {{ $message['role'] === 'user' ? 'text-right' : 'text-left' }}" wire:key="message-{{ $index }}-{{ $message['timestamp']->timestamp }}">
                                 <div class="inline-block max-w-xs lg:max-w-md">
-                                    <div class="p-3 rounded-lg {{ $message['type'] === 'user' 
+                                    <div class="p-3 rounded-lg {{ $message['role'] === 'user' 
                                         ? 'bg-blue-500 text-white rounded-br-none' 
                                         : 'bg-white border border-gray-200 rounded-bl-none' }}">
-                                        {!! nl2br(e($message['message'])) !!}
+                                        {!! nl2br(e($message['content'])) !!}
                                     </div>
-                                    <div class="text-xs text-gray-500 mt-1 {{ $message['type'] === 'user' ? 'text-right' : 'text-left' }}">
+                                    <div class="text-xs text-gray-500 mt-1 {{ $message['role'] === 'user' ? 'text-right' : 'text-left' }}">
                                         {{ $message['timestamp']->format('H:i:s') }}
                                     </div>
                                 </div>
                             </div>
                         @endforeach
 
-                        <div wire:loading.delay.longer wire:target="sendMessage" class="mb-4 text-left">
+                        @if($isLoading)
+                        <div class="mb-4 text-left" wire:key="typing-indicator">
+                            <div class="inline-block max-w-xs lg:max-w-md">
+                                <div class="p-3 bg-white border border-gray-200 rounded-lg rounded-bl-none">
+                                    <div class="typing-indicator">
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        @endif
+                        
+                        <!-- Real-time loading indicator -->
+                        <div wire:loading.delay wire:target="sendMessage" class="mb-4 text-left">
                             <div class="inline-block max-w-xs lg:max-w-md">
                                 <div class="p-3 bg-white border border-gray-200 rounded-lg rounded-bl-none">
                                     <div class="typing-indicator">
@@ -88,15 +103,16 @@
 
                     <!-- Chat Input -->
                     <div class="p-4 border-t border-gray-200">
-                        <form wire:submit.prevent="sendMessage" class="flex space-x-2">
+                        <div class="flex space-x-2">
                             <input type="text" 
-                                   wire:model="currentMessage" 
+                                   wire:model.live="query" 
+                                   wire:keydown.enter="sendMessage"
                                    placeholder="Type your message here..." 
                                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                   wire:loading.attr="disabled" wire:target="sendMessage">
-                            <button type="submit" 
+                                   {{ $isLoading ? 'disabled' : '' }}>
+                            <button wire:click="sendMessage" 
                                     class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                                    wire:loading.attr="disabled" wire:target="sendMessage">
+                                    {{ $isLoading ? 'disabled' : '' }}>
                                 <span wire:loading.remove wire:target="sendMessage">
                                     <i class="fas fa-paper-plane"></i>
                                 </span>
@@ -104,7 +120,7 @@
                                     <i class="fas fa-spinner fa-spin"></i>
                                 </span>
                             </button>
-                        </form>
+                        </div>
                     </div>
                 </div>
             </div>

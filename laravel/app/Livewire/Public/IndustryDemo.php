@@ -4,12 +4,14 @@ namespace App\Livewire\Public;
 
 use App\Models\Organization;
 use Livewire\Component;
+use Livewire\Attributes\On;
 
 class IndustryDemo extends Component
 {
     public $industry;
-    public $chatMessages = [];
-    public $currentMessage = '';
+    public $messages = [];
+    public $query = '';
+    public $isLoading = false;
     public $demoData = [];
     public $selectedDemo = null;
 
@@ -195,10 +197,10 @@ class IndustryDemo extends Component
     public function initializeChat()
     {
         $orgName = $this->selectedDemo['organization'] ?? 'AI Assistant';
-        $this->chatMessages = [
+        $this->messages = [
             [
-                'type' => 'bot',
-                'message' => "Hello! I'm the AI assistant for {$orgName}. How can I help you today?",
+                'role' => 'assistant',
+                'content' => "Hello! I'm the AI assistant for {$orgName}. How can I help you today?",
                 'timestamp' => now()
             ]
         ];
@@ -206,32 +208,76 @@ class IndustryDemo extends Component
 
     public function sendMessage()
     {
-        if (empty(trim($this->currentMessage))) {
+        if (empty($this->query)) {
             return;
         }
 
-        $userMessage = $this->currentMessage;
-        
-        // Add user message immediately
-        $this->chatMessages[] = [
-            'type' => 'user',
-            'message' => $userMessage,
-            'timestamp' => now()
-        ];
-        
-        // Clear input
-        $this->currentMessage = '';
-        
-        // Generate AI response (isTyping will be handled by wire:loading)
-        $response = $this->generateDemoResponse($userMessage);
-        
-        // Add bot response
-        $this->chatMessages[] = [
-            'type' => 'bot',
-            'message' => $response,
-            'timestamp' => now()
-        ];
+        try {
+            $this->isLoading = true;
+            $userMessage = $this->query;
+            $this->query = '';
+
+            // Add user message to chat immediately
+            $this->messages[] = [
+                'role' => 'user',
+                'content' => $userMessage,
+                'timestamp' => now(),
+            ];
+
+            // Simple approach - just use enhancedSearch like we did before, but with proper error handling
+            $aiService = app(\App\Services\AiAgentService::class);
+            $collectionName = 'demo_' . $this->industry;
+            
+            $searchResults = $aiService->enhancedSearch($collectionName, $userMessage, 3);
+            
+            $context = "Relevant information:\n\n";
+            if (!empty($searchResults)) {
+                foreach ($searchResults as $item) {
+                    $payload = $item['payload'] ?? [];
+                    if (isset($payload['content']) && !empty(trim($payload['content']))) {
+                        $context .= trim($payload['content']) . "\n\n";
+                    }
+                }
+            } else {
+                $context = "No specific information found in the knowledge base.";
+            }
+            
+            $orgName = $this->selectedDemo['organization'] ?? 'this organization';
+            $systemPrompt = "You are a helpful customer service AI assistant for {$orgName}. Use the provided context to answer questions accurately and helpfully. Speak as {$orgName} using 'we' and 'our'. Keep responses concise and professional.";
+            
+            $chatMessages = [
+                ['role' => 'system', 'content' => $systemPrompt . "\n\n" . $context],
+                ['role' => 'user', 'content' => $userMessage]
+            ];
+            
+            $response = $aiService->llmChat($chatMessages, 'llama3.2:3b');
+            
+            if ($response && isset($response['message']['content'])) {
+                $aiResponse = $response['message']['content'];
+            } else {
+                $aiResponse = 'We ran into an issue generating a response. Please try again.';
+            }
+            
+            $this->messages[] = [
+                'role' => 'assistant',
+                'content' => $aiResponse,
+                'timestamp' => now()
+            ];
+            
+        } catch (\Exception $e) {
+            \Log::error('Demo chat error: ' . $e->getMessage());
+            
+            $this->messages[] = [
+                'role' => 'assistant',
+                'content' => 'Sorry, I encountered an error. Please try again.',
+                'timestamp' => now()
+            ];
+        } finally {
+            $this->isLoading = false;
+        }
     }
+
+
 
     public function sendSampleQuestion($question)
     {
