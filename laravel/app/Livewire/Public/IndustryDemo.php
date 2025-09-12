@@ -10,7 +10,6 @@ class IndustryDemo extends Component
     public $industry;
     public $chatMessages = [];
     public $currentMessage = '';
-    public $isTyping = false;
     public $demoData = [];
     public $selectedDemo = null;
 
@@ -211,28 +210,27 @@ class IndustryDemo extends Component
             return;
         }
 
-        // Add user message
+        $userMessage = $this->currentMessage;
+        
+        // Add user message immediately
         $this->chatMessages[] = [
             'type' => 'user',
-            'message' => $this->currentMessage,
+            'message' => $userMessage,
             'timestamp' => now()
         ];
-
-        $userMessage = $this->currentMessage;
+        
+        // Clear input
         $this->currentMessage = '';
-        $this->isTyping = true;
-
-        // Simulate AI response based on the message
+        
+        // Generate AI response (isTyping will be handled by wire:loading)
         $response = $this->generateDemoResponse($userMessage);
         
-        // Add bot response after a delay (simulated)
+        // Add bot response
         $this->chatMessages[] = [
             'type' => 'bot',
             'message' => $response,
             'timestamp' => now()
         ];
-
-        $this->isTyping = false;
     }
 
     public function sendSampleQuestion($question)
@@ -243,18 +241,63 @@ class IndustryDemo extends Component
 
     private function generateDemoResponse($message)
     {
-        // Try to get response from Qdrant first
+        // Use the real AI backend with demo collection
         try {
-            $demoService = app(\App\Services\DemoQdrantService::class);
-            $results = $demoService->queryDemo($this->industry, $message);
+            $aiService = app(\App\Services\AiAgentService::class);
+            $collectionName = "demo_{$this->industry}";
             
-            if ($results && count($results) > 0) {
-                // Return the best matching answer
-                $bestMatch = $results[0];
-                return $bestMatch['answer'];
+            \Log::info('Demo AI query started', [
+                'industry' => $this->industry,
+                'collection' => $collectionName,
+                'message' => $message
+            ]);
+            
+            // First, query the demo collection for relevant context
+            $searchResults = $aiService->enhancedSearch($collectionName, $message, 3);
+            
+            if ($searchResults && isset($searchResults['results']) && count($searchResults['results']) > 0) {
+                \Log::info('Demo search results found', [
+                    'collection' => $collectionName,
+                    'results_count' => count($searchResults['results'])
+                ]);
+                
+                // Prepare context for the LLM
+                $context = "";
+                foreach ($searchResults['results'] as $result) {
+                    $context .= $result['payload']['question'] . "\n" . $result['payload']['answer'] . "\n\n";
+                }
+                
+                // Create messages for the LLM
+                $messages = [
+                    [
+                        'role' => 'system',
+                        'content' => "You are an AI assistant for {$this->selectedDemo['organization']}. Use the following context to answer questions accurately and helpfully. If you can't find the answer in the context, provide a helpful response asking for more details.\n\nContext:\n{$context}"
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => $message
+                    ]
+                ];
+                
+                // Query the LLM
+                $response = $aiService->llmChat($messages, 'llama3.2:3b');
+                
+                if ($response && isset($response['message']['content'])) {
+                    \Log::info('Demo AI response generated successfully', [
+                        'collection' => $collectionName,
+                        'response_length' => strlen($response['message']['content'])
+                    ]);
+                    return $response['message']['content'];
+                }
+            } else {
+                \Log::warning('No search results found for demo query', [
+                    'collection' => $collectionName,
+                    'message' => $message
+                ]);
             }
+            
         } catch (\Exception $e) {
-            \Log::warning('Demo Qdrant query failed, falling back to hardcoded responses', [
+            \Log::error('Demo AI query failed', [
                 'industry' => $this->industry,
                 'message' => $message,
                 'error' => $e->getMessage()

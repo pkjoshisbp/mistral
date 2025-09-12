@@ -67,25 +67,23 @@
                                         {!! nl2br(e($message['message'])) !!}
                                     </div>
                                     <div class="text-xs text-gray-500 mt-1 {{ $message['type'] === 'user' ? 'text-right' : 'text-left' }}">
-                                        {{ $message['timestamp']->format('H:i') }}
+                                        {{ $message['timestamp']->format('H:i:s') }}
                                     </div>
                                 </div>
                             </div>
                         @endforeach
 
-                        @if($isTyping)
-                            <div class="mb-4 text-left">
-                                <div class="inline-block max-w-xs lg:max-w-md">
-                                    <div class="p-3 bg-white border border-gray-200 rounded-lg rounded-bl-none">
-                                        <div class="typing-indicator">
-                                            <span></span>
-                                            <span></span>
-                                            <span></span>
-                                        </div>
+                        <div wire:loading.delay.longer wire:target="sendMessage" class="mb-4 text-left">
+                            <div class="inline-block max-w-xs lg:max-w-md">
+                                <div class="p-3 bg-white border border-gray-200 rounded-lg rounded-bl-none">
+                                    <div class="typing-indicator">
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
                                     </div>
                                 </div>
                             </div>
-                        @endif
+                        </div>
                     </div>
 
                     <!-- Chat Input -->
@@ -95,11 +93,16 @@
                                    wire:model="currentMessage" 
                                    placeholder="Type your message here..." 
                                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                   {{ $isTyping ? 'disabled' : '' }}>
+                                   wire:loading.attr="disabled" wire:target="sendMessage">
                             <button type="submit" 
                                     class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                                    {{ $isTyping ? 'disabled' : '' }}>
-                                <i class="fas fa-paper-plane"></i>
+                                    wire:loading.attr="disabled" wire:target="sendMessage">
+                                <span wire:loading.remove wire:target="sendMessage">
+                                    <i class="fas fa-paper-plane"></i>
+                                </span>
+                                <span wire:loading wire:target="sendMessage">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                </span>
                             </button>
                         </form>
                     </div>
@@ -155,7 +158,7 @@
     .typing-indicator {
         display: flex;
         align-items: center;
-        space-x: 1px;
+        gap: 2px;
     }
 
     .typing-indicator span {
@@ -164,8 +167,7 @@
         height: 8px;
         border-radius: 50%;
         background-color: #9CA3AF;
-        margin-right: 4px;
-        animation: typing 1.4s infinite ease-in-out;
+        animation: typing-bounce 1.5s infinite ease-in-out;
     }
 
     .typing-indicator span:nth-child(1) {
@@ -173,20 +175,20 @@
     }
 
     .typing-indicator span:nth-child(2) {
-        animation-delay: 0.2s;
+        animation-delay: 0.15s;
     }
 
     .typing-indicator span:nth-child(3) {
-        animation-delay: 0.4s;
+        animation-delay: 0.3s;
     }
 
-    @keyframes typing {
+    @keyframes typing-bounce {
         0%, 60%, 100% {
             transform: translateY(0);
-            opacity: 0.5;
+            opacity: 0.4;
         }
         30% {
-            transform: translateY(-10px);
+            transform: translateY(-8px);
             opacity: 1;
         }
     }
@@ -213,7 +215,17 @@
             if (chatContainer) {
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             }
-        }, 100);
+        }, 50);
+    });
+    
+    // Also scroll immediately when user sends a message
+    document.addEventListener('livewire:component:update', function () {
+        setTimeout(() => {
+            const chatContainer = document.getElementById('chatMessages');
+            if (chatContainer) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }, 10);
     });
     </script>
 </div>

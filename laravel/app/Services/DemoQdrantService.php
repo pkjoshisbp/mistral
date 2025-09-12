@@ -3,19 +3,16 @@
 namespace App\Services;
 
 use App\Models\DemoOrganization;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Exception;
 
 class DemoQdrantService
 {
-    private $qdrantUrl;
-    private $qdrantApiKey;
+    private $aiService;
 
     public function __construct()
     {
-        $this->qdrantUrl = config('services.qdrant.url', 'http://localhost:6333');
-        $this->qdrantApiKey = config('services.qdrant.api_key');
+        $this->aiService = app(\App\Services\AiAgentService::class);
     }
 
     /**
@@ -44,14 +41,67 @@ class DemoQdrantService
         $collectionName = "demo_{$demo->industry}";
         
         try {
-            // Create collection
-            $this->createCollection($collectionName);
+            Log::info("Starting demo collection sync", [
+                'collection' => $collectionName,
+                'industry' => $demo->industry
+            ]);
+            
+            // Check if collection exists, create if not
+            if (!$this->aiService->collectionExists($collectionName)) {
+                $createResult = $this->aiService->createCollection($collectionName);
+                Log::info("Collection creation result", [
+                    'collection' => $collectionName,
+                    'result' => $createResult
+                ]);
+                
+                if (!$createResult || (is_array($createResult) && isset($createResult['status']) && $createResult['status'] !== 'success')) {
+                    throw new Exception("Failed to create collection: {$collectionName}");
+                }
+                Log::info("Created new demo collection", ['collection' => $collectionName]);
+            } else {
+                Log::info("Demo collection already exists", ['collection' => $collectionName]);
+            }
+            
+            // Note: We'll create a new collection each time, which effectively clears old data
             
             // Generate FAQ data for this demo
             $faqData = $this->generateDemoFAQs($demo);
             
-            // Insert FAQ data into collection
-            $this->insertDemoData($collectionName, $faqData);
+            // Insert FAQ data into collection using AiAgentService
+            foreach ($faqData as $index => $faq) {
+                $text = $faq['question'] . ' ' . $faq['answer'];
+                
+                // Generate embedding for the text
+                $embedding = $this->aiService->embed($text);
+                
+                if ($embedding && is_array($embedding)) {
+                    // Add to Qdrant collection
+                    $success = $this->aiService->addToQdrant(
+                        $collectionName,
+                        $embedding,
+                        $faq, // metadata payload
+                        $index + 1 // unique ID
+                    );
+                    
+                    if ($success) {
+                        Log::info("Added FAQ to collection", [
+                            'collection' => $collectionName,
+                            'question' => substr($faq['question'], 0, 50) . '...'
+                        ]);
+                    } else {
+                        Log::warning("Failed to add FAQ to collection", [
+                            'collection' => $collectionName,
+                            'question' => $faq['question']
+                        ]);
+                    }
+                } else {
+                    Log::error("Failed to generate embedding", [
+                        'collection' => $collectionName,
+                        'question' => $faq['question'],
+                        'embedding_result' => $embedding
+                    ]);
+                }
+            }
             
             Log::info("Demo collection synced successfully", [
                 'collection' => $collectionName,
@@ -72,39 +122,7 @@ class DemoQdrantService
         }
     }
 
-    /**
-     * Query demo collection for AI responses
-     */
-    public function queryDemo($industry, $question, $limit = 3)
-    {
-        $collectionName = "demo_{$industry}";
-        
-        try {
-            $response = Http::withHeaders($this->getHeaders())
-                ->post("{$this->qdrantUrl}/collections/{$collectionName}/points/search", [
-                    'vector' => $this->generateEmbedding($question),
-                    'limit' => $limit,
-                    'with_payload' => true,
-                    'score_threshold' => 0.7
-                ]);
 
-            if ($response->successful()) {
-                $results = $response->json()['result'] ?? [];
-                return $this->formatDemoResults($results);
-            }
-            
-            return null;
-            
-        } catch (Exception $e) {
-            Log::error("Demo query failed", [
-                'industry' => $industry,
-                'question' => $question,
-                'error' => $e->getMessage()
-            ]);
-            
-            return null;
-        }
-    }
 
     /**
      * Generate demo-specific FAQs based on demo organization data
@@ -238,92 +256,4 @@ class DemoQdrantService
         return "Our {$feature} service at {$demo->name} is designed to meet your needs with quality and reliability. {$demo->description} Contact us to learn more about how this service can benefit you.";
     }
 
-    private function createCollection($collectionName)
-    {
-        $response = Http::withHeaders($this->getHeaders())
-            ->put("{$this->qdrantUrl}/collections/{$collectionName}", [
-                'vectors' => [
-                    'size' => 384, // Using sentence-transformers embedding size
-                    'distance' => 'Cosine'
-                ]
-            ]);
-
-        if (!$response->successful()) {
-            throw new Exception("Failed to create collection: " . $response->body());
-        }
-
-        return true;
-    }
-
-    private function insertDemoData($collectionName, $faqData)
-    {
-        $points = [];
-        
-        foreach ($faqData as $index => $faq) {
-            $text = $faq['question'] . ' ' . $faq['answer'];
-            
-            $points[] = [
-                'id' => $index + 1,
-                'vector' => $this->generateEmbedding($text),
-                'payload' => $faq
-            ];
-        }
-
-        $response = Http::withHeaders($this->getHeaders())
-            ->put("{$this->qdrantUrl}/collections/{$collectionName}/points", [
-                'points' => $points
-            ]);
-
-        if (!$response->successful()) {
-            throw new Exception("Failed to insert data: " . $response->body());
-        }
-
-        return true;
-    }
-
-    private function generateEmbedding($text)
-    {
-        // For demo purposes, using a simple hash-based approach
-        // In production, you'd want to use actual embeddings from a model
-        $hash = hash('sha256', strtolower(trim($text)));
-        $vector = [];
-        
-        for ($i = 0; $i < 384; $i++) {
-            $vector[] = (float) (hexdec(substr($hash, $i % 64, 2)) / 255.0 - 0.5);
-        }
-        
-        return $vector;
-    }
-
-    private function formatDemoResults($results)
-    {
-        $formatted = [];
-        
-        foreach ($results as $result) {
-            $payload = $result['payload'] ?? [];
-            $score = $result['score'] ?? 0;
-            
-            if ($score > 0.7) { // Only include high-confidence results
-                $formatted[] = [
-                    'question' => $payload['question'] ?? '',
-                    'answer' => $payload['answer'] ?? '',
-                    'score' => $score,
-                    'organization' => $payload['organization'] ?? ''
-                ];
-            }
-        }
-        
-        return $formatted;
-    }
-
-    private function getHeaders()
-    {
-        $headers = ['Accept' => 'application/json', 'Content-Type' => 'application/json'];
-        
-        if ($this->qdrantApiKey) {
-            $headers['api-key'] = $this->qdrantApiKey;
-        }
-        
-        return $headers;
-    }
 }

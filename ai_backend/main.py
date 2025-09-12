@@ -283,6 +283,22 @@ async def list_collections():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list collections: {str(e)}")
 
+@app.get("/qdrant/collections/{collection_name}")
+async def get_collection(collection_name: str):
+    """Get specific collection info"""
+    try:
+        info = qdrant.get_collection(collection_name)
+        return {
+            "status": "success",
+            "name": collection_name,
+            "points_count": info.points_count,
+            "collection_status": info.status,
+            "vector_size": info.config.params.vectors.size if hasattr(info.config.params, 'vectors') else None,
+            "distance": info.config.params.vectors.distance if hasattr(info.config.params, 'vectors') else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Collection not found: {str(e)}")
+
 @app.post("/qdrant/add")
 async def add_to_qdrant(request: Request):
     data = await request.json()

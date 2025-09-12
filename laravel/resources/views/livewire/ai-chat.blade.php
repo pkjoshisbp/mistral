@@ -23,7 +23,7 @@
             </div>
         </div>
 
-        <div class="chat-box" style="height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; background-color: #f8f9fa;">
+        <div class="chat-box" id="aiChatMessages" style="height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; background-color: #f8f9fa; scroll-behavior: smooth;">
             @forelse ($messages as $message)
                 <div class="message mb-3 {{ $message['role'] === 'user' ? 'text-right' : 'text-left' }}">
                     <div class="d-inline-block p-2 rounded {{ $message['role'] === 'user' ? 'bg-primary text-white' : ($message['role'] === 'system' ? 'bg-danger text-white' : 'bg-light') }}" style="max-width: 70%;">
@@ -86,13 +86,41 @@
 </div>
 
 <script>
-    // Auto-scroll to bottom when new messages are added
+    // Auto-scroll to bottom when new messages are added (Livewire 3 compatible)
     document.addEventListener('livewire:load', function () {
-        Livewire.hook('message.processed', (message, component) => {
-            const chatBox = document.querySelector('.chat-box');
+        const chatBox = document.getElementById('aiChatMessages');
+        if (chatBox) {
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    });
+
+    document.addEventListener('livewire:update', function () {
+        // Auto-scroll chat to bottom when new messages arrive
+        setTimeout(() => {
+            const chatBox = document.getElementById('aiChatMessages');
             if (chatBox) {
                 chatBox.scrollTop = chatBox.scrollHeight;
             }
-        });
+        }, 50);
+    });
+    
+    // Also scroll immediately when user sends a message
+    document.addEventListener('livewire:component:update', function () {
+        setTimeout(() => {
+            const chatBox = document.getElementById('aiChatMessages');
+            if (chatBox) {
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        }, 10);
+    });
+    
+    // Scroll to bottom when page loads
+    window.addEventListener('load', function() {
+        setTimeout(() => {
+            const chatBox = document.getElementById('aiChatMessages');
+            if (chatBox) {
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        }, 100);
     });
 </script>
