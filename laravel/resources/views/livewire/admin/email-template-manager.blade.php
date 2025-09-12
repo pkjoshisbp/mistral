@@ -113,7 +113,7 @@
 
     <!-- Modal -->
     @if($showModal)
-        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);" tabindex="-1" wire:ignore.self>
             <div class="modal-dialog modal-xl">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -214,8 +214,9 @@
                             <i class="fas fa-eye"></i> Preview
                         </button>
                         <button type="button" class="btn btn-secondary" wire:click="closeModal()">Cancel</button>
-                        <button type="button" class="btn btn-primary" wire:click="save()">
-                            {{ $editingTemplate ? 'Update Template' : 'Create Template' }}
+                        <button type="button" class="btn btn-primary" wire:click="save()" wire:loading.attr="disabled">
+                            <span wire:loading.remove wire:target="save">{{ $editingTemplate ? 'Update Template' : 'Create Template' }}</span>
+                            <span wire:loading wire:target="save"><i class="fas fa-spinner fa-spin"></i> Saving...</span>
                         </button>
                     </div>
                 </div>
@@ -287,3 +288,29 @@
         </div>
     @endif
 </div>
+
+<style>
+.modal-xl {
+    max-width: 90%;
+}
+
+.modal-content {
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-footer {
+    border-top: 1px solid #dee2e6;
+    padding: 1rem;
+    background: #fff;
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+}
+
+@media (max-width: 768px) {
+    .modal-xl {
+        max-width: 95%;
+    }
+}
+</style>
