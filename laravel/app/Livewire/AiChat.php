@@ -409,8 +409,17 @@ $nluUser = [
         return; // skip LLM generation
     }
 
-    // ---- SYSTEM PROMPT (compressed) ----
-    $systemPrompt = "Answer strictly for {$orgName} using ONLY provided context + user message. Speak as {$orgName} (we/our). Never say you are AI or use I/me/my. If address/price/timing/contact present: answer directly. If missing info: brief follow-up or advise contacting {$orgName}. Keep to <=2 concise factual sentences.";
+    // ---- SYSTEM PROMPT (provider-aware) ----
+    $aiService = app(\App\Services\AiAgentService::class);
+    $isOpenAI = $aiService->isOpenAiProvider();
+    
+    if ($isOpenAI) {
+        // Ultra-concise for GPT to minimize tokens
+        $systemPrompt = "You're {$orgName}. Answer using context. Be brief, direct. User asked: \"{$query}\"";
+    } else {
+        // Standard prompt for Llama
+        $systemPrompt = "Answer strictly for {$orgName} using ONLY provided context + user message. Speak as {$orgName} (we/our). Never say you are AI or use I/me/my. If address/price/timing/contact present: answer directly. If missing info: brief follow-up or advise contacting {$orgName}. Keep to <=2 concise factual sentences. Original question: \"{$query}\"";
+    }
 
     $contextSummary = [
         'slots'     => $slots,

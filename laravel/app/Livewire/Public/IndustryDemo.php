@@ -230,32 +230,65 @@ class IndustryDemo extends Component
             
             $searchResults = $aiService->enhancedSearch($collectionName, $userMessage, 3);
             
-            $context = "Relevant information:\n\n";
-            if (!empty($searchResults)) {
-                foreach ($searchResults as $item) {
+            $context = "";
+            if (!empty($searchResults) && isset($searchResults['results'])) {
+                foreach ($searchResults['results'] as $item) {
                     $payload = $item['payload'] ?? [];
-                    if (isset($payload['content']) && !empty(trim($payload['content']))) {
+                    
+                    // Extract question and answer from the search results
+                    if (isset($payload['question']) && isset($payload['answer'])) {
+                        $context .= "Q: {$payload['question']}\nA: {$payload['answer']}\n\n";
+                    } elseif (isset($payload['content']) && !empty(trim($payload['content']))) {
                         $context .= trim($payload['content']) . "\n\n";
                     }
                 }
-            } else {
+            }
+            
+            if (empty($context)) {
                 $context = "No specific information found in the knowledge base.";
             }
             
             $orgName = $this->selectedDemo['organization'] ?? 'this organization';
-            $systemPrompt = "You are a helpful customer service AI assistant for {$orgName}. Use the provided context to answer questions accurately and helpfully. Speak as {$orgName} using 'we' and 'our'. Keep responses concise and professional.";
+            
+            // Check if using OpenAI for more concise prompts
+            $aiService = app(\App\Services\AiAgentService::class);
+            $isOpenAI = $aiService->isOpenAiProvider();
+            
+            if ($isOpenAI) {
+                // Extremely directive prompt for GPT-5-mini
+                $systemPrompt = "You are {$orgName}'s AI assistant. MANDATORY: Use ONLY the Context provided below. If the Context contains the answer to the user's question, provide that exact answer. DO NOT say 'we don't have information' if the Context contains it. Answer as {$orgName} using 'we/our'. Customer asked: \"{$userMessage}\"";
+            } else {
+                // Standard prompt for Llama
+                $systemPrompt = "You are a helpful customer service AI assistant for {$orgName}. Use the provided context to answer questions accurately and helpfully. Speak as {$orgName} using 'we' and 'our'. Keep responses concise and professional. Customer question: \"{$userMessage}\"";
+            }
             
             $chatMessages = [
-                ['role' => 'system', 'content' => $systemPrompt . "\n\n" . $context],
+                ['role' => 'system', 'content' => $systemPrompt . "\n\nContext:\n" . $context],
                 ['role' => 'user', 'content' => $userMessage]
             ];
             
+            // Debug: Log what context is actually being sent
+            \Log::info('Demo context being sent to AI', [
+                'context_length' => strlen($context),
+                'context_content' => $context,
+                'system_message_length' => strlen($systemPrompt . "\n\nContext:\n" . $context),
+                'full_system_message' => $systemPrompt . "\n\nContext:\n" . $context,
+                'search_results_count' => isset($searchResults['results']) ? count($searchResults['results']) : 0,
+                'user_message' => $userMessage
+            ]);
+            
             $response = $aiService->smartLlmChat($chatMessages);
             
-            if ($response && isset($response['message']['content'])) {
+            if ($response && isset($response['message']['content']) && !empty($response['message']['content'])) {
                 $aiResponse = $response['message']['content'];
+            } elseif (isset($searchResults) && !empty($searchResults)) {
+                // Use the best search result as fallback when AI response is empty/null
+                $bestResult = $searchResults[0];
+                $payload = $bestResult['payload'] ?? $bestResult;
+                $aiResponse = $payload['answer'] ?? $payload['content'] ?? 'I found some relevant information but need more details to provide a complete answer.';
             } else {
-                $aiResponse = 'We ran into an issue generating a response. Please try again.';
+                // If no context, provide a helpful generic response
+                $aiResponse = "I'd be happy to help you! Could you please provide more specific details about what you're looking for?";
             }
             
             $this->messages[] = [

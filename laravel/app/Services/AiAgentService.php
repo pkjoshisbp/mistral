@@ -517,12 +517,20 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 $apiKey = config('services.openai.api_key');
             }
             
+            // Let GPT-5-mini use its default token allocation - no artificial limits
+            // The model will decide how to allocate reasoning vs output tokens
+            
+            Log::info('OpenAI chat request (no token limits)', [
+                'model' => $model,
+                'messages_count' => count($messages)
+            ]);
+            
             $client = OpenAI::client($apiKey);
             
             $result = $client->chat()->create([
                 'model' => $model,
                 'messages' => $messages,
-                'max_completion_tokens' => 1000,
+                // No max_completion_tokens - let the model decide optimal allocation
             ]);
 
             Log::info('OpenAI chat response', [
@@ -531,11 +539,37 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 'usage' => $result->usage->toArray()
             ]);
 
+            // Debug: Log the raw choices structure and full result
+            Log::info('OpenAI choices debug', [
+                'choices_count' => count($result->choices),
+                'first_choice' => isset($result->choices[0]) ? [
+                    'message_role' => $result->choices[0]->message->role ?? 'null',
+                    'message_content' => $result->choices[0]->message->content ?? 'null',
+                    'content_length' => strlen($result->choices[0]->message->content ?? ''),
+                    'finish_reason' => $result->choices[0]->finishReason ?? 'null',
+                ] : 'no_choices',
+                'raw_result_keys' => array_keys($result->toArray()),
+                'choices_structure' => $result->choices[0]->toArray()
+            ]);
+
+            // Extract content from the response
+            $content = $result->choices[0]->message->content ?? '';
+            
+            // Handle empty content from reasoning models - use the search context intelligently
+            if (empty($content)) {
+                // Log that we're using fallback
+                Log::info('OpenAI returned empty content, using intelligent fallback');
+                
+                // For now, return null to let the caller handle it with context
+                // This allows the original search results to be used as fallback
+                return null;
+            }
+
             // Convert OpenAI response format to match our existing format
             $response = [
                 'message' => [
                     'role' => $result->choices[0]->message->role,
-                    'content' => $result->choices[0]->message->content,
+                    'content' => $content,
                 ],
                 'usage' => [
                     'prompt_tokens' => $result->usage->promptTokens,
@@ -555,11 +589,67 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 );
             }
 
+            // Debug: Log the final response structure
+            Log::info('OpenAI final response', [
+                'has_message' => isset($response['message']),
+                'message_content_length' => strlen($response['message']['content'] ?? ''),
+                'content_preview' => substr($response['message']['content'] ?? '', 0, 100),
+                'usage_tokens' => $response['usage']['total_tokens'] ?? 0
+            ]);
+
             return $response;
 
         } catch (\Exception $e) {
             Log::error('OpenAI chat exception', ['error' => $e->getMessage()]);
             return null;
+        }
+    }
+
+    /**
+     * Estimate token count for messages (rough approximation)
+     */
+    public function estimateTokenCount($messages)
+    {
+        $totalText = '';
+        foreach ($messages as $message) {
+            $totalText .= $message['content'] ?? '';
+        }
+        
+        // Rough estimation: 1 token ≈ 0.75 words or 4 characters
+        $wordCount = str_word_count($totalText);
+        $charCount = strlen($totalText);
+        
+        // Use the higher estimate for safety
+        $tokensFromWords = $wordCount / 0.75;
+        $tokensFromChars = $charCount / 4;
+        
+        return max($tokensFromWords, $tokensFromChars);
+    }
+    
+    /**
+     * Calculate dynamic token limit based on context size
+     * For reasoning models like GPT-5-mini, we need extra tokens for internal reasoning
+     */
+    public function calculateDynamicTokenLimit($inputTokens)
+    {
+        // For reasoning models, we need to account for both reasoning tokens and output tokens
+        // GPT-5-mini uses reasoning tokens internally, then generates output
+        
+        if ($inputTokens < 50) {
+            // Short context: 200 reasoning + 200 output = 400 total
+            return 400;
+        } elseif ($inputTokens < 100) {
+            // Medium context: 250 reasoning + 250 output = 500 total
+            return 500;
+        } elseif ($inputTokens < 200) {
+            // Longer context: 300 reasoning + 300 output = 600 total
+            return 600;
+        } elseif ($inputTokens < 400) {
+            // Complex context: 400 reasoning + 400 output = 800 total
+            return 800;
+        } else {
+            // Very complex context: 500 reasoning + 500 output = 1000 total
+            return 1000;
         }
     }
 
