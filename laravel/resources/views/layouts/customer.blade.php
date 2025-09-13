@@ -135,6 +135,13 @@
               <p>API Integration</p>
             </a>
           </li>
+          
+          <li class="nav-item">
+            <a href="{{ route('customer.action-manager') }}" class="nav-link {{ request()->routeIs('customer.action-manager') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-cogs"></i>
+              <p>Live Data Actions</p>
+            </a>
+          </li>
 
           <li class="nav-header">WIDGET</li>
           <li class="nav-item">

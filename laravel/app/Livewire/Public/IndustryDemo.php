@@ -224,11 +224,28 @@ class IndustryDemo extends Component
                 'timestamp' => now(),
             ];
 
-            // Simple approach - just use enhancedSearch like we did before, but with proper error handling
+            // Use enhanced search with actions for live data integration
             $aiService = app(\App\Services\AiAgentService::class);
             $collectionName = 'demo_' . $this->industry;
             
-            $searchResults = $aiService->enhancedSearch($collectionName, $userMessage, 3);
+            // Try to find organization for this demo to get live data actions
+            $organizationId = null;
+            try {
+                $demoOrg = \App\Models\DemoOrganization::where('industry', $this->industry)->where('is_active', true)->first();
+                if ($demoOrg && $demoOrg->organization_id) {
+                    $organizationId = $demoOrg->organization_id;
+                }
+            } catch (\Exception $e) {
+                // Fallback to regular search if no organization found
+            }
+            
+            if ($organizationId) {
+                // Use enhanced search with actions for live data
+                $searchResults = $aiService->enhancedSearchWithActions($collectionName, $userMessage, $organizationId, 3);
+            } else {
+                // Fallback to regular enhanced search
+                $searchResults = $aiService->enhancedSearch($collectionName, $userMessage, 3);
+            }
             
             $context = "";
             if (!empty($searchResults) && isset($searchResults['results'])) {
@@ -320,63 +337,146 @@ class IndustryDemo extends Component
 
     private function generateDemoResponse($message)
     {
-        // Use the real AI backend with demo collection
+        // Use the action-enhanced AI system
         try {
             $aiService = app(\App\Services\AiAgentService::class);
             $collectionName = "demo_{$this->industry}";
             
-            \Log::info('Demo AI query started', [
+            \Log::info('Demo AI query started with action system', [
                 'industry' => $this->industry,
                 'collection' => $collectionName,
                 'message' => $message
             ]);
             
-            // First, query the demo collection for relevant context
-            $searchResults = $aiService->enhancedSearch($collectionName, $message, 3);
+            // Get organization ID for demo (use AI Chat Support as default)
+            $organization = Organization::where('slug', 'ai-chat-support')->first();
+            $organizationId = $organization ? $organization->id : 3;
             
-            if ($searchResults && isset($searchResults['results']) && count($searchResults['results']) > 0) {
-                \Log::info('Demo search results found', [
-                    'collection' => $collectionName,
-                    'results_count' => count($searchResults['results'])
+            // Use enhanced search with actions if we have actions configured
+            // Check if we have actions for this organization
+            $hasActions = \App\Models\OrganizationAction::forOrganization($organizationId)
+                ->active()
+                ->exists();
+            
+            if ($hasActions) {
+                \Log::info('Using action-enhanced search', [
+                    'organization_id' => $organizationId,
+                    'has_actions' => $hasActions
                 ]);
                 
-                // Prepare context for the LLM
-                $context = "";
-                foreach ($searchResults['results'] as $result) {
-                    $context .= $result['payload']['question'] . "\n" . $result['payload']['answer'] . "\n\n";
-                }
+                // Use action-enhanced search
+                $enhancedResult = $aiService->enhancedSearchWithActions($collectionName, $message, $organizationId, 3);
                 
-                // Create messages for the LLM
-                $messages = [
-                    [
-                        'role' => 'system',
-                        'content' => "You are an AI assistant for {$this->selectedDemo['organization']}. Use the following context to answer questions accurately and helpfully. If you can't find the answer in the context, provide a helpful response asking for more details.\n\nContext:\n{$context}"
-                    ],
-                    [
-                        'role' => 'user',
-                        'content' => $message
-                    ]
-                ];
-                
-                // Query the LLM
-                $response = $aiService->smartLlmChat($messages);
-                
-                if ($response && isset($response['message']['content'])) {
-                    \Log::info('Demo AI response generated successfully', [
-                        'collection' => $collectionName,
-                        'response_length' => strlen($response['message']['content'])
+                if ($enhancedResult) {
+                    \Log::info('Enhanced result type', [
+                        'type' => $enhancedResult['type'],
+                        'primary_source' => $enhancedResult['primary_source'] ?? 'unknown'
                     ]);
-                    return $response['message']['content'];
+                    
+                    // Handle different result types
+                    if ($enhancedResult['type'] === 'hybrid' && isset($enhancedResult['live_data'])) {
+                        // Action executed successfully - combine live data with KB context
+                        $liveData = $enhancedResult['live_data'];
+                        $kbResults = $enhancedResult['kb_results'];
+                        
+                        // Prepare context from KB
+                        $kbContext = "";
+                        if ($kbResults && isset($kbResults['results'])) {
+                            foreach ($kbResults['results'] as $result) {
+                                $payload = $result['payload'] ?? [];
+                                if (isset($payload['question']) && isset($payload['answer'])) {
+                                    $kbContext .= "Q: {$payload['question']}\nA: {$payload['answer']}\n\n";
+                                }
+                            }
+                        }
+                        
+                        $orgName = $this->selectedDemo['organization'];
+                        $systemPrompt = "You are {$orgName}'s AI assistant. You have access to both live data and knowledge base information. 
+                        
+                        LIVE DATA (prioritize this for real-time queries):
+                        {$liveData}
+                        
+                        KNOWLEDGE BASE (use for general information):
+                        {$kbContext}
+                        
+                        Provide helpful answers using both sources as appropriate. Always mention when you're providing live/current data vs general information.";
+                        
+                        $messages = [
+                            ['role' => 'system', 'content' => $systemPrompt],
+                            ['role' => 'user', 'content' => $message]
+                        ];
+                        
+                        $response = $aiService->smartLlmChat($messages);
+                        
+                        if ($response && isset($response['message']['content'])) {
+                            \Log::info('Hybrid response generated successfully', [
+                                'live_data_length' => strlen($liveData),
+                                'kb_context_length' => strlen($kbContext)
+                            ]);
+                            return $response['message']['content'];
+                        }
+                        
+                    } elseif (in_array($enhancedResult['type'], ['fallback_to_kb', 'knowledge_base_only'])) {
+                        // Use regular KB approach
+                        $kbResults = $enhancedResult['kb_results'];
+                        
+                        if ($kbResults && isset($kbResults['results']) && count($kbResults['results']) > 0) {
+                            $context = "";
+                            foreach ($kbResults['results'] as $result) {
+                                $payload = $result['payload'] ?? [];
+                                if (isset($payload['question']) && isset($payload['answer'])) {
+                                    $context .= "Q: {$payload['question']}\nA: {$payload['answer']}\n\n";
+                                }
+                            }
+                            
+                            if (!empty($context)) {
+                                $messages = [
+                                    [
+                                        'role' => 'system',
+                                        'content' => "You are {$this->selectedDemo['organization']}'s AI assistant. Use the following context to answer questions accurately.\n\nContext:\n{$context}"
+                                    ],
+                                    ['role' => 'user', 'content' => $message]
+                                ];
+                                
+                                $response = $aiService->smartLlmChat($messages);
+                                
+                                if ($response && isset($response['message']['content'])) {
+                                    return $response['message']['content'];
+                                }
+                            }
+                        }
+                    }
                 }
             } else {
-                \Log::warning('No search results found for demo query', [
-                    'collection' => $collectionName,
-                    'message' => $message
-                ]);
+                // Fallback to regular enhanced search (no actions configured)
+                \Log::info('No actions configured, using regular enhanced search');
+                
+                $searchResults = $aiService->enhancedSearch($collectionName, $message, 3);
+                
+                if ($searchResults && isset($searchResults['results']) && count($searchResults['results']) > 0) {
+                    $context = "";
+                    foreach ($searchResults['results'] as $result) {
+                        $context .= $result['payload']['question'] . "\n" . $result['payload']['answer'] . "\n\n";
+                    }
+                    
+                    $messages = [
+                        [
+                            'role' => 'system',
+                            'content' => "You are an AI assistant for {$this->selectedDemo['organization']}. Use the following context to answer questions accurately.\n\nContext:\n{$context}"
+                        ],
+                        ['role' => 'user', 'content' => $message]
+                    ];
+                    
+                    $response = $aiService->smartLlmChat($messages);
+                    
+                    if ($response && isset($response['message']['content'])) {
+                        return $response['message']['content'];
+                    }
+                }
             }
             
         } catch (\Exception $e) {
-            \Log::error('Demo AI query failed', [
+            \Log::error('Demo AI query with actions failed', [
                 'industry' => $this->industry,
                 'message' => $message,
                 'error' => $e->getMessage()

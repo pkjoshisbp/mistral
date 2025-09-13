@@ -125,6 +125,14 @@
               <li class="nav-item"><a href="{{ route('admin.documents') }}" class="nav-link {{ request()->routeIs('admin.documents') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Documents</p></a></li>
             </ul>
           </li>
+          
+          <li class="nav-item">
+            <a href="{{ route('admin.action-manager') }}" class="nav-link {{ request()->routeIs('admin.action-manager') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-cogs"></i>
+              <p>Live Data Actions</p>
+            </a>
+          </li>
+          
           <li class="nav-item">
             <a href="{{ route('admin.ai-chat') }}" class="nav-link {{ request()->routeIs('admin.ai-chat') ? 'active' : '' }}">
               <i class="nav-icon fas fa-comments"></i>

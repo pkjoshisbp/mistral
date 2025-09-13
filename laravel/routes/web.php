@@ -210,6 +210,9 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     // Demo Management Route
     Route::get('/demo-manager', \App\Livewire\Admin\DemoManager::class)->name('demo-manager');
     
+    // Action Manager Route - Live Data Actions
+    Route::get('/action-manager', \App\Livewire\Admin\ActionManager::class)->name('action-manager');
+    
     // Profile routes for admin
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
@@ -268,6 +271,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/documents', \App\Livewire\Customer\Documents::class)->name('documents');
         Route::get('/website-crawler', \App\Livewire\Customer\WebsiteCrawler::class)->name('crawler');
         Route::get('/api-integration', \App\Livewire\Customer\ApiIntegration::class)->name('api-integration');
+        Route::get('/action-manager', \App\Livewire\Customer\ActionManager::class)->name('action-manager');
         Route::get('/chat-history', \App\Livewire\Customer\ChatHistory::class)->name('chat-history');
         Route::get('/leads', \App\Livewire\Customer\LeadsManager::class)->name('leads');
         Route::get('/content', function () {

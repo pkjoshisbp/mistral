@@ -360,6 +360,101 @@ class AiAgentService
     }
 
     /**
+     * Enhanced search with action processing - combines static KB with live data
+     */
+    public function enhancedSearchWithActions($collectionName, $originalQuery, $organizationId, $limit = 5)
+    {
+        try {
+            Log::info('Enhanced search with actions started', [
+                'collection' => $collectionName,
+                'organization_id' => $organizationId,
+                'original_query' => $originalQuery
+            ]);
+
+            // Create ActionService instance
+            $intentDetector = app(IntentDetectionService::class);
+            $executor = app(ActionExecutorService::class);
+            $actionService = new ActionService($this, $intentDetector, $executor);
+
+            // Process query through action system
+            $actionResult = $actionService->processQuery($originalQuery, $organizationId);
+            
+            // Also get knowledge base results
+            $kbResults = $this->enhancedSearch($collectionName, $originalQuery, $limit);
+            
+            // Combine results based on action processing outcome
+            if ($actionResult['type'] === 'action_executed' && $actionResult['result']['success']) {
+                // Action executed successfully - prioritize live data
+                $liveDataFormatted = $actionService->formatLiveDataForAI(
+                    $actionResult['result']['data'],
+                    $actionResult['action']
+                );
+                
+                Log::info('Action executed successfully with live data', [
+                    'action_name' => $actionResult['action']['name'],
+                    'live_data_length' => strlen($liveDataFormatted),
+                    'kb_results_count' => isset($kbResults['results']) ? count($kbResults['results']) : 0
+                ]);
+
+                return [
+                    'type' => 'hybrid',
+                    'action_result' => $actionResult,
+                    'live_data' => $liveDataFormatted,
+                    'kb_results' => $kbResults,
+                    'primary_source' => 'live_data'
+                ];
+                
+            } elseif ($actionResult['type'] === 'action_executed' && !$actionResult['result']['success']) {
+                // Action failed - use KB as fallback
+                Log::warning('Action execution failed, using KB fallback', [
+                    'action_error' => $actionResult['result']['error'] ?? 'Unknown error',
+                    'kb_results_count' => isset($kbResults['results']) ? count($kbResults['results']) : 0
+                ]);
+
+                return [
+                    'type' => 'fallback_to_kb',
+                    'action_result' => $actionResult,
+                    'kb_results' => $kbResults,
+                    'primary_source' => 'knowledge_base',
+                    'fallback_reason' => $actionResult['result']['error'] ?? 'Action execution failed'
+                ];
+                
+            } else {
+                // No action needed or no matching actions - use KB only
+                Log::info('Using knowledge base only', [
+                    'action_type' => $actionResult['type'],
+                    'kb_results_count' => isset($kbResults['results']) ? count($kbResults['results']) : 0
+                ]);
+
+                return [
+                    'type' => 'knowledge_base_only',
+                    'action_result' => $actionResult,
+                    'kb_results' => $kbResults,
+                    'primary_source' => 'knowledge_base'
+                ];
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Enhanced search with actions failed', [
+                'collection' => $collectionName,
+                'organization_id' => $organizationId,
+                'original_query' => $originalQuery,
+                'error' => $e->getMessage()
+            ]);
+
+            // Fallback to regular KB search
+            $kbResults = $this->enhancedSearch($collectionName, $originalQuery, $limit);
+            
+            return [
+                'type' => 'error_fallback_to_kb',
+                'kb_results' => $kbResults,
+                'primary_source' => 'knowledge_base',
+                'error' => 'Action processing failed: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
      * Rewrite user query using Llama-3.2
      */
     public function rewriteQueryForSearch($originalQuery)
