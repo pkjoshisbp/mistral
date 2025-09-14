@@ -40,6 +40,36 @@ class AiAgentService
     }
 
     /**
+     * Get the configured OpenAI model
+     */
+    public function getOpenAiModel()
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $model = \App\Models\AdminSetting::get('openai_default_model');
+            if ($model) {
+                return $model;
+            }
+        }
+        
+        return config('app.openai_default_model', 'gpt-5-mini');
+    }
+
+    /**
+     * Get the configured Llama model
+     */
+    public function getLlamaModel()
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $model = \App\Models\AdminSetting::get('llama_default_model');
+            if ($model) {
+                return $model;
+            }
+        }
+        
+        return config('app.llama_default_model', 'llama3.2:1b');
+    }
+
+    /**
      * Generate embeddings for given text
      */
     public function embed($text, $model = null)
@@ -520,10 +550,15 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
     /**
      * Get LLM answer
      */
-    public function llmAnswer($prompt, $model = 'llama3.2:1b')
+    public function llmAnswer($prompt, $model = null)
     {
         try {
-            $response = Http::timeout(60)->post("{$this->baseUrl}/llm/answer", [
+            // Use configured model if none provided
+            if (!$model) {
+                $model = $this->getLlamaModel();
+            }
+
+            $response = Http::timeout(30)->post("{$this->baseUrl}/llm/answer", [
                 'prompt' => $prompt,
                 'model' => $model
             ]);
@@ -538,9 +573,14 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
     /**
      * LLM chat with conversation context
      */
-    public function llmChat($messages, $model = 'mistral:7b', $userId = null, $organizationId = null)  // Default to mistral:7b for better answers
+    public function llmChat($messages, $model = null, $userId = null, $organizationId = null)  // Default determined dynamically
     {
         try {
+            // Use configured model if none provided
+            if (!$model) {
+                $model = $this->getLlamaModel();
+            }
+
             $payload = [
                 'messages' => $messages,
                 'model' => $model
@@ -552,10 +592,10 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 'url' => "{$this->baseUrl}/llm/chat",
                 'payload_preview' => $payloadPreview,
                 'payload_length' => strlen(json_encode($payload)),
-                'timeout' => 90
+                'timeout' => 30
             ]);
 
-            $response = Http::timeout(90)->post("{$this->baseUrl}/llm/chat", $payload);
+            $response = Http::timeout(30)->post("{$this->baseUrl}/llm/chat", $payload);
 
             $body = $response->body();
             Log::info('AI Agent LLM chat response', [
@@ -568,13 +608,25 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
             if ($response->successful()) {
                 $result = $response->json();
                 
-                // Log token usage if user and organization are provided
-                if ($userId && $organizationId && isset($result['usage']['total_tokens'])) {
+                // Log token usage if organization is provided
+                if ($organizationId) {
+                    $tokensUsed = 0;
+                    
+                    // Try to get tokens from response first
+                    if (isset($result['usage']['total_tokens'])) {
+                        $tokensUsed = $result['usage']['total_tokens'];
+                    } else {
+                        // Estimate tokens if not provided by FastAPI
+                        $inputText = json_encode($messages);
+                        $outputText = isset($result['message']['content']) ? $result['message']['content'] : '';
+                        $tokensUsed = (int)((strlen($inputText) + strlen($outputText)) / 4); // Rough estimate: 4 chars per token
+                    }
+                    
                     $this->logTokenUsage(
                         $userId,
                         $organizationId,
                         'llm_chat',
-                        $result['usage']['total_tokens'],
+                        $tokensUsed,
                         substr($payloadPreview, 0, 255)
                     );
                 }
@@ -592,9 +644,14 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
     /**
      * OpenAI chat completion
      */
-    public function openAiChat($messages, $model = 'gpt-5-mini', $userId = null, $organizationId = null)
+    public function openAiChat($messages, $model = null, $userId = null, $organizationId = null)
     {
         try {
+            // Use configured model if none provided
+            if (!$model) {
+                $model = $this->getOpenAiModel();
+            }
+
             Log::info('OpenAI chat request', [
                 'model' => $model,
                 'messages_count' => count($messages),
@@ -758,7 +815,7 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
             $openAiModel = 'gpt-5-mini';
             return $this->openAiChat($messages, $openAiModel, $userId, $organizationId);
         } else {
-            $llamaModel = $model ?: 'mistral:7b';
+            $llamaModel = $model ?: $this->getLlamaModel();
             return $this->llmChat($messages, $llamaModel, $userId, $organizationId);
         }
     }
@@ -1133,10 +1190,26 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
     private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary)
     {
         try {
-            // Get user's active subscription
-            $user = \App\Models\User::find($userId);
-            $subscription = $user ? $user->activeSubscription : null;
+            $subscription = null;
             
+            // Handle widget usage (no user ID) - assign to organization's first user
+            if (!$userId && $organizationId) {
+                $organization = \App\Models\Organization::find($organizationId);
+                if ($organization) {
+                    // Get the first user associated with this organization
+                    $firstUser = $organization->users()->first();
+                    if ($firstUser) {
+                        $userId = $firstUser->id;
+                        $subscription = $firstUser->activeSubscription;
+                    }
+                }
+            } else if ($userId) {
+                // Get user's active subscription
+                $user = \App\Models\User::find($userId);
+                $subscription = $user ? $user->activeSubscription : null;
+            }
+            
+            // Still log even if no user found (for monitoring)
             \App\Models\TokenUsageLog::create([
                 'user_id' => $userId,
                 'organization_id' => $organizationId,
@@ -1146,6 +1219,18 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 'request_summary' => $requestSummary,
                 'used_at' => now()
             ]);
+            
+            // Update subscription token usage if subscription exists
+            if ($subscription) {
+                $subscription->increment('tokens_used_this_period', $tokensUsed);
+                
+                Log::info('Subscription token usage updated', [
+                    'subscription_id' => $subscription->id,
+                    'tokens_added' => $tokensUsed,
+                    'new_total' => $subscription->fresh()->tokens_used_this_period,
+                    'plan_limit' => $subscription->subscriptionPlan->token_cap_monthly ?? 'unlimited'
+                ]);
+            }
             
             Log::info('Token usage logged', [
                 'user_id' => $userId,

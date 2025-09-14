@@ -59,41 +59,78 @@ class PayPalController extends Controller
             // Get price based on billing cycle
             $price = $billingCycle === 'yearly' ? $plan->yearly_price : $plan->monthly_price;
 
-            // If a PayPal billing plan ID exists, create a recurring subscription
-            if ($plan->paypal_plan_id) {
-                $subscriptionPayload = [
+            // For subscription plans (not PAYG), create proper recurring PayPal subscription
+            if ($plan->slug !== 'payg' && $plan->paypal_plan_id) {
+                // Create PayPal subscription using the billing plan
+                $subscriptionData = [
                     'plan_id' => $plan->paypal_plan_id,
-                    'custom_id' => 'user_' . $user->id . '_plan_' . $plan->id . '_' . $billingCycle,
+                    'start_time' => now()->addMinute()->toISOString(), // Start 1 minute from now
+                    'quantity' => '1',
+                    'shipping_amount' => [
+                        'currency_code' => 'USD',
+                        'value' => '0.00'
+                    ],
+                    'subscriber' => [
+                        'name' => [
+                            'given_name' => explode(' ', $user->name)[0] ?? $user->name,
+                            'surname' => explode(' ', $user->name, 2)[1] ?? ''
+                        ],
+                        'email_address' => $user->email
+                    ],
                     'application_context' => [
                         'brand_name' => config('app.name'),
                         'locale' => 'en-US',
+                        'landing_page' => 'BILLING',
                         'shipping_preference' => 'NO_SHIPPING',
                         'user_action' => 'SUBSCRIBE_NOW',
+                        'payment_method' => [
+                            'payer_selected' => 'PAYPAL',
+                            'payee_preferred' => 'IMMEDIATE_PAYMENT_REQUIRED'
+                        ],
                         'return_url' => route('paypal.success') . '?plan_id=' . $plan->id . '&billing_cycle=' . $billingCycle,
                         'cancel_url' => route('paypal.cancel')
-                    ]
+                    ],
+                    'custom_id' => 'user_' . $user->id . '_plan_' . $plan->id . '_' . $billingCycle
                 ];
 
                 $response = Http::withToken($accessToken)
-                    ->post($this->paypalBaseUrl . '/v1/billing/subscriptions', $subscriptionPayload);
+                    ->post($this->paypalBaseUrl . '/v1/billing/subscriptions', $subscriptionData);
 
                 if ($response->successful()) {
-                    $data = $response->json();
-                    foreach ($data['links'] as $link) {
+                    $paypalSubscription = $response->json();
+                    
+                    // Create local subscription record in pending status
+                    $localSubscription = Subscription::create([
+                        'user_id' => $user->id,
+                        'organization_id' => $user->organization_id ?? 3,
+                        'subscription_plan_id' => $plan->id,
+                        'paypal_subscription_id' => $paypalSubscription['id'],
+                        'status' => 'pending',
+                        'billing_cycle' => $billingCycle,
+                        'current_period_start' => now(),
+                        'current_period_end' => $billingCycle === 'yearly' ? now()->addYear() : now()->addMonth(),
+                        'tokens_used_this_period' => 0
+                    ]);
+
+                    foreach ($paypalSubscription['links'] as $link) {
                         if ($link['rel'] === 'approve') {
                             return response()->json([
                                 'success' => true,
                                 'approval_url' => $link['href'],
-                                'mode' => 'recurring'
+                                'mode' => 'subscription'
                             ]);
                         }
                     }
                 } else {
                     Log::error('PayPal subscription create error', ['body' => $response->body()]);
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Failed to create PayPal subscription. Please try again or contact support.'
+                    ], 500);
                 }
             }
 
-            // Fallback: one-time order (until billing plan IDs are provisioned)
+            // For PAYG, create one-time payment for credits
             $paymentData = [
                 'intent' => 'CAPTURE',
                 'purchase_units' => [
@@ -102,8 +139,8 @@ class PayPalController extends Controller
                             'currency_code' => 'USD',
                             'value' => number_format($price, 2, '.', '')
                         ],
-                        'description' => $plan->name . ' Plan - ' . $plan->description . ' (' . ucfirst($billingCycle) . ')',
-                        'custom_id' => 'user_' . $user->id . '_plan_' . $plan->id . '_' . $billingCycle
+                        'description' => $plan->name . ' - Credit Purchase',
+                        'custom_id' => 'user_' . $user->id . '_payg_' . $plan->id
                     ]
                 ],
                 'application_context' => [
@@ -127,7 +164,7 @@ class PayPalController extends Controller
                         return response()->json([
                             'success' => true,
                             'approval_url' => $link['href'],
-                            'mode' => 'one_time'
+                            'mode' => 'payg_credits'
                         ]);
                     }
                 }
@@ -135,10 +172,73 @@ class PayPalController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to initiate PayPal payment/subscription.'
+                'message' => 'Failed to initiate PayPal payment.'
             ], 500);
         } catch (\Exception $e) {
             Log::error('PayPal payment creation failed: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while creating the payment: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Create PayPal one-time payment for credit packages
+     */
+    public function createCreditPayment(Request $request)
+    {
+        try {
+            $package = \App\Models\CreditPackage::findOrFail($request->package_id);
+            $user = Auth::user();
+            $accessToken = $this->getAccessToken();
+            
+            // Create one-time payment order
+            $paymentData = [
+                'intent' => 'CAPTURE',
+                'purchase_units' => [
+                    [
+                        'amount' => [
+                            'currency_code' => 'USD',
+                            'value' => number_format($package->usd_price, 2, '.', '')
+                        ],
+                        'description' => $package->name . ' - Credit Package',
+                        'custom_id' => 'user_' . $user->id . '_credit_' . $package->id
+                    ]
+                ],
+                'application_context' => [
+                    'brand_name' => config('app.name'),
+                    'locale' => 'en-US',
+                    'landing_page' => 'BILLING',
+                    'shipping_preference' => 'NO_SHIPPING',
+                    'user_action' => 'PAY_NOW',
+                    'return_url' => route('paypal.credit-success') . '?package_id=' . $package->id,
+                    'cancel_url' => route('paypal.cancel')
+                ]
+            ];
+
+            $response = Http::withToken($accessToken)
+                ->post($this->paypalBaseUrl . '/v2/checkout/orders', $paymentData);
+
+            if ($response->successful()) {
+                $paypalOrder = $response->json();
+                foreach ($paypalOrder['links'] as $link) {
+                    if ($link['rel'] === 'approve') {
+                        return response()->json([
+                            'success' => true,
+                            'approval_url' => $link['href'],
+                            'mode' => 'credit_purchase'
+                        ]);
+                    }
+                }
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to initiate PayPal credit payment.'
+            ], 500);
+        } catch (\Exception $e) {
+            Log::error('PayPal credit payment creation failed: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while creating the payment: ' . $e->getMessage()
@@ -207,6 +307,25 @@ class PayPalController extends Controller
     }
 
     /**
+     * Handle successful credit purchase
+     */
+    public function handleCreditSuccess(Request $request)
+    {
+        try {
+            $orderId = $request->get('order_id');
+            
+            if (!$orderId) {
+                return redirect()->route('customer.dashboard')->with('error', 'Missing order ID.');
+            }
+
+            return redirect()->route('customer.dashboard')->with('success', 'Credits purchased successfully!');
+        } catch (Exception $e) {
+            Log::error('PayPal Credit Success Error: ' . $e->getMessage());
+            return redirect()->route('customer.dashboard')->with('error', 'Credit purchase processing error.');
+        }
+    }
+
+    /**
      * Handle PayPal webhooks
      */
     public function handleWebhook(Request $request)
@@ -220,26 +339,126 @@ class PayPalController extends Controller
                 case 'BILLING.SUBSCRIPTION.ACTIVATED':
                     $this->handleSubscriptionActivated($event);
                     break;
-                    
                 case 'BILLING.SUBSCRIPTION.CANCELLED':
                     $this->handleSubscriptionCancelled($event);
                     break;
-                    
                 case 'BILLING.SUBSCRIPTION.SUSPENDED':
                     $this->handleSubscriptionSuspended($event);
                     break;
-                    
                 case 'PAYMENT.SALE.COMPLETED':
                     $this->handlePaymentCompleted($event);
                     break;
+                case 'CHECKOUT.ORDER.APPROVED':
+                    $this->handleCheckoutOrderApproved($event);
+                    break;
+                case 'CHECKOUT.ORDER.COMPLETED':
+                    $this->handleCheckoutOrderCompleted($event);
+                    break;
             }
 
-            return response()->json(['status' => 'success']);
-
-        } catch (\Exception $e) {
+            return response('OK');
+        } catch (Exception $e) {
             Log::error('PayPal webhook processing failed: ' . $e->getMessage());
+            return response('Error', 400);
+        }
+    }
+
+    /**
+     * Handle PayPal CHECKOUT.ORDER.APPROVED event for subscription purchase
+     */
+    private function handleCheckoutOrderApproved($event)
+    {
+        $resource = $event['resource'];
+        $purchaseUnit = $resource['purchase_units'][0] ?? null;
+        if (!$purchaseUnit || empty($purchaseUnit['custom_id'])) {
+            Log::error('PayPal webhook: custom_id missing in CHECKOUT.ORDER.APPROVED');
+            return;
+        }
+        $customId = $purchaseUnit['custom_id'];
+        // custom_id format: user_{userId}_plan_{planId}_{cycle}
+        if (preg_match('/user_(\d+)_plan_(\d+)_(\w+)/', $customId, $matches)) {
+            $userId = $matches[1];
+            $planId = $matches[2];
+            $cycle = $matches[3];
+            $user = \App\Models\User::find($userId);
+            $plan = \App\Models\SubscriptionPlan::find($planId);
+            if ($user && $plan) {
+                // Create or update subscription
+                $subscription = \App\Models\Subscription::updateOrCreate(
+                    [
+                        'user_id' => $user->id,
+                        'subscription_plan_id' => $plan->id,
+                        'paypal_subscription_id' => $resource['id'],
+                    ],
+                    [
+                        'status' => 'active',
+                        'current_period_start' => now(),
+                        'current_period_end' => $cycle === 'yearly' ? now()->addYear() : now()->addMonth(),
+                    ]
+                );
+                Log::info('PayPal subscription activated via CHECKOUT.ORDER.APPROVED', [
+                    'user_id' => $user->id,
+                    'plan_id' => $plan->id,
+                    'subscription_id' => $subscription->id,
+                ]);
+            } else {
+                Log::error('PayPal webhook: user or plan not found for custom_id', ['custom_id' => $customId]);
+            }
+        } else {
+            Log::error('PayPal webhook: custom_id format invalid', ['custom_id' => $customId]);
+        }
+    }
+
+    /**
+     * Handle PayPal CHECKOUT.ORDER.COMPLETED event for credit purchases
+     */
+    private function handleCheckoutOrderCompleted($event)
+    {
+        $resource = $event['resource'];
+        $purchaseUnit = $resource['purchase_units'][0] ?? null;
+        if (!$purchaseUnit || empty($purchaseUnit['custom_id'])) {
+            Log::error('PayPal webhook: custom_id missing in CHECKOUT.ORDER.COMPLETED');
+            return;
+        }
+        
+        $customId = $purchaseUnit['custom_id'];
+        
+        // Handle credit package purchases: user_{userId}_credit_{packageId}
+        if (preg_match('/user_(\d+)_credit_(\d+)/', $customId, $matches)) {
+            $userId = $matches[1];
+            $packageId = $matches[2];
+            $user = \App\Models\User::find($userId);
+            $package = \App\Models\CreditPackage::find($packageId);
             
-            return response()->json(['status' => 'error'], 500);
+            if ($user && $package) {
+                // Add credits to user account
+                \App\Models\UserCredit::create([
+                    'user_id' => $user->id,
+                    'amount' => $package->credits,
+                    'source' => 'paypal_purchase',
+                    'reference_id' => $resource['id'],
+                    'expires_at' => null, // Credits never expire
+                ]);
+                
+                // Record transaction
+                \App\Models\CreditTransaction::create([
+                    'user_id' => $user->id,
+                    'type' => 'purchase',
+                    'amount' => $package->credits,
+                    'description' => 'PayPal credit purchase: ' . $package->name,
+                    'reference_id' => $resource['id'],
+                ]);
+                
+                Log::info('PayPal credit purchase completed', [
+                    'user_id' => $user->id,
+                    'package_id' => $package->id,
+                    'credits_added' => $package->credits,
+                ]);
+            } else {
+                Log::error('PayPal webhook: user or package not found for credit purchase', ['custom_id' => $customId]);
+            }
+        } else {
+            Log::error('PayPal webhook: custom_id format invalid for credit purchase', ['custom_id' => $customId]);
         }
     }
 

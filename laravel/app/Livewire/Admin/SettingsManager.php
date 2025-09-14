@@ -48,8 +48,9 @@ class SettingsManager extends Component
     public function getAvailableLlamaModels()
     {
         return [
-            'llama3.2:3b' => 'Llama 3.2:3B',
-            'mistral:7b' => 'Mistral 7B'
+            'llama3.2:1b' => 'Llama 3.2:1B (Fast, recommended)',
+            'llama3.2:3b' => 'Llama 3.2:3B (Better quality)',
+            'mistral:7b' => 'Mistral 7B (High quality, slower)'
         ];
     }
 
@@ -83,7 +84,7 @@ class SettingsManager extends Component
         $this->ai_model_provider = AdminSetting::get('ai_model_provider', config('app.ai_model_provider', 'llama'));
         $this->openai_api_key = AdminSetting::get('openai_api_key', '');
         $this->openai_default_model = AdminSetting::get('openai_default_model', 'gpt-5-mini');
-        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3.2:3b');
+        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3.2:1b');
     }
 
     public function savePaymentSettings()
@@ -205,17 +206,34 @@ class SettingsManager extends Component
 
     public function saveAiSettings()
     {
-        \Log::info('AI Settings save method called', [
+        $this->validate([
+            'ai_model_provider' => 'required|in:openai,llama',
+            'openai_api_key' => 'nullable|string',
+            'openai_default_model' => 'nullable|string',
+            'llama_default_model' => 'nullable|string',
+        ]);
+
+        // Save to admin settings
+        AdminSetting::set('ai_model_provider', $this->ai_model_provider, 'select', 'ai', 'AI Model Provider');
+        AdminSetting::set('openai_api_key', $this->openai_api_key, 'password', 'ai', 'OpenAI API Key', null, true);
+        AdminSetting::set('openai_default_model', $this->openai_default_model, 'text', 'ai', 'OpenAI Default Model');
+        AdminSetting::set('llama_default_model', $this->llama_default_model, 'select', 'ai', 'Llama Default Model');
+
+        // Update environment file if OpenAI key is provided
+        if ($this->openai_api_key) {
+            $this->updateEnvFile([
+                'OPENAI_API_KEY' => $this->openai_api_key,
+                'AI_MODEL_PROVIDER' => $this->ai_model_provider,
+            ]);
+        }
+
+        \Log::info('AI Settings saved successfully', [
             'provider' => $this->ai_model_provider,
             'llama_model' => $this->llama_default_model,
             'openai_model' => $this->openai_default_model
         ]);
         
-        // Simple success response for testing
-        session()->flash('success', 'AI settings saved successfully! (Test mode)');
-        
-        // Refresh the component to show the success message
-        return redirect()->to(request()->header('Referer'));
+        session()->flash('success', 'AI settings saved successfully!');
     }
 
     public function render()

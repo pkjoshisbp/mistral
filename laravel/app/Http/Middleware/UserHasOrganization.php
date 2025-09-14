@@ -17,17 +17,15 @@ class UserHasOrganization
     {
         $user = auth()->user();
         
-        // Check if user has an organization assigned (using the many-to-many relationship)
-        if (!$user || $user->organizations()->count() === 0) {
-            
-            // If user has an active subscription, allow them to continue to organization setup
-            // Otherwise, redirect them to subscription page first
-            if (!$user->activeSubscription) {
-                return redirect()->route('customer.subscription')
-                    ->with('error', 'Please select a subscription plan first, then set up your organization.');
-            }
-            
-            // If they have a subscription but no organization, redirect to setup
+        // Check if user has access (either active subscription or sufficient credits)
+        if (!$user || !$user->canAccessPremiumFeatures()) {
+            return redirect()->route('customer.subscription')
+                ->with('error', 'Access requires an active subscription or available credits. Please subscribe or purchase credits to continue.');
+        }
+        
+        // Then check if user has an organization assigned (using the many-to-many relationship)
+        if ($user->organizations()->count() === 0) {
+            // If they have access but no organization, redirect to setup
             return redirect()->route('customer.setup-organization')
                 ->with('info', 'Please set up your organization to access dashboard features.');
         }

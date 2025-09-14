@@ -158,6 +158,12 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{ route('admin.token-usage-analytics') }}" class="nav-link {{ request()->routeIs('admin.token-usage-analytics') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-microchip"></i>
+              <p>Token Usage</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.widget-manager') }}" class="nav-link {{ request()->routeIs('admin.widget-manager') ? 'active' : '' }}">
               <i class="nav-icon fas fa-code"></i>
               <p>Widget Manager</p>

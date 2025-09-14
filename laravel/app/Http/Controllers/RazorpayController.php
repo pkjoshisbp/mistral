@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Subscription;
 use App\Models\SubscriptionPlan;
+use App\Models\CreditPackage;
+use App\Models\UserCredit;
+use App\Models\CreditTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -24,11 +27,16 @@ class RazorpayController extends Controller
     }
 
     /**
-     * Create Razorpay subscription
+     * Create Razorpay subscription or credit payment
      */
     public function createSubscription(Request $request)
     {
         try {
+            // Check if this is a credit package instead of subscription plan
+            if ($request->has('credit_package_id')) {
+                return $this->createCreditPayment($request);
+            }
+
             $plan = SubscriptionPlan::findOrFail($request->plan_id);
             $user = Auth::user();
             $locationService = app(\App\Services\LocationService::class);
@@ -223,6 +231,67 @@ class RazorpayController extends Controller
     }
 
     /**
+     * Create Razorpay credit payment
+     */
+    public function createCreditPayment(Request $request)
+    {
+        try {
+            $creditPackage = CreditPackage::findOrFail($request->credit_package_id);
+            $user = Auth::user();
+            $locationService = app(\App\Services\LocationService::class);
+            
+            // Initialize Razorpay API
+            $api = new Api($this->razorpayId, $this->razorpaySecret);
+
+            // Convert USD price to INR
+            $priceINR = $locationService->convertToINR($creditPackage->price);
+            $amountInPaise = $priceINR * 100; // Convert to paise
+
+            // Create Razorpay order for one-time payment
+            $order = $api->order->create([
+                'amount' => $amountInPaise,
+                'currency' => 'INR',
+                'receipt' => 'credit_' . time() . '_' . $user->id,
+                'notes' => [
+                    'user_id' => $user->id,
+                    'credit_package_id' => $creditPackage->id,
+                    'package_name' => $creditPackage->name,
+                    'tokens' => $creditPackage->tokens,
+                    'payment_type' => 'credit'
+                ]
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'order_id' => $order['id'],
+                'razorpay_key' => $this->razorpayId,
+                'amount' => $amountInPaise,
+                'currency' => 'INR',
+                'name' => config('app.name'),
+                'description' => $creditPackage->name . ' Credit Package',
+                'prefill' => [
+                    'email' => $user->email,
+                    'contact' => $user->phone ?? '',
+                    'name' => $user->name
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Razorpay credit payment creation failed', [
+                'user_id' => Auth::id(),
+                'credit_package_id' => $request->credit_package_id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while creating the credit payment: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Handle successful payment
      */
     public function handleSuccess(Request $request)
@@ -264,7 +333,7 @@ class RazorpayController extends Controller
     }
 
     /**
-     * Handle successful one-time payment
+     * Handle successful one-time payment (subscriptions or credits)
      */
     public function handleOnetimeSuccess(Request $request)
     {
@@ -284,7 +353,7 @@ class RazorpayController extends Controller
 
             $api->utility->verifyPaymentSignature($attributes);
 
-            // Update local subscription
+            // First check if this is a subscription payment
             $subscription = Subscription::where('razorpay_payment_id', $orderId)->first();
             if ($subscription) {
                 $subscription->update([
@@ -298,6 +367,17 @@ class RazorpayController extends Controller
                 return redirect()->route('customer.dashboard')
                     ->with('success', 'Payment successful! Your subscription is now active.');
             }
+
+            // If not a subscription, check if it's a credit purchase by fetching order details
+            $order = $api->order->fetch($orderId);
+            $notes = $order['notes'] ?? [];
+
+            if (isset($notes['payment_type']) && $notes['payment_type'] === 'credit') {
+                // Handle credit purchase
+                $this->handleCreditPurchaseSuccess($order, $paymentId);
+                return redirect()->route('customer.dashboard')
+                    ->with('success', 'Credits purchased successfully!');
+            }
             
             return redirect()->route('customer.dashboard')
                 ->with('error', 'Subscription not found');
@@ -310,6 +390,67 @@ class RazorpayController extends Controller
             
             return redirect()->route('customer.dashboard')
                 ->with('error', 'Payment verification failed');
+        }
+    }
+
+    /**
+     * Handle successful credit purchase
+     */
+    private function handleCreditPurchaseSuccess($order, $paymentId)
+    {
+        try {
+            $notes = $order['notes'];
+            $userId = $notes['user_id'] ?? null;
+            $creditPackageId = $notes['credit_package_id'] ?? null;
+            $tokens = $notes['tokens'] ?? null;
+
+            if (!$userId || !$creditPackageId || !$tokens) {
+                Log::error('Incomplete credit purchase data', ['notes' => $notes]);
+                return;
+            }
+
+            $user = User::find($userId);
+            $creditPackage = CreditPackage::find($creditPackageId);
+
+            if (!$user || !$creditPackage) {
+                Log::error('User or credit package not found', [
+                    'user_id' => $userId,
+                    'credit_package_id' => $creditPackageId
+                ]);
+                return;
+            }
+
+            // Add credits to user account
+            $userCredit = UserCredit::firstOrCreate(
+                ['user_id' => $userId],
+                ['credits' => 0]
+            );
+
+            $userCredit->increment('credits', $tokens);
+
+            // Record the transaction
+            CreditTransaction::create([
+                'user_id' => $userId,
+                'credit_package_id' => $creditPackageId,
+                'amount' => $creditPackage->price,
+                'credits' => $tokens,
+                'payment_method' => 'razorpay',
+                'razorpay_payment_id' => $paymentId,
+                'razorpay_order_id' => $order['id'],
+                'status' => 'completed'
+            ]);
+
+            Log::info('Credit purchase completed', [
+                'user_id' => $userId,
+                'credits_added' => $tokens,
+                'payment_id' => $paymentId
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Credit purchase processing failed', [
+                'error' => $e->getMessage(),
+                'order_id' => $order['id'] ?? null
+            ]);
         }
     }
 
@@ -440,9 +581,13 @@ class RazorpayController extends Controller
 
     private function handlePaymentCaptured($event)
     {
-        $subscriptionId = $event['payload']['payment']['entity']['subscription_id'] ?? null;
+        $payment = $event['payload']['payment']['entity'];
+        $subscriptionId = $payment['subscription_id'] ?? null;
+        $orderId = $payment['order_id'] ?? null;
+        $notes = $payment['notes'] ?? [];
         
         if ($subscriptionId) {
+            // Handle subscription payments
             $subscription = Subscription::where('razorpay_subscription_id', $subscriptionId)->first();
             if ($subscription) {
                 // Reset token usage for new billing period
@@ -452,6 +597,65 @@ class RazorpayController extends Controller
                     'current_period_end' => now()->addMonth()
                 ]);
             }
+        } elseif ($orderId && isset($notes['payment_type']) && $notes['payment_type'] === 'credit') {
+            // Handle credit payments
+            $this->handleCreditPurchase($payment, $notes);
+        }
+    }
+
+    private function handleCreditPurchase($payment, $notes)
+    {
+        try {
+            $userId = $notes['user_id'] ?? null;
+            $creditPackageId = $notes['credit_package_id'] ?? null;
+            $tokens = $notes['tokens'] ?? null;
+
+            if (!$userId || !$creditPackageId || !$tokens) {
+                Log::error('Incomplete credit purchase data in webhook', ['notes' => $notes]);
+                return;
+            }
+
+            $user = User::find($userId);
+            $creditPackage = CreditPackage::find($creditPackageId);
+
+            if (!$user || !$creditPackage) {
+                Log::error('User or credit package not found', [
+                    'user_id' => $userId,
+                    'credit_package_id' => $creditPackageId
+                ]);
+                return;
+            }
+
+            // Add credits to user account
+            $userCredit = UserCredit::firstOrCreate(
+                ['user_id' => $userId],
+                ['credits' => 0]
+            );
+
+            $userCredit->increment('credits', $tokens);
+
+            // Record the transaction
+            CreditTransaction::create([
+                'user_id' => $userId,
+                'credit_package_id' => $creditPackageId,
+                'amount' => $creditPackage->price,
+                'credits' => $tokens,
+                'payment_method' => 'razorpay',
+                'razorpay_payment_id' => $payment['id'],
+                'status' => 'completed'
+            ]);
+
+            Log::info('Credit purchase completed via webhook', [
+                'user_id' => $userId,
+                'credits_added' => $tokens,
+                'payment_id' => $payment['id']
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Credit purchase processing failed in webhook', [
+                'error' => $e->getMessage(),
+                'payment_id' => $payment['id'] ?? null
+            ]);
         }
     }
 }

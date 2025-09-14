@@ -346,8 +346,7 @@
             </div>
         </div>
     @endif
-</div>
-
+    
 <style>
 .btn-close-small {
     background: none;
@@ -361,3 +360,4 @@
     color: #ccc;
 }
 </style>
+</div>

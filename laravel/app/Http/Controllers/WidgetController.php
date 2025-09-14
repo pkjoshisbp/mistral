@@ -83,10 +83,20 @@ class WidgetController
     public function chat(Request $request, $orgId)
     {
         try {
-            $organization = Organization::find($orgId);
+            // Try to find organization by ID first, then by slug
+            $organization = is_numeric($orgId) 
+                ? Organization::find($orgId) 
+                : Organization::where('slug', $orgId)->first();
             
             if (!$organization || !$organization->is_active) {
                 return response()->json(['error' => 'Organization not found or inactive'], 404)
+                    ->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            // Check token usage limits before processing chat
+            $tokenLimitCheck = $this->checkTokenLimits($organization);
+            if ($tokenLimitCheck !== true) {
+                return response()->json($tokenLimitCheck, 429) // 429 Too Many Requests
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
@@ -146,7 +156,7 @@ class WidgetController
             $searchResults = $this->aiAgentService->enhancedSearch(
                 $collectionName,
                 $message, // Use original message for rewriting
-                5 // Get top 5 relevant results
+                2 // Get top 2 relevant results for faster processing
             );
             
             $context = '';
@@ -212,10 +222,6 @@ class WidgetController
 
             // Create system prompt with location awareness
             $systemPrompt = "You are a helpful customer service assistant for {$organization->name}. ";
-            $systemPrompt .= "IMPORTANT: You must answer questions based ONLY on the provided context below. ";
-            $systemPrompt .= "Do not make up information or provide generic responses. ";
-            $systemPrompt .= "Do not assume the customer is asking about a specific service unless they explicitly mention it. ";
-            $systemPrompt .= "If you don't have specific information in the context, say 'I don't have that specific information available' and offer to help in other ways.\n\n";
             
             // Add the customer's question FIRST to provide focus
             $systemPrompt .= "CUSTOMER QUESTION: \"{$message}\"\n\n";
@@ -230,17 +236,40 @@ class WidgetController
             }
             
             if ($context) {
-                $systemPrompt .= "RELEVANT CONTEXT (Use this information to answer the customer's question above):\n{$context}\n\n";
+                $systemPrompt .= "HERE IS THE RELEVANT INFORMATION TO ANSWER THE QUESTION:\n{$context}\n\n";
+                $systemPrompt .= "INSTRUCTIONS: Use the information above to provide a comprehensive, helpful answer to the customer's question. ";
+                $systemPrompt .= "The information provided is accurate and current. Present it in a clear, friendly way. ";
+            } else {
+                $systemPrompt .= "I don't have specific information available to answer this question. ";
+                $systemPrompt .= "Please let me know if I can help with anything else or provide general information. ";
+            }
+            
+            $systemPrompt .= "Be direct and helpful in your response.";
+
+            // Get AI response using llmChat for better token tracking
+            $messages = [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $message]
+            ];
+            
+            // Use configured AI provider for optimal performance
+            if ($this->aiAgentService->isOpenAiProvider()) {
+                // Use OpenAI with configured model
+                $aiResponse = $this->aiAgentService->openAiChat($messages, $this->aiAgentService->getOpenAiModel(), null, $orgId);
+            } else {
+                // Use local LLM with configured model
+                $aiResponse = $this->aiAgentService->llmChat($messages, $this->aiAgentService->getLlamaModel(), null, $orgId);
             }
 
-            $systemPrompt .= "Based on the context provided, please give a direct, helpful answer to the customer's question. ";
-            $systemPrompt .= "Answer only what they specifically asked about. ";
-            $systemPrompt .= "Do not mention specific services unless the customer's question relates to them:";
+            if (!$aiResponse || !isset($aiResponse['message']['content'])) {
+                // Fallback to old method
+                $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt);
+                $responseText = $aiResponse['answer'] ?? 'I apologize, but I\'m experiencing technical difficulties. Please try again later.';
+            } else {
+                $responseText = $aiResponse['message']['content'];
+            }
 
-            // Get AI response
-            $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt);
-
-            if (!$aiResponse || !isset($aiResponse['answer'])) {
+            if (!$responseText) {
                 throw new \Exception('Failed to get AI response');
             }
 
@@ -253,25 +282,24 @@ class WidgetController
                 'context_found' => !empty($context),
                 'context_preview' => $context ? substr($context, 0, 300) . '...' : 'No context',
                 'system_prompt_length' => strlen($systemPrompt),
-                'system_prompt_preview' => substr($systemPrompt, 0, 400) . '...',
-                'ai_response_length' => strlen($aiResponse['answer']),
-                'ai_response_preview' => substr($aiResponse['answer'], 0, 300) . '...',
-                'full_ai_response' => $aiResponse['answer']
+                'ai_response_length' => strlen($responseText),
+                'ai_response_preview' => substr($responseText, 0, 300) . '...',
+                'full_ai_response' => $responseText
             ]);
 
             // Save conversation to database
-            $this->saveConversationToDatabase($organization, $sessionId, $message, $aiResponse['answer'], $allUserInfo, compact('country', 'region', 'location'));
+            $this->saveConversationToDatabase($organization, $sessionId, $message, $responseText, $allUserInfo, compact('country', 'region', 'location'));
 
             // Log the conversation for analytics
             Log::info('Widget chat', [
                 'org_id' => $orgId,
                 'session_id' => $sessionId,
                 'message' => $message,
-                'response' => $aiResponse['answer']
+                'response' => $responseText
             ]);
 
             return response()->json([
-                'response' => $aiResponse['answer'],
+                'response' => $responseText,
                 'session_id' => $sessionId,
                 'timestamp' => now()->toISOString()
             ])->header('X-Robots-Tag', 'noindex, nofollow');
@@ -387,5 +415,85 @@ class WidgetController
                 'error' => $e->getMessage()
             ]);
         }
+    }
+
+    /**
+     * Check if organization has exceeded token limits
+     */
+    private function checkTokenLimits($organization)
+    {
+        // Get the organization's owner (first user)
+        $user = $organization->users()->first();
+        if (!$user) {
+            // No user associated, allow chat but log warning
+            Log::warning('No user associated with organization for token limit check', [
+                'org_id' => $organization->id,
+                'org_name' => $organization->name
+            ]);
+            return true;
+        }
+
+        $subscription = $user->activeSubscription;
+        if (!$subscription || !$subscription->subscriptionPlan) {
+            // No active subscription - could implement pay-per-use or block
+            return [
+                'error' => 'No active subscription found',
+                'message' => 'Please subscribe to a plan to continue using AI chat.',
+                'action_required' => 'subscribe',
+                'upgrade_url' => config('app.url') . '/customer/subscriptions'
+            ];
+        }
+
+        $tokenLimit = $subscription->subscriptionPlan->token_cap_monthly;
+        $tokensUsed = $subscription->tokens_used_this_period;
+        $remainingTokens = $subscription->remaining_tokens;
+        $usagePercentage = $subscription->usage_percentage;
+
+        // Estimate tokens needed for this request (rough estimate: 500-1000 tokens per chat)
+        $estimatedTokensNeeded = 800;
+
+        if ($remainingTokens <= 0) {
+            // Completely over limit
+            return [
+                'error' => 'Token limit exceeded',
+                'message' => 'You have used all ' . number_format($tokenLimit) . ' tokens in your ' . $subscription->subscriptionPlan->name . ' plan this month.',
+                'usage_info' => [
+                    'used' => $tokensUsed,
+                    'limit' => $tokenLimit,
+                    'percentage' => round($usagePercentage, 1)
+                ],
+                'action_required' => 'upgrade_or_wait',
+                'upgrade_url' => config('app.url') . '/customer/subscriptions',
+                'renewal_date' => $subscription->current_period_end ? $subscription->current_period_end->format('M j, Y') : null
+            ];
+        }
+
+        if ($remainingTokens < $estimatedTokensNeeded) {
+            // Likely to exceed limit with this request
+            return [
+                'error' => 'Insufficient tokens',
+                'message' => 'You have only ' . number_format($remainingTokens) . ' tokens remaining, but this request may need up to ' . number_format($estimatedTokensNeeded) . ' tokens.',
+                'usage_info' => [
+                    'used' => $tokensUsed,
+                    'limit' => $tokenLimit,
+                    'remaining' => $remainingTokens,
+                    'percentage' => round($usagePercentage, 1)
+                ],
+                'action_required' => 'upgrade',
+                'upgrade_url' => config('app.url') . '/customer/subscriptions'
+            ];
+        }
+
+        if ($usagePercentage >= 90) {
+            // Warning: approaching limit, but still allow
+            Log::info('User approaching token limit', [
+                'user_id' => $user->id,
+                'org_id' => $organization->id,
+                'usage_percentage' => $usagePercentage,
+                'remaining_tokens' => $remainingTokens
+            ]);
+        }
+
+        return true; // All checks passed
     }
 }

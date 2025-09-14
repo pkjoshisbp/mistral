@@ -97,4 +97,52 @@ class User extends Authenticatable
     {
         return $this->role === 'customer';
     }
+
+    public function userCredit()
+    {
+        return $this->hasOne(UserCredit::class);
+    }
+
+    public function creditTransactions()
+    {
+        return $this->hasMany(CreditTransaction::class);
+    }
+
+    /**
+     * Get user's credit balance (create record if doesn't exist)
+     */
+    public function getCreditBalance()
+    {
+        $credit = $this->userCredit ?? UserCredit::getOrCreateForUser($this->id);
+        return $credit->balance;
+    }
+
+    /**
+     * Check if user can access premium features
+     * Returns true if user has active subscription OR sufficient credits
+     */
+    public function canAccessPremiumFeatures($minimumCredits = 1.0)
+    {
+        // Admins always have access
+        if ($this->isAdmin()) {
+            return true;
+        }
+
+        // Check for active subscription first
+        if ($this->activeSubscription) {
+            return true;
+        }
+
+        // Check for sufficient credits
+        return $this->getCreditBalance() >= $minimumCredits;
+    }
+
+    /**
+     * Check if user has any form of access (subscription or credits)
+     * Used for basic feature access checks
+     */
+    public function hasAnyAccess()
+    {
+        return $this->canAccessPremiumFeatures(0.1); // Minimum 0.1 credits or active subscription
+    }
 }

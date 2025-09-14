@@ -213,6 +213,9 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     // Action Manager Route - Live Data Actions
     Route::get('/action-manager', \App\Livewire\Admin\ActionManager::class)->name('action-manager');
     
+    // Token Usage Analytics Route
+    Route::get('/token-usage-analytics', \App\Livewire\Admin\TokenUsageAnalytics::class)->name('token-usage-analytics');
+    
     // Profile routes for admin
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
@@ -273,6 +276,8 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/api-integration', \App\Livewire\Customer\ApiIntegration::class)->name('api-integration');
         Route::get('/action-manager', \App\Livewire\Customer\ActionManager::class)->name('action-manager');
         Route::get('/chat-history', \App\Livewire\Customer\ChatHistory::class)->name('chat-history');
+        Route::get('/token-usage', \App\Livewire\Customer\TokenUsage::class)->name('token-usage');
+        Route::get('/credits', \App\Livewire\Customer\Credits::class)->name('credits');
         Route::get('/leads', \App\Livewire\Customer\LeadsManager::class)->name('leads');
         Route::get('/content', function () {
             return view('customer.content');
@@ -328,10 +333,14 @@ Route::prefix('paypal')->name('paypal.')->group(function () {
     Route::post('create-subscription', [\App\Http\Controllers\PayPalController::class, 'createSubscription'])
         ->middleware('auth')
         ->name('create-subscription');
+    Route::post('create-credit-payment', [\App\Http\Controllers\PayPalController::class, 'createCreditPayment'])
+        ->middleware('auth')
+        ->name('create-credit-payment');
     Route::get('create-subscription-direct/{planId}/{cycle}', function ($planId, $cycle = 'monthly') {
         return view('payment.paypal-redirect', compact('planId', 'cycle'));
     })->middleware('auth')->name('create-subscription-direct');
     Route::get('success', [\App\Http\Controllers\PayPalController::class, 'handleSuccess'])->name('success');
+    Route::get('credit-success', [\App\Http\Controllers\PayPalController::class, 'handleCreditSuccess'])->name('credit-success');
     Route::get('cancel', [\App\Http\Controllers\PayPalController::class, 'handleCancel'])->name('cancel');
     Route::post('webhook', [\App\Http\Controllers\PayPalController::class, 'handleWebhook'])->name('webhook');
 });
@@ -344,6 +353,9 @@ Route::prefix('razorpay')->name('razorpay.')->group(function () {
     Route::post('create-onetime-payment', [\App\Http\Controllers\RazorpayController::class, 'createOnetimePayment'])
         ->middleware('auth')
         ->name('create-onetime-payment');
+    Route::post('create-credit-payment', [\App\Http\Controllers\RazorpayController::class, 'createCreditPayment'])
+        ->middleware('auth')
+        ->name('create-credit-payment');
     Route::get('create-subscription-direct/{planId}/{cycle}', function ($planId, $cycle = 'monthly') {
         return view('payment.razorpay-redirect', compact('planId', 'cycle'));
     })->middleware('auth')->name('create-subscription-direct');

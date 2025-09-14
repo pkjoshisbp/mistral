@@ -428,6 +428,8 @@
     </div>
 
 
+    </div> <!-- Close main container-fluid div -->
+
 <script>
 function copyToClipboard(elementId) {
     const element = document.getElementById(elementId);
@@ -449,4 +451,4 @@ function copyToClipboard(elementId) {
         document.execCommand('copy');
     });
 }
-</div>
+</script>

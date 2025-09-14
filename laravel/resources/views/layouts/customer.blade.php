@@ -99,6 +99,7 @@
             </a>
           </li>
           
+          @if(Auth::user()->canAccessPremiumFeatures())
           <li class="nav-header">DATA MANAGEMENT</li>
           <li class="nav-item">
             <a href="{{ route('customer.organization') }}" class="nav-link {{ request()->routeIs('customer.organization') ? 'active' : '' }}">
@@ -174,6 +175,15 @@
               <p>Chat History</p>
             </a>
           </li>
+          @else
+          <li class="nav-header">ACCESS REQUIRED</li>
+          <li class="nav-item">
+            <div class="nav-link text-muted">
+              <i class="nav-icon fas fa-lock"></i>
+              <p><small>Subscription or credits required to access features</small></p>
+            </div>
+          </li>
+          @endif
 
           <li class="nav-header">ACCOUNT</li>
           <li class="nav-item">
@@ -182,6 +192,20 @@
               <p>Subscription</p>
             </a>
           </li>
+          @if(Auth::user()->canAccessPremiumFeatures())
+          <li class="nav-item">
+            <a href="{{ route('customer.token-usage') }}" class="nav-link {{ request()->routeIs('customer.token-usage') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-microchip"></i>
+              <p>Token Usage</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('customer.credits') }}" class="nav-link {{ request()->routeIs('customer.credits') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-coins"></i>
+              <p>My Credits</p>
+            </a>
+          </li>
+          @endif
           <li class="nav-item">
             <a href="{{ route('customer.profile.edit') }}" class="nav-link {{ request()->routeIs('customer.profile.edit') ? 'active' : '' }}">
               <i class="nav-icon fas fa-user"></i>

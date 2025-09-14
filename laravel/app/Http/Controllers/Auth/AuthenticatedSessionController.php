@@ -16,8 +16,13 @@ class AuthenticatedSessionController extends Controller
     /**
      * Display the login view.
      */
-    public function create(): View
+    public function create(Request $request): View
     {
+        // Store intended redirect URL if provided
+        if ($request->has('redirect')) {
+            $request->session()->put('url.intended', $request->get('redirect'));
+        }
+        
         return view('auth.login');
     }
 
@@ -80,14 +85,24 @@ class AuthenticatedSessionController extends Controller
     protected function redirectAfterLogin(LoginRequest $request): RedirectResponse
     {
         $user = auth()->user();
-            // If a plan selection was stored pre-login (from pricing), redirect to home with flags to resume checkout
-            $selectedPlanId = $request->session()->pull('selected_plan_id');
-            $paymentProvider = $request->session()->pull('payment_provider');
-            $billingCycle = $request->session()->pull('billing_cycle');
-            if ($selectedPlanId && $paymentProvider) {
-                // Append as query params for the welcome page JS to pick up (and as a backup to sessionStorage)
-                return redirect()->to(route('home') . "?resume_payment=1&plan_id={$selectedPlanId}&provider={$paymentProvider}" . ($billingCycle ? "&cycle={$billingCycle}" : ''));
-            }
+        
+        // Check if there's an intended URL (like credits-and-services page)
+        $intendedUrl = $request->session()->get('url.intended');
+        if ($intendedUrl && !str_contains($intendedUrl, '/customer/') && !str_contains($intendedUrl, '/admin/')) {
+            // If intended URL is a public page (like credits), redirect there
+            $request->session()->forget('url.intended');
+            return redirect($intendedUrl);
+        }
+        
+        // If a plan selection was stored pre-login (from pricing), redirect to home with flags to resume checkout
+        $selectedPlanId = $request->session()->pull('selected_plan_id');
+        $paymentProvider = $request->session()->pull('payment_provider');
+        $billingCycle = $request->session()->pull('billing_cycle');
+        if ($selectedPlanId && $paymentProvider) {
+            // Append as query params for the welcome page JS to pick up (and as a backup to sessionStorage)
+            return redirect()->to(route('home') . "?resume_payment=1&plan_id={$selectedPlanId}&provider={$paymentProvider}" . ($billingCycle ? "&cycle={$billingCycle}" : ''));
+        }
+        
         if ($user->role === 'admin') {
             return redirect()->intended(route('admin.dashboard'));
         } elseif ($user->role === 'customer') {

@@ -1,4 +1,4 @@
-@extends('layouts.app')
+@extends('layouts.public')
 
 @section('title', 'Credits & Services')
 
@@ -80,7 +80,7 @@
                                                 @endif
                                             </div>
                                         @else
-                                            <a href="{{ route('login') }}" class="btn btn-{{ $colors[$index % count($colors)] }} btn-block">
+                                            <a href="{{ route('login', ['redirect' => url()->current()]) }}" class="btn btn-{{ $colors[$index % count($colors)] }} btn-block">
                                                 Login to Purchase
                                             </a>
                                         @endauth

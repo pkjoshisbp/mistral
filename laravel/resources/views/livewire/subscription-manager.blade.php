@@ -68,8 +68,17 @@
                             <h5>No Active Subscription</h5>
                             <p class="text-muted">Choose a plan below to get started</p>
                             
+                            <div class="alert alert-success mt-3">
+                                <h6><i class="fas fa-coins"></i> Alternative: Credit Packages (No Expiration)</h6>
+                                <p class="mb-2">Not ready for a monthly subscription? Try our flexible credit packages that never expire!</p>
+                                <a href="{{ route('credits-and-services') }}" class="btn btn-success btn-sm">
+                                    <i class="fas fa-coins"></i> View Credit Packages
+                                </a>
+                                <small class="d-block mt-2 text-muted">Perfect for testing or low-volume usage</small>
+                            </div>
+                            
                             <div class="alert alert-info mt-3">
-                                <h6><i class="fas fa-info-circle"></i> Payment Options Available</h6>
+                                <h6><i class="fas fa-info-circle"></i> Subscription Payment Options</h6>
                                 <ul class="mb-0 text-start">
                                     <li><strong>Recurring Payment:</strong> Automatic monthly/yearly billing (requires supported bank cards)</li>
                                     <li><strong>One-time Payment:</strong> Manual payment option if recurring payment is not supported by your bank</li>
@@ -295,6 +304,28 @@
                             </div>
                         </div>
                     @endforeach
+                </div>
+            </div>
+            
+            <!-- Credit Packages Card -->
+            <div class="card mt-4 border-success">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-coins"></i>
+                        Credit Packages
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Prefer pay-as-you-go? Our credit packages never expire!</p>
+                    <ul class="list-unstyled mb-3">
+                        <li><i class="fas fa-check text-success"></i> No monthly commitments</li>
+                        <li><i class="fas fa-check text-success"></i> Credits never expire</li>
+                        <li><i class="fas fa-check text-success"></i> Perfect for testing</li>
+                        <li><i class="fas fa-check text-success"></i> Full access to all features</li>
+                    </ul>
+                    <a href="{{ route('credits-and-services') }}" class="btn btn-success btn-block">
+                        <i class="fas fa-coins"></i> View Credit Packages
+                    </a>
                 </div>
             </div>
         </div>

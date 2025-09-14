@@ -1,8 +1,3 @@
-@extends('layouts.admin')
-
-@section('title', 'Admin Settings')
-
-@section('content')
 <div class="content-header">
     <div class="container-fluid">
         <div class="row mb-2">
@@ -18,10 +13,3 @@
         </div>
     </div>
 </div>
-
-<section class="content">
-    <div class="container-fluid">
-        @livewire('admin.settings-manager')
-    </div>
-</section>
-@endsection
