@@ -55,6 +55,7 @@ class WidgetScriptManager extends Component
         }
 
         $config = json_encode($this->widgetSettings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        $analyticsEnabled = isset($this->widgetSettings['analytics']) && $this->widgetSettings['analytics'] ? 'true' : 'false';
         
         $this->generatedScript = <<<JS
 <!-- AI Chat Support Widget Script -->
@@ -70,7 +71,7 @@ class WidgetScriptManager extends Component
     
     // Analytics Configuration
     window.aiChatAnalytics = {
-        enabled: " . ($this->widgetSettings['analytics'] ? 'true' : 'false') . ",
+        enabled: {$analyticsEnabled},
         trackingUrl: 'https://ai-chat.support/api/analytics/track',
         organizationId: '{$organization->id}'
     };

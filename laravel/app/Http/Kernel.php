@@ -33,7 +33,7 @@ class Kernel extends HttpKernel
             \App\Http\Middleware\EncryptCookies::class,
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
-            \App\Http\Middleware\SetLocaleFromSession::class,
+            \App\Http\Middleware\LocalizationMiddleware::class,
             // Logs missing translation keys (only active meaningfully in local env)
             \App\Http\Middleware\LogMissingTranslations::class,
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,

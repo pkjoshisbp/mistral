@@ -17,15 +17,6 @@ Route::get('/', function () {
     return view('welcome', compact('latestBlogs'));
 })->name('home');
 
-// Language switch
-Route::get('/lang/{locale}', function ($locale) {
-    $available = ['en','de','fr','it','pt','hi','es','th'];
-    if (in_array($locale, $available)) {
-        session(['app_locale' => $locale]);
-    }
-    return back();
-})->name('lang.switch');
-
 Route::get('/about', function () {
     return view('public.about');
 })->name('about');
@@ -57,6 +48,295 @@ Route::get('/refund-policy', function () {
     $refund = \App\Models\TermsAndConditions::getRefundPolicy();
     return view('public.refund-policy', compact('refund'));
 })->name('refund-policy');
+
+// Language-specific routes
+Route::get('/de', function () {
+    $latestBlogs = Blog::published()
+        ->orderBy('published_at', 'desc')
+        ->take(3)
+        ->get();
+    return view('welcome', compact('latestBlogs'));
+});
+
+Route::get('/de/about', function () {
+    return view('public.about');
+});
+
+Route::get('/de/features', function () {
+    return view('public.features');
+});
+
+Route::get('/de/credits-and-services', function () {
+    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    return view('public.credits-and-services', compact('creditPackages'));
+});
+
+Route::get('/de/contact', function () {
+    return view('contact');
+});
+
+Route::get('/de/terms', function () {
+    $terms = \App\Models\TermsAndConditions::getTerms();
+    return view('public.terms', compact('terms'));
+});
+
+Route::get('/de/privacy', function () {
+    $privacy = \App\Models\TermsAndConditions::getPrivacyPolicy();
+    return view('public.privacy', compact('privacy'));
+});
+
+Route::get('/de/refund-policy', function () {
+    $refund = \App\Models\TermsAndConditions::getRefundPolicy();
+    return view('public.refund-policy', compact('refund'));
+});
+
+// French routes
+Route::get('/fr', function () {
+    $latestBlogs = Blog::published()
+        ->orderBy('published_at', 'desc')
+        ->take(3)
+        ->get();
+    return view('welcome', compact('latestBlogs'));
+});
+
+Route::get('/fr/about', function () {
+    return view('public.about');
+});
+
+Route::get('/fr/features', function () {
+    return view('public.features');
+});
+
+Route::get('/fr/credits-and-services', function () {
+    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    return view('public.credits-and-services', compact('creditPackages'));
+});
+
+Route::get('/fr/contact', function () {
+    return view('contact');
+});
+
+Route::get('/fr/terms', function () {
+    $terms = \App\Models\TermsAndConditions::getTerms();
+    return view('public.terms', compact('terms'));
+});
+
+Route::get('/fr/privacy', function () {
+    $privacy = \App\Models\TermsAndConditions::getPrivacyPolicy();
+    return view('public.privacy', compact('privacy'));
+});
+
+Route::get('/fr/refund-policy', function () {
+    $refund = \App\Models\TermsAndConditions::getRefundPolicy();
+    return view('public.refund-policy', compact('refund'));
+});
+
+// Spanish routes  
+Route::get('/es', function () {
+    $latestBlogs = Blog::published()
+        ->orderBy('published_at', 'desc')
+        ->take(3)
+        ->get();
+    return view('welcome', compact('latestBlogs'));
+});
+
+Route::get('/es/about', function () {
+    return view('public.about');
+});
+
+Route::get('/es/features', function () {
+    return view('public.features');
+});
+
+Route::get('/es/credits-and-services', function () {
+    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    return view('public.credits-and-services', compact('creditPackages'));
+});
+
+Route::get('/es/contact', function () {
+    return view('contact');
+});
+
+Route::get('/es/terms', function () {
+    $terms = \App\Models\TermsAndConditions::getTerms();
+    return view('public.terms', compact('terms'));
+});
+
+Route::get('/es/privacy', function () {
+    $privacy = \App\Models\TermsAndConditions::getPrivacyPolicy();
+    return view('public.privacy', compact('privacy'));
+});
+
+Route::get('/es/refund-policy', function () {
+    $refund = \App\Models\TermsAndConditions::getRefundPolicy();
+    return view('public.refund-policy', compact('refund'));
+});
+
+// Italian routes  
+Route::get('/it', function () {
+    $latestBlogs = Blog::published()
+        ->orderBy('published_at', 'desc')
+        ->take(3)
+        ->get();
+    return view('welcome', compact('latestBlogs'));
+});
+
+Route::get('/it/about', function () {
+    return view('public.about');
+});
+
+Route::get('/it/features', function () {
+    return view('public.features');
+});
+
+Route::get('/it/credits-and-services', function () {
+    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    return view('public.credits-and-services', compact('creditPackages'));
+});
+
+Route::get('/it/contact', function () {
+    return view('contact');
+});
+
+Route::get('/it/terms', function () {
+    $terms = \App\Models\TermsAndConditions::getTerms();
+    return view('public.terms', compact('terms'));
+});
+
+Route::get('/it/privacy', function () {
+    $privacy = \App\Models\TermsAndConditions::getPrivacyPolicy();
+    return view('public.privacy', compact('privacy'));
+});
+
+Route::get('/it/refund-policy', function () {
+    $refund = \App\Models\TermsAndConditions::getRefundPolicy();
+    return view('public.refund-policy', compact('refund'));
+});
+
+// Portuguese routes  
+Route::get('/pt', function () {
+    $latestBlogs = Blog::published()
+        ->orderBy('published_at', 'desc')
+        ->take(3)
+        ->get();
+    return view('welcome', compact('latestBlogs'));
+});
+
+Route::get('/pt/about', function () {
+    return view('public.about');
+});
+
+Route::get('/pt/features', function () {
+    return view('public.features');
+});
+
+Route::get('/pt/credits-and-services', function () {
+    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    return view('public.credits-and-services', compact('creditPackages'));
+});
+
+Route::get('/pt/contact', function () {
+    return view('contact');
+});
+
+Route::get('/pt/terms', function () {
+    $terms = \App\Models\TermsAndConditions::getTerms();
+    return view('public.terms', compact('terms'));
+});
+
+Route::get('/pt/privacy', function () {
+    $privacy = \App\Models\TermsAndConditions::getPrivacyPolicy();
+    return view('public.privacy', compact('privacy'));
+});
+
+Route::get('/pt/refund-policy', function () {
+    $refund = \App\Models\TermsAndConditions::getRefundPolicy();
+    return view('public.refund-policy', compact('refund'));
+});
+
+// Hindi routes  
+Route::get('/hi', function () {
+    $latestBlogs = Blog::published()
+        ->orderBy('published_at', 'desc')
+        ->take(3)
+        ->get();
+    return view('welcome', compact('latestBlogs'));
+});
+
+Route::get('/hi/about', function () {
+    return view('public.about');
+});
+
+Route::get('/hi/features', function () {
+    return view('public.features');
+});
+
+Route::get('/hi/credits-and-services', function () {
+    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    return view('public.credits-and-services', compact('creditPackages'));
+});
+
+Route::get('/hi/contact', function () {
+    return view('contact');
+});
+
+Route::get('/hi/terms', function () {
+    $terms = \App\Models\TermsAndConditions::getTerms();
+    return view('public.terms', compact('terms'));
+});
+
+Route::get('/hi/privacy', function () {
+    $privacy = \App\Models\TermsAndConditions::getPrivacyPolicy();
+    return view('public.privacy', compact('privacy'));
+});
+
+Route::get('/hi/refund-policy', function () {
+    $refund = \App\Models\TermsAndConditions::getRefundPolicy();
+    return view('public.refund-policy', compact('refund'));
+});
+
+// Thai routes  
+Route::get('/th', function () {
+    $latestBlogs = Blog::published()
+        ->orderBy('published_at', 'desc')
+        ->take(3)
+        ->get();
+    return view('welcome', compact('latestBlogs'));
+});
+
+Route::get('/th/about', function () {
+    return view('public.about');
+});
+
+Route::get('/th/features', function () {
+    return view('public.features');
+});
+
+Route::get('/th/credits-and-services', function () {
+    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    return view('public.credits-and-services', compact('creditPackages'));
+});
+
+Route::get('/th/contact', function () {
+    return view('contact');
+});
+
+Route::get('/th/terms', function () {
+    $terms = \App\Models\TermsAndConditions::getTerms();
+    return view('public.terms', compact('terms'));
+});
+
+Route::get('/th/privacy', function () {
+    $privacy = \App\Models\TermsAndConditions::getPrivacyPolicy();
+    return view('public.privacy', compact('privacy'));
+});
+
+Route::get('/th/refund-policy', function () {
+    $refund = \App\Models\TermsAndConditions::getRefundPolicy();
+    return view('public.refund-policy', compact('refund'));
+});
+
+
 
 // Industry Demo Routes - Debug Route
 Route::get('/demo-test', function() {

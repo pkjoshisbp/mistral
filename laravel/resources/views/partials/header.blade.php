@@ -42,7 +42,21 @@
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="langDropdown">
                         @foreach(['en'=>'English','de'=>'Deutsch','fr'=>'Français','it'=>'Italiano','pt'=>'Português','hi'=>'हिन्दी','es'=>'Español','th'=>'ไทย'] as $code=>$label)
-                            <li><a class="dropdown-item" href="{{ route('lang.switch', $code) }}">{{ $label }}</a></li>
+                            @php($currentPath = request()->getPathInfo())
+                            @php($currentSegments = array_values(array_filter(explode('/', $currentPath))))
+                            @php($availableLocales = ['de','fr','es','it','pt','hi','th'])
+                            
+                            @if($code === 'en')
+                                @php($isLocalized = !empty($currentSegments) && in_array($currentSegments[0], $availableLocales))
+                                @php($basePath = $isLocalized && count($currentSegments) > 1 ? '/' . implode('/', array_slice($currentSegments, 1)) : ($isLocalized ? '' : $currentPath))
+                                @php($localizedPath = $basePath ?: '/')
+                            @else
+                                @php($isLocalized = !empty($currentSegments) && in_array($currentSegments[0], $availableLocales))
+                                @php($basePath = $isLocalized && count($currentSegments) > 1 ? '/' . implode('/', array_slice($currentSegments, 1)) : ($isLocalized ? '' : $currentPath))
+                                @php($localizedPath = '/' . $code . $basePath)
+                            @endif
+                            
+                            <li><a class="dropdown-item" href="{{ url($localizedPath) }}">{{ $label }}</a></li>
                         @endforeach
                     </ul>
                 </li>

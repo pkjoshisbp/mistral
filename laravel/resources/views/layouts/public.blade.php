@@ -21,12 +21,29 @@
     <meta name="twitter:title" content="@yield('twitter_title', __('common.hero_intro'))">
     <meta name="twitter:description" content="@yield('twitter_description', __('common.hero_sub'))">
 
-    <!-- Hreflang for alternate locales -->
-    @php($availableLocales = ['en','de','fr','it','pt','hi','es','th'])
-    @foreach($availableLocales as $loc)
-        <link rel="alternate" hreflang="{{ $loc }}" href="{{ url()->current() }}?lang={{ $loc }}" />
+    <!-- SEO: Hreflang for language versions -->
+    @php($currentPath = request()->getPathInfo())
+    @php($currentSegments = array_values(array_filter(explode('/', $currentPath))))
+    @php($supportedLocales = ['de','fr','es','it','pt','hi','th'])
+    @php($isLocalized = !empty($currentSegments) && in_array($currentSegments[0], $supportedLocales))
+    @php($basePath = $isLocalized && count($currentSegments) > 1 ? '/' . implode('/', array_slice($currentSegments, 1)) : ($isLocalized ? '' : $currentPath))
+    
+    <!-- English version (no prefix) -->
+    <link rel="alternate" hreflang="en" href="{{ url($basePath ?: '/') }}" />
+    
+    <!-- Localized versions -->
+    @foreach($supportedLocales as $loc)
+        <link rel="alternate" hreflang="{{ $loc }}" href="{{ url('/' . $loc . $basePath) }}" />
     @endforeach
-    <link rel="alternate" hreflang="x-default" href="{{ url()->current() }}" />
+    
+    <!-- Default language -->
+    <link rel="alternate" hreflang="x-default" href="{{ url($basePath ?: '/') }}" />
+    
+    <!-- Canonical URL (current page) -->
+    @php($currentLocale = app()->getLocale())
+    @php($canonicalPath = $currentLocale === 'en' ? ($basePath ?: '/') : '/' . $currentLocale . $basePath)
+    <link rel="canonical" href="{{ url($canonicalPath) }}" />
+    
     <meta name="twitter:image" content="@yield('twitter_image', asset('images/ai-chat-twitter-image.jpg'))">
     
     <!-- Favicon -->

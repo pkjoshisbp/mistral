@@ -1,6 +1,9 @@
 User-agent: *
 Allow: /
 
+# Sitemap location
+Sitemap: https://ai-chat.support/sitemap.xml
+
 # Block admin and private areas
 Disallow: /admin/
 Disallow: /customer/
