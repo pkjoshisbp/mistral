@@ -659,12 +659,20 @@ Route::prefix('razorpay')->name('razorpay.')->group(function () {
 
 // OTP Routes
 Route::post('/auth/send-otp', function(\Illuminate\Http\Request $request) {
+    // Log the request for debugging
+    \Log::info('OTP Request received', [
+        'email' => $request->email,
+        'headers' => $request->headers->all(),
+        'device_fingerprint' => $request->header('X-Device-Fingerprint')
+    ]);
+
     $request->validate([
         'email' => 'required|email|exists:users,email'
     ]);
 
     $user = \App\Models\User::where('email', $request->email)->first();
     if (!$user) {
+        \Log::error('User not found for OTP', ['email' => $request->email]);
         return response()->json([
             'success' => false,
             'message' => 'User not found'
@@ -676,6 +684,7 @@ Route::post('/auth/send-otp', function(\Illuminate\Http\Request $request) {
     if ($deviceFingerprint) {
         $trustedDevices = json_decode($request->cookie('trusted_devices', '[]'), true);
         if (in_array($deviceFingerprint, $trustedDevices)) {
+            \Log::info('Device is trusted, skipping OTP', ['email' => $request->email, 'fingerprint' => $deviceFingerprint]);
             return response()->json([
                 'success' => true,
                 'trusted_device' => true,
@@ -684,18 +693,59 @@ Route::post('/auth/send-otp', function(\Illuminate\Http\Request $request) {
         }
     }
 
-    // Generate and send OTP
-    $otpRecord = \App\Models\EmailOtp::generateForEmail($request->email, 'login');
-    
-    // Send email notification
-    $user->notify(new \App\Notifications\OtpLoginNotification($otpRecord->otp));
+    try {
+        // Generate and send OTP
+        $otpRecord = \App\Models\EmailOtp::generateForEmail($request->email, 'login');
+        
+        // Send email notification
+        $user->notify(new \App\Notifications\OtpLoginNotification($otpRecord->otp));
+        
+        \Log::info('OTP sent successfully', ['email' => $request->email, 'otp' => $otpRecord->otp]);
 
-    return response()->json([
-        'success' => true,
-        'trusted_device' => false,
-        'message' => 'OTP sent successfully'
-    ]);
+        return response()->json([
+            'success' => true,
+            'trusted_device' => false,
+            'message' => 'OTP sent successfully'
+        ]);
+    } catch (\Exception $e) {
+        \Log::error('OTP sending failed', [
+            'email' => $request->email,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to send OTP: ' . $e->getMessage()
+        ], 500);
+    }
 })->name('auth.send-otp');
+
+// Simple login test route (temporary for debugging)
+Route::post('/auth/simple-login', function(\Illuminate\Http\Request $request) {
+    $request->validate([
+        'email' => 'required|email',
+        'password' => 'required'
+    ]);
+
+    \Log::info('Simple login attempt', ['email' => $request->email]);
+
+    if (\Auth::attempt($request->only('email', 'password'))) {
+        \Log::info('Simple login successful', ['email' => $request->email]);
+        $request->session()->regenerate();
+        
+        $user = auth()->user();
+        if ($user->role === 'admin') {
+            return response()->json(['success' => true, 'redirect' => route('admin.dashboard')]);
+        } elseif ($user->role === 'customer') {
+            return response()->json(['success' => true, 'redirect' => route('customer.dashboard')]);
+        }
+        return response()->json(['success' => true, 'redirect' => '/']);
+    } else {
+        \Log::warning('Simple login failed', ['email' => $request->email]);
+        return response()->json(['success' => false, 'message' => 'Invalid credentials'], 401);
+    }
+})->name('auth.simple-login');
 
 // Registration OTP Routes
 Route::post('/auth/send-registration-otp', function(\Illuminate\Http\Request $request) {

@@ -31,12 +31,21 @@ class AuthenticatedSessionController extends Controller
      */
     public function store(LoginRequest $request): RedirectResponse
     {
+        \Log::info('Login attempt', [
+            'email' => $request->email,
+            'has_otp' => $request->has('otp'),
+            'has_password' => $request->has('password'),
+            'request_data' => $request->except(['password', 'otp'])
+        ]);
+
         // Check if this is OTP authentication
         if ($request->has('otp')) {
+            \Log::info('Processing OTP authentication', ['email' => $request->email]);
             return $this->authenticateWithOtp($request);
         }
 
         // Regular password authentication
+        \Log::info('Processing regular authentication', ['email' => $request->email]);
         $request->authenticate();
 
         $request->session()->regenerate();
