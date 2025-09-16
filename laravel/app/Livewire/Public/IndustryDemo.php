@@ -272,11 +272,11 @@ class IndustryDemo extends Component
             $isOpenAI = $aiService->isOpenAiProvider();
             
             if ($isOpenAI) {
-                // Extremely directive prompt for GPT-5-mini
-                $systemPrompt = "You are {$orgName}'s AI assistant. MANDATORY: Use ONLY the Context provided below. If the Context contains the answer to the user's question, provide that exact answer. DO NOT say 'we don't have information' if the Context contains it. Answer as {$orgName} using 'we/our'. Customer asked: \"{$userMessage}\"";
+                // Concise prompt for GPT-5-mini
+                $systemPrompt = "You are {$orgName}'s AI assistant. Use only the Context below. Answer as {$orgName} with 'we/our'. Be brief and direct.";
             } else {
                 // Standard prompt for Llama
-                $systemPrompt = "You are a helpful customer service AI assistant for {$orgName}. Use the provided context to answer questions accurately and helpfully. Speak as {$orgName} using 'we' and 'our'. Keep responses concise and professional. Customer question: \"{$userMessage}\"";
+                $systemPrompt = "You are {$orgName}'s AI assistant. Use provided context. Answer as {$orgName} with 'we/our'. Keep responses brief.";
             }
             
             $chatMessages = [

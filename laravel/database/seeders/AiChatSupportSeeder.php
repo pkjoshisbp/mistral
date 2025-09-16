@@ -58,7 +58,7 @@ class AiChatSupportSeeder extends Seeder
             ],
             [
                 'title' => 'Pricing and Plans',
-                'content' => 'We offer flexible pricing plans to suit businesses of all sizes. Our Starter plan begins at $29/month for up to 1,000 conversations, perfect for small businesses. The Professional plan at $99/month includes up to 5,000 conversations and advanced analytics. The Enterprise plan offers unlimited conversations, priority support, and custom integrations. All plans include a 14-day free trial with no credit card required. Volume discounts are available for high-traffic websites.',
+                'content' => 'We offer flexible pricing plans to suit businesses of all sizes. Our plans start at $49/month for the Starter package with 2M tokens, and $199/month for the Pro plan with 10M tokens. For Indian customers, pricing is ₹4,900/month for Starter and ₹19,900/month for Pro. WhatsApp integration service is available for $50 (₹5,000 for Indian customers). All plans include comprehensive features, analytics, and support. Enterprise solutions are available with custom pricing.',
                 'type' => 'pricing'
             ],
             [

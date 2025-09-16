@@ -110,7 +110,7 @@
                             Send us your data and we'll integrate it into your AI system, including initial training and optimization.
                         </p>
                         <div class="price mb-2">
-                            <span class="h5 text-warning">₹4,200</span>
+                            <span class="h5 text-warning">₹5,000</span>
                             <small class="text-muted">($50)</small>
                         </div>
                         <ul class="list-unstyled small">
@@ -138,7 +138,7 @@
                             We monitor your chat interactions and continuously improve your AI with new training data.
                         </p>
                         <div class="price mb-2">
-                            <span class="h5 text-info">₹2,100/month</span>
+                            <span class="h5 text-info">₹2,500/month</span>
                             <small class="text-muted">($25/month)</small>
                         </div>
                         <ul class="list-unstyled small">
@@ -166,7 +166,7 @@
                             Connect your AI chatbot directly to WhatsApp for seamless customer communication.
                         </p>
                         <div class="price mb-2">
-                            <span class="h5 text-success">₹4,200</span>
+                            <span class="h5 text-success">₹5,000</span>
                             <small class="text-muted">($50)</small>
                         </div>
                         <ul class="list-unstyled small">

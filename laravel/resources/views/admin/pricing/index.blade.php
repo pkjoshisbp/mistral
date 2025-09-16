@@ -168,7 +168,7 @@
                             <li>Should be <strong>20-40% more expensive</strong> than subscription rates</li>
                             <li>Never expire - premium for flexibility</li>
                             <li>Recommended: $60-80 per 1M tokens for credits</li>
-                            <li>Use INR conversion rate: ~83x USD price</li>
+                            <li>Use INR conversion rate: ~100x USD price (includes all taxes)</li>
                         </ul>
                     </div>
                 </div>

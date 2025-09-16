@@ -26,7 +26,7 @@ class CreditPackageSeeder extends Seeder
                 'slug' => 'basic-credits',
                 'description' => 'Perfect for occasional usage with no expiration',
                 'usd_price' => 69.00, // ~40% more than Starter monthly rate per 1M
-                'inr_price' => 5700.00, // ~83x exchange rate
+                'inr_price' => 7000.00, // 100x conversion ($70 * 100)
                 'tokens' => 1000000, // 1M tokens
                 'features' => [
                     '1 Million tokens',

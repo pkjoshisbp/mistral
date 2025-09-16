@@ -15,8 +15,8 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Compiled Tailwind CSS -->
+    @vite('resources/css/app.css')
     
     <!-- Livewire Styles -->
     @livewireStyles
@@ -24,6 +24,30 @@
     <style>
         body {
             font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f8fafc;
+        }
+        
+        /* Fallback styles in case Tailwind doesn't load */
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 1rem; }
+        .bg-gradient-to-r { background: linear-gradient(to right, #2563eb, #7c3aed); }
+        .text-white { color: white; }
+        .py-16 { padding: 4rem 0; }
+        .text-center { text-align: center; }
+        .text-4xl { font-size: 2.25rem; }
+        .font-bold { font-weight: 700; }
+        .mb-4 { margin-bottom: 1rem; }
+        .mb-6 { margin-bottom: 1.5rem; }
+        .bg-white { background-color: white; }
+        .rounded-lg { border-radius: 0.5rem; }
+        .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        .p-6 { padding: 1.5rem; }
+        .grid { display: grid; }
+        .gap-8 { gap: 2rem; }
+        @media (min-width: 1024px) {
+            .lg\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .lg\\:col-span-1 { grid-column: span 1 / span 1; }
         }
         
         /* Custom scrollbar */

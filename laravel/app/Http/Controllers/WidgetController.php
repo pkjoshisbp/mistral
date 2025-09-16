@@ -220,31 +220,26 @@ class WidgetController
                 }
             }
 
-            // Create system prompt with location awareness
+            // Create concise system prompt
             $systemPrompt = "You are a helpful customer service assistant for {$organization->name}. ";
             
-            // Add the customer's question FIRST to provide focus
-            $systemPrompt .= "CUSTOMER QUESTION: \"{$message}\"\n\n";
-            
-            // Add location context if available
+            // Add location context briefly if available
             if ($country || $region || $location) {
-                $systemPrompt .= "Customer Location: ";
-                if ($country) $systemPrompt .= "Country: {$country} ";
-                if ($region) $systemPrompt .= "Region: {$region} ";
-                if ($location) $systemPrompt .= "Location: {$location} ";
-                $systemPrompt .= "\nPlease provide location-appropriate responses for pricing, availability, and services.\n\n";
+                $systemPrompt .= "Customer is in ";
+                if ($country) $systemPrompt .= $country;
+                if ($region) $systemPrompt .= ", {$region}";
+                if ($location) $systemPrompt .= ", {$location}";
+                $systemPrompt .= ". ";
             }
             
             if ($context) {
-                $systemPrompt .= "HERE IS THE RELEVANT INFORMATION TO ANSWER THE QUESTION:\n{$context}\n\n";
-                $systemPrompt .= "INSTRUCTIONS: Use the information above to provide a comprehensive, helpful answer to the customer's question. ";
-                $systemPrompt .= "The information provided is accurate and current. Present it in a clear, friendly way. ";
+                $systemPrompt .= "Use this info:\n{$context}\n";
+                $systemPrompt .= "Give a brief, helpful answer using the above information. ";
             } else {
-                $systemPrompt .= "I don't have specific information available to answer this question. ";
-                $systemPrompt .= "Please let me know if I can help with anything else or provide general information. ";
+                $systemPrompt .= "I don't have specific info for this question. ";
             }
             
-            $systemPrompt .= "Be direct and helpful in your response.";
+            $systemPrompt .= "Keep responses concise and direct.";
 
             // Get AI response using llmChat for better token tracking
             $messages = [

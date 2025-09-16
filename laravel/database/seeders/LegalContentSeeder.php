@@ -189,9 +189,10 @@ We strive to maintain high service availability but cannot guarantee uninterrupt
 PRICING AND PAYMENT
 
 Our pricing is based on usage tiers and subscription plans:
-• Starter Plan: $29/month - Up to 1,000 conversations
-• Professional Plan: $99/month - Up to 10,000 conversations
-• Enterprise Plan: $299/month - Unlimited conversations
+• Starter Plan: $49/month - Up to 2M tokens
+• Professional Plan: $199/month - Up to 10M tokens  
+• Pay-as-you-go: $5 minimum for 100k tokens
+• Enterprise Plan: $999/month - Up to 50M+ tokens
 • Custom pricing available for large organizations
 
 Payment terms:

@@ -682,7 +682,7 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
             $result = $client->chat()->create([
                 'model' => $model,
                 'messages' => $messages,
-                // No max_completion_tokens - let the model decide optimal allocation
+                'max_completion_tokens' => 300, // Limit response length to keep it concise
             ]);
 
             Log::info('OpenAI chat response', [
