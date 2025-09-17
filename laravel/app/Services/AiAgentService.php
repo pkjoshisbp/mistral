@@ -60,6 +60,25 @@ class AiAgentService
     public function getLlamaModel()
     {
         if (class_exists(\App\Models\AdminSetting::class)) {
+            $backendType = \App\Models\AdminSetting::get('ai_backend_type', 'ollama');
+            
+            // For llama.cpp backend, use the configured repo or path
+            if ($backendType === 'llamacpp') {
+                $llamacppRepo = \App\Models\AdminSetting::get('llamacpp_model_repo');
+                $llamacppPath = \App\Models\AdminSetting::get('llamacpp_model_path');
+                
+                // Prefer custom path if provided, otherwise use repo
+                if ($llamacppPath) {
+                    return $llamacppPath;
+                } elseif ($llamacppRepo) {
+                    return $llamacppRepo;
+                } else {
+                    // Default to 3B model if nothing configured
+                    return 'bartowski/Llama-3.2-3B-Instruct-GGUF:Llama-3.2-3B-Instruct-Q4_K_M.gguf';
+                }
+            }
+            
+            // For ollama backend, use traditional model setting
             $model = \App\Models\AdminSetting::get('llama_default_model');
             if ($model) {
                 return $model;
@@ -67,6 +86,18 @@ class AiAgentService
         }
         
         return config('app.llama_default_model', 'llama3.2:1b');
+    }
+
+    /**
+     * Get the configured AI backend type
+     */
+    public function getBackendType()
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            return \App\Models\AdminSetting::get('ai_backend_type', 'ollama');
+        }
+        
+        return config('app.ai_backend_type', 'ollama');
     }
 
     /**
@@ -583,7 +614,8 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
 
             $payload = [
                 'messages' => $messages,
-                'model' => $model
+                'model' => $model,
+                'backend_type' => $this->getBackendType()
             ];
             
             // Truncate logged payload to keep logs lean
@@ -592,17 +624,25 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 'url' => "{$this->baseUrl}/llm/chat",
                 'payload_preview' => $payloadPreview,
                 'payload_length' => strlen(json_encode($payload)),
-                'timeout' => 30
+                'timeout' => 30,
+                'model' => $payload['model'],
+                'backend_type' => $payload['backend_type']
             ]);
 
             $response = Http::timeout(30)->post("{$this->baseUrl}/llm/chat", $payload);
 
             $body = $response->body();
+            $responseData = $response->successful() ? $response->json() : null;
+            $tokensUsed = isset($responseData['usage']['total_tokens']) ? $responseData['usage']['total_tokens'] : 'unknown';
+            
             Log::info('AI Agent LLM chat response', [
                 'status' => $response->status(),
                 'successful' => $response->successful(),
                 'body_length' => strlen($body),
-                'body_preview' => substr($body, 0, 100)
+                'body_preview' => substr($body, 0, 100),
+                'model' => $payload['model'],
+                'backend_type' => $payload['backend_type'],
+                'tokens_used' => $tokensUsed
             ]);
 
             if ($response->successful()) {

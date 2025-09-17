@@ -211,7 +211,7 @@
                                     <div class="form-group">
                                         <label for="ai_model_provider">AI Provider</label>
                                         <select wire:model="ai_model_provider" class="form-control @error('ai_model_provider') is-invalid @enderror">
-                                            <option value="llama">Llama (Local/Ollama)</option>
+                                            <option value="llama">Llama (Local Models)</option>
                                             <option value="openai">OpenAI (GPT)</option>
                                         </select>
                                         @error('ai_model_provider')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -219,9 +219,25 @@
                                     </div>
                                 </div>
                                 
-                                <div class="col-md-6">
+                                <div class="col-md-6" x-show="$wire.ai_model_provider === 'llama'">
                                     <div class="form-group">
-                                        <label for="llama_default_model">Llama Default Model</label>
+                                        <label for="ai_backend_type">Llama Backend</label>
+                                        <select wire:model="ai_backend_type" class="form-control @error('ai_backend_type') is-invalid @enderror">
+                                            @foreach($this->getAvailableBackends() as $value => $label)
+                                                <option value="{{ $value }}">{{ $label }}</option>
+                                            @endforeach
+                                        </select>
+                                        @error('ai_backend_type')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Choose between Ollama (easy) or llama.cpp (optimized)</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Ollama Settings -->
+                            <div class="row" x-show="$wire.ai_model_provider === 'llama' && $wire.ai_backend_type === 'ollama'">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="llama_default_model">Ollama Model</label>
                                         <select wire:model="llama_default_model" 
                                                 class="form-control @error('llama_default_model') is-invalid @enderror">
                                             @foreach($this->getAvailableLlamaModels() as $value => $label)
@@ -229,7 +245,63 @@
                                             @endforeach
                                         </select>
                                         @error('llama_default_model')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                        <small class="form-text text-muted">Default model when using Llama provider</small>
+                                        <small class="form-text text-muted">Available Ollama models (auto-downloaded on first use)</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- llama.cpp Settings -->
+                            <div x-show="$wire.ai_model_provider === 'llama' && $wire.ai_backend_type === 'llamacpp'">
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <div class="form-group">
+                                            <label for="llamacpp_model_repo">Pre-configured GGUF Models</label>
+                                            <select wire:model="llamacpp_model_repo" 
+                                                    class="form-control @error('llamacpp_model_repo') is-invalid @enderror">
+                                                @foreach($this->getAvailableLlamaCppModels() as $value => $label)
+                                                    <option value="{{ $value }}">{{ $label }}</option>
+                                                @endforeach
+                                            </select>
+                                            @error('llamacpp_model_repo')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                            <small class="form-text text-muted">
+                                                <i class="fas fa-download"></i> 
+                                                Select from tested GGUF models (will auto-download if needed)
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <div class="form-group">
+                                            <label for="llamacpp_model_path">OR Custom Model File Path</label>
+                                            <input type="text" wire:model="llamacpp_model_path" 
+                                                   class="form-control @error('llamacpp_model_path') is-invalid @enderror"
+                                                   placeholder="/path/to/custom-model.gguf">
+                                            @error('llamacpp_model_path')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                            <small class="form-text text-muted">Optional: Full path to custom GGUF model file (overrides above selection)</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="llamacpp_threads">CPU Threads</label>
+                                            <input type="number" wire:model="llamacpp_threads" 
+                                                   class="form-control @error('llamacpp_threads') is-invalid @enderror"
+                                                   min="1" max="32" placeholder="4">
+                                            @error('llamacpp_threads')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                            <small class="form-text text-muted">Number of CPU threads (1-32)</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="llamacpp_context_length">Context Length</label>
+                                            <input type="number" wire:model="llamacpp_context_length" 
+                                                   class="form-control @error('llamacpp_context_length') is-invalid @enderror"
+                                                   min="512" max="8192" step="512" placeholder="4096">
+                                            @error('llamacpp_context_length')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                            <small class="form-text text-muted">Context window size (512-8192)</small>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -260,17 +332,87 @@
 
                             <div class="alert alert-info">
                                 <i class="fas fa-info-circle"></i>
-                                <strong>Current Provider:</strong> 
+                                <strong>Current Configuration:</strong> 
                                 @if($ai_model_provider === 'openai')
                                     <span class="badge badge-primary">OpenAI GPT</span>
                                     Using GPT-5 Mini model
                                 @else
-                                    <span class="badge badge-success">Llama (Local)</span>
-                                    Using {{ $llama_default_model }} model
+                                    @if($ai_backend_type === 'ollama')
+                                        <span class="badge badge-success">Ollama</span>
+                                        Using {{ $llama_default_model }} model
+                                    @else
+                                        <span class="badge badge-warning">llama.cpp</span>
+                                        Using custom GGUF model @if($llamacpp_model_path) ({{ basename($llamacpp_model_path) }}) @endif
+                                    @endif
                                 @endif
                             </div>
 
-                            <div class="d-flex justify-content-end">
+                            <!-- Performance Tips -->
+                            @if($ai_model_provider === 'llama')
+                                <div class="alert alert-light">
+                                    <h6><i class="fas fa-lightbulb"></i> Performance Analysis (Tested Results)</h6>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <h6>🚀 Backend Performance:</h6>
+                                            <ul class="mb-2">
+                                                <li><strong>Ollama:</strong> 7.33s response time, easy setup</li>
+                                                <li><strong>llama.cpp:</strong> 6.15s response time (16% faster)</li>
+                                            </ul>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <h6>📊 Model Performance:</h6>
+                                            <ul class="mb-2">
+                                                <li><strong>llama3.2:1b:</strong> 9.86s (fastest)</li>
+                                                <li><strong>llama3.2:3b:</strong> 14.47s (recommended)</li>
+                                                <li><strong>mistral:7b:</strong> 27.66s (highest quality)</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <small class="text-muted">
+                                            <i class="fas fa-info-circle"></i>
+                                            Results from live testing on this server. llama.cpp provides 16% performance gain but requires GGUF model files.
+                                        </small>
+                                    </div>
+                                </div>
+                            @endif
+
+                            <!-- Model Testing Section -->
+                            @if($ai_model_provider === 'llama' && $ai_backend_type === 'ollama')
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <div class="form-group">
+                                            <label>Model Testing</label>
+                                            <div class="btn-group d-block">
+                                                @foreach($this->getAvailableLlamaModels() as $value => $label)
+                                                    <button type="button" 
+                                                            wire:click="testModel('{{ $value }}')" 
+                                                            class="btn btn-outline-info btn-sm mr-2 mb-2"
+                                                            wire:loading.attr="disabled" 
+                                                            wire:target="testModel">
+                                                        <span wire:loading.remove wire:target="testModel('{{ $value }}')">
+                                                            <i class="fas fa-flask"></i>
+                                                            Test {{ $value }}
+                                                        </span>
+                                                        <span wire:loading wire:target="testModel('{{ $value }}')" class="d-none">
+                                                            <i class="fas fa-spinner fa-spin"></i>
+                                                            Testing...
+                                                        </span>
+                                                    </button>
+                                                @endforeach
+                                            </div>
+                                            <small class="form-text text-muted">Test different models to check response time and availability</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
+
+                            <div class="d-flex justify-content-between">
+                                <a href="/AI_MODEL_RECOMMENDATIONS.md" target="_blank" class="btn btn-info">
+                                    <i class="fas fa-chart-line"></i>
+                                    View Performance Analysis
+                                </a>
+                                
                                 <button type="submit" class="btn btn-primary" wire:loading.attr="disabled" wire:target="saveAiSettings">
                                     <span wire:loading.remove wire:target="saveAiSettings">
                                         <i class="fas fa-save"></i>

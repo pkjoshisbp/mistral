@@ -36,9 +36,14 @@ class SettingsManager extends Component
     
     // AI Settings
     public $ai_model_provider = 'llama';
+    public $ai_backend_type = 'ollama'; // ollama or llamacpp
     public $openai_api_key = '';
     public $openai_default_model = 'gpt-5-mini'; // Only allowed model
     public $llama_default_model = 'llama3.2:3b';
+    public $llamacpp_model_path = '';
+    public $llamacpp_model_repo = 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom';
+    public $llamacpp_threads = 4;
+    public $llamacpp_context_length = 4096;
     
     public function mount()
     {
@@ -48,10 +53,74 @@ class SettingsManager extends Component
     public function getAvailableLlamaModels()
     {
         return [
-            'llama3.2:1b' => 'Llama 3.2:1B (Fast, recommended)',
-            'llama3.2:3b' => 'Llama 3.2:3B (Better quality)',
-            'mistral:7b' => 'Mistral 7B (High quality, slower)'
+            'llama3.2:1b' => 'Llama 3.2:1B (Fast, lightweight)',
+            'llama3.2:3b' => 'Llama 3.2:3B (Balanced quality/speed)',
+            'llama3.2:3b-instruct-gguf' => 'Llama 3.2:3B Instruct GGUF (llama.cpp optimized)',
+            'mistral:7b' => 'Mistral 7B (High quality, slower)',
+            'gemma:2b' => 'Gemma 2B (Google, fast)',
         ];
+    }
+
+    public function getAvailableLlamaCppModels()
+    {
+        return [
+            'bartowski/Llama-3.2-3B-Instruct-GGUF:Llama-3.2-3B-Instruct-Q4_K_M.gguf' => 'Llama 3.2 3B Instruct Q4_K_M (1.87GB)',
+            'bartowski/Llama-3.2-1B-Instruct-GGUF:Llama-3.2-1B-Instruct-Q4_K_M.gguf' => 'Llama 3.2 1B Instruct Q4_K_M (Fast)',
+            'custom/Llama-3.2-3B-Instruct-Q8_0-Custom' => 'Llama 3.2 3B Instruct Q8_0 Custom (3.2GB, High Quality)',
+        ];
+    }
+
+    public function getAvailableBackends()
+    {
+        return [
+            'ollama' => 'Ollama (Easy management, auto-downloads)',
+            'llamacpp' => 'llama.cpp (Optimized performance, manual setup)'
+        ];
+    }
+
+    public function checkOllamaModels()
+    {
+        try {
+            $output = shell_exec('ollama list 2>&1');
+            if ($output && str_contains($output, 'llama3.2')) {
+                return true;
+            }
+        } catch (\Exception $e) {
+            \Log::error('Failed to check Ollama models: ' . $e->getMessage());
+        }
+        return false;
+    }
+
+    public function testModel($model = null)
+    {
+        $testModel = $model ?: $this->llama_default_model;
+        $testPrompt = "Respond with 'AI system test successful' and the current model name.";
+        
+        try {
+            $startTime = microtime(true);
+            
+            // Test with Ollama API
+            $response = \Http::timeout(30)->post('http://localhost:11434/api/generate', [
+                'model' => $testModel,
+                'prompt' => $testPrompt,
+                'stream' => false
+            ]);
+            
+            $endTime = microtime(true);
+            $responseTime = round(($endTime - $startTime), 2);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                $responseText = $data['response'] ?? 'No response received';
+                
+                session()->flash('success', "✅ Model '{$testModel}' test successful! Response time: {$responseTime}s. Response: " . substr($responseText, 0, 100) . "...");
+            } else {
+                session()->flash('error', "❌ Model test failed. HTTP status: " . $response->status());
+            }
+            
+        } catch (\Exception $e) {
+            session()->flash('error', "❌ Model test error: " . $e->getMessage());
+        }
     }
 
     public function loadSettings()
@@ -82,9 +151,14 @@ class SettingsManager extends Component
         
         // AI Settings
         $this->ai_model_provider = AdminSetting::get('ai_model_provider', config('app.ai_model_provider', 'llama'));
+        $this->ai_backend_type = AdminSetting::get('ai_backend_type', 'ollama');
         $this->openai_api_key = AdminSetting::get('openai_api_key', '');
         $this->openai_default_model = AdminSetting::get('openai_default_model', 'gpt-5-mini');
         $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3.2:1b');
+        $this->llamacpp_model_path = AdminSetting::get('llamacpp_model_path', '');
+        $this->llamacpp_model_repo = AdminSetting::get('llamacpp_model_repo', 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom');
+        $this->llamacpp_threads = AdminSetting::get('llamacpp_threads', 4);
+        $this->llamacpp_context_length = AdminSetting::get('llamacpp_context_length', 4096);
     }
 
     public function savePaymentSettings()
@@ -208,27 +282,42 @@ class SettingsManager extends Component
     {
         $this->validate([
             'ai_model_provider' => 'required|in:openai,llama',
+            'ai_backend_type' => 'required|in:ollama,llamacpp',
             'openai_api_key' => 'nullable|string',
             'openai_default_model' => 'nullable|string',
             'llama_default_model' => 'nullable|string',
+            'llamacpp_model_path' => 'nullable|string',
+            'llamacpp_model_repo' => 'nullable|string',
+            'llamacpp_threads' => 'nullable|integer|min:1|max:32',
+            'llamacpp_context_length' => 'nullable|integer|min:512|max:8192',
         ]);
 
         // Save to admin settings
         AdminSetting::set('ai_model_provider', $this->ai_model_provider, 'select', 'ai', 'AI Model Provider');
+        AdminSetting::set('ai_backend_type', $this->ai_backend_type, 'select', 'ai', 'AI Backend Type');
         AdminSetting::set('openai_api_key', $this->openai_api_key, 'password', 'ai', 'OpenAI API Key', null, true);
         AdminSetting::set('openai_default_model', $this->openai_default_model, 'text', 'ai', 'OpenAI Default Model');
         AdminSetting::set('llama_default_model', $this->llama_default_model, 'select', 'ai', 'Llama Default Model');
+        AdminSetting::set('llamacpp_model_path', $this->llamacpp_model_path, 'text', 'ai', 'llama.cpp Model Path');
+        AdminSetting::set('llamacpp_model_repo', $this->llamacpp_model_repo, 'select', 'ai', 'llama.cpp Model Repository');
+        AdminSetting::set('llamacpp_threads', $this->llamacpp_threads, 'number', 'ai', 'llama.cpp Threads');
+        AdminSetting::set('llamacpp_context_length', $this->llamacpp_context_length, 'number', 'ai', 'llama.cpp Context Length');
 
-        // Update environment file if OpenAI key is provided
+        // Update environment file
+        $envUpdates = [
+            'AI_MODEL_PROVIDER' => $this->ai_model_provider,
+            'AI_BACKEND_TYPE' => $this->ai_backend_type,
+        ];
+        
         if ($this->openai_api_key) {
-            $this->updateEnvFile([
-                'OPENAI_API_KEY' => $this->openai_api_key,
-                'AI_MODEL_PROVIDER' => $this->ai_model_provider,
-            ]);
+            $envUpdates['OPENAI_API_KEY'] = $this->openai_api_key;
         }
+
+        $this->updateEnvFile($envUpdates);
 
         \Log::info('AI Settings saved successfully', [
             'provider' => $this->ai_model_provider,
+            'backend_type' => $this->ai_backend_type,
             'llama_model' => $this->llama_default_model,
             'openai_model' => $this->openai_default_model
         ]);
