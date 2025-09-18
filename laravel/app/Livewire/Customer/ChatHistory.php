@@ -59,8 +59,13 @@ class ChatHistory extends Component
 
     public function deleteSession($sessionId)
     {
+        $org = Auth::user()->primaryOrganization();
+        if (!$org) {
+            return; // No organization context
+        }
+
         $conversation = ChatConversation::where('id', $sessionId)
-            ->where('organization_id', Auth::user()->organization_id)
+            ->where('organization_id', $org->id)
             ->first();
 
         if ($conversation) {
@@ -71,9 +76,14 @@ class ChatHistory extends Component
 
     public function exportSession($sessionId)
     {
+        $org = Auth::user()->primaryOrganization();
+        if (!$org) {
+            return; // No organization context
+        }
+
         $conversation = ChatConversation::with('messages')
             ->where('id', $sessionId)
-            ->where('organization_id', Auth::user()->organization_id)
+            ->where('organization_id', $org->id)
             ->first();
 
         if ($conversation) {
@@ -109,8 +119,21 @@ class ChatHistory extends Component
 
     public function render()
     {
+        $org = Auth::user()->primaryOrganization();
+
+        if (!$org) {
+            return view('livewire.customer.chat-history', [
+                'conversations' => collect([])
+            ])->layout('layouts.customer', [
+                'layoutData' => [
+                    'title' => 'Chat History'
+                ]
+            ]);
+        }
+
         $query = ChatConversation::with(['messages'])
-            ->where('organization_id', Auth::user()->organization_id);
+            ->withCount('messages')
+            ->where('organization_id', $org->id);
 
         if ($this->search) {
             $query->where(function ($q) {
@@ -130,7 +153,10 @@ class ChatHistory extends Component
             $query->whereDate('created_at', '<=', $this->dateTo);
         }
 
-        $conversations = $query->orderBy('last_activity_at', 'desc')->paginate(10);
+        $conversations = $query
+            ->orderByDesc('last_activity_at')
+            ->orderByDesc('created_at')
+            ->paginate(10);
 
         return view('livewire.customer.chat-history', [
             'conversations' => $conversations

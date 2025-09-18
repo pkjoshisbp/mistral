@@ -54,12 +54,13 @@ class Faqs extends Component
     {
         $this->validate();
         $org = $this->orgId();
+        $clean = $this->sanitizeAnswer($this->answer);
         
         try {
             $faq = OrganizationFaq::create([
                 'organization_id' => $org,
                 'question' => $this->question,
-                'answer' => $this->answer,
+                'answer' => $clean,
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order,
@@ -98,11 +99,12 @@ class Faqs extends Component
         $this->validate();
         $f = OrganizationFaq::where('organization_id', $this->orgId())->find($this->editingId);
         if (!$f) return;
+        $clean = $this->sanitizeAnswer($this->answer);
         
         try {
             $f->update([
                 'question' => $this->question,
-                'answer' => $this->answer,
+                'answer' => $clean,
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order,
@@ -218,5 +220,71 @@ class Faqs extends Component
     public function render()
     {
         return view('livewire.customer.faqs')->layout('layouts.customer');
+    }
+
+    /**
+     * Sanitize answer allowing only a controlled subset of HTML tags and attributes.
+     */
+    private function sanitizeAnswer(string $html): string
+    {
+        // Quick bail
+        if (trim($html) === '') return '';
+        // Allowed tags & attributes mapping
+        $allowedTags = [
+            'strong' => [], 'b' => [], 'em' => [], 'i' => [], 'u' => [], 'br' => [], 'code' => [],
+            'ul' => [], 'ol' => [], 'li' => [],
+            'a' => ['href','target','rel'],
+            'img' => ['src','alt']
+        ];
+
+        // Load into DOMDocument for stripping disallowed tags
+        $doc = new \DOMDocument('1.0', 'UTF-8');
+        libxml_use_internal_errors(true);
+        $wrapped = '<div>'.$html.'</div>';
+        $doc->loadHTML($wrapped, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+
+        $xpath = new \DOMXPath($doc);
+        foreach ($xpath->query('//*') as $node) {
+            $tag = $node->nodeName;
+            if (!array_key_exists($tag, $allowedTags)) {
+                // Replace node with its text content or children
+                if ($node->childNodes->length) {
+                    while ($node->firstChild) {
+                        $node->parentNode->insertBefore($node->firstChild, $node);
+                    }
+                }
+                $node->parentNode->removeChild($node);
+                continue;
+            }
+            // Clean attributes
+            if ($node->hasAttributes()) {
+                for ($i = $node->attributes->length - 1; $i >=0; $i--) {
+                    $attr = $node->attributes->item($i);
+                    if (!in_array($attr->name, $allowedTags[$tag], true)) {
+                        $node->removeAttribute($attr->name);
+                        continue;
+                    }
+                    // Basic protocol safety for href/src
+                    if (in_array($attr->name, ['href','src'])) {
+                        $val = $attr->value;
+                        if (!preg_match('/^https?:\/\//i', $val)) {
+                            // Disallow javascript: and other schemes
+                            $node->removeAttribute($attr->name);
+                        }
+                    }
+                    if ($attr->name === 'target') {
+                        $node->setAttribute('rel','nofollow noopener noreferrer');
+                    }
+                }
+            }
+        }
+
+        $cleanHtml = $doc->saveHTML();
+        // Remove wrapping container if present
+        if (str_starts_with($cleanHtml, '<div>') && str_ends_with($cleanHtml, '</div>')) {
+            $cleanHtml = substr($cleanHtml, 5, -6);
+        }
+        return trim($cleanHtml);
     }
 }

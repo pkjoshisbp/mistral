@@ -103,7 +103,7 @@
                                         </td>
                                         <td>
                                             <span class="badge badge-info">
-                                                {{ $conversation->messages->count() }} messages
+                                                {{ $conversation->messages_count ?? $conversation->messages->count() }} messages
                                             </span>
                                         </td>
                                         <td>
@@ -144,21 +144,14 @@
                                             <td colspan="5" class="bg-light">
                                                 <div class="chat-messages p-3" style="max-height: 300px; overflow-y: auto;">
                                                     @foreach($conversation->messages as $message)
-                                                        <div class="message mb-2 
-                                                            @if($message->sender === 'user') text-right @else text-left @endif">
-                                                            <div class="message-content 
-                                                                @if($message->sender === 'user') 
-                                                                    bg-primary text-white 
-                                                                @else 
-                                                                    bg-white border 
-                                                                @endif
-                                                                d-inline-block p-2 rounded" 
-                                                                style="max-width: 70%;">
-                                                                {{ $message->message }}
+                                                        @php $isUser = $message->sender_type === 'user'; @endphp
+                                                        <div class="message mb-2 {{ $isUser ? 'text-right' : 'text-left' }}">
+                                                            <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded" style="max-width: 70%;">
+                                                                {!! $message->message_html !!}
                                                             </div>
                                                             <div class="message-time">
                                                                 <small class="text-muted">
-                                                                    {{ $message->created_at->format('h:i A') }}
+                                                                    {{ ($message->sent_at ?? $message->created_at)->format('h:i A') }}
                                                                 </small>
                                                             </div>
                                                         </div>

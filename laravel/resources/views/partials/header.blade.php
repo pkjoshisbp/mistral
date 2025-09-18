@@ -32,6 +32,9 @@
                 <li class="nav-item">
                     <a class="nav-link" href="{{ route('contact') }}">{{ __('common.contact') }}</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ route('affiliate.register') }}">Become an Affiliate</a>
+                </li>
             </ul>
             
             <ul class="navbar-nav align-items-center ms-auto">
@@ -70,6 +73,8 @@
                                 <li><a class="dropdown-item" href="{{ route('admin.dashboard') }}">Admin Dashboard</a></li>
                             @elseif(Auth::user()->role === 'customer')
                                 <li><a class="dropdown-item" href="{{ route('customer.dashboard') }}">Customer Dashboard</a></li>
+                            @elseif(Auth::user()->role === 'affiliate')
+                                <li><a class="dropdown-item" href="{{ route('affiliate.dashboard') }}">Affiliate Dashboard</a></li>
                             @else
                                 <li><a class="dropdown-item" href="{{ route('home') }}">Home</a></li>
                             @endif

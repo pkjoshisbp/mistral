@@ -28,6 +28,8 @@ class RedirectIfAuthenticated
                     return redirect()->route('admin.dashboard');
                 } elseif ($user->role === 'customer') {
                     return redirect()->route('customer.dashboard');
+                } elseif ($user->role === 'affiliate') {
+                    return redirect()->route('affiliate.dashboard');
                 } else {
                     return redirect(RouteServiceProvider::HOME);
                 }

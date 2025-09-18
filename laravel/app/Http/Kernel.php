@@ -21,6 +21,7 @@ class Kernel extends HttpKernel
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
         \App\Http\Middleware\TrimStrings::class,
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
+        \App\Http\Middleware\AffiliateTracker::class,
     ];
 
     /**
@@ -70,6 +71,7 @@ class Kernel extends HttpKernel
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'customer' => \App\Http\Middleware\CustomerMiddleware::class,
         'admin' => \App\Http\Middleware\AdminMiddleware::class,
+        'affiliate' => \App\Http\Middleware\AffiliateMiddleware::class,
         'user.has.organization' => \App\Http\Middleware\UserHasOrganization::class,
         'subscription.required' => \App\Http\Middleware\RequireActiveSubscription::class,
         'noindex' => \App\Http\Middleware\NoIndexMiddleware::class,

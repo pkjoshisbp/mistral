@@ -108,6 +108,12 @@
               <p>Users</p>
             </a>
           </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.credit-manager') }}" class="nav-link {{ request()->routeIs('admin.credit-manager') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-coins"></i>
+              <p>Credit Manager</p>
+            </a>
+          </li>
 
           <li class="nav-header">DATA MANAGEMENT</li>
           <li class="nav-item has-treeview {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'menu-open' : '' }}">

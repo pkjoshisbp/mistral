@@ -345,6 +345,12 @@ Route::get('/demo-test', function() {
 
 Route::get('/demo/{industry?}', \App\Livewire\Public\IndustryDemo::class)->name('demo');
 
+// Affiliate Registration Route
+Route::get('/affiliate/register', \App\Livewire\AffiliateRegistration::class)->name('affiliate.register');
+
+// Affiliate Link Redirect Route
+Route::get('/ref/{code}', [\App\Http\Controllers\AffiliateController::class, 'redirect'])->name('affiliate.redirect');
+
 // Blog Routes
 
 Route::get('/blog', function () {
@@ -367,7 +373,9 @@ Route::get('/blog/{blog:slug}', function (Blog $blog) {
 Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('sitemap');
 
 // Analytics tracking routes
-Route::post('/analytics/track', [AnalyticsController::class, 'track'])->name('analytics.track');
+Route::post('/analytics/track', [AnalyticsController::class, 'track'])
+    ->middleware([\App\Http\Middleware\CorsMiddleware::class])
+    ->name('analytics.track');
 Route::get('/analytics/dashboard/{orgId}', [AnalyticsController::class, 'dashboard'])->name('analytics.dashboard');
 
 Route::middleware('auth')->group(function () {
@@ -454,6 +462,8 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/users', function () {
         return view('admin.users');
     })->name('users');
+    
+    Route::get('/credit-manager', \App\Livewire\Admin\CreditManager::class)->name('credit-manager');
     
     Route::get('/terms-management', function () {
         return view('admin.terms-management');
@@ -589,11 +599,21 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
     });
 });
 
+// Affiliate Routes (for affiliates to manage their links, commissions, etc.)
+Route::middleware(['auth', 'affiliate'])->prefix('affiliate')->name('affiliate.')->group(function () {
+    Route::get('/dashboard', \App\Livewire\AffiliateDashboard::class)->name('dashboard');
+    Route::get('/links', \App\Livewire\AffiliateLinks::class)->name('links');
+    Route::get('/commissions', \App\Livewire\AffiliateCommissions::class)->name('commissions');
+    Route::get('/reports', \App\Livewire\AffiliateReports::class)->name('reports');
+    Route::get('/profile', \App\Livewire\AffiliateProfile::class)->name('profile');
+});
+
 // Widget Routes (Public - no auth required)
 Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class, 'noindex'])->group(function () {
     Route::get('{orgId}/script.js', [\App\Http\Controllers\WidgetController::class, 'getWidgetScript'])->name('widget.script');
     Route::get('{orgId}/styles.css', [\App\Http\Controllers\WidgetController::class, 'getWidgetCSS'])->name('widget.styles');
     Route::post('{orgId}/chat', [\App\Http\Controllers\WidgetController::class, 'chat'])->name('widget.chat');
+    Route::options('{orgId}/chat', function() { return response('', 204); });
     Route::get('{orgId}/config', [\App\Http\Controllers\WidgetController::class, 'getConfig'])->name('widget.config');
     Route::get('{orgId}/test', function($orgId) {
         $organization = \App\Models\Organization::findOrFail($orgId);

@@ -145,4 +145,30 @@ class User extends Authenticatable
     {
         return $this->canAccessPremiumFeatures(0.1); // Minimum 0.1 credits or active subscription
     }
+
+    // Affiliate relationships
+    public function affiliate()
+    {
+        return $this->hasOne(Affiliate::class);
+    }
+
+    public function referredByAffiliate()
+    {
+        return $this->belongsTo(Affiliate::class, 'referred_by_affiliate_id');
+    }
+
+    public function affiliateVisits()
+    {
+        return $this->hasMany(AffiliateVisit::class);
+    }
+
+    public function affiliateCommissions()
+    {
+        return $this->hasMany(AffiliateCommission::class);
+    }
+
+    public function isAffiliate(): bool
+    {
+        return $this->role === 'affiliate' && $this->affiliate !== null;
+    }
 }

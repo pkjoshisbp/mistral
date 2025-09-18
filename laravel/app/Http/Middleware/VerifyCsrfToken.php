@@ -16,5 +16,6 @@ class VerifyCsrfToken extends Middleware
         'paypal/webhook',
         'razorpay/webhook',
         'razorpay/webhook-test',
+        'analytics/track', // Public analytics endpoint (widget + site events) - stateless
     ];
 }

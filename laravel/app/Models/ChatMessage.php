@@ -63,4 +63,30 @@ class ChatMessage extends Model
     {
         return $this->sender_type === 'agent';
     }
+
+    /**
+     * Accessor to return a safe HTML version of the message with clickable links.
+     */
+    public function getMessageHtmlAttribute()
+    {
+        if (!$this->message) {
+            return '';
+        }
+        // Escape first
+        $escaped = e($this->message);
+        // Linkify http/https URLs
+        $linked = preg_replace_callback('/https?:\/\/[^\s<]+/i', function ($matches) {
+            $full = $matches[0];
+            $trail = '';
+            // Move trailing punctuation outside link
+            while (preg_match('/[\.,!?)]$/', $full)) {
+                $trail = substr($full, -1) . $trail;
+                $full = substr($full, 0, -1);
+            }
+            $display = strlen($full) > 80 ? substr($full,0,77).'...' : $full;
+            return '<a href="'.e($full).'" target="_blank" rel="nofollow noopener noreferrer">'.$display.'</a>'.$trail;
+        }, $escaped);
+        // Preserve newlines
+        return nl2br($linked);
+    }
 }

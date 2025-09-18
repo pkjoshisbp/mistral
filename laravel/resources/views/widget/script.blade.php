@@ -360,6 +360,30 @@
             }
         }
 
+        linkify(text) {
+            if (!text) return '';
+            // Escape basic HTML first to prevent injection, then re-insert anchors
+            const escapeMap = { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' };
+            const escaped = text.replace(/[&<>"']/g, ch => escapeMap[ch] || ch);
+            // Detect URLs (http/https) and convert to anchors opening in new tab
+            // Exclude trailing punctuation (. , ! ? ) ] } ) if present; keep them outside the link
+            const urlRegex = /https?:\/\/[^\s<]+/g;
+            const withLinks = escaped.replace(urlRegex, full => {
+                const m = full.match(/^(.*?)([\.,!?)]?]?)$/); // capture potential single trailing punctuation
+                if (!m) return full;
+                let url = m[1];
+                let trail = full.substring(url.length);
+                // If url ends with common punctuation, move it out
+                while(/[\.,!?)]$/.test(url)) {
+                    trail = url.slice(-1) + trail;
+                    url = url.slice(0,-1);
+                }
+                return `<a href="${url}" target="_blank" rel="nofollow noopener noreferrer">${url}</a>${trail}`;
+            });
+            // Preserve line breaks
+            return withLinks.replace(/\n/g, '<br>');
+        }
+
         addMessage(content, sender = 'user') {
             const messagesContainer = document.getElementById(this.ids.messages);
             if (!messagesContainer) {
@@ -373,9 +397,10 @@
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             
                                console.log('[AI Widget] Closing chat window');
+            const safeContent = sender === 'bot' ? this.linkify(content) : this.linkify(content); // both user & bot for consistency
             messageElement.innerHTML = `
                 <div class="ai-chat-message-content">
-                    ${content}
+                    ${safeContent}
                 </div>
                 <div class="ai-chat-message-time">${time}</div>
             `;
