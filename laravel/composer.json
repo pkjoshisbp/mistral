@@ -12,6 +12,7 @@
         "laravel/framework": "^10.10",
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
+        "league/commonmark": "^2.7",
         "livewire/livewire": "^3.6",
         "openai-php/client": "^0.10.3",
         "razorpay/razorpay": "^2.9",

@@ -1,6 +1,16 @@
 <x-guest-layout>
     <!-- Session Status -->
     <x-auth-session-status class="mb-4" :status="session('status')" />
+    @if (session('error'))
+        <div class="mb-4 text-sm text-red-600">
+            {{ session('error') }}
+        </div>
+    @endif
+    @if ($errors->has('auth') || $errors->has('email') || $errors->has('password') || $errors->has('otp'))
+        <div class="mb-4 text-sm text-red-600">
+            {{ $errors->first('auth') ?: $errors->first('email') ?: $errors->first('password') ?: $errors->first('otp') }}
+        </div>
+    @endif
 
     <form method="POST" action="{{ route('login') }}">
         @csrf
@@ -42,10 +52,10 @@
         </div>
 
         <!-- OTP Section -->
-        <div id="otp-section" class="mt-4" style="display: none;">
+    <div id="otp-section" class="mt-4" style="display: {{ $errors->has('otp') ? 'block' : 'none' }};">
             <div>
                 <x-input-label for="otp" :value="__('Enter OTP Code')" />
-                <x-text-input id="otp" class="block mt-1 w-full" type="text" name="otp" maxlength="6" placeholder="Enter 6-digit OTP" />
+                <x-text-input id="otp" class="block mt-1 w-full" type="text" name="otp" maxlength="6" placeholder="Enter 6-digit OTP" @if(!$errors->has('otp')) disabled @endif />
                 <x-input-error :messages="$errors->get('otp')" class="mt-2" />
             </div>
             <div class="mt-2 text-sm text-gray-600">
@@ -71,9 +81,7 @@
                 </a>
             @endif
 
-            <button type="button" id="simple-login" class="ms-3 inline-flex items-center px-4 py-2 bg-red-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-red-500 focus:bg-red-700 active:bg-red-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition ease-in-out duration-150">
-                Simple Login (Debug)
-            </button>
+            
 
             <x-primary-button id="login-button" class="ms-3">
                 <span id="login-text">{{ __('Log In') }}</span>
@@ -115,7 +123,7 @@
         const resendBtn = document.getElementById('resend-otp');
         const otpMessage = document.getElementById('otp-message');
 
-        let otpSent = false;
+    // We no longer track client-side OTP step; rely on server to decide
 
         // Generate device fingerprint
         function generateDeviceFingerprint() {
@@ -144,8 +152,28 @@
         }
 
         const deviceFingerprint = generateDeviceFingerprint();
+        // Attach device fingerprint to the form for native submission
+        (function(){
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'device_fingerprint';
+            hidden.value = deviceFingerprint;
+            form.appendChild(hidden);
+        })();
 
-        // Handle form submission
+        // Helper to set/update hidden inputs on the form
+        function setHiddenField(name, value) {
+            let input = form.querySelector('input[type="hidden"][name="' + name + '"]');
+            if (!input) {
+                input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                form.appendChild(input);
+            }
+            input.value = value;
+        }
+
+        // Handle form submission: always submit natively first so server validates credentials before OTP
         form.addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -158,17 +186,21 @@
                 return;
             }
 
-            if (!otpSent) {
-                // First step - always send OTP for security
-                await sendOTP(email);
-            } else {
-                // Second step - verify OTP and complete login
+            // If OTP section is visible (server indicated OTP required), require OTP
+            const otpVisible = otpSection && getComputedStyle(otpSection).display !== 'none';
+            if (otpVisible) {
                 if (!otp || otp.length !== 6) {
                     alert('Please enter a valid 6-digit OTP code');
                     return;
                 }
-                await verifyOTPAndLogin(email, password, otp);
+                setHiddenField('otp', otp);
+                const rememberDevice = document.getElementById('remember_device');
+                if (rememberDevice && rememberDevice.checked) {
+                    setHiddenField('remember_device', '1');
+                }
             }
+            showSpinner(true);
+            form.submit();
         });
 
         async function sendOTP(email) {
@@ -187,31 +219,9 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    if (data.trusted_device) {
-                        // Device is trusted, proceed directly to login
-                        const formData = new FormData();
-                        formData.append('email', email);
-                        formData.append('password', passwordInput.value);
-                        formData.append('_token', document.querySelector('meta[name="csrf-token"]').content);
-
-                        const loginResponse = await fetch(form.action, {
-                            method: 'POST',
-                            body: formData
-                        });
-
-                        if (loginResponse.ok) {
-                            window.location.reload();
-                        } else {
-                            alert('Login failed. Please try again.');
-                        }
-                    } else {
-                        // OTP required
-                        otpSent = true;
-                        otpSection.style.display = 'block';
-                        loginText.textContent = 'Verify & Login';
-                        otpMessage.textContent = 'We\'ve sent a 6-digit code to ' + email + '. Please enter it below.';
-                        otpInput.focus();
-                    }
+                    // If requested from Resend button, notify user
+                    otpMessage.textContent = 'We\'ve sent a 6-digit code to ' + email + '. Please enter it below.';
+                    // Keep UI state as determined by server
                 } else {
                     alert(data.message || 'Failed to send OTP. Please try again.');
                 }
@@ -223,56 +233,7 @@
             }
         }
 
-        async function verifyOTPAndLogin(email, password, otp) {
-            try {
-                showSpinner(true);
-                
-                const formData = new FormData();
-                formData.append('email', email);
-                formData.append('password', password);
-                formData.append('otp', otp);
-                formData.append('_token', document.querySelector('meta[name="csrf-token"]').content);
-                
-                // Add remember device if checked
-                const rememberDevice = document.getElementById('remember_device');
-                if (rememberDevice && rememberDevice.checked) {
-                    formData.append('remember_device', '1');
-                }
-
-                const response = await fetch(form.action, {
-                    method: 'POST',
-                    headers: {
-                        'X-Device-Fingerprint': deviceFingerprint
-                    },
-                    body: formData
-                });
-
-                if (response.ok) {
-                    // Login successful
-                    window.location.reload();
-                } else {
-                    const data = await response.json();
-                    if (data.errors) {
-                        if (data.errors.otp) {
-                            alert(data.errors.otp[0]);
-                        } else if (data.errors.email) {
-                            alert(data.errors.email[0]);
-                        } else if (data.errors.password) {
-                            alert(data.errors.password[0]);
-                        } else {
-                            alert('Login failed. Please check your credentials.');
-                        }
-                    } else {
-                        alert('Login failed. Please try again.');
-                    }
-                }
-            } catch (error) {
-                alert('Error during login. Please try again.');
-                console.error('Login Error:', error);
-            } finally {
-                showSpinner(false);
-            }
-        }
+        // verifyOTPAndLogin no longer used; native submit handles errors via Laravel session
 
         function showSpinner(show) {
             if (show) {
@@ -284,9 +245,15 @@
             }
         }
 
-        // Resend OTP
+        // Resend OTP (only after server indicates OTP is required)
         resendBtn.addEventListener('click', async function(e) {
             e.preventDefault();
+            // Allow resend only if OTP section is visible (server requested)
+            const otpVisible = otpSection && getComputedStyle(otpSection).display !== 'none';
+            if (!otpVisible) {
+                alert('Please submit your email and password first.');
+                return;
+            }
             const email = emailInput.value;
             if (email) {
                 await sendOTP(email);
@@ -299,41 +266,44 @@
             }
         });
 
-        // Simple login (for debugging)
-        document.getElementById('simple-login').addEventListener('click', async function(e) {
-            e.preventDefault();
-            const email = emailInput.value;
-            const password = passwordInput.value;
+        // Simple login (debug) removed; keep code safe if element is absent
+        const simpleLoginBtn = document.getElementById('simple-login');
+        if (simpleLoginBtn) {
+            simpleLoginBtn.addEventListener('click', async function(e) {
+                e.preventDefault();
+                const email = emailInput.value;
+                const password = passwordInput.value;
 
-            if (!email || !password) {
-                alert('Please enter both email and password.');
-                return;
-            }
-
-            try {
-                const response = await fetch('/auth/simple-login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                    },
-                    body: JSON.stringify({ email: email, password: password})
-                });
-
-                const data = await response.json();
-                
-                if (data.success) {
-                    console.log('Simple login successful, redirecting to:', data.redirect);
-                    window.location.href = data.redirect;
-                } else {
-                    alert(data.message || 'Login failed');
-                    console.error('Simple login failed:', data);
+                if (!email || !password) {
+                    alert('Please enter both email and password.');
+                    return;
                 }
-            } catch (error) {
-                alert('Login error: ' + error.message);
-                console.error('Simple login error:', error);
-            }
-        });
+
+                try {
+                    const response = await fetch('/auth/simple-login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                        },
+                        body: JSON.stringify({ email: email, password: password})
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        console.log('Simple login successful, redirecting to:', data.redirect);
+                        window.location.href = data.redirect;
+                    } else {
+                        alert(data.message || 'Login failed');
+                        console.error('Simple login failed:', data);
+                    }
+                } catch (error) {
+                    alert('Login error: ' + error.message);
+                    console.error('Simple login error:', error);
+                }
+            });
+        }
 
         // Password visibility toggle
         const togglePassword = document.getElementById('toggle-password');

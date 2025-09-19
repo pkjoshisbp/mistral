@@ -362,26 +362,89 @@
 
         linkify(text) {
             if (!text) return '';
-            // Escape basic HTML first to prevent injection, then re-insert anchors
-            const escapeMap = { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' };
-            const escaped = text.replace(/[&<>"']/g, ch => escapeMap[ch] || ch);
-            // Detect URLs (http/https) and convert to anchors opening in new tab
-            // Exclude trailing punctuation (. , ! ? ) ] } ) if present; keep them outside the link
+            
+            // Strip any HTML tags that might be present (defensive)
+            text = text.replace(/<[^>]*>/g, '');
+            
+            // Normalize Markdown links: [label](url ... ) -> label (url)
+            text = text.replace(/\[(.*?)\]\(([^)]+)\)/g, (m, label, inner) => {
+                let url = '';
+                const urlMatch = inner.match(/https?:\/\/[^\s)]+/i);
+                if (urlMatch) url = urlMatch[0];
+                else {
+                    const dm = inner.match(/(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s)]*)?/i);
+                    if (dm) url = 'https://' + dm[0];
+                }
+                if (url) {
+                    if (!label || label.toLowerCase() === url.toLowerCase()) return url;
+                    return `${label} (${url})`;
+                }
+                return label || inner;
+            });
+            
+            // Process links first, then escape remaining content
+            let processed = text;
+            
+            // Store link placeholders to avoid escaping them
+            const links = [];
+            let linkIndex = 0;
+            
+            // Detect URLs (http/https) and convert to anchors
             const urlRegex = /https?:\/\/[^\s<]+/g;
-            const withLinks = escaped.replace(urlRegex, full => {
-                const m = full.match(/^(.*?)([\.,!?)]?]?)$/); // capture potential single trailing punctuation
+            processed = processed.replace(urlRegex, full => {
+                const m = full.match(/^(.*?)([\.,!?)]?]?)$/);
                 if (!m) return full;
                 let url = m[1];
                 let trail = full.substring(url.length);
+                
                 // If url ends with common punctuation, move it out
                 while(/[\.,!?)]$/.test(url)) {
                     trail = url.slice(-1) + trail;
                     url = url.slice(0,-1);
                 }
-                return `<a href="${url}" target="_blank" rel="nofollow noopener noreferrer">${url}</a>${trail}`;
+                
+                const linkHtml = `<a href="${url}" target="_blank">${url}</a>${trail}`;
+                const placeholder = `__LINK_${linkIndex}__`;
+                links[linkIndex] = linkHtml;
+                linkIndex++;
+                return placeholder;
             });
+            
+            // Bare domains (e.g., example.com) -> prepend https
+            const domainRegex = /(?<![\w@])((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(\/[\w\-._~:/?#[\]@!$&'()*+,;=%]*)?/g;
+            processed = processed.replace(domainRegex, (match, host, path='') => {
+                // Skip if it's a placeholder
+                if (match.includes('__LINK_')) return match;
+                
+                const url = `https://${host}${path || ''}`;
+                const linkHtml = `<a href="${url}" target="_blank">${host}${path || ''}</a>`;
+                const placeholder = `__LINK_${linkIndex}__`;
+                links[linkIndex] = linkHtml;
+                linkIndex++;
+                return placeholder;
+            });
+            
+            // Emails
+            const emailRegex = /(?<![\w])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w])/g;
+            processed = processed.replace(emailRegex, (email) => {
+                const linkHtml = `<a href="mailto:${email}">${email}</a>`;
+                const placeholder = `__LINK_${linkIndex}__`;
+                links[linkIndex] = linkHtml;
+                linkIndex++;
+                return placeholder;
+            });
+            
+            // Now escape remaining content (but not link placeholders)
+            const escapeMap = { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' };
+            processed = processed.replace(/[&<>"']/g, ch => escapeMap[ch] || ch);
+            
+            // Restore links
+            for (let i = 0; i < links.length; i++) {
+                processed = processed.replace(`__LINK_${i}__`, links[i]);
+            }
+            
             // Preserve line breaks
-            return withLinks.replace(/\n/g, '<br>');
+            return processed.replace(/\n/g, '<br>');
         }
 
         addMessage(content, sender = 'user') {

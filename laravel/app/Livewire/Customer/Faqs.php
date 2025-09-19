@@ -7,6 +7,7 @@ use App\Models\OrganizationFaq;
 use App\Models\Organization;
 use App\Services\AiAgentService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Artisan;
 
 class Faqs extends Component
 {
@@ -18,10 +19,13 @@ class Faqs extends Component
     public $keywords = '';
     public $sort_order = 0;
     public $is_active = true;
+    public $showPreview = false;
+    public $formSnapshot = [];
+    protected $listeners = ['customer-faqs-user-choice' => 'handleUnsavedChoice'];
 
     protected $rules = [
         'question' => 'required|string|min:3',
-        'answer' => 'required|string|min:3',
+    'answer' => 'required|string|min:3',
         'category' => 'nullable|string',
         'keywords' => 'nullable|string',
         'sort_order' => 'nullable|integer',
@@ -44,23 +48,150 @@ class Faqs extends Component
 
     public function resetForm()
     {
+    $this->editingId = null;
+    $this->question = $this->answer = $this->category = $this->keywords = '';
+        $this->sort_order = 0;
+        $this->is_active = true;
+        $this->showPreview = false;
+    }
+
+    public function togglePreview()
+    {
+        $this->showPreview = !$this->showPreview;
+    }
+
+    /**
+     * Take a snapshot of current form values to detect unsaved changes
+     */
+    private function snapshotForm()
+    {
+        $this->formSnapshot = [
+            'editingId' => $this->editingId,
+            'question' => (string) $this->question,
+            'answer' => (string) $this->answer,
+            'category' => (string) $this->category,
+            'keywords' => (string) $this->keywords,
+            'sort_order' => (int) $this->sort_order,
+            'is_active' => (bool) $this->is_active,
+        ];
+    }
+
+    /**
+     * Check if current form differs from the snapshot
+     */
+    private function hasUnsavedChanges(): bool
+    {
+        if (empty($this->formSnapshot)) return false;
+        $current = [
+            'editingId' => $this->editingId,
+            'question' => (string) $this->question,
+            'answer' => (string) $this->answer,
+            'category' => (string) $this->category,
+            'keywords' => (string) $this->keywords,
+            'sort_order' => (int) $this->sort_order,
+            'is_active' => (bool) $this->is_active,
+        ];
+        return $current !== $this->formSnapshot;
+    }
+
+    public function toggleForm()
+    {
+        $this->showForm = !$this->showForm;
+        
+        // If form is now visible, dispatch event to activate toolbar
+        if ($this->showForm) {
+            $this->dispatch('activate-toolbar');
+            // Starting fresh create if no editingId and fields empty
+            $this->snapshotForm();
+        }
+    }
+
+    /**
+     * Safer handler for the header "Add FAQ" button.
+     * If there are unsaved changes, ask user to save/discard/cancel.
+     */
+    public function handleAddClick()
+    {
+        if ($this->showForm && $this->hasUnsavedChanges()) {
+            // Ask browser to confirm via JS
+            $this->dispatch('confirm-unsaved-faq');
+            return;
+        }
+
+        // No unsaved changes — start a new blank form
         $this->editingId = null;
+        // Do not wipe on purpose if form is already open and blank; but ensure blank for new
         $this->question = $this->answer = $this->category = $this->keywords = '';
         $this->sort_order = 0;
         $this->is_active = true;
+        $this->showPreview = false;
+        $this->showForm = true;
+        $this->snapshotForm();
+        $this->dispatch('activate-toolbar');
+    }
+
+    /**
+     * Handle user choice from JS confirm dialog.
+     * Payload: ['action' => 'save'|'discard'|'cancel']
+     */
+    public function handleUnsavedChoice($payload = [])
+    {
+        $action = $payload['action'] ?? 'cancel';
+        if ($action === 'save') {
+            // Save current as new (create) then prepare new blank form
+            try {
+                $this->create();
+                // After create() the form is hidden and cleared; reopen new blank
+                $this->editingId = null;
+                $this->showForm = true;
+                $this->question = $this->answer = $this->category = $this->keywords = '';
+                $this->sort_order = 0;
+                $this->is_active = true;
+                $this->showPreview = false;
+                $this->snapshotForm();
+                $this->dispatch('activate-toolbar');
+            } catch (\Throwable $e) {
+                // Validation errors will surface via session; keep form as-is
+            }
+        } elseif ($action === 'discard') {
+            // Discard and start new blank
+            $this->editingId = null;
+            $this->question = $this->answer = $this->category = $this->keywords = '';
+            $this->sort_order = 0;
+            $this->is_active = true;
+            $this->showPreview = false;
+            $this->showForm = true;
+            $this->snapshotForm();
+            $this->dispatch('activate-toolbar');
+        } else {
+            // cancel - do nothing, keep current form content intact
+        }
+    }
+
+    public function getPreviewHtmlProperty()
+    {
+        if (empty($this->answer)) {
+            return '<p class="text-muted">Enter your answer using simple HTML (e.g., <strong>bold</strong>, <em>italic</em>, <a href=\"#\">link</a>) to see the preview...</p>';
+        }
+        $faq = new OrganizationFaq();
+        return $faq->sanitizeHtml($this->answer);
     }
 
     public function create()
     {
         $this->validate();
         $org = $this->orgId();
-        $clean = $this->sanitizeAnswer($this->answer);
+        
+    // Sanitize provided HTML before saving
+    $faqInstance = new OrganizationFaq();
+    $htmlContent = $faqInstance->sanitizeHtml($this->answer);
         
         try {
             $faq = OrganizationFaq::create([
                 'organization_id' => $org,
                 'question' => $this->question,
-                'answer' => $clean,
+                'answer' => $htmlContent,
+                'answer_markdown' => null,
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order,
@@ -86,12 +217,16 @@ class Faqs extends Component
         
         $this->editingId = $id;
         $this->question = $f->question;
-        $this->answer = $f->answer;
+    $this->answer = $f->answer;
         $this->category = $f->category;
         $this->keywords = $f->keywords;
         $this->sort_order = $f->sort_order ?? 0;
         $this->is_active = (bool)$f->is_active;
         $this->showForm = true;
+        
+        // Dispatch event to activate toolbar
+        $this->dispatch('activate-toolbar');
+        $this->snapshotForm();
     }
 
     public function update()
@@ -99,12 +234,15 @@ class Faqs extends Component
         $this->validate();
         $f = OrganizationFaq::where('organization_id', $this->orgId())->find($this->editingId);
         if (!$f) return;
-        $clean = $this->sanitizeAnswer($this->answer);
+        
+    // Sanitize provided HTML
+    $htmlContent = $f->sanitizeHtml($this->answer);
         
         try {
             $f->update([
                 'question' => $this->question,
-                'answer' => $clean,
+                'answer' => $htmlContent,
+                'answer_markdown' => null,
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order,
@@ -168,16 +306,28 @@ class Faqs extends Component
             
             $aiService = new AiAgentService();
             
+            // Compute content using model accessor (with fallbacks) and preserve URLs
+            $content = trim((string) $faq->plain_text_with_links);
+            if ($content === '') {
+                Log::warning('Skipping Qdrant upsert for FAQ with empty content', [
+                    'faq_id' => $faq->id,
+                    'organization_slug' => $organization->slug,
+                    'question' => $faq->question
+                ]);
+                return; // Do not overwrite existing good vectors with empty content
+            }
+            
             $items = [
                 [
                     'id' => "faq_{$faq->id}",
                     'title' => $faq->question,
-                    'content' => $faq->answer,
+                    'content' => $content, // Use plain text for embeddings
                     'category' => $faq->category ?? 'general',
                     'metadata' => [
                         'table_id' => $faq->id,
                         'updated_at' => $faq->updated_at->toISOString(),
-                        'keywords' => $faq->keywords
+                        'keywords' => $faq->keywords,
+                        'links' => method_exists($faq, 'getLinksAttribute') ? $faq->links : []
                     ]
                 ]
             ];
@@ -222,69 +372,32 @@ class Faqs extends Component
         return view('livewire.customer.faqs')->layout('layouts.customer');
     }
 
+
     /**
-     * Sanitize answer allowing only a controlled subset of HTML tags and attributes.
+     * Resync all FAQs of the current organization to AI (Qdrant)
      */
-    private function sanitizeAnswer(string $html): string
+    public function resyncFaqsToAi()
     {
-        // Quick bail
-        if (trim($html) === '') return '';
-        // Allowed tags & attributes mapping
-        $allowedTags = [
-            'strong' => [], 'b' => [], 'em' => [], 'i' => [], 'u' => [], 'br' => [], 'code' => [],
-            'ul' => [], 'ol' => [], 'li' => [],
-            'a' => ['href','target','rel'],
-            'img' => ['src','alt']
-        ];
-
-        // Load into DOMDocument for stripping disallowed tags
-        $doc = new \DOMDocument('1.0', 'UTF-8');
-        libxml_use_internal_errors(true);
-        $wrapped = '<div>'.$html.'</div>';
-        $doc->loadHTML($wrapped, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-        libxml_clear_errors();
-
-        $xpath = new \DOMXPath($doc);
-        foreach ($xpath->query('//*') as $node) {
-            $tag = $node->nodeName;
-            if (!array_key_exists($tag, $allowedTags)) {
-                // Replace node with its text content or children
-                if ($node->childNodes->length) {
-                    while ($node->firstChild) {
-                        $node->parentNode->insertBefore($node->firstChild, $node);
-                    }
-                }
-                $node->parentNode->removeChild($node);
-                continue;
+        try {
+            $org = Organization::find($this->orgId());
+            if (!$org) {
+                session()->flash('error', 'Organization not found.');
+                return;
             }
-            // Clean attributes
-            if ($node->hasAttributes()) {
-                for ($i = $node->attributes->length - 1; $i >=0; $i--) {
-                    $attr = $node->attributes->item($i);
-                    if (!in_array($attr->name, $allowedTags[$tag], true)) {
-                        $node->removeAttribute($attr->name);
-                        continue;
-                    }
-                    // Basic protocol safety for href/src
-                    if (in_array($attr->name, ['href','src'])) {
-                        $val = $attr->value;
-                        if (!preg_match('/^https?:\/\//i', $val)) {
-                            // Disallow javascript: and other schemes
-                            $node->removeAttribute($attr->name);
-                        }
-                    }
-                    if ($attr->name === 'target') {
-                        $node->setAttribute('rel','nofollow noopener noreferrer');
-                    }
-                }
-            }
+            // Call the Artisan command so we reuse the same safe logic and logging
+            Artisan::call('faq:resync', [
+                'organization' => $org->slug
+            ]);
+            $output = Artisan::output();
+            Log::info('Customer-triggered FAQ resync completed', [
+                'organization_slug' => $org->slug,
+                'output' => $output
+            ]);
+            session()->flash('message', 'Resync completed. Output: ' . trim($output));
+        } catch (\Throwable $e) {
+            Log::error('Customer resync FAQs error', ['error' => $e->getMessage()]);
+            session()->flash('error', 'Resync failed: ' . $e->getMessage());
         }
-
-        $cleanHtml = $doc->saveHTML();
-        // Remove wrapping container if present
-        if (str_starts_with($cleanHtml, '<div>') && str_ends_with($cleanHtml, '</div>')) {
-            $cleanHtml = substr($cleanHtml, 5, -6);
-        }
-        return trim($cleanHtml);
     }
+
 }

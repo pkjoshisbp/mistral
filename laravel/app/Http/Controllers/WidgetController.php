@@ -195,6 +195,7 @@ class WidgetController
                     $orderedResults = array_merge($serviceResults, $faqResults);
                 }
                 
+                $collectedLinks = [];
                 foreach ($orderedResults as $result) {
                     $payload = $result['payload'] ?? [];
                     $dataType = $payload['data_type'] ?? '';
@@ -202,8 +203,8 @@ class WidgetController
                     // Format context differently based on data type
                     if ($dataType === 'service') {
                         // For services, include all relevant pricing and service info
-                        if (isset($payload['title'])) $context .= "Service: " . $payload['title'] . "\n";
-                        if (isset($payload['content'])) $context .= "Description: " . $payload['content'] . "\n";
+                        if (isset($payload['title'])) $context .= "Service: " . $this->htmlToPlainWithLinks((string) $payload['title']) . "\n";
+                        if (isset($payload['content'])) $context .= "Description: " . $this->htmlToPlainWithLinks((string) $payload['content']) . "\n";
                         if (isset($payload['price'])) $context .= "Price: " . $payload['price'] . " " . ($payload['currency'] ?? '') . "\n";
                         if (isset($payload['duration'])) $context .= "Duration: " . $payload['duration'] . "\n";
                         if (isset($payload['requirements'])) $context .= "Requirements: " . $payload['requirements'] . "\n";
@@ -212,11 +213,24 @@ class WidgetController
                         $contextFields = ['title', 'content', 'category'];
                         foreach ($contextFields as $field) {
                             if (isset($payload[$field]) && is_string($payload[$field]) && !empty($payload[$field])) {
-                                $context .= ucfirst($field) . ": " . $payload[$field] . "\n";
+                                $context .= ucfirst($field) . ": " . $this->htmlToPlainWithLinks((string) $payload[$field]) . "\n";
+                            }
+                        }
+                        // Collect any explicit links if present in metadata
+                        if (isset($payload['links']) && is_array($payload['links'])) {
+                            foreach ($payload['links'] as $lnk) {
+                                if (is_string($lnk) && (stripos($lnk, 'http://') === 0 || stripos($lnk, 'https://') === 0)) {
+                                    $collectedLinks[] = $lnk;
+                                }
                             }
                         }
                     }
                     $context .= "\n";
+                }
+                // Append a Links section if any were collected
+                $collectedLinks = array_values(array_unique($collectedLinks));
+                if (!empty($collectedLinks)) {
+                    $context .= "Links: " . implode(', ', $collectedLinks) . "\n\n";
                 }
             }
 
@@ -239,7 +253,7 @@ class WidgetController
                 $systemPrompt .= "I don't have specific info for this question. ";
             }
             
-            $systemPrompt .= "Keep responses concise and direct.";
+            $systemPrompt .= "Keep responses concise and direct. Always use plain text only - no HTML tags, no markdown, no special formatting. If you mention any website or resource, include the full https URL as plain text. If you suggest multiple resources, present them as a simple bulleted list with each item containing only the plain URL.";
 
             // Get AI response using llmChat for better token tracking
             $messages = [
@@ -267,6 +281,9 @@ class WidgetController
             if (!$responseText) {
                 throw new \Exception('Failed to get AI response');
             }
+
+            // Normalize and sanitize AI response to plain text with clean URLs (no HTML)
+            $responseText = $this->normalizeAiResponse($responseText);
 
             // Detailed logging for debugging
             Log::info('Widget AI Response Debug', [
@@ -311,6 +328,72 @@ class WidgetController
                 'error' => true
             ], 500)->header('X-Robots-Tag', 'noindex, nofollow');
         }
+    }
+
+    /**
+     * Convert HTML to plain text while preserving links as "text (url)" or just the URL.
+     */
+    private function htmlToPlainWithLinks(string $html): string
+    {
+        if ($html === '') return '';
+
+        // Replace anchors with "text (url)" preserving either label or URL
+        $html = preg_replace_callback('/<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/is', function ($m) {
+            $url = trim($m[1]);
+            $text = trim(strip_tags($m[2]));
+            if ($text === '' || strcasecmp($text, $url) === 0) {
+                return $url;
+            }
+            return $text . ' (' . $url . ')';
+        }, $html) ?? $html;
+
+        // Convert common block separators to newlines
+        $html = preg_replace('/<\s*br\s*\/?\s*>/i', "\n", $html) ?? $html;
+        $html = preg_replace('/<\/(p|div|li|h[1-6])>/i', "\n", $html) ?? $html;
+        $html = preg_replace('/<\s*li\s*>/i', "* ", $html) ?? $html;
+
+        // Strip remaining tags
+        $text = strip_tags($html);
+        // Decode entities and normalize whitespace
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace("/\r\n|\r|\n/", "\n", $text);
+        $text = preg_replace("/\n{3,}/", "\n\n", $text);
+        return trim($text);
+    }
+
+    /**
+     * Ensure model output is plain text without HTML tags; keep URLs intact for client linkify.
+     */
+    private function normalizeAiResponse(string $text): string
+    {
+        if ($text === '') return '';
+        // First convert any anchor tags to "text (url)" or URL
+        $text = $this->htmlToPlainWithLinks($text);
+        // Convert Markdown links [label](url or noisy content) to "label (https://...)" or just URL
+        $text = preg_replace_callback('/\[(.*?)\]\(([^)]+)\)/s', function ($m) {
+            $label = trim($m[1]);
+            $inner = trim($m[2]);
+            $url = '';
+            if (preg_match('/https?:\/\/[^\s)]+/i', $inner, $um)) {
+                $url = $um[0];
+            } elseif (preg_match('/(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s)]*)?/i', $inner, $dm)) {
+                $url = 'https://' . $dm[0];
+            }
+            if ($url !== '') {
+                if ($label === '' || strcasecmp($label, $url) === 0) return $url;
+                return $label . ' (' . $url . ')';
+            }
+            return $label !== '' ? $label : $inner; // fallback to readable text
+        }, $text);
+        // As an extra guard, remove any lingering tags
+        $text = strip_tags($text);
+        // Collapse excessive whitespace
+        $text = preg_replace('/\s+/', ' ', str_replace(["\r", "\t"], [' ', ' '], $text));
+        // Re-insert line breaks around bullets or list markers if any were present
+        $text = preg_replace('/\*\s+/', "\n* ", $text);
+        // Restore paragraph-like breaks after periods followed by asterisk bullets
+        $text = preg_replace('/\.\s+\*/', ".\n*", $text);
+        return trim($text);
     }
 
     /**

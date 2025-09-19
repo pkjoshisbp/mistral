@@ -1089,10 +1089,39 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
     public function storeDataToQdrant($organizationSlug, $dataType, $items)
     {
         try {
+            // Filter out items with empty content to avoid overwriting good data with blanks
+            $filtered = [];
+            foreach ($items as $it) {
+                $content = isset($it['content']) ? trim((string) $it['content']) : '';
+                if ($content === '') {
+                    Log::warning('Skipping item with empty content for Qdrant store', [
+                        'organization_slug' => $organizationSlug,
+                        'data_type' => $dataType,
+                        'item_id' => $it['id'] ?? null,
+                        'title' => $it['title'] ?? null
+                    ]);
+                    continue;
+                }
+                $filtered[] = $it;
+            }
+
+            if (empty($filtered)) {
+                Log::warning('No valid items to store to Qdrant after filtering empties', [
+                    'organization_slug' => $organizationSlug,
+                    'data_type' => $dataType
+                ]);
+                return [
+                    'success' => false,
+                    'successful_stores' => 0,
+                    'failed_stores' => 0,
+                    'failures' => ['all_items_empty']
+                ];
+            }
+
             $payload = [
                 'organization_slug' => $organizationSlug,
                 'data_type' => $dataType,
-                'items' => $items
+                'items' => $filtered
             ];
 
             Log::info('Storing data to Qdrant', [
