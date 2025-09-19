@@ -21,18 +21,23 @@ class SecurityHeaders
                 // Content Security Policy
         $csp = [
             "default-src 'self'",
-            // Added googletagmanager + google analytics collection, and split into explicit script-src-elem / attr for clarity
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://www.googletagmanager.com https://www.google-analytics.com",
-            "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://www.googletagmanager.com https://www.google-analytics.com",
+            // Script sources - including payment gateways and analytics
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://www.googletagmanager.com https://www.google-analytics.com https://www.paypal.com https://checkout.razorpay.com",
+            "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://www.googletagmanager.com https://www.google-analytics.com https://www.paypal.com https://checkout.razorpay.com",
             "script-src-attr 'self' 'unsafe-inline'",
+            // Style sources
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.bunny.net https://cdnjs.cloudflare.com https://cdn.jsdelivr.net",
+            // Image sources
             "img-src 'self' data: https: http: https://www.google-analytics.com",
+            // Font sources
             "font-src 'self' https://fonts.gstatic.com https://fonts.bunny.net https://cdnjs.cloudflare.com",
-            "connect-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://fonts.googleapis.com https://fonts.gstatic.com https://code.jquery.com https://www.googletagmanager.com https://www.google-analytics.com",
-            "frame-src 'self' https://www.googletagmanager.com",
+            // Connection sources - for API calls and external resources
+            "connect-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://fonts.googleapis.com https://fonts.gstatic.com https://code.jquery.com https://www.googletagmanager.com https://www.google-analytics.com https://api.paypal.com https://api.razorpay.com",
+            // Frame sources - for payment iframes and analytics
+            "frame-src 'self' https://www.googletagmanager.com https://www.paypal.com https://api.razorpay.com",
             "object-src 'none'",
             "base-uri 'self'",
-            "form-action 'self'"
+            "form-action 'self' https://www.paypal.com https://api.razorpay.com"
         ];
 
         $response->headers->set('Content-Security-Policy', implode('; ', $csp));
