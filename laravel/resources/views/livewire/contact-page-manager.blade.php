@@ -171,30 +171,83 @@
                             </h5>
                         </div>
                         <div class="card-body">
-                            <form id="contactForm">
-                                <div class="form-group mb-3">
-                                    <label for="contact_name">Name</label>
-                                    <input type="text" class="form-control" id="contact_name" required>
+                            @if($contactSubmitted)
+                                <div class="alert alert-success">
+                                    <i class="fas fa-check-circle me-2"></i>
+                                    <strong>Thank you!</strong> Your message has been sent successfully. We'll get back to you soon!
                                 </div>
-                                <div class="form-group mb-3">
-                                    <label for="contact_email">Email</label>
-                                    <input type="email" class="form-control" id="contact_email" required>
+                                <div class="text-center">
+                                    <button type="button" class="btn btn-outline-primary" wire:click="resetContactForm">
+                                        <i class="fas fa-plus me-2"></i>Send Another Message
+                                    </button>
                                 </div>
-                                <div class="form-group mb-3">
-                                    <label for="contact_subject">Subject</label>
-                                    <input type="text" class="form-control" id="contact_subject" required>
-                                </div>
-                                <div class="form-group mb-3">
-                                    <label for="contact_message">Message</label>
-                                    <textarea class="form-control" id="contact_message" rows="4" required></textarea>
-                                </div>
-                                <div class="form-group mb-3">
-                                    <div class="h-captcha" data-sitekey="812ca166-bbf2-4c20-b0aa-219e78f87970"></div>
-                                </div>
-                                <button type="submit" class="btn btn-primary w-100">
-                                    <i class="fas fa-send me-2"></i>Send Message
-                                </button>
-                            </form>
+                            @else
+                                <form wire:submit.prevent="submitContactForm">
+                                    <!-- Honeypot field (hidden) -->
+                                    <div style="display: none;">
+                                        <input type="text" wire:model="honeypot" tabindex="-1" autocomplete="off">
+                                    </div>
+                                    
+                                    <div class="form-group mb-3">
+                                        <label for="contactName">Name *</label>
+                                        <input type="text" class="form-control @error('contactName') is-invalid @enderror" 
+                                               wire:model="contactName" id="contactName" required>
+                                        @error('contactName')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                    
+                                    <div class="form-group mb-3">
+                                        <label for="contactEmail">Email *</label>
+                                        <input type="email" class="form-control @error('contactEmail') is-invalid @enderror" 
+                                               wire:model="contactEmail" id="contactEmail" required>
+                                        @error('contactEmail')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                    
+                                    <div class="form-group mb-3">
+                                        <label for="contactPhone">Phone (Optional)</label>
+                                        <input type="text" class="form-control @error('contactPhone') is-invalid @enderror" 
+                                               wire:model="contactPhone" id="contactPhone">
+                                        @error('contactPhone')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                    
+                                    <div class="form-group mb-3">
+                                        <label for="contactSubject">Subject *</label>
+                                        <input type="text" class="form-control @error('contactSubject') is-invalid @enderror" 
+                                               wire:model="contactSubject" id="contactSubject" required>
+                                        @error('contactSubject')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                    
+                                    <div class="form-group mb-3">
+                                        <label for="contactMessage">Message *</label>
+                                        <textarea class="form-control @error('contactMessage') is-invalid @enderror" 
+                                                  wire:model="contactMessage" id="contactMessage" rows="4" required></textarea>
+                                        @error('contactMessage')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                    
+                                    <!-- Math Captcha -->
+                                    <div class="form-group mb-3">
+                                        <label for="mathAnswer">
+                                            <i class="fas fa-calculator me-2"></i>
+                                            Security Check: What is {{ $mathQuestion }}? *
+                                        </label>
+                                        <input type="number" class="form-control @error('mathAnswer') is-invalid @enderror" 
+                                               wire:model="mathAnswer" id="mathAnswer" required 
+                                               placeholder="Enter the answer">
+                                        @error('mathAnswer')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">
+                                            Please solve this simple math problem to verify you're human.
+                                        </small>
+                                    </div>
+                                    
+                                    <button type="submit" class="btn btn-primary w-100" wire:loading.attr="disabled">
+                                        <span wire:loading.remove>
+                                            <i class="fas fa-paper-plane me-2"></i>Send Message
+                                        </span>
+                                        <span wire:loading>
+                                            <i class="fas fa-spinner fa-spin me-2"></i>Sending...
+                                        </span>
+                                    </button>
+                                </form>
+                            @endif
                         </div>
                     </div>
                 </div>

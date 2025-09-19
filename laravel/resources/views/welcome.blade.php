@@ -424,16 +424,45 @@
             </div>
         </div>
     </section>
-                                  
-                            </div>
-                            
-                           
-                        </div>
-                    </div>
+
+    <!-- Customer Reviews Section -->
+    <section class="py-5">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-lg-8 text-center mb-5">
+                    <h2>What Our Customers Say</h2>
+                    <p class="lead">See how our AI chat service has transformed customer support for businesses worldwide</p>
                 </div>
             </div>
             
-           
+            @livewire('public.reviews-display')
+            
+            <div class="text-center mt-5">
+                <div class="row justify-content-center">
+                    <div class="col-md-8">
+                        @auth
+                            <div class="bg-primary text-white p-4 rounded">
+                                <h4>Share Your Experience</h4>
+                                <p class="mb-3">Help others discover the benefits of our AI chat service by sharing your experience.</p>
+                                <a href="{{ route('reviews.submit') }}" class="btn btn-light btn-lg">
+                                    <i class="fas fa-star me-2"></i>Write a Review
+                                </a>
+                            </div>
+                        @else
+                            <div class="bg-light p-4 rounded">
+                                <h4>Join Our Community</h4>
+                                <p class="mb-3">Sign up to share your review and help others discover our AI chat service.</p>
+                                <a href="{{ route('register') }}" class="btn btn-primary btn-lg me-2">
+                                    <i class="fas fa-user-plus me-2"></i>Sign Up
+                                </a>
+                                <a href="{{ route('reviews.index') }}" class="btn btn-outline-primary btn-lg">
+                                    <i class="fas fa-eye me-2"></i>View All Reviews
+                                </a>
+                            </div>
+                        @endauth
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
 

@@ -488,6 +488,9 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
         Route::post('/credit-packages', [\App\Http\Controllers\Admin\PricingController::class, 'storeCreditPackage'])->name('credit-packages.store');
     });
     Route::get('/analytics', \App\Livewire\Admin\AnalyticsDashboard::class)->name('analytics');
+    Route::get('/reviews', function () {
+        return view('admin.reviews');
+    })->name('reviews');
     
     // Email Management Routes
     Route::get('/email-templates', \App\Livewire\Admin\EmailTemplateManager::class)->name('email-templates');
@@ -906,3 +909,21 @@ Route::post('/persist-selected-plan', function(\Illuminate\Http\Request $request
     ]);
     return response()->json(['ok' => true]);
 })->name('persist-selected-plan');
+
+// Customer Reviews Routes
+Route::prefix('reviews')->name('reviews.')->group(function () {
+    // Public routes
+    Route::get('/', function () {
+        return view('public.reviews');
+    })->name('index');
+    Route::get('/organization/{organizationId}', \App\Livewire\Public\ReviewsDisplay::class)->name('organization');
+    
+    // Auth required routes
+    Route::middleware('auth')->group(function () {
+        Route::get('/submit/{organizationId?}', function ($organizationId = null) {
+            return view('public.review-submit');
+        })->name('submit');
+    });
+});
+
+require __DIR__.'/auth.php';

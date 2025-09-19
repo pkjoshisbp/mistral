@@ -30,6 +30,9 @@
                     <a class="nav-link" href="{{ route('blog.index') }}">{{ __('common.blog') }}</a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link" href="{{ route('reviews.index') }}">Reviews</a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link" href="{{ route('contact') }}">{{ __('common.contact') }}</a>
                 </li>
                 <li class="nav-item">
@@ -78,6 +81,10 @@
                             @else
                                 <li><a class="dropdown-item" href="{{ route('home') }}">Home</a></li>
                             @endif
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ route('reviews.submit') }}">
+                                <i class="fas fa-star me-2"></i>Write a Review
+                            </a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li>
                                 <form method="POST" action="{{ route('logout') }}">

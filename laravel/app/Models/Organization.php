@@ -66,4 +66,29 @@ class Organization extends Model
     {
         return str_replace('-', '_', $this->slug);
     }
+
+    public function customerReviews()
+    {
+        return $this->hasMany(CustomerReview::class);
+    }
+
+    public function approvedReviews()
+    {
+        return $this->hasMany(CustomerReview::class)->approved();
+    }
+
+    public function featuredReviews()
+    {
+        return $this->hasMany(CustomerReview::class)->approved()->featured();
+    }
+
+    public function getAverageRatingAttribute()
+    {
+        return $this->approvedReviews()->avg('rating') ?: 0;
+    }
+
+    public function getReviewsCountAttribute()
+    {
+        return $this->approvedReviews()->count();
+    }
 }

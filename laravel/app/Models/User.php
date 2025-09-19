@@ -171,4 +171,14 @@ class User extends Authenticatable
     {
         return $this->role === 'affiliate' && $this->affiliate !== null;
     }
+
+    public function customerReviews()
+    {
+        return $this->hasMany(CustomerReview::class);
+    }
+
+    public function approvedReviews()
+    {
+        return $this->hasMany(CustomerReview::class, 'approved_by');
+    }
 }

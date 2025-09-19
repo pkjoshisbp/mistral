@@ -18,46 +18,12 @@
     <section class="py-5">
         <div class="container">
             <div class="row g-5 align-items-stretch">
-                <div class="col-lg-8 d-flex">
+                <div class="col-lg-12 d-flex">
                     <div class="contact-card p-4 flex-fill">
-                        <h3 class="mb-4">Send us a Message</h3>
                         @livewire('contact-page-manager')
                     </div>
                 </div>
-                <div class="col-lg-4 d-flex align-items-stretch">
-                    <div class="w-100">
-                        <div class="contact-info-item d-flex align-items-center mb-4">
-                            <i class="fas fa-envelope fa-2x me-3 text-primary"></i>
-                            <div>
-                                <h5 class="mb-1">Email Us</h5>
-                                <p class="mb-0">info@ai-chat.support</p>
-                            </div>
-                        </div>
-                        <div class="contact-info-item d-flex align-items-center mb-4">
-                            <i class="fas fa-phone fa-2x me-3 text-primary"></i>
-                            <div>
-                                <h5 class="mb-1">Call Us</h5>
-                                <p class="mb-0">+91 9937253528</p>
-                            </div>
-                        </div>
-                        <div class="contact-info-item d-flex align-items-center mb-4">
-                            <i class="fas fa-map-marker-alt fa-2x me-3 text-primary"></i>
-                            <div>
-                                <h5 class="mb-1">Address</h5>
-                                <p class="mb-1">Villa No.10, Sriram Villa,</p>
-                                <p class="mb-1">AN Guha Lane,</p>
-                                <p class="mb-0">Sambalpur - 768001</p>
-                            </div>
-                        </div>
-                        <div class="contact-info-item d-flex align-items-center mb-4">
-                            <i class="fas fa-comments fa-2x me-3 text-primary"></i>
-                            <div>
-                                <h5 class="mb-1">Live Chat</h5>
-                                <p class="mb-0">Chat with our AI assistant 24/7 using the chat widget on this page</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+
             </div>
         </div>
     </section>
