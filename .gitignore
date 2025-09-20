@@ -47,3 +47,9 @@ ai_env/
 
 # Frontend build artifacts
 laravel/public/build/
+
+# LLM binaries and shared libs (do not version)
+llama-cli
+llama-server
+libllama.so
+libggml.so
