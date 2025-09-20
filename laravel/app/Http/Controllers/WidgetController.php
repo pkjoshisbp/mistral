@@ -38,7 +38,8 @@ class WidgetController
             'theme' => $organization->settings['widget_theme'] ?? 'default',
             'position' => $organization->settings['widget_position'] ?? 'bottom-right',
             'primaryColor' => $organization->settings['primary_color'] ?? '#007bff',
-            'welcomeMessage' => $organization->settings['welcome_message'] ?? 'Hello! How can I help you today?'
+            'welcomeMessage' => $organization->settings['welcome_message'] ?? 'Hello! How can I help you today?',
+            'requireContactForGuests' => (bool)($organization->settings['require_contact_for_guests'] ?? false)
         ];
 
         $script = view('widget.script', compact('widgetConfig'))->render();

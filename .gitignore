@@ -4,11 +4,12 @@ venv/
 # Ignore Ollama models (default location)
 ~/.ollama/
 ollama_models/
+models/
 
 # Ignore log files
 *.log
 logs/
-
+llama.cpp/
 # Ignore node_modules (for Laravel/AdminLTE)
 node_modules/
 
@@ -19,7 +20,7 @@ vendor/
 storage/
 
 # Ignore environment files
-.env
+**/.env
 
 # Ignore IDE/editor files
 .vscode/
@@ -33,3 +34,16 @@ storage/
 
 # Ignore Qdrant data (if local)
 qdrant_data/
+
+# Python cache/artifacts
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local virtualenvs
+ai_env/
+
+# Frontend build artifacts
+laravel/public/build/

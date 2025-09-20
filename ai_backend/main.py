@@ -10,6 +10,10 @@ import os
 import subprocess
 import psutil
 import signal
+import json
+import tempfile
+import shutil
+from pathlib import Path
 try:
     from rewrite import rewrite_prompt  # type: ignore
 except Exception as e:
@@ -28,6 +32,41 @@ EMBED_TIMEOUT_SEC = float(os.getenv("EMBED_TIMEOUT", "15"))
 MAX_EMBED_CHARS = int(os.getenv("MAX_EMBED_CHARS", "1800"))
 EMBED_CONCURRENCY = int(os.getenv("EMBED_CONCURRENCY", "2"))
 
+# Backend type configuration
+AI_BACKEND_TYPE = os.getenv("AI_BACKEND_TYPE", "ollama")  # ollama or llamacpp
+LLAMACPP_BINARY = os.getenv("LLAMACPP_BINARY", "/var/www/clients/client1/web64/web/llama.cpp/build/bin/llama-cli")
+LLAMACPP_SERVER_BINARY = os.getenv("LLAMACPP_SERVER_BINARY", "/var/www/clients/client1/web64/web/llama.cpp/build/bin/llama-server")
+LLAMACPP_SERVER_PORT = int(os.getenv("LLAMACPP_SERVER_PORT", "8112"))
+LLAMACPP_SERVER_URL = f"http://localhost:{LLAMACPP_SERVER_PORT}"
+MODELS_DIR = os.getenv("MODELS_DIR", "/var/www/clients/client1/web64/web/models")
+
+# Pre-configured GGUF models
+GGUF_MODELS = {
+    "bartowski/Llama-3.2-3B-Instruct-GGUF:Llama-3.2-3B-Instruct-Q4_K_M.gguf": {
+        "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+    },
+    "bartowski/Llama-3.2-1B-Instruct-GGUF:Llama-3.2-1B-Instruct-Q4_K_M.gguf": {
+        "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+    },
+    "bartowski/Llama-3.2-3B-Instruct-GGUF:Llama-3.2-3B-Instruct-Q8_0.gguf": {
+        "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q8_0.gguf",
+        "filename": "Llama-3.2-3B-Instruct-Q8_0.gguf"
+    },
+    "custom/Llama-3.2-3B-Instruct-Q8_0-Custom": {
+        "url": "",  # Local custom model - no download needed
+        "filename": "Llama-3.2-3B-Instruct-Q8_0-custom.gguf"
+    }
+}
+
+# Ensure models directory exists
+Path(MODELS_DIR).mkdir(exist_ok=True)
+
+# Global variable to track llama-server process
+llamacpp_server_process = None
+current_llamacpp_model = None
+
 # Process management config
 MAX_OLLAMA_RUNNER_CPU = float(os.getenv("MAX_OLLAMA_RUNNER_CPU", "200.0"))  # Max CPU % for runner processes
 MAX_OLLAMA_RUNNER_TIME = int(os.getenv("MAX_OLLAMA_RUNNER_TIME", "300"))    # Max runtime in seconds (5 min)
@@ -39,7 +78,242 @@ app = FastAPI()
 qdrant = QdrantClient(host="127.0.0.1", port=6333)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources when FastAPI shuts down"""
+    await stop_llamacpp_server()
+
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
+
+# Helper functions for llama.cpp server management
+async def start_llamacpp_server(model_path: str) -> bool:
+    """Start llama-server with the specified model"""
+    global llamacpp_server_process, current_llamacpp_model
+    
+    # If server is already running with the same model, return True
+    if llamacpp_server_process and current_llamacpp_model == model_path:
+        try:
+            # Check if server is still responding
+            async with httpx.AsyncClient(timeout=5) as client:
+                response = await client.get(f"{LLAMACPP_SERVER_URL}/health")
+                if response.status_code == 200:
+                    logging.info(f"llama-server already running with model: {Path(model_path).name}")
+                    return True
+        except:
+            pass  # Server not responding, will restart
+    
+    # Stop existing server if running
+    await stop_llamacpp_server()
+    
+    try:
+        # Set up environment with LD_LIBRARY_PATH for shared libraries
+        env = os.environ.copy()
+        lib_dir = Path(LLAMACPP_SERVER_BINARY).parent  # build/bin directory
+        env["LD_LIBRARY_PATH"] = f"{lib_dir}:{env.get('LD_LIBRARY_PATH', '')}"
+        
+        # Start llama-server
+        cmd = [
+            LLAMACPP_SERVER_BINARY,
+            "-m", model_path,
+            "--port", str(LLAMACPP_SERVER_PORT),
+            "--host", "127.0.0.1",
+            "--ctx-size", "4096",
+            "--n-predict", "-1",  # unlimited tokens
+            "--threads", "4",
+            "--no-warmup"
+        ]
+        
+        logging.info(f"Starting llama-server on port {LLAMACPP_SERVER_PORT} with model: {Path(model_path).name}")
+        
+        llamacpp_server_process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env
+        )
+        
+        # Wait for server to start (check health endpoint)
+        max_attempts = 30
+        for attempt in range(max_attempts):
+            try:
+                await asyncio.sleep(1)
+                async with httpx.AsyncClient(timeout=5) as client:
+                    response = await client.get(f"{LLAMACPP_SERVER_URL}/health")
+                    if response.status_code == 200:
+                        current_llamacpp_model = model_path
+                        logging.info(f"llama-server started successfully on port {LLAMACPP_SERVER_PORT}")
+                        return True
+            except:
+                if attempt == max_attempts - 1:
+                    logging.error(f"llama-server failed to start after {max_attempts} attempts")
+                    await stop_llamacpp_server()
+                    return False
+                continue
+        
+        return False
+        
+    except Exception as e:
+        logging.error(f"Failed to start llama-server: {str(e)}")
+        await stop_llamacpp_server()
+        return False
+
+async def stop_llamacpp_server():
+    """Stop the running llama-server"""
+    global llamacpp_server_process, current_llamacpp_model
+    
+    if llamacpp_server_process:
+        try:
+            llamacpp_server_process.terminate()
+            await asyncio.wait_for(llamacpp_server_process.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            llamacpp_server_process.kill()
+            await llamacpp_server_process.wait()
+        except Exception as e:
+            logging.error(f"Error stopping llama-server: {str(e)}")
+        
+        llamacpp_server_process = None
+        current_llamacpp_model = None
+        logging.info("llama-server stopped")
+
+async def llamacpp_server_chat(messages: list) -> dict:
+    """Send chat request to llama-server"""
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(f"{LLAMACPP_SERVER_URL}/v1/chat/completions", json={
+                "model": "llama-model",  # llama-server ignores this, uses loaded model
+                "messages": messages,
+                "stream": False,
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "max_tokens": 512
+            })
+            
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail=f"llama-server error: {response.text}")
+            
+            result = response.json()
+            
+            # Convert OpenAI-compatible response to our format
+            if "choices" in result and len(result["choices"]) > 0:
+                choice = result["choices"][0]
+                message_content = choice.get("message", {}).get("content", "")
+                
+                return {
+                    "message": {"content": message_content, "role": "assistant"},
+                    "usage": result.get("usage", {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0
+                    })
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Invalid response from llama-server")
+                
+    except Exception as e:
+        logging.error(f"llama-server chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"llama-server chat failed: {str(e)}")
+
+# Helper functions for llama.cpp support
+async def download_gguf_model(model_repo_path: str) -> str:
+    """Download GGUF model from Hugging Face if not already present"""
+    if model_repo_path not in GGUF_MODELS:
+        raise ValueError(f"Unknown model repository: {model_repo_path}")
+    
+    model_info = GGUF_MODELS[model_repo_path]
+    local_path = Path(MODELS_DIR) / model_info["filename"]
+    
+    if local_path.exists():
+        logging.info(f"GGUF model already exists: {local_path}")
+        return str(local_path)
+    
+    logging.info(f"Downloading GGUF model: {model_repo_path}")
+    
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:  # 5 minute timeout for large downloads
+            response = await client.get(model_info["url"], follow_redirects=True)
+            response.raise_for_status()
+            
+            # Write to temporary file first, then move to final location
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                tmp_file.write(response.content)
+                tmp_path = tmp_file.name
+            
+            shutil.move(tmp_path, local_path)
+            logging.info(f"Downloaded GGUF model to: {local_path}")
+            return str(local_path)
+            
+    except Exception as e:
+        logging.error(f"Failed to download GGUF model {model_repo_path}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to download model: {str(e)}")
+
+async def run_llamacpp_chat(model_path: str, messages: list) -> dict:
+    """Run llama.cpp chat inference"""
+    if not Path(LLAMACPP_BINARY).exists():
+        raise HTTPException(status_code=500, detail="llama.cpp binary not found")
+    
+    # Convert messages to prompt format
+    prompt = ""
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "system":
+            prompt += f"System: {content}\n\n"
+        elif role == "user":
+            prompt += f"Human: {content}\n\n"
+        elif role == "assistant":
+            prompt += f"Assistant: {content}\n\n"
+    
+    prompt += "Assistant: "
+    
+    try:
+        # Run llama.cpp with the model
+        cmd = [
+            LLAMACPP_BINARY,
+            "-m", model_path,
+            "-p", prompt,
+            "--temp", "0.7",
+            "--top-p", "0.9",
+            "--repeat-penalty", "1.1",
+            "-n", "512",  # max new tokens
+            "--simple-io"
+        ]
+        
+        logging.info(f"Running llama.cpp: {' '.join(cmd[:4])}...")  # Log first few args
+        
+        # Set up environment with LD_LIBRARY_PATH for shared libraries
+        env = os.environ.copy()
+        lib_dir = Path(LLAMACPP_BINARY).parent  # Same directory as the binary
+        env["LD_LIBRARY_PATH"] = f"{lib_dir}:{env.get('LD_LIBRARY_PATH', '')}"
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            error_msg = stderr.decode().strip()
+            logging.error(f"llama.cpp error: {error_msg}")
+            raise HTTPException(status_code=500, detail=f"llama.cpp inference failed: {error_msg}")
+        
+        output = stdout.decode().strip()
+        
+        # Extract just the generated response (after "Assistant: ")
+        if "Assistant: " in output:
+            response_text = output.split("Assistant: ")[-1].strip()
+        else:
+            response_text = output.strip()
+        
+        return {
+            "message": {"content": response_text, "role": "assistant"}
+        }
+        
+    except Exception as e:
+        logging.error(f"llama.cpp execution error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"llama.cpp execution failed: {str(e)}")
 
 def cleanup_stuck_ollama_processes():
     """Clean up stuck Ollama runner processes that consume too much CPU or run too long"""
@@ -428,15 +702,46 @@ async def llm_chat(request: Request):
     data = await request.json()
     messages = data["messages"]
     model = data.get("model", DEFAULT_CHAT_MODEL)  # Use high quality model by default
+    backend_type = data.get("backend_type", AI_BACKEND_TYPE)  # Allow override from request
+    
     # Log incoming chat request
-    logging.info(f"llm_chat request: model={model} messages={messages}")
+    logging.info(f"llm_chat request: backend={backend_type} model={model} messages={len(messages)} msgs")
 
     # If system prompt contains context, log it for debugging
     for msg in messages:
         if msg.get("role") == "system":
-            logging.info(f"System prompt/context sent to Ollama: {msg.get('content')}")
+            logging.info(f"System prompt/context: {msg.get('content')[:100]}...")
     start_time = time.time()
     
+    # Handle llama.cpp backend
+    if backend_type == "llamacpp":
+        try:
+            # Check if model is a GGUF repository path
+            if model in GGUF_MODELS:
+                model_path = await download_gguf_model(model)
+            else:
+                # Assume it's a file path
+                model_path = model
+                if not Path(model_path).exists():
+                    raise HTTPException(status_code=404, detail=f"Model file not found: {model_path}")
+            
+            # Start llama-server with the model (or use existing if same model)
+            server_started = await start_llamacpp_server(model_path)
+            if not server_started:
+                raise HTTPException(status_code=500, detail="Failed to start llama-server")
+            
+            # Send chat request to llama-server
+            result = await llamacpp_server_chat(messages)
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logging.info(f"llama-server chat completed model={Path(model_path).name} elapsed_ms={elapsed_ms}")
+            
+            return result
+            
+        except Exception as e:
+            logging.error(f"llama.cpp chat error: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # Handle Ollama backend (default/fallback)
     # Quick process check before making request
     try:
         high_cpu_count = 0

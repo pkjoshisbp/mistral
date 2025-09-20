@@ -135,7 +135,7 @@
 <body>
     @include('partials.header')
 
-    <main style="margin-top: 76px;">
+    <main style="margin-top: var(--navbar-height, 76px);">
         {{-- Render Livewire component slot if present, otherwise fall back to traditional @section content --}}
         @if (isset($slot))
             {{ $slot }}
@@ -148,6 +148,19 @@
 
     @yield('scripts')
     @livewireScripts
+    <script>
+        (function() {
+            function setNavbarOffset() {
+                var nav = document.querySelector('.navbar.fixed-top');
+                if (!nav) return;
+                var h = nav.getBoundingClientRect().height;
+                document.documentElement.style.setProperty('--navbar-height', Math.ceil(h) + 'px');
+            }
+            window.addEventListener('load', setNavbarOffset, { once: true });
+            window.addEventListener('resize', setNavbarOffset);
+            document.addEventListener('DOMContentLoaded', setNavbarOffset);
+        })();
+    </script>
     
     <!-- AI Chat Widget -->
     <script>

@@ -308,8 +308,18 @@
                                   document.body.classList.contains('logged-in') ||
                                   window.Laravel && window.Laravel.user;
                 
-                // Show lead form if not captured yet AND user is not logged in
-                if (!this.leadCaptured && !isLoggedIn) {
+                // If org requires contact for guests, enforce lead form for non-auth users
+                const requireLead = !!this.config.requireContactForGuests;
+
+                if (!isLoggedIn && requireLead) {
+                    // Disable skip button
+                    const skipBtn = document.getElementById(this.ids.leadSkip);
+                    if (skipBtn) {
+                        skipBtn.style.display = 'none';
+                    }
+                    // Always show lead form
+                    this.showLeadForm();
+                } else if (!this.leadCaptured && !isLoggedIn) {
                     this.showLeadForm();
                 } else {
                     this.leadCaptured = true; // Skip lead capture for logged in users
@@ -591,6 +601,12 @@
         }
 
         skipLeadForm() {
+            // If organization requires contact for guests, do not allow skip
+            const isLoggedIn = document.querySelector('meta[name="user-authenticated"]') || document.body.classList.contains('logged-in') || (window.Laravel && window.Laravel.user);
+            if (!isLoggedIn && this.config.requireContactForGuests) {
+                alert('Please provide your name and email to start chat.');
+                return;
+            }
             this.leadCaptured = true;
             this.saveLeadCaptured();
             this.hideLeadForm();

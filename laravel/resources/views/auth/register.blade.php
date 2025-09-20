@@ -1,11 +1,10 @@
 <x-guest-layout>
     @if(request('plan'))
-        <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-            <div class="flex items-center">
-                <svg class="w-5 h-5 text-blue-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+        <div class="alert alert-info d-flex align-items-center" role="alert">
+            <svg width="20" height="20" class="me-2" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                 </svg>
-                <span class="text-sm font-medium text-blue-800">
+                <span>
                     Selected Plan: {{ ucfirst(request('plan')) }} 
                     @if(request('plan') == 'starter')
                         ($49/month)
@@ -13,11 +12,10 @@
                         ($199/month)
                     @endif
                 </span>
-            </div>
         </div>
     @endif
 
-    <form method="POST" action="{{ route('register') }}">
+    <form method="POST" action="{{ route('register') }}" class="mt-2">
         @csrf
 
         <!-- Hidden field for selected plan -->
@@ -26,64 +24,54 @@
         @endif
 
         <!-- Name -->
-        <div>
+        <div class="mb-3">
             <x-input-label for="name" :value="__('Name')" />
-            <x-text-input id="name" class="block mt-1 w-full" type="text" name="name" :value="old('name')" required autofocus autocomplete="name" />
-            <x-input-error :messages="$errors->get('name')" class="mt-2" />
+            <x-text-input id="name" type="text" name="name" :value="old('name')" required autofocus autocomplete="name" />
+            <x-input-error :messages="$errors->get('name')" />
         </div>
 
         <!-- Email Address -->
-        <div class="mt-4">
+        <div class="mb-3">
             <x-input-label for="email" :value="__('Email')" />
-            <x-text-input id="email" class="block mt-1 w-full" type="email" name="email" :value="old('email')" required autocomplete="username" />
-            <x-input-error :messages="$errors->get('email')" class="mt-2" />
+            <x-text-input id="email" type="email" name="email" :value="old('email')" required autocomplete="username" />
+            <x-input-error :messages="$errors->get('email')" />
         </div>
 
         <!-- Password -->
-        <div class="mt-4">
+        <div class="mb-3">
             <x-input-label for="password" :value="__('Password')" />
-
-            <x-text-input id="password" class="block mt-1 w-full"
-                            type="password"
-                            name="password"
-                            required autocomplete="new-password" />
-
-            <x-input-error :messages="$errors->get('password')" class="mt-2" />
+            <x-text-input id="password" type="password" name="password" required autocomplete="new-password" />
+            <x-input-error :messages="$errors->get('password')" />
         </div>
 
         <!-- Confirm Password -->
-        <div class="mt-4">
+        <div class="mb-3">
             <x-input-label for="password_confirmation" :value="__('Confirm Password')" />
-
-            <x-text-input id="password_confirmation" class="block mt-1 w-full"
-                            type="password"
-                            name="password_confirmation" required autocomplete="new-password" />
-
-            <x-input-error :messages="$errors->get('password_confirmation')" class="mt-2" />
+            <x-text-input id="password_confirmation" type="password" name="password_confirmation" required autocomplete="new-password" />
+            <div id="password-mismatch" class="invalid-feedback d-none">Passwords do not match.</div>
+            <x-input-error :messages="$errors->get('password_confirmation')" />
         </div>
 
         <!-- OTP Section -->
-        <div class="mt-4" id="otp-section" style="display: none;">
+        <div class="mb-3" id="otp-section" style="display: none;">
             <x-input-label for="otp" :value="__('Email Verification Code')" />
-            <div class="flex space-x-2">
-                <x-text-input id="otp" class="block mt-1 w-full" type="text" name="otp" maxlength="6" placeholder="Enter 6-digit code" />
-                <button type="button" id="resend-otp" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 text-sm">
-                    Resend
-                </button>
+            <div class="d-flex gap-2">
+                <x-text-input id="otp" type="text" name="otp" maxlength="6" placeholder="Enter 6-digit code" />
+                <button type="button" id="resend-otp" class="btn btn-secondary btn-sm">Resend</button>
             </div>
-            <x-input-error :messages="$errors->get('otp')" class="mt-2" />
-            <div id="otp-status" class="mt-1 text-sm"></div>
+            <x-input-error :messages="$errors->get('otp')" />
+            <div id="otp-status" class="mt-1 small"></div>
         </div>
 
         <!-- Email Verification Button -->
-        <div class="mt-4" id="verify-email-container" style="display: block !important; visibility: visible !important;">
-            <button type="button" id="verify-email" class="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600" style="display: block !important; visibility: visible !important; width: 100%; padding: 8px 16px; background-color: #3b82f6; color: white; border-radius: 4px; border: none; cursor: pointer;">
+        <div class="mb-3" id="verify-email-container" style="display: block !important; visibility: visible !important;">
+            <button type="button" id="verify-email" class="btn btn-info w-100" style="display: block !important; visibility: visible !important;">
                 Verify Email Address
             </button>
         </div>
 
-        <div class="flex items-center justify-end mt-4">
-            <a class="underline text-sm text-gray-600 hover:text-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" href="{{ route('login') }}">
+        <div class="d-flex align-items-center justify-content-between mt-3">
+            <a class="text-decoration-underline small" href="{{ route('login') }}">
                 {{ __('Already registered?') }}
             </a>
 
@@ -92,18 +80,18 @@
             </x-primary-button>
         </div>
             <!-- Trust & Security Section -->
-            <div class="mt-6 text-center text-sm text-gray-500">
-                <hr class="my-4">
+            <div class="mt-4 text-center small text-muted">
+                <hr class="my-3">
                 <div class="mb-2">
                     <strong>ai-chat.support is owned and operated by MYWEB SOLUTIONS.</strong>
                 </div>
                 <div>
-                    <a href="{{ route('privacy') }}" class="me-3 underline">Privacy Policy</a>
-                    <a href="{{ route('terms') }}" class="me-3 underline">Terms of Service</a>
-                    <a href="{{ route('contact') }}" class="underline">Contact Us</a>
+                    <a href="{{ route('privacy') }}" class="me-3 text-decoration-underline">Privacy Policy</a>
+                    <a href="{{ route('terms') }}" class="me-3 text-decoration-underline">Terms of Service</a>
+                    <a href="{{ route('contact') }}" class="text-decoration-underline">Contact Us</a>
                 </div>
                 <div class="mt-2">
-                    <span class="text-xs">For support or security concerns, email <a href="mailto:info@ai-chat.support" class="underline">info@ai-chat.support</a></span>
+                    <span>For support or security concerns, email <a href="mailto:info@ai-chat.support" class="text-decoration-underline">info@ai-chat.support</a></span>
                 </div>
             </div>
 
@@ -113,6 +101,30 @@
 
     <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // Client-side password confirmation validation
+        const pass = document.getElementById('password');
+        const pass2 = document.getElementById('password_confirmation');
+        const mismatch = document.getElementById('password-mismatch');
+        const registerBtn = document.getElementById('register-button');
+
+        function validatePasswords() {
+            if (!pass || !pass2) return true;
+            const ok = pass.value !== '' && pass.value === pass2.value;
+            if (!ok) {
+                pass2.classList.add('is-invalid');
+                if (mismatch) mismatch.classList.remove('d-none');
+            } else {
+                pass2.classList.remove('is-invalid');
+                if (mismatch) mismatch.classList.add('d-none');
+            }
+            return ok;
+        }
+
+        ['input','blur'].forEach(evt => {
+            if (pass2) pass2.addEventListener(evt, validatePasswords);
+            if (pass) pass.addEventListener(evt, validatePasswords);
+        });
+
         const verifyEmailBtn = document.getElementById('verify-email');
         const otpSection = document.getElementById('otp-section');
         const registerButton = document.getElementById('register-button');
@@ -241,6 +253,11 @@
         // Form submission handler
         const form = document.querySelector('form');
         form.addEventListener('submit', function(e) {
+            if (!validatePasswords()) {
+                e.preventDefault();
+                alert('Passwords do not match. Please confirm your password correctly.');
+                return false;
+            }
             if (!otpVerified && hasOtpInput.value !== 'true') {
                 e.preventDefault();
                 alert('Please verify your email address before registering.');

@@ -12,71 +12,64 @@
         </div>
     @endif
 
-    <form method="POST" action="{{ route('login') }}">
+    <form method="POST" action="{{ route('login') }}" class="mt-2">
         @csrf
 
         <!-- Email Address -->
-        <div>
+        <div class="mb-3">
             <x-input-label for="email" :value="__('Email')" />
-            <x-text-input id="email" class="block mt-1 w-full" type="email" name="email" :value="old('email')" required autofocus autocomplete="username" />
-            <x-input-error :messages="$errors->get('email')" class="mt-2" />
+            <x-text-input id="email" type="email" name="email" :value="old('email')" required autofocus autocomplete="username" />
+            <x-input-error :messages="$errors->get('email')" />
         </div>
 
         <!-- Password -->
-        <div class="mt-4">
+        <div class="mb-3">
             <x-input-label for="password" :value="__('Password')" />
-            <div class="relative">
-                <x-text-input id="password" class="block mt-1 w-full pr-10"
+            <div class="position-relative">
+                <x-text-input id="password" class="pe-5"
                                 type="password"
                                 name="password"
                                 required autocomplete="current-password" />
-                <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-gray-700">
-                    <svg id="eye-open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                <button type="button" id="toggle-password" class="btn btn-link position-absolute top-0 end-0 mt-1 me-1 p-1 text-decoration-none">
+                    <svg id="eye-open" width="20" height="20" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 5c-4.478 0-8.268 2.943-9.542 7 1.274 4.057 5.064 7 9.542 7 4.478 0 8.268-2.943 9.542-7C20.268 7.943 16.478 5 12 5zm0 10a3 3 0 110-6 3 3 0 010 6z"></path>
                     </svg>
-                    <svg id="eye-closed" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L12 12m6.022-.878L21 21m-3.978-3.978l-3.022-3.022m0 0L12 12m3-3L12 12m-3-3l-3 3m3-3l3 3"></path>
+                    <svg id="eye-closed" width="20" height="20" class="d-none" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 3l18 18-1.5 1.5L15.6 18.6A10.5 10.5 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029l2.33 2.33A7.5 7.5 0 004.5 12c1.274 4.057 5.064 7 9.542 7 .559 0 1.11-.04 1.65-.118L1.5 4.5 3 3z"></path>
                     </svg>
                 </button>
             </div>
-            <x-input-error :messages="$errors->get('password')" class="mt-2" />
+            <x-input-error :messages="$errors->get('password')" />
         </div>
 
         <!-- Remember Me -->
-        <div class="block mt-4">
-            <label for="remember_me" class="inline-flex items-center">
-                <input id="remember_me" type="checkbox" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500" name="remember">
-                <span class="ms-2 text-sm text-gray-600">{{ __('Remember me') }}</span>
-            </label>
+        <div class="form-check mb-3">
+            <input id="remember_me" type="checkbox" class="form-check-input" name="remember">
+            <label for="remember_me" class="form-check-label">{{ __('Remember me') }}</label>
         </div>
 
         <!-- OTP Section -->
-    <div id="otp-section" class="mt-4" style="display: {{ $errors->has('otp') ? 'block' : 'none' }};">
-            <div>
+    <div id="otp-section" class="mb-3" style="display: {{ $errors->has('otp') ? 'block' : 'none' }};">
+            <div class="mb-2">
                 <x-input-label for="otp" :value="__('Enter OTP Code')" />
-                <x-text-input id="otp" class="block mt-1 w-full" type="text" name="otp" maxlength="6" placeholder="Enter 6-digit OTP" @if(!$errors->has('otp')) disabled @endif />
-                <x-input-error :messages="$errors->get('otp')" class="mt-2" />
+                <x-text-input id="otp" type="text" name="otp" maxlength="6" placeholder="Enter 6-digit OTP" @if(!$errors->has('otp')) disabled @endif />
+                <x-input-error :messages="$errors->get('otp')" />
             </div>
-            <div class="mt-2 text-sm text-gray-600">
+            <div class="text-muted small mb-2">
                 <span id="otp-message">We've sent a 6-digit code to your email address. Please check your inbox.</span>
-                <button type="button" id="resend-otp" class="ml-2 text-indigo-600 hover:text-indigo-800 underline">
-                    Resend OTP
-                </button>
+                <button type="button" id="resend-otp" class="btn btn-link p-0 ms-2">Resend OTP</button>
             </div>
             
             <!-- Remember Device for OTP -->
-            <div class="mt-3">
-                <label for="remember_device" class="inline-flex items-center">
-                    <input id="remember_device" type="checkbox" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500" name="remember_device">
-                    <span class="ms-2 text-sm text-gray-600">{{ __('Remember this device (skip OTP for 30 days)') }}</span>
-                </label>
+            <div class="form-check">
+                <input id="remember_device" type="checkbox" class="form-check-input" name="remember_device">
+                <label for="remember_device" class="form-check-label">{{ __('Remember this device (skip OTP for 30 days)') }}</label>
             </div>
         </div>
 
-        <div class="flex items-center justify-end mt-4">
+        <div class="d-flex align-items-center justify-content-between mt-3">
             @if (Route::has('password.request'))
-                <a class="underline text-sm text-gray-600 hover:text-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" href="{{ route('password.request') }}">
+                <a class="text-decoration-underline small" href="{{ route('password.request') }}">
                     {{ __('Forgot your password?') }}
                 </a>
             @endif
@@ -85,27 +78,24 @@
 
             <x-primary-button id="login-button" class="ms-3">
                 <span id="login-text">{{ __('Log In') }}</span>
-                <span id="login-spinner" class="hidden ml-2">
-                    <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
+                <span id="login-spinner" class="d-none ms-2">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                 </span>
             </x-primary-button>
         </div>
         <!-- Trust & Security Section -->
-        <div class="mt-6 text-center text-sm text-gray-500">
-            <hr class="my-4">
+        <div class="mt-4 text-center small text-muted">
+            <hr class="my-3">
             <div class="mb-2">
                 <strong>ai-chat.support is owned and operated by MYWEB SOLUTIONS.</strong>
             </div>
             <div>
-                <a href="{{ route('privacy') }}" class="me-3 underline">Privacy Policy</a>
-                <a href="{{ route('terms') }}" class="me-3 underline">Terms of Service</a>
-                <a href="{{ route('contact') }}" class="underline">Contact Us</a>
+                <a href="{{ route('privacy') }}" class="me-3 text-decoration-underline">Privacy Policy</a>
+                <a href="{{ route('terms') }}" class="me-3 text-decoration-underline">Terms of Service</a>
+                <a href="{{ route('contact') }}" class="text-decoration-underline">Contact Us</a>
             </div>
             <div class="mt-2">
-                <span class="text-xs">For support or security concerns, email <a href="mailto:info@ai-chat.support" class="underline">info@ai-chat.support</a></span>
+                <span class="text-muted">For support or security concerns, email <a href="mailto:info@ai-chat.support" class="text-decoration-underline">info@ai-chat.support</a></span>
             </div>
         </div>
     </form>
@@ -237,10 +227,10 @@
 
         function showSpinner(show) {
             if (show) {
-                loginSpinner.classList.remove('hidden');
+                loginSpinner.classList.remove('d-none');
                 loginButton.disabled = true;
             } else {
-                loginSpinner.classList.add('hidden');
+                loginSpinner.classList.add('d-none');
                 loginButton.disabled = false;
             }
         }
@@ -316,11 +306,11 @@
             
             // Toggle eye icons
             if (type === 'text') {
-                eyeOpen.classList.add('hidden');
-                eyeClosed.classList.remove('hidden');
+                eyeOpen.classList.add('d-none');
+                eyeClosed.classList.remove('d-none');
             } else {
-                eyeOpen.classList.remove('hidden');
-                eyeClosed.classList.add('hidden');
+                eyeOpen.classList.remove('d-none');
+                eyeClosed.classList.add('d-none');
             }
         });
     });
