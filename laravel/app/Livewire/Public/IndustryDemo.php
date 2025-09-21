@@ -331,7 +331,7 @@ class IndustryDemo extends Component
 
     public function sendSampleQuestion($question)
     {
-        $this->currentMessage = $question;
+        $this->query = $question;
         $this->sendMessage();
     }
 
@@ -526,6 +526,6 @@ class IndustryDemo extends Component
     public function render()
     {
         return view('livewire.public.industry-demo')
-            ->layout('layouts.demo');
+            ->layout('layouts.public');
     }
 }

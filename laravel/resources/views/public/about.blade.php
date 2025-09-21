@@ -164,8 +164,8 @@
             </div>
             <div class="col-lg-3 col-md-6 mb-4">
                 <div class="stat-item">
-                    <h2 class="display-4 fw-bold">< 2s</h2>
-                    <p class="mb-0">Response Time</p>
+                    <h2 class="display-4 fw-bold">99%</h2>
+                    <p class="mb-0">Up Time</p>
                 </div>
             </div>
             <div class="col-lg-3 col-md-6 mb-4">
