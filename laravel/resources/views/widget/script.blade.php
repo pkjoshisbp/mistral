@@ -4,8 +4,10 @@
     // Widget Configuration
     const config = @json($widgetConfig);
     
-    // Prevent multiple initializations
-    if (window.AiChatWidget) {
+    // Prevent multiple initializations across orgs
+    window.__AiChatWidgetInstances = window.__AiChatWidgetInstances || {};
+    const __ORG_KEY__ = (typeof config === 'object' && config.orgId) ? String(config.orgId) : 'default';
+    if (window.__AiChatWidgetInstances[__ORG_KEY__]) {
         return;
     }
 
@@ -308,18 +310,8 @@
                                   document.body.classList.contains('logged-in') ||
                                   window.Laravel && window.Laravel.user;
                 
-                // If org requires contact for guests, enforce lead form for non-auth users
-                const requireLead = !!this.config.requireContactForGuests;
-
-                if (!isLoggedIn && requireLead) {
-                    // Disable skip button
-                    const skipBtn = document.getElementById(this.ids.leadSkip);
-                    if (skipBtn) {
-                        skipBtn.style.display = 'none';
-                    }
-                    // Always show lead form
-                    this.showLeadForm();
-                } else if (!this.leadCaptured && !isLoggedIn) {
+                // Show lead form if not captured yet AND user is not logged in
+                if (!this.leadCaptured && !isLoggedIn) {
                     this.showLeadForm();
                 } else {
                     this.leadCaptured = true; // Skip lead capture for logged in users
@@ -373,7 +365,17 @@
         linkify(text) {
             if (!text) return '';
             
-            // Strip any HTML tags that might be present (defensive)
+            // Preserve existing anchors by placeholdering them first
+            const anchorPlaceholders = [];
+            let anchorIndex = 0;
+            text = text.replace(/<a\b[^>]*>.*?<\/a>/gi, (m) => {
+                const ph = `__ANCHOR_${anchorIndex}__`;
+                anchorPlaceholders.push(m);
+                anchorIndex++;
+                return ph;
+            });
+
+            // Strip any remaining HTML tags (defensive)
             text = text.replace(/<[^>]*>/g, '');
             
             // Normalize Markdown links: [label](url ... ) -> label (url)
@@ -399,7 +401,7 @@
             const links = [];
             let linkIndex = 0;
             
-            // Detect URLs (http/https) and convert to anchors
+            // Detect URLs (http/https) and convert to anchors (with image handling)
             const urlRegex = /https?:\/\/[^\s<]+/g;
             processed = processed.replace(urlRegex, full => {
                 const m = full.match(/^(.*?)([\.,!?)]?]?)$/);
@@ -412,8 +414,11 @@
                     trail = url.slice(-1) + trail;
                     url = url.slice(0,-1);
                 }
-                
-                const linkHtml = `<a href="${url}" target="_blank">${url}</a>${trail}`;
+                // Image extensions
+                const isImage = /\.(?:png|jpe?g|gif|webp|svg)(?:[?#].*)?$/i.test(url);
+                const linkHtml = isImage
+                    ? `<img src="${url}" alt="image" style="max-width:100%;height:auto;"/>${trail}`
+                    : `<a href="${url}" target="_blank">${url}</a>${trail}`;
                 const placeholder = `__LINK_${linkIndex}__`;
                 links[linkIndex] = linkHtml;
                 linkIndex++;
@@ -434,15 +439,8 @@
                 return placeholder;
             });
             
-            // Emails
-            const emailRegex = /(?<![\w])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w])/g;
-            processed = processed.replace(emailRegex, (email) => {
-                const linkHtml = `<a href="mailto:${email}">${email}</a>`;
-                const placeholder = `__LINK_${linkIndex}__`;
-                links[linkIndex] = linkHtml;
-                linkIndex++;
-                return placeholder;
-            });
+            // Emails - do NOT convert to links; leave as plain text per requirement
+            // (Intentionally disabled email linkification)
             
             // Now escape remaining content (but not link placeholders)
             const escapeMap = { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' };
@@ -453,6 +451,11 @@
                 processed = processed.replace(`__LINK_${i}__`, links[i]);
             }
             
+            // Restore original anchors
+            for (let i = 0; i < anchorPlaceholders.length; i++) {
+                processed = processed.replace(`__ANCHOR_${i}__`, anchorPlaceholders[i]);
+            }
+
             // Preserve line breaks
             return processed.replace(/\n/g, '<br>');
         }
@@ -601,12 +604,6 @@
         }
 
         skipLeadForm() {
-            // If organization requires contact for guests, do not allow skip
-            const isLoggedIn = document.querySelector('meta[name="user-authenticated"]') || document.body.classList.contains('logged-in') || (window.Laravel && window.Laravel.user);
-            if (!isLoggedIn && this.config.requireContactForGuests) {
-                alert('Please provide your name and email to start chat.');
-                return;
-            }
             this.leadCaptured = true;
             this.saveLeadCaptured();
             this.hideLeadForm();
@@ -724,7 +721,18 @@
         }
     }
 
-    // Initialize widget
-    window.AiChatWidget = new AiChatWidget(config);
+    // Initialize widget when DOM is ready
+    const start = () => {
+        if (window.__AiChatWidgetInstances[__ORG_KEY__]) return; // prevent re-init per org
+        const instance = new AiChatWidget(config);
+        window.__AiChatWidgetInstances[__ORG_KEY__] = instance;
+        // Backwards compatibility pointer
+        window.AiChatWidget = instance;
+    };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
 
 })();

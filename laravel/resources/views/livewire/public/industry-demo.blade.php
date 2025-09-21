@@ -69,7 +69,7 @@
                             <div class="mb-3" wire:key="message-{{ $index }}-{{ $message['timestamp']->timestamp }}">
                                 <div class="d-flex {{ $message['role'] === 'user' ? 'justify-content-end' : 'justify-content-start' }}">
                                     <div class="p-3 rounded-3 {{ $message['role'] === 'user' ? 'bg-primary text-white' : 'bg-white border' }}" style="max-width: 28rem;">
-                                        {!! nl2br(e($message['content'])) !!}
+                                        <x-linkified-text :text="$message['content']" />
                                     </div>
                                 </div>
                                 <div class="small text-muted {{ $message['role'] === 'user' ? 'text-end' : '' }} mt-1">

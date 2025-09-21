@@ -190,7 +190,7 @@ window.initHtmlToolbar = function() {
             case 'link':
                 const url = prompt('Enter URL:', 'https://example.com');
                 if (url && url !== 'https://example.com') {
-                    const text = selectedText || 'link text';
+                    const text = selectedText || url; // if no selection, use the URL itself as text
                     replacement = `<a href="${url}" target="_blank" rel="nofollow noopener noreferrer">${text}</a>`;
                 } else {
                     return;

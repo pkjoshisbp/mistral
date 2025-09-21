@@ -28,7 +28,7 @@
                 <div class="message mb-3 {{ $message['role'] === 'user' ? 'text-right' : 'text-left' }}">
                     <div class="d-inline-block p-2 rounded {{ $message['role'] === 'user' ? 'bg-primary text-white' : ($message['role'] === 'system' ? 'bg-danger text-white' : 'bg-light') }}" style="max-width: 70%;">
                         <strong>{{ ucfirst($message['role']) }}:</strong><br>
-                        {{ $message['content'] }}
+                        <x-linkified-text :text="$message['content']" />
                         <br><small class="text-muted">{{ $message['timestamp']->format('H:i:s') }}</small>
                     </div>
                 </div>

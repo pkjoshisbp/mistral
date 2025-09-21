@@ -31,6 +31,7 @@ class WidgetController
             return response('Organization not found or inactive', 404);
         }
 
+        $scriptVersion = now()->format('Ymd.His');
         $widgetConfig = [
             'orgId' => $orgId,
             'orgName' => $organization->name,
@@ -44,10 +45,20 @@ class WidgetController
 
         $script = view('widget.script', compact('widgetConfig'))->render();
 
+        Log::info('Serving widget script', [
+            'org_id' => $orgId,
+            'org_slug' => $organization->slug,
+            'version' => $scriptVersion
+        ]);
+
         return response($script)
             ->header('Content-Type', 'application/javascript')
             ->header('Access-Control-Allow-Origin', '*')
-            ->header('Cache-Control', 'public, max-age=3600')
+            // Disable caching to ensure latest fixes are delivered to widgets
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+            ->header('Pragma', 'no-cache')
+            ->header('Expires', '0')
+            ->header('X-AI-Widget-Version', $scriptVersion)
             ->header('X-Robots-Tag', 'noindex, nofollow');
     }
 
@@ -271,12 +282,15 @@ class WidgetController
                 $aiResponse = $this->aiAgentService->llmChat($messages, $this->aiAgentService->getLlamaModel(), null, $orgId);
             }
 
+            $rawResponseText = null;
             if (!$aiResponse || !isset($aiResponse['message']['content'])) {
                 // Fallback to old method
                 $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt);
-                $responseText = $aiResponse['answer'] ?? 'I apologize, but I\'m experiencing technical difficulties. Please try again later.';
+                $rawResponseText = $aiResponse['answer'] ?? null;
+                $responseText = $rawResponseText ?? 'I apologize, but I\'m experiencing technical difficulties. Please try again later.';
             } else {
-                $responseText = $aiResponse['message']['content'];
+                $rawResponseText = $aiResponse['message']['content'];
+                $responseText = $rawResponseText;
             }
 
             if (!$responseText) {
@@ -284,6 +298,11 @@ class WidgetController
             }
 
             // Normalize and sanitize AI response to plain text with clean URLs (no HTML)
+            Log::info('Widget AI raw response', [
+                'org_id' => $orgId,
+                'session_id' => $sessionId,
+                'raw_ai_response_preview' => substr((string) $rawResponseText, 0, 300) . '...',
+            ]);
             $responseText = $this->normalizeAiResponse($responseText);
 
             // Detailed logging for debugging
@@ -338,11 +357,12 @@ class WidgetController
     {
         if ($html === '') return '';
 
-        // Replace anchors with "text (url)" preserving either label or URL
+        // Replace anchors with readable text; if label is a URL, prefer the href URL to avoid duplication
         $html = preg_replace_callback('/<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/is', function ($m) {
             $url = trim($m[1]);
             $text = trim(strip_tags($m[2]));
-            if ($text === '' || strcasecmp($text, $url) === 0) {
+            $isTextUrl = (bool)preg_match('/^https?:\/\//i', $text);
+            if ($text === '' || strcasecmp($text, $url) === 0 || $isTextUrl) {
                 return $url;
             }
             return $text . ' (' . $url . ')';
@@ -381,7 +401,8 @@ class WidgetController
                 $url = 'https://' . $dm[0];
             }
             if ($url !== '') {
-                if ($label === '' || strcasecmp($label, $url) === 0) return $url;
+                // If label is empty or equals URL, or label itself looks like a URL (even if different), prefer the URL only
+                if ($label === '' || strcasecmp($label, $url) === 0 || preg_match('/^https?:\/\//i', $label)) return $url;
                 return $label . ' (' . $url . ')';
             }
             return $label !== '' ? $label : $inner; // fallback to readable text
