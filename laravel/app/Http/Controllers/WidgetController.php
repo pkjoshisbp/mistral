@@ -246,8 +246,20 @@ class WidgetController
                 }
             }
 
-            // Create concise system prompt
+            // Create concise system prompt with official org contact metadata
+            $orgWebsite = $organization->website ?: config('app.url');
+            $orgEmail = $organization->contact_email ?? null;
+            $orgPhone = $organization->contact_phone ?? null;
+            $orgDesc  = $organization->description ? trim($this->htmlToPlainWithLinks($organization->description)) : null;
+
             $systemPrompt = "You are a helpful customer service assistant for {$organization->name}. ";
+            if ($orgDesc) {
+                $systemPrompt .= "About: {$orgDesc}. ";
+            }
+            $systemPrompt .= "Official website: {$orgWebsite}. ";
+            if ($orgEmail) { $systemPrompt .= "Official email: {$orgEmail}. "; }
+            if ($orgPhone) { $systemPrompt .= "Official phone: {$orgPhone}. "; }
+            $systemPrompt .= "If you suggest contacting us, ONLY use the official website/email/phone above; never invent contact details. ";
             
             // Add location context briefly if available
             if ($country || $region || $location) {
@@ -265,7 +277,7 @@ class WidgetController
                 $systemPrompt .= "I don't have specific info for this question. ";
             }
             
-            $systemPrompt .= "Keep responses concise and direct. Always use plain text only - no HTML tags, no markdown, no special formatting. If you mention any website or resource, include the full https URL as plain text. If you suggest multiple resources, present them as a simple bulleted list with each item containing only the plain URL.";
+            $systemPrompt .= "Keep responses concise and direct. Always use plain text only - no HTML tags, no markdown, no special formatting. If you mention any website or resource, include the full https URL as plain text. If you suggest multiple resources, present them as a simple bulleted list with each item containing only the plain URL. Do not fabricate domains or emails; prefer {$orgWebsite} and the official contacts provided.";
 
             // Get AI response using llmChat for better token tracking
             $messages = [
@@ -522,6 +534,16 @@ class WidgetController
      */
     private function checkTokenLimits($organization)
     {
+        // Allow disabling token enforcement via config/services.ai_agent.enforce_limits or env AI_ENFORCE_LIMITS=false
+        $enforce = (bool) config('services.ai_agent.enforce_limits', env('AI_ENFORCE_LIMITS', false));
+        if (!$enforce) {
+            \Log::debug('Token limits not enforced (config disabled)', [
+                'org_id' => $organization->id,
+                'org_name' => $organization->name
+            ]);
+            return true;
+        }
+
         // Get the organization's owner (first user)
         $user = $organization->users()->first();
         if (!$user) {
@@ -534,14 +556,34 @@ class WidgetController
         }
 
         $subscription = $user->activeSubscription;
+
+        // Estimate tokens needed for this request (rough estimate: 500-1000 tokens per chat)
+        $estimatedTokensNeeded = 800;
+
+        // Always consider user credits as a fallback funding source
+        $creditBalance = 0;
+        try {
+            $creditBalance = optional(\App\Models\UserCredit::getOrCreateForUser($user->id))->balance ?? 0;
+        } catch (\Throwable $e) {
+            Log::error('Failed to load user credit balance', ['user_id' => $user->id, 'error' => $e->getMessage()]);
+        }
+
         if (!$subscription || !$subscription->subscriptionPlan) {
-            // No active subscription - could implement pay-per-use or block
-            return [
-                'error' => 'No active subscription found',
-                'message' => 'Please subscribe to a plan to continue using AI chat.',
-                'action_required' => 'subscribe',
-                'upgrade_url' => config('app.url') . '/customer/subscriptions'
-            ];
+            // No active subscription: allow if credits are sufficient; otherwise soft-allow but log
+            if ($creditBalance >= $estimatedTokensNeeded) {
+                Log::info('Allowing chat using credits (no subscription)', [
+                    'org_id' => $organization->id,
+                    'user_id' => $user->id,
+                    'credit_balance' => $creditBalance
+                ]);
+                return true;
+            }
+            Log::info('No subscription and insufficient credits; allowing under soft policy', [
+                'org_id' => $organization->id,
+                'user_id' => $user->id,
+                'credit_balance' => $creditBalance
+            ]);
+            return true;
         }
 
         $tokenLimit = $subscription->subscriptionPlan->token_cap_monthly;
@@ -549,38 +591,49 @@ class WidgetController
         $remainingTokens = $subscription->remaining_tokens;
         $usagePercentage = $subscription->usage_percentage;
 
-        // Estimate tokens needed for this request (rough estimate: 500-1000 tokens per chat)
-        $estimatedTokensNeeded = 800;
+        // If subscription remaining tokens are insufficient, allow if credits can cover
+        if ($remainingTokens <= 0 || $remainingTokens < $estimatedTokensNeeded) {
+            if ($creditBalance >= $estimatedTokensNeeded) {
+                Log::info('Subscription low/exhausted, allowing chat using credits', [
+                    'user_id' => $user->id,
+                    'org_id' => $organization->id,
+                    'remaining_sub_tokens' => $remainingTokens,
+                    'credit_balance' => $creditBalance
+                ]);
+                return true;
+            }
 
-        if ($remainingTokens <= 0) {
-            // Completely over limit
-            return [
-                'error' => 'Token limit exceeded',
-                'message' => 'You have used all ' . number_format($tokenLimit) . ' tokens in your ' . $subscription->subscriptionPlan->name . ' plan this month.',
-                'usage_info' => [
-                    'used' => $tokensUsed,
-                    'limit' => $tokenLimit,
-                    'percentage' => round($usagePercentage, 1)
-                ],
-                'action_required' => 'upgrade_or_wait',
-                'upgrade_url' => config('app.url') . '/customer/subscriptions',
-                'renewal_date' => $subscription->current_period_end ? $subscription->current_period_end->format('M j, Y') : null
-            ];
-        }
+            // Hard deny if neither subscription tokens nor credits can cover
+            if ($remainingTokens <= 0) {
+                return [
+                    'error' => 'Token limit exceeded',
+                    'message' => 'You have used all ' . number_format($tokenLimit) . ' tokens in your ' . $subscription->subscriptionPlan->name . ' plan this month.',
+                    'usage_info' => [
+                        'used' => $tokensUsed,
+                        'limit' => $tokenLimit,
+                        'percentage' => round($usagePercentage, 1),
+                        'credits' => $creditBalance
+                    ],
+                    'action_required' => 'upgrade_or_add_credits',
+                    'upgrade_url' => config('app.url') . '/customer/subscription',
+                    'credits_url' => config('app.url') . '/customer/credits',
+                    'renewal_date' => $subscription->current_period_end ? $subscription->current_period_end->format('M j, Y') : null
+                ];
+            }
 
-        if ($remainingTokens < $estimatedTokensNeeded) {
-            // Likely to exceed limit with this request
             return [
                 'error' => 'Insufficient tokens',
-                'message' => 'You have only ' . number_format($remainingTokens) . ' tokens remaining, but this request may need up to ' . number_format($estimatedTokensNeeded) . ' tokens.',
+                'message' => 'You have only ' . number_format($remainingTokens) . ' tokens remaining in your subscription, and not enough credits to cover this request.',
                 'usage_info' => [
                     'used' => $tokensUsed,
                     'limit' => $tokenLimit,
                     'remaining' => $remainingTokens,
-                    'percentage' => round($usagePercentage, 1)
+                    'percentage' => round($usagePercentage, 1),
+                    'credits' => $creditBalance
                 ],
-                'action_required' => 'upgrade',
-                'upgrade_url' => config('app.url') . '/customer/subscriptions'
+                'action_required' => 'upgrade_or_add_credits',
+                'upgrade_url' => config('app.url') . '/customer/subscription',
+                'credits_url' => config('app.url') . '/customer/credits'
             ];
         }
 
@@ -590,7 +643,8 @@ class WidgetController
                 'user_id' => $user->id,
                 'org_id' => $organization->id,
                 'usage_percentage' => $usagePercentage,
-                'remaining_tokens' => $remainingTokens
+                'remaining_tokens' => $remainingTokens,
+                'credit_balance' => $creditBalance
             ]);
         }
 

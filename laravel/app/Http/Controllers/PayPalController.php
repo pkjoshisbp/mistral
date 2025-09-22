@@ -431,28 +431,21 @@ class PayPalController extends Controller
             $package = \App\Models\CreditPackage::find($packageId);
             
             if ($user && $package) {
-                // Add credits to user account
-                \App\Models\UserCredit::create([
-                    'user_id' => $user->id,
-                    'amount' => $package->credits,
-                    'source' => 'paypal_purchase',
-                    'reference_id' => $resource['id'],
-                    'expires_at' => null, // Credits never expire
-                ]);
-                
-                // Record transaction
-                \App\Models\CreditTransaction::create([
-                    'user_id' => $user->id,
-                    'type' => 'purchase',
-                    'amount' => $package->credits,
-                    'description' => 'PayPal credit purchase: ' . $package->name,
-                    'reference_id' => $resource['id'],
+                // Add credits to user account via central model method
+                $userCredit = \App\Models\UserCredit::getOrCreateForUser($user->id);
+                $tokens = $package->tokens;
+                $userCredit->addCredits($tokens, 'Credit package purchase (PayPal)', [
+                    'credit_package_id' => $package->id,
+                    'credits' => $tokens,
+                    'payment_method' => 'paypal',
+                    'reference_id' => $resource['id'] ?? null,
+                    'notes' => 'Package: ' . ($package->name ?? 'N/A') . ' | USD ' . ($package->usd_price ?? '0')
                 ]);
                 
                 Log::info('PayPal credit purchase completed', [
                     'user_id' => $user->id,
                     'package_id' => $package->id,
-                    'credits_added' => $package->credits,
+                    'credits_added' => $tokens,
                 ]);
             } else {
                 Log::error('PayPal webhook: user or package not found for credit purchase', ['custom_id' => $customId]);

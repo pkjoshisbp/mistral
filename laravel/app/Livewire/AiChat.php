@@ -413,12 +413,29 @@ $nluUser = [
     $aiService = app(\App\Services\AiAgentService::class);
     $isOpenAI = $aiService->isOpenAiProvider();
     
+    // Include official org metadata to avoid invented contacts
+    $orgMeta = null;
+    if ($organization) {
+        $orgMeta = [
+            'website' => $organization->website ?? config('app.url'),
+            'email' => $organization->contact_email ?? null,
+            'phone' => $organization->contact_phone ?? null,
+            'about' => $organization->description ? strip_tags($organization->description) : null,
+        ];
+    }
+
     if ($isOpenAI) {
         // Ultra-concise for GPT to minimize tokens
-        $systemPrompt = "You're {$orgName}. Answer using context. Be brief, direct. User asked: \"{$query}\"";
+        $systemPrompt = "You're {$orgName}. Answer using context. Be brief, direct. If referring to contact, ONLY use official: website={$orgMeta['website']}" .
+            ($orgMeta['email'] ? ", email={$orgMeta['email']}" : '') .
+            ($orgMeta['phone'] ? ", phone={$orgMeta['phone']}" : '') .
+            ". Never invent contact details. User asked: \"{$query}\"";
     } else {
         // Standard prompt for Llama
-        $systemPrompt = "Answer strictly for {$orgName} using ONLY provided context + user message. Speak as {$orgName} (we/our). Never say you are AI or use I/me/my. If address/price/timing/contact present: answer directly. If missing info: brief follow-up or advise contacting {$orgName}. Keep to <=2 concise factual sentences. Original question: \"{$query}\"";
+        $systemPrompt = "Answer strictly for {$orgName} using ONLY provided context + user message. Speak as {$orgName} (we/our). Never say you are AI or use I/me/my. If address/price/timing/contact present: answer directly. If suggesting contact, ONLY use official details: website={$orgMeta['website']}" .
+            ($orgMeta['email'] ? ", email={$orgMeta['email']}" : '') .
+            ($orgMeta['phone'] ? ", phone={$orgMeta['phone']}" : '') .
+            ". Never invent domains or emails. Keep to <=2 concise factual sentences. Original question: \"{$query}\"";
     }
 
     $contextSummary = [
@@ -429,6 +446,7 @@ $nluUser = [
     ];
 
     // Minimize message count: merge context summary + snippets into one system message
+    if ($orgMeta) { $contextSummary['org_meta'] = $orgMeta; }
     $mergedContext = 'Context JSON: ' . json_encode($contextSummary, JSON_UNESCAPED_UNICODE) . "\n" . $context;
     $chatMessages = [
         ['role' => 'system', 'content' => $systemPrompt . "\n" . $mergedContext],

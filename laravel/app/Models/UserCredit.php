@@ -46,30 +46,54 @@ class UserCredit extends Model
     /**
      * Add credits to user balance (thread-safe)
      */
-    public function addCredits($amount, $reason = 'Purchase')
+    public function addCredits($amount, $reason = 'Purchase', array $extra = [])
     {
-        DB::transaction(function () use ($amount, $reason) {
+        DB::transaction(function () use ($amount, $reason, $extra) {
             $this->increment('balance', $amount);
             $this->increment('total_purchased', $amount);
             $this->update(['last_updated_at' => now()]);
             
             // Log the transaction
-            CreditTransaction::create([
+            $payload = [
                 'user_id' => $this->user_id,
                 'type' => 'credit',
                 'amount' => $amount,
                 'balance_after' => $this->fresh()->balance,
                 'description' => $reason
-            ]);
+            ];
+
+            // Allow passing optional metadata fields for purchases
+            $allowedExtras = [
+                'reference_id',
+                'subscription_id',
+                'credit_package_id',
+                'credits',
+                'payment_method',
+                'razorpay_payment_id',
+                'notes',
+                'metadata',
+            ];
+            foreach ($allowedExtras as $key) {
+                if (array_key_exists($key, $extra)) {
+                    $payload[$key] = $extra[$key];
+                }
+            }
+
+            // If explicit credits not provided, set it equal to amount (commonly 1 credit = 1 token)
+            if (!isset($payload['credits'])) {
+                $payload['credits'] = $amount;
+            }
+
+            CreditTransaction::create($payload);
         });
     }
 
     /**
      * Deduct credits from user balance (thread-safe)
      */
-    public function deductCredits($amount, $reason = 'Usage')
+    public function deductCredits($amount, $reason = 'Usage', array $extra = [])
     {
-        return DB::transaction(function () use ($amount, $reason) {
+        return DB::transaction(function () use ($amount, $reason, $extra) {
             if ($this->balance < $amount) {
                 return false; // Insufficient credits
             }
@@ -79,13 +103,37 @@ class UserCredit extends Model
             $this->update(['last_updated_at' => now()]);
             
             // Log the transaction
-            CreditTransaction::create([
+            $payload = [
                 'user_id' => $this->user_id,
                 'type' => 'debit',
                 'amount' => $amount,
                 'balance_after' => $this->fresh()->balance,
                 'description' => $reason
-            ]);
+            ];
+
+            // Optional metadata on usage as well
+            $allowedExtras = [
+                'reference_id',
+                'subscription_id',
+                'credit_package_id',
+                'credits',
+                'payment_method',
+                'razorpay_payment_id',
+                'notes',
+                'metadata',
+            ];
+            foreach ($allowedExtras as $key) {
+                if (array_key_exists($key, $extra)) {
+                    $payload[$key] = $extra[$key];
+                }
+            }
+
+            // For debits, keep credits equal to amount unless overridden
+            if (!isset($payload['credits'])) {
+                $payload['credits'] = $amount;
+            }
+
+            CreditTransaction::create($payload);
             
             return true;
         });

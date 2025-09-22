@@ -59,6 +59,7 @@
                     </div>
                 </div>
 
+
                 <div class="form-group mb-3">
                     <label for="description" class="form-label">
                         <i class="fas fa-info-circle"></i>
@@ -70,6 +71,55 @@
                               rows="3"
                               placeholder="Brief description of your organization"></textarea>
                     @error('description')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                    @enderror
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="website" class="form-label">
+                                <i class="fas fa-globe"></i>
+                                Website
+                            </label>
+                            <input type="text"
+                                   class="form-control @error('website') is-invalid @enderror"
+                                   id="website"
+                                   wire:model="website"
+                                   placeholder="https://example.com">
+                            @error('website')
+                                <div class="invalid-feedback">{{ $message }}</div>
+                            @enderror
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="contact_email" class="form-label">
+                                <i class="fas fa-envelope"></i>
+                                Contact Email
+                            </label>
+                            <input type="email"
+                                   class="form-control @error('contact_email') is-invalid @enderror"
+                                   id="contact_email"
+                                   wire:model="contact_email"
+                                   placeholder="support@example.com">
+                            @error('contact_email')
+                                <div class="invalid-feedback">{{ $message }}</div>
+                            @enderror
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group mb-3">
+                    <label for="contact_phone" class="form-label">
+                        <i class="fas fa-phone"></i>
+                        Contact Phone
+                    </label>
+                    <input type="text"
+                           class="form-control @error('contact_phone') is-invalid @enderror"
+                           id="contact_phone"
+                           wire:model="contact_phone"
+                           placeholder="+1 555-123-4567">
+                    @error('contact_phone')
                         <div class="invalid-feedback">{{ $message }}</div>
                     @enderror
                 </div>

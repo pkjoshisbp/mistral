@@ -3,6 +3,7 @@
 namespace App\Livewire\Customer;
 
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use App\Models\OrganizationFaq;
 use App\Models\Organization;
 use App\Services\AiAgentService;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Artisan;
 
 class Faqs extends Component
 {
+    use WithFileUploads;
     public $showForm = false;
     public $editingId = null;
     public $question = '';
@@ -21,6 +23,8 @@ class Faqs extends Component
     public $is_active = true;
     public $showPreview = false;
     public $formSnapshot = [];
+    public $uploadFile; // JSON upload
+    public $importing = false;
     protected $listeners = ['customer-faqs-user-choice' => 'handleUnsavedChoice'];
 
     protected $rules = [
@@ -31,6 +35,47 @@ class Faqs extends Component
         'sort_order' => 'nullable|integer',
         'is_active' => 'boolean'
     ];
+
+    public function importJson()
+    {
+        $org = Organization::find($this->orgId());
+        if (!$org) {
+            session()->flash('error', 'Organization not found.');
+            return;
+        }
+        if (!$this->uploadFile) {
+            session()->flash('error', 'Please choose a JSON file to upload.');
+            return;
+        }
+
+        $this->importing = true;
+        try {
+            $realPath = $this->uploadFile->getRealPath();
+            $filename = $this->uploadFile->getClientOriginalName() ?: 'faqs.json';
+            $url = url('/api/organizations/' . $org->slug . '/faqs/import');
+
+            $response = \Http::timeout(120)
+                ->withToken((string) ($org->api_token ?? ''))
+                ->attach('upload', fopen($realPath, 'r'), $filename)
+                ->post($url);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                if (!empty($data['success'])) {
+                    session()->flash('message', 'Import complete. Created: ' . ($data['created'] ?? 0) . ', Updated: ' . ($data['updated'] ?? 0) . ', Skipped: ' . ($data['skipped'] ?? 0) . '. Synced: ' . ($data['qdrant']['synced'] ?? 0));
+                    $this->uploadFile = null;
+                    return;
+                }
+            }
+
+            session()->flash('error', 'Import failed: ' . $response->status() . ' ' . $response->body());
+        } catch (\Throwable $e) {
+            \Log::error('Customer FAQ import error', ['error' => $e->getMessage()]);
+            session()->flash('error', 'Import error: ' . $e->getMessage());
+        } finally {
+            $this->importing = false;
+        }
+    }
 
     private function orgId()
     {

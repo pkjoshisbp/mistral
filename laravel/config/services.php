@@ -33,6 +33,7 @@ return [
 
     'ai_agent' => [
         'url' => env('AI_AGENT_URL', 'http://localhost:8111'),
+        'enforce_limits' => env('AI_ENFORCE_LIMITS', false),
     ],
 
     'openai' => [

@@ -56,6 +56,23 @@
                     </div>
                 </div>
 
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label class="form-label">Contact Email</label>
+                            <input type="email" class="form-control @error('contact_email') is-invalid @enderror" wire:model="contact_email" placeholder="support@example.com">
+                            @error('contact_email') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label class="form-label">Contact Phone</label>
+                            <input type="text" class="form-control @error('contact_phone') is-invalid @enderror" wire:model="contact_phone" placeholder="+1 555-123-4567">
+                            @error('contact_phone') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                        </div>
+                    </div>
+                </div>
+
                 <div class="form-group mb-3">
                     <label class="form-label">Description</label>
                     <textarea class="form-control @error('description') is-invalid @enderror" rows="3" wire:model="description" placeholder="Short description"></textarea>

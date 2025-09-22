@@ -55,7 +55,9 @@ class UserManager extends Component
         $organization = Organization::findOrFail($organizationId);
         
         if (!$user->organizations->contains($organizationId)) {
-            $user->organizations()->attach($organizationId, ['role' => 'member']);
+            // Pivot table 'organization_user' does not have a 'role' column.
+            // Attach without extra attributes to avoid SQL errors.
+            $user->organizations()->attach($organizationId);
             session()->flash('success', 'Organization assigned successfully!');
         } else {
             session()->flash('info', 'User is already assigned to this organization.');

@@ -3,12 +3,16 @@
 namespace App\Livewire\Admin;
 
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use App\Models\Organization;
 use App\Models\OrganizationFaq;
 use App\Services\AiAgentService;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class FaqsManager extends Component
 {
+    use WithFileUploads;
     public $selectedOrganization = '';
     public $showForm = false;
     public $editingId = null;
@@ -19,6 +23,8 @@ class FaqsManager extends Component
     public $is_active = true;
     public $sort_order = 0;
     public $keywords = '';
+    public $uploadFile; // JSON upload
+    public $importing = false;
 
     protected $rules = [
         'selectedOrganization' => 'required|exists:organizations,id',
@@ -29,6 +35,53 @@ class FaqsManager extends Component
         'sort_order' => 'nullable|integer',
         'keywords' => 'nullable|string'
     ];
+
+    public function importJson()
+    {
+        if (!$this->selectedOrganization) {
+            session()->flash('error', 'Please select an organization first.');
+            return;
+        }
+        if (!$this->uploadFile) {
+            session()->flash('error', 'Please choose a JSON file to upload.');
+            return;
+        }
+
+        $org = Organization::find($this->selectedOrganization);
+        if (!$org) {
+            session()->flash('error', 'Selected organization not found.');
+            return;
+        }
+
+        $this->importing = true;
+        try {
+            $realPath = $this->uploadFile->getRealPath();
+            $filename = $this->uploadFile->getClientOriginalName() ?: 'faqs.json';
+            $url = url('/api/organizations/' . $org->slug . '/faqs/import');
+
+            $response = Http::timeout(120)
+                ->withToken((string) ($org->api_token ?? ''))
+                ->attach('upload', fopen($realPath, 'r'), $filename)
+                ->post($url);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                if (!empty($data['success'])) {
+                    session()->flash('message', 'Import complete. Created: ' . ($data['created'] ?? 0) . ', Updated: ' . ($data['updated'] ?? 0) . ', Skipped: ' . ($data['skipped'] ?? 0) . '. Synced: ' . ($data['qdrant']['synced'] ?? 0));
+                    // Clear file and refresh list
+                    $this->uploadFile = null;
+                    return;
+                }
+            }
+
+            session()->flash('error', 'Import failed: ' . $response->status() . ' ' . $response->body());
+        } catch (\Throwable $e) {
+            Log::error('Admin FAQ import error', ['error' => $e->getMessage()]);
+            session()->flash('error', 'Import error: ' . $e->getMessage());
+        } finally {
+            $this->importing = false;
+        }
+    }
 
     public function getOrganizationsProperty()
     {

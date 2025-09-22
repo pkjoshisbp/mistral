@@ -8,12 +8,16 @@ use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
+
 class OrganizationSetup extends Component
 {
     public $tab = 'create'; // 'create' or 'join'
     public $name = '';
     public $slug = '';
     public $description = '';
+    public $website = '';
+    public $contact_email = '';
+    public $contact_phone = '';
     public $existingOrganizations = [];
 
     public function mount()
@@ -33,12 +37,18 @@ class OrganizationSetup extends Component
             'name' => 'required|string|max:255',
             'slug' => 'required|string|max:255|unique:organizations,slug',
             'description' => 'nullable|string|max:1000',
+            'website' => 'nullable|string|max:255',
+            'contact_email' => 'nullable|email|max:255',
+            'contact_phone' => 'nullable|string|max:32',
         ]);
 
         $organization = Organization::create([
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
+            'website_url' => $this->website,
+            'contact_email' => $this->contact_email,
+            'contact_phone' => $this->contact_phone,
             'is_active' => true,
         ]);
 

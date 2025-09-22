@@ -3,8 +3,25 @@
     <section class="content"><div class="container-fluid">
         @if(session()->has('message'))<div class="alert alert-success">{{ session('message') }}</div>@endif
         @if(session()->has('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
-        <div class="card"><div class="card-header d-flex justify-content-between"><div><strong>Manage FAQs</strong><div class="mt-1"><select wire:model.live="selectedOrganization" class="form-control" style="width:200px"><option value="">Select Organization</option>@foreach($this->organizations as $org)<option value="{{ $org->id }}">{{ $org->name }}</option>@endforeach</select></div></div><button class="btn btn-primary" wire:click="$toggle('showForm')"><i class="fas fa-plus"></i> {{ $editingId ? 'Edit' : 'Add' }} FAQ</button></div>
+    <div class="card"><div class="card-header d-flex justify-content-between"><div><strong>Manage FAQs</strong><div class="mt-1"><select wire:model.live="selectedOrganization" class="form-control" style="width:200px"><option value="">Select Organization</option>@foreach($this->organizations as $org)<option value="{{ $org->id }}">{{ $org->name }}</option>@endforeach</select></div></div><div class="d-flex gap-2"><button class="btn btn-outline-secondary mr-2" wire:click="importJson" @disabled(!$selectedOrganization)><i class="fas fa-file-upload"></i> Import JSON</button><button class="btn btn-primary" wire:click="$toggle('showForm')"><i class="fas fa-plus"></i> {{ $editingId ? 'Edit' : 'Add' }} FAQ</button></div></div>
         <div class="card-body">
+            <div class="mb-3 p-3 border rounded bg-white">
+                <h6 class="mb-2"><i class="fas fa-upload"></i> Upload FAQs JSON</h6>
+                <div class="row align-items-end">
+                    <div class="col-md-6 mb-2">
+                        <label class="form-label">Choose JSON file</label>
+                        <input type="file" class="form-control" wire:model="uploadFile" accept="application/json,.json">
+                        <small class="text-muted">Expected format: array of {question, answer, category?, keywords?, sort_order?, is_active?}</small>
+                    </div>
+                    <div class="col-md-3 mb-2">
+                        <label class="form-label d-block">&nbsp;</label>
+                        <button class="btn btn-success" wire:click="importJson" @disabled(!$selectedOrganization)>
+                            <span wire:loading.remove wire:target="importJson">Import to Selected Org</span>
+                            <span wire:loading wire:target="importJson"><i class="fas fa-spinner fa-spin"></i> Importing…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
             @if($showForm)
             <div class="border rounded p-3 mb-4 bg-light">
                 <form wire:submit.prevent="{{ $editingId ? 'update' : 'create' }}">

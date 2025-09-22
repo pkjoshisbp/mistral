@@ -13,7 +13,9 @@ class Organization extends Model
         'name',
         'slug',
         'description',
-        'website', // unified field used in forms
+    'website', // canonical website field used in forms; legacy website_url displayed read-only where present
+        'contact_email',
+        'contact_phone',
         'timezone',
         'api_key',
         'settings',

@@ -400,6 +400,18 @@
             // Store link placeholders to avoid escaping them
             const links = [];
             let linkIndex = 0;
+            // Email placeholders to keep emails as plain text (no link)
+            const emailPlaceholders = [];
+            let emailIndex = 0;
+
+            // Detect and temporarily replace email addresses with placeholders
+            const emailRegex = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+            processed = processed.replace(emailRegex, (em) => {
+                const ph = `__EMAIL_${emailIndex}__`;
+                emailPlaceholders[emailIndex] = em;
+                emailIndex++;
+                return ph;
+            });
             
             // Detect URLs (http/https) and convert to anchors (with image handling)
             const urlRegex = /https?:\/\/[^\s<]+/g;
@@ -426,13 +438,12 @@
             });
             
             // Bare domains (e.g., example.com) -> prepend https
-            const domainRegex = /(?<![\w@])((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(\/[\w\-._~:/?#[\]@!$&'()*+,;=%]*)?/g;
-            processed = processed.replace(domainRegex, (match, host, path='') => {
-                // Skip if it's a placeholder
-                if (match.includes('__LINK_')) return match;
-                
+            // Use a safe regex that ensures the match is not part of an email by
+            // requiring a non-@, non-word boundary before the domain (or start of string).
+            const domainRegex = /(^|[^@\w])((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(\/[\w\-._~:/?#[\]@!$&'()*+,;=%]*)?/g;
+            processed = processed.replace(domainRegex, (full, pre, host, path = '') => {
                 const url = `https://${host}${path || ''}`;
-                const linkHtml = `<a href="${url}" target="_blank">${host}${path || ''}</a>`;
+                const linkHtml = `${pre}<a href="${url}" target="_blank">${host}${path || ''}</a>`;
                 const placeholder = `__LINK_${linkIndex}__`;
                 links[linkIndex] = linkHtml;
                 linkIndex++;
@@ -449,6 +460,10 @@
             // Restore links
             for (let i = 0; i < links.length; i++) {
                 processed = processed.replace(`__LINK_${i}__`, links[i]);
+            }
+            // Restore email placeholders as plain text (no link)
+            for (let i = 0; i < emailPlaceholders.length; i++) {
+                processed = processed.replace(`__EMAIL_${i}__`, emailPlaceholders[i]);
             }
             
             // Restore original anchors

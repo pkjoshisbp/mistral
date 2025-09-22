@@ -1299,6 +1299,30 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                     'new_total' => $subscription->fresh()->tokens_used_this_period,
                     'plan_limit' => $subscription->subscriptionPlan->token_cap_monthly ?? 'unlimited'
                 ]);
+            } elseif ($userId) {
+                // No active subscription: deduct from credits balance
+                try {
+                    $userCredit = \App\Models\UserCredit::getOrCreateForUser($userId);
+                    $deducted = $userCredit->deductCredits($tokensUsed, 'AI usage: ' . $endpointType, [
+                        'metadata' => [
+                            'organization_id' => $organizationId,
+                            'endpoint_type' => $endpointType,
+                            'tokens_used' => $tokensUsed,
+                        ]
+                    ]);
+                    if (!$deducted) {
+                        Log::warning('Insufficient credits for usage', [
+                            'user_id' => $userId,
+                            'required' => $tokensUsed,
+                            'balance' => $userCredit->balance
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Credit deduction failed', [
+                        'user_id' => $userId,
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
             
             Log::info('Token usage logged', [

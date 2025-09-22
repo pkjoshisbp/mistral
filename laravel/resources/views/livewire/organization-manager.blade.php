@@ -53,9 +53,33 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="website_url">Website URL</label>
+                            <label for="website">Website</label>
+                            <input type="url" wire:model="website" class="form-control" id="website" placeholder="https://example.com">
+                            @error('website') <span class="text-danger">{{ $message }}</span> @enderror
+                            <small class="text-muted">If left blank, we'll fall back to the legacy Website URL field below.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="website_url">Legacy Website URL (optional)</label>
                             <input type="url" wire:model="website_url" class="form-control" id="website_url" placeholder="https://example.com">
                             @error('website_url') <span class="text-danger">{{ $message }}</span> @enderror
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="contact_email">Contact Email</label>
+                                    <input type="email" wire:model="contact_email" class="form-control" id="contact_email" placeholder="support@example.com">
+                                    @error('contact_email') <span class="text-danger">{{ $message }}</span> @enderror
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="contact_phone">Contact Phone</label>
+                                    <input type="text" wire:model="contact_phone" class="form-control" id="contact_phone" placeholder="+1 555-123-4567">
+                                    @error('contact_phone') <span class="text-danger">{{ $message }}</span> @enderror
+                                </div>
+                            </div>
                         </div>
 
                         <div class="card-footer">
@@ -108,9 +132,32 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="edit_website_url">Website URL</label>
+                            <label for="edit_website">Website</label>
+                            <input type="url" wire:model="website" class="form-control" id="edit_website">
+                            @error('website') <span class="text-danger">{{ $message }}</span> @enderror
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit_website_url">Legacy Website URL (optional)</label>
                             <input type="url" wire:model="website_url" class="form-control" id="edit_website_url">
                             @error('website_url') <span class="text-danger">{{ $message }}</span> @enderror
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="edit_contact_email">Contact Email</label>
+                                    <input type="email" wire:model="contact_email" class="form-control" id="edit_contact_email">
+                                    @error('contact_email') <span class="text-danger">{{ $message }}</span> @enderror
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="edit_contact_phone">Contact Phone</label>
+                                    <input type="text" wire:model="contact_phone" class="form-control" id="edit_contact_phone">
+                                    @error('contact_phone') <span class="text-danger">{{ $message }}</span> @enderror
+                                </div>
+                            </div>
                         </div>
 
                         <div class="card-footer">
@@ -152,12 +199,23 @@
                                     </div>
                                 </div>
                                 
-                                @if($org->website_url)
+                                @php $displayWebsite = $org->website ?? $org->website_url; @endphp
+                                @if($displayWebsite)
                                     <div class="mt-2">
                                         <strong>Website:</strong> 
-                                        <a href="{{ $org->website_url }}" target="_blank" class="text-primary">
-                                            {{ $org->website_url }}
+                                        <a href="{{ $displayWebsite }}" target="_blank" class="text-primary">
+                                            {{ $displayWebsite }}
                                         </a>
+                                    </div>
+                                @endif
+
+                                @if($org->contact_email || $org->contact_phone)
+                                    <div class="mt-2">
+                                        <strong>Contact:</strong>
+                                        <span>{{ $org->contact_email ?? '—' }}</span>
+                                        @if($org->contact_phone)
+                                            <span class="ml-2">| {{ $org->contact_phone }}</span>
+                                        @endif
                                     </div>
                                 @endif
                                 

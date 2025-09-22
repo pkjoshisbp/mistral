@@ -181,6 +181,7 @@ return [
         App\Providers\EventServiceProvider::class,
         App\Providers\RouteServiceProvider::class,
         App\Providers\LocalizationServiceProvider::class,
+        App\Providers\ConsoleSafetyServiceProvider::class,
     ])->toArray(),
 
     /*

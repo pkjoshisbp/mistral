@@ -17,12 +17,20 @@ class OrganizationManager extends Component
     public $slug = '';
     public $description = '';
     public $website_url = '';
+    // New unified contact fields used across the app
+    public $website = '';
+    public $contact_email = '';
+    public $contact_phone = '';
 
     protected $rules = [
         'name' => 'required|min:3',
         'slug' => 'required|unique:organizations,slug',
         'description' => 'nullable',
-        'website_url' => 'nullable|url'
+        'website_url' => 'nullable|url',
+        // Prefer unified website field; keep website_url for backward UI binding
+        'website' => 'nullable|url',
+        'contact_email' => 'nullable|email',
+        'contact_phone' => 'nullable|string|max:50'
     ];
 
     public function mount()
@@ -43,7 +51,10 @@ class OrganizationManager extends Component
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
-            'website_url' => $this->website_url,
+            // Write to canonical columns
+            'website' => $this->website ?: $this->website_url,
+            'contact_email' => $this->contact_email ?: null,
+            'contact_phone' => $this->contact_phone ?: null,
             'api_key' => \Str::random(32),
             'settings' => [
                 'sync_enabled' => true,
@@ -59,7 +70,7 @@ class OrganizationManager extends Component
             \Log::error('Failed to create Qdrant collection: ' . $e->getMessage());
         }
 
-        $this->reset(['name', 'slug', 'description', 'website_url']);
+    $this->reset(['name', 'slug', 'description', 'website_url', 'website', 'contact_email', 'contact_phone']);
         $this->showCreateForm = false;
         $this->loadOrganizations();
         
@@ -75,7 +86,11 @@ class OrganizationManager extends Component
         $this->name = $org->name;
         $this->slug = $org->slug;
         $this->description = $org->description;
-        $this->website_url = $org->website_url;
+        // Backward compatibility: load both
+        $this->website_url = $org->website_url ?? '';
+        $this->website = $org->website ?? ($org->website_url ?? '');
+        $this->contact_email = $org->contact_email ?? '';
+        $this->contact_phone = $org->contact_phone ?? '';
         $this->showEditForm = true;
     }
 
@@ -85,7 +100,10 @@ class OrganizationManager extends Component
             'name' => 'required|min:3',
             'slug' => 'required|unique:organizations,slug,' . $this->editingOrgId,
             'description' => 'nullable',
-            'website_url' => 'nullable|url'
+            'website_url' => 'nullable|url',
+            'website' => 'nullable|url',
+            'contact_email' => 'nullable|email',
+            'contact_phone' => 'nullable|string|max:50'
         ]);
 
         $org = Organization::find($this->editingOrgId);
@@ -95,7 +113,10 @@ class OrganizationManager extends Component
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
-            'website_url' => $this->website_url,
+            // Write canonical fields; keep legacy website_url untouched
+            'website' => $this->website ?: $this->website_url,
+            'contact_email' => $this->contact_email ?: null,
+            'contact_phone' => $this->contact_phone ?: null,
         ]);
 
         // If slug changed, update Qdrant collection
@@ -118,7 +139,7 @@ class OrganizationManager extends Component
             }
         }
 
-        $this->reset(['name', 'slug', 'description', 'website_url', 'editingOrgId']);
+    $this->reset(['name', 'slug', 'description', 'website_url', 'website', 'contact_email', 'contact_phone', 'editingOrgId']);
         $this->showEditForm = false;
         $this->loadOrganizations();
         
@@ -135,14 +156,14 @@ class OrganizationManager extends Component
         $this->showCreateForm = !$this->showCreateForm;
         $this->showEditForm = false;
         if (!$this->showCreateForm) {
-            $this->reset(['name', 'slug', 'description', 'website_url']);
+            $this->reset(['name', 'slug', 'description', 'website_url', 'website', 'contact_email', 'contact_phone']);
         }
     }
 
     public function cancelEdit()
     {
         $this->showEditForm = false;
-        $this->reset(['name', 'slug', 'description', 'website_url', 'editingOrgId']);
+        $this->reset(['name', 'slug', 'description', 'website_url', 'website', 'contact_email', 'contact_phone', 'editingOrgId']);
     }
 
     public function render()

@@ -243,9 +243,22 @@ class RazorpayController extends Controller
             // Initialize Razorpay API
             $api = new Api($this->razorpayId, $this->razorpaySecret);
 
-            // Convert USD price to INR
-            $priceINR = $locationService->convertToINR($creditPackage->price);
-            $amountInPaise = $priceINR * 100; // Convert to paise
+            // Always use configured INR price for credit packages (no USD conversion)
+            $priceINR = $creditPackage->inr_price ?? null;
+            if ($priceINR === null || $priceINR <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'INR price is not configured for this credit package.'
+                ], 422);
+            }
+            $amountInPaise = (int) round($priceINR * 100); // INR -> paise
+
+            if ($amountInPaise < 100) { // Razorpay minimum = ₹1.00 (100 paise)
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Order amount less than minimum amount allowed'
+                ], 422);
+            }
 
             // Create Razorpay order for one-time payment
             $order = $api->order->create([
@@ -420,24 +433,15 @@ class RazorpayController extends Controller
                 return;
             }
 
-            // Add credits to user account
-            $userCredit = UserCredit::firstOrCreate(
-                ['user_id' => $userId],
-                ['credits' => 0]
-            );
-
-            $userCredit->increment('credits', $tokens);
-
-            // Record the transaction
-            CreditTransaction::create([
-                'user_id' => $userId,
+            // Add credits to user account via central model method
+            $userCredit = UserCredit::getOrCreateForUser($userId);
+            $userCredit->addCredits($tokens, 'Credit package purchase (Razorpay)', [
                 'credit_package_id' => $creditPackageId,
-                'amount' => $creditPackage->price,
                 'credits' => $tokens,
                 'payment_method' => 'razorpay',
                 'razorpay_payment_id' => $paymentId,
-                'razorpay_order_id' => $order['id'],
-                'status' => 'completed'
+                'reference_id' => $order['id'] ?? null,
+                'notes' => 'Package: ' . ($creditPackage->name ?? 'N/A') . ' | INR ' . ($creditPackage->inr_price ?? '0')
             ]);
 
             Log::info('Credit purchase completed', [
@@ -592,7 +596,7 @@ class RazorpayController extends Controller
             if ($subscription) {
                 // Reset token usage for new billing period
                 $subscription->update([
-                    'tokens_used_current_period' => 0,
+                    'tokens_used_this_period' => 0,
                     'current_period_start' => now(),
                     'current_period_end' => now()->addMonth()
                 ]);
@@ -626,23 +630,15 @@ class RazorpayController extends Controller
                 return;
             }
 
-            // Add credits to user account
-            $userCredit = UserCredit::firstOrCreate(
-                ['user_id' => $userId],
-                ['credits' => 0]
-            );
-
-            $userCredit->increment('credits', $tokens);
-
-            // Record the transaction
-            CreditTransaction::create([
-                'user_id' => $userId,
+            // Add credits to user account via central model method
+            $userCredit = UserCredit::getOrCreateForUser($userId);
+            $userCredit->addCredits($tokens, 'Credit package purchase (Razorpay webhook)', [
                 'credit_package_id' => $creditPackageId,
-                'amount' => $creditPackage->price,
                 'credits' => $tokens,
                 'payment_method' => 'razorpay',
-                'razorpay_payment_id' => $payment['id'],
-                'status' => 'completed'
+                'razorpay_payment_id' => $payment['id'] ?? null,
+                'reference_id' => $payment['order_id'] ?? null,
+                'notes' => 'Package: ' . ($creditPackage->name ?? 'N/A') . ' | INR ' . ($creditPackage->inr_price ?? '0')
             ]);
 
             Log::info('Credit purchase completed via webhook', [

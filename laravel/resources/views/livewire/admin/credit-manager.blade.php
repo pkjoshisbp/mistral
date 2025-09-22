@@ -182,13 +182,59 @@
                         </div>
                         
                         <div class="mb-3">
-                            <label class="form-label">Amount</label>
+                            <label class="form-label">Credits (Tokens)</label>
                             <input type="number" class="form-control @error('creditAmount') is-invalid @enderror" 
-                                   wire:model="creditAmount" step="0.01" min="0.01" max="10000" placeholder="0.00">
+                                   wire:model="creditAmount" step="1" min="1" max="100000000" placeholder="e.g., 100000 (tokens)">
                             @error('creditAmount') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                            <small class="text-muted">Enter how many tokens to add or deduct. Large values like 100,000 or 200,000 are supported.</small>
                         </div>
+
+                        @if($creditType === 'add')
+                        <div class="mb-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="toggleOfflinePayment"
+                                       onclick="document.getElementById('offlinePaymentFields').classList.toggle('d-none');">
+                                <label class="form-check-label" for="toggleOfflinePayment">Add offline payment details (optional)</label>
+                            </div>
+                        </div>
+                        <div id="offlinePaymentFields" class="border rounded p-3 d-none">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Payment Amount</label>
+                                    <input type="number" step="0.01" min="0" class="form-control @error('offlineCreditPaymentAmount') is-invalid @enderror" 
+                                           wire:model="offlineCreditPaymentAmount" placeholder="0.00">
+                                    @error('offlineCreditPaymentAmount') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Currency</label>
+                                    <select class="form-select @error('offlineCreditPaymentCurrency') is-invalid @enderror" wire:model="offlineCreditPaymentCurrency">
+                                        <option value="INR">INR</option>
+                                        <option value="USD">USD</option>
+                                    </select>
+                                    @error('offlineCreditPaymentCurrency') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="form-label">Method</label>
+                                    <select class="form-select @error('offlineCreditPaymentMethod') is-invalid @enderror" wire:model="offlineCreditPaymentMethod">
+                                        <option value="bank_transfer">Bank Transfer</option>
+                                        <option value="cash">Cash</option>
+                                        <option value="check">Check</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                    @error('offlineCreditPaymentMethod') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Reference / Receipt</label>
+                                    <input type="text" class="form-control @error('offlineCreditPaymentReference') is-invalid @enderror" 
+                                           wire:model="offlineCreditPaymentReference" placeholder="e.g., UTR/Receipt/Invoice #">
+                                    @error('offlineCreditPaymentReference') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                                </div>
+                            </div>
+                            <small class="text-muted">These details are saved with the credit transaction as payment_method=offline.</small>
+                        </div>
+                        @endif
                         
-                        <div class="mb-3">
+                        <div class="mb-3 mt-3">
                             <label class="form-label">Reason / Notes</label>
                             <input type="text" class="form-control @error('creditReason') is-invalid @enderror" 
                                    wire:model="creditReason" placeholder="e.g., Free trial extension, Promotional credit, Refund">

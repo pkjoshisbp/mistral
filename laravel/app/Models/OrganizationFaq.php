@@ -58,8 +58,13 @@ class OrganizationFaq extends Model
             return '';
         }
 
+        // Prepare HTML and suppress libxml warnings for malformed inputs (e.g., stray &)
+        $prepared = $this->prepareHtmlForDom((string) $html);
         $dom = new DOMDocument();
-        $dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        $prev = libxml_use_internal_errors(true);
+        $dom->loadHTML('<?xml encoding="UTF-8">' . $prepared, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
 
         // Define allowed tags and their allowed attributes
         $allowedTags = ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'a', 'img', 'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
@@ -139,8 +144,12 @@ class OrganizationFaq extends Model
         if (trim($html) === '') return '';
 
         $dom = new DOMDocument();
+        $prepared = $this->prepareHtmlForDom($html);
+        $prev = libxml_use_internal_errors(true);
         // Load already-sanitized HTML to avoid unsafe tags
-        $dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        $dom->loadHTML('<?xml encoding="UTF-8">' . $prepared, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
 
         $xpath = new \DOMXPath($dom);
         /** @var \DOMElement $a */
@@ -177,7 +186,11 @@ class OrganizationFaq extends Model
         $links = [];
         if (trim($html) === '') return $links;
         $dom = new DOMDocument();
-        $dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        $prepared = $this->prepareHtmlForDom($html);
+        $prev = libxml_use_internal_errors(true);
+        $dom->loadHTML('<?xml encoding="UTF-8">' . $prepared, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
         $xpath = new \DOMXPath($dom);
         foreach ($xpath->query('//a[@href]') as $a) {
             $href = trim($a->getAttribute('href'));
@@ -187,6 +200,18 @@ class OrganizationFaq extends Model
         }
         // Unique preserve order
         return array_values(array_unique($links));
+    }
+
+    /**
+     * Normalize HTML string for DOM parsing by escaping stray ampersands and ensuring UTF-8 handling.
+     */
+    private function prepareHtmlForDom(string $html): string
+    {
+        $html = trim($html);
+        if ($html === '') return '';
+        // Escape stray ampersands that are not valid entities (common cause of htmlParseEntityRef)
+        $html = preg_replace('/&(?!#\d+;|#x[0-9a-fA-F]+;|[a-zA-Z][a-zA-Z0-9]+;)/', '&amp;', $html);
+        return $html;
     }
 
     /**

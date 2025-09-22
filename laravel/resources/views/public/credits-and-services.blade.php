@@ -64,17 +64,21 @@
                                         @auth
                                             <div class="btn-group-vertical w-100">
                                                 @if($isFromIndia)
-                                                    <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2">
+                                                    <a href="#" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2"
+                                                       onclick="return startRazorpayCredit({ packageId: {{ $package->id }} });">
                                                         <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                     </a>
-                                                    <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-{{ $colors[$index % count($colors)] }}">
+                                                    <a href="#" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
+                                                       onclick="return startPaypalCredit({ packageId: {{ $package->id }} });">
                                                         <i class="fab fa-paypal"></i> Pay with PayPal
                                                     </a>
                                                 @else
-                                                    <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2">
+                                                    <a href="#" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2"
+                                                       onclick="return startPaypalCredit({ packageId: {{ $package->id }} });">
                                                         <i class="fab fa-paypal"></i> Pay with PayPal
                                                     </a>
-                                                    <a href="#" onclick="alert('Credit packages coming soon!')" class="btn btn-outline-{{ $colors[$index % count($colors)] }}">
+                                                    <a href="#" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
+                                                       onclick="return startRazorpayCredit({ packageId: {{ $package->id }} });">
                                                         <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                     </a>
                                                 @endif
@@ -257,3 +261,113 @@
     </div>
 </div>
 @endsection
+
+@auth
+@section('scripts')
+    @vite(['resources/js/payment.js'])
+    <script>
+        // Expose PayPal client id for loader
+        window.paypalClientId = '{{ env('PAYPAL_CLIENT_ID') }}';
+
+        // Initialize SDKs when this page renders
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load SDKs only once
+            try { window.initializePayPal && window.initializePayPal(); } catch(e) { console.warn(e); }
+            try { window.initializeRazorpay && window.initializeRazorpay(); } catch(e) { console.warn(e); }
+        });
+
+        async function startPaypalCredit({ packageId }) {
+            try {
+                const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+                const res = await fetch('{{ route('paypal.create-credit-payment') }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrf
+                    },
+                    body: JSON.stringify({ package_id: packageId })
+                });
+                const data = await res.json();
+                if (data.success && data.approval_url) {
+                    window.location.href = data.approval_url;
+                } else {
+                    alert(data.message || 'Failed to start PayPal payment.');
+                }
+            } catch (err) {
+                console.error('PayPal credit init failed:', err);
+                alert('Something went wrong while starting PayPal.');
+            }
+            return false;
+        }
+
+        async function startRazorpayCredit({ packageId }) {
+            try {
+                const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+                const res = await fetch('{{ route('razorpay.create-credit-payment') }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrf
+                    },
+                    body: JSON.stringify({ credit_package_id: packageId })
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    alert(data.message || 'Failed to start Razorpay payment.');
+                    return false;
+                }
+
+                const options = {
+                    key: data.razorpay_key,
+                    amount: data.amount,
+                    currency: data.currency,
+                    name: data.name,
+                    description: data.description,
+                    order_id: data.order_id,
+                    handler: function (response) {
+                        // Verify and finalize payment
+                        // We redirect to onetime-success to verify signature server-side
+                        const form = document.createElement('form');
+                        form.method = 'POST';
+                        form.action = '{{ route('razorpay.onetime-success') }}';
+                        const csrfInput = document.createElement('input');
+                        csrfInput.type = 'hidden';
+                        csrfInput.name = '_token';
+                        csrfInput.value = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+                        form.appendChild(csrfInput);
+                        const orderInput = document.createElement('input');
+                        orderInput.type = 'hidden';
+                        orderInput.name = 'razorpay_order_id';
+                        orderInput.value = response.razorpay_order_id;
+                        form.appendChild(orderInput);
+                        const payInput = document.createElement('input');
+                        payInput.type = 'hidden';
+                        payInput.name = 'razorpay_payment_id';
+                        payInput.value = response.razorpay_payment_id;
+                        form.appendChild(payInput);
+                        const sigInput = document.createElement('input');
+                        sigInput.type = 'hidden';
+                        sigInput.name = 'razorpay_signature';
+                        sigInput.value = response.razorpay_signature;
+                        form.appendChild(sigInput);
+                        document.body.appendChild(form);
+                        form.submit();
+                    },
+                    prefill: data.prefill || {},
+                    theme: { color: '#0d6efd' }
+                };
+
+                const rzp = new Razorpay(options);
+                rzp.open();
+            } catch (err) {
+                console.error('Razorpay credit init failed:', err);
+                alert('Something went wrong while starting Razorpay.');
+            }
+            return false;
+        }
+        // make functions global for onclick handlers
+        window.startPaypalCredit = startPaypalCredit;
+        window.startRazorpayCredit = startRazorpayCredit;
+    </script>
+@endsection
+@endauth

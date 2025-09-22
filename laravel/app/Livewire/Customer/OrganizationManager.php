@@ -13,6 +13,8 @@ class OrganizationManager extends Component
     public $slug = '';
     public $description = '';
     public $website = '';
+    public $contact_email = '';
+    public $contact_phone = '';
     public $timezone = 'UTC';
     public $organization; // existing org
 
@@ -21,6 +23,8 @@ class OrganizationManager extends Component
         'slug' => 'required|string|max:255|unique:organizations,slug',
         'description' => 'nullable|string|max:1000',
         'website' => 'nullable|url|max:255',
+        'contact_email' => 'nullable|email|max:255',
+        'contact_phone' => 'nullable|string|max:50',
         'timezone' => 'required|string|max:100'
     ];
 
@@ -33,6 +37,8 @@ class OrganizationManager extends Component
                 'slug' => $this->organization->slug,
                 'description' => $this->organization->description,
                 'website' => $this->organization->website,
+                'contact_email' => $this->organization->contact_email,
+                'contact_phone' => $this->organization->contact_phone,
                 'timezone' => $this->organization->timezone ?? 'UTC'
             ]);
         }
@@ -53,12 +59,16 @@ class OrganizationManager extends Component
                 'name' => 'required|string|max:255',
                 'description' => 'nullable|string|max:1000',
                 'website' => 'nullable|url|max:255',
+                'contact_email' => 'nullable|email|max:255',
+                'contact_phone' => 'nullable|string|max:50',
                 'timezone' => 'required|string|max:100'
             ]);
             $this->organization->update([
                 'name' => $this->name,
                 'description' => $this->description,
                 'website' => $this->website,
+                'contact_email' => $this->contact_email ?: null,
+                'contact_phone' => $this->contact_phone ?: null,
                 'timezone' => $this->timezone
             ]);
             session()->flash('success', 'Organization updated successfully.');
@@ -69,6 +79,8 @@ class OrganizationManager extends Component
                 'slug' => $this->slug,
                 'description' => $this->description,
                 'website' => $this->website,
+                'contact_email' => $this->contact_email ?: null,
+                'contact_phone' => $this->contact_phone ?: null,
                 'timezone' => $this->timezone,
                 'is_active' => true
             ]);

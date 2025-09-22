@@ -372,7 +372,9 @@ Route::get('/blog/{blog:slug}', function (Blog $blog) {
 // SEO Routes
 Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('sitemap');
 
-// Analytics tracking routes
+// Analytics tracking routes (with CORS and preflight)
+Route::options('/analytics/track', function () { return response('', 204); })
+    ->middleware([\App\Http\Middleware\CorsMiddleware::class]);
 Route::post('/analytics/track', [AnalyticsController::class, 'track'])
     ->middleware([\App\Http\Middleware\CorsMiddleware::class])
     ->name('analytics.track');

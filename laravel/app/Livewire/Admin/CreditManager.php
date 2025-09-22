@@ -24,6 +24,11 @@ class CreditManager extends Component
     public $creditAmount = '';
     public $creditReason = '';
     public $creditType = 'add'; // add or deduct
+    // Optional offline payment details when adding credits
+    public $offlineCreditPaymentAmount = '';
+    public $offlineCreditPaymentCurrency = 'INR';
+    public $offlineCreditPaymentMethod = 'bank_transfer'; // bank_transfer, cash, check, other
+    public $offlineCreditPaymentReference = '';
     
     // Offline subscription form
     public $subscriptionPlanId = '';
@@ -36,7 +41,8 @@ class CreditManager extends Component
     public $subscriptionNotes = '';
 
     protected $rules = [
-        'creditAmount' => 'required|numeric|min:0.01|max:10000',
+        // Allow large credit adjustments (tokens). Use integer min 1, generous upper bound.
+        'creditAmount' => 'required|integer|min:1|max:100000000',
         'creditReason' => 'required|string|max:255',
         'creditType' => 'required|in:add,deduct',
         'subscriptionPlanId' => 'required|exists:subscription_plans,id',
@@ -98,18 +104,56 @@ class CreditManager extends Component
     public function adjustCredits()
     {
         $this->validate([
-            'creditAmount' => 'required|numeric|min:0.01|max:10000',
+            'creditAmount' => 'required|integer|min:1|max:100000000',
             'creditReason' => 'required|string|max:255',
-            'creditType' => 'required|in:add,deduct'
+            'creditType' => 'required|in:add,deduct',
+            'offlineCreditPaymentAmount' => 'nullable|numeric|min:0',
+            'offlineCreditPaymentCurrency' => 'nullable|string|max:10',
+            'offlineCreditPaymentMethod' => 'nullable|in:bank_transfer,cash,check,other',
+            'offlineCreditPaymentReference' => 'nullable|string|max:255',
         ]);
 
         $user = User::findOrFail($this->selectedUserId);
         $userCredit = UserCredit::getOrCreateForUser($user->id);
 
         if ($this->creditType === 'add') {
+            // Build optional offline payment metadata
+            $meta = [];
+            $notesParts = [];
+            $paymentMethod = null;
+            if ($this->offlineCreditPaymentAmount !== '' && $this->offlineCreditPaymentAmount !== null) {
+                $meta['payment_amount'] = (float) $this->offlineCreditPaymentAmount;
+                $meta['currency'] = $this->offlineCreditPaymentCurrency ?: 'INR';
+                $paymentMethod = $this->offlineCreditPaymentMethod ?: 'offline';
+                $meta['payment_method'] = $paymentMethod;
+                if ($this->offlineCreditPaymentReference) {
+                    $meta['reference'] = $this->offlineCreditPaymentReference;
+                }
+                $notesParts[] = 'Payment: ' . $meta['currency'] . ' ' . number_format($meta['payment_amount'], 2);
+                $notesParts[] = 'Method: ' . $paymentMethod;
+                if (!empty($meta['reference'])) {
+                    $notesParts[] = 'Ref: ' . $meta['reference'];
+                }
+            }
+
+            $reason = 'Admin adjustment: ' . $this->creditReason;
+            if (!empty($notesParts)) {
+                $reason .= ' | ' . implode(' | ', $notesParts);
+            }
+
+            $extra = [
+                'payment_method' => $paymentMethod ?: 'manual',
+                'notes' => !empty($notesParts) ? implode(' | ', $notesParts) : null,
+                'metadata' => !empty($meta) ? $meta : null,
+            ];
+            if (!empty($meta['reference'])) {
+                $extra['reference_id'] = $meta['reference'];
+            }
+
             $userCredit->addCredits(
-                $this->creditAmount, 
-                'Admin adjustment: ' . $this->creditReason
+                $this->creditAmount,
+                $reason,
+                $extra
             );
             $message = "Successfully added {$this->creditAmount} credits to {$user->name}'s account.";
         } else {
@@ -169,15 +213,21 @@ class CreditManager extends Component
             'cancelled_at' => null
         ]);
 
-        // Create payment record
+        // Record offline payment metadata (does not change credit balance)
         CreditTransaction::create([
             'user_id' => $user->id,
-            'type' => 'offline_payment',
-            'amount' => $this->offlinePaymentAmount,
-            'description' => "Offline subscription payment ({$this->offlinePaymentMethod}): {$this->offlinePaymentReference}",
+            'type' => 'credit', // maintain enum integrity; amount here is informational
+            'amount' => 0,
+            'description' => 'Offline subscription payment',
             'reference_id' => $this->offlinePaymentReference,
             'subscription_id' => $subscription->id,
-            'notes' => $this->subscriptionNotes
+            'payment_method' => 'offline',
+            'notes' => trim("Method: {$this->offlinePaymentMethod} | Paid: {$this->offlinePaymentAmount} | {$this->subscriptionNotes}"),
+            'metadata' => [
+                'payment_amount' => (float) $this->offlinePaymentAmount,
+                'payment_method' => $this->offlinePaymentMethod,
+                'currency' => 'INR',
+            ]
         ]);
 
         session()->flash('success', "Successfully created offline subscription for {$user->name}. Plan: {$plan->name} ({$this->billingCycle})");
@@ -223,6 +273,10 @@ class CreditManager extends Component
         $this->creditAmount = '';
         $this->creditReason = '';
         $this->creditType = 'add';
+        $this->offlineCreditPaymentAmount = '';
+        $this->offlineCreditPaymentCurrency = 'INR';
+        $this->offlineCreditPaymentMethod = 'bank_transfer';
+        $this->offlineCreditPaymentReference = '';
     }
 
     public function resetSubscriptionForm()

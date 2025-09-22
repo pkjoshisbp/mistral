@@ -8,6 +8,6 @@ class Credits extends Component
 {
     public function render()
     {
-        return view('livewire.customer.credits');
+        return view('livewire.customer.credits')->layout('layouts.customer');
     }
 }
