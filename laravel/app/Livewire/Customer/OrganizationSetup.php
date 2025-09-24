@@ -46,7 +46,7 @@ class OrganizationSetup extends Component
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
-            'website_url' => $this->website,
+            'website' => $this->website,
             'contact_email' => $this->contact_email,
             'contact_phone' => $this->contact_phone,
             'is_active' => true,

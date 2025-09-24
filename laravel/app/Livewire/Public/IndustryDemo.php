@@ -212,22 +212,44 @@ class IndustryDemo extends Component
             return;
         }
 
+        // Stage user message and dispatch a browser event to process in a second request
+        $this->isLoading = true;
+        $userMessage = $this->query;
+        $this->query = '';
+
+        $this->messages[] = [
+            'role' => 'user',
+            'content' => $userMessage,
+            'timestamp' => now(),
+        ];
+
+        // Trigger processing on the client after this render cycle
+    $this->dispatch('demo:process', $userMessage);
+    }
+
+
+
+    public function sendSampleQuestion($question)
+    {
+        // Stage immediately so the user sees their message and typing indicator
+        $this->isLoading = true;
+        $this->messages[] = [
+            'role' => 'user',
+            'content' => $question,
+            'timestamp' => now(),
+        ];
+        // Dispatch event to process in a separate request (for smooth UX)
+    $this->dispatch('demo:process', $question);
+    }
+
+    #[On('demo:process')]
+    public function processQueuedMessage($message)
+    {
         try {
-            $this->isLoading = true;
-            $userMessage = $this->query;
-            $this->query = '';
-
-            // Add user message to chat immediately
-            $this->messages[] = [
-                'role' => 'user',
-                'content' => $userMessage,
-                'timestamp' => now(),
-            ];
-
             // Use enhanced search with actions for live data integration
             $aiService = app(\App\Services\AiAgentService::class);
             $collectionName = 'demo_' . $this->industry;
-            
+
             // Try to find organization for this demo to get live data actions
             $organizationId = null;
             try {
@@ -238,21 +260,17 @@ class IndustryDemo extends Component
             } catch (\Exception $e) {
                 // Fallback to regular search if no organization found
             }
-            
+
             if ($organizationId) {
-                // Use enhanced search with actions for live data
-                $searchResults = $aiService->enhancedSearchWithActions($collectionName, $userMessage, $organizationId, 3);
+                $searchResults = $aiService->enhancedSearchWithActions($collectionName, $message, $organizationId, 3);
             } else {
-                // Fallback to regular enhanced search
-                $searchResults = $aiService->enhancedSearch($collectionName, $userMessage, 3);
+                $searchResults = $aiService->enhancedSearch($collectionName, $message, 3);
             }
-            
+
             $context = "";
             if (!empty($searchResults) && isset($searchResults['results'])) {
                 foreach ($searchResults['results'] as $item) {
                     $payload = $item['payload'] ?? [];
-                    
-                    // Extract question and answer from the search results
                     if (isset($payload['question']) && isset($payload['answer'])) {
                         $context .= "Q: {$payload['question']}\nA: {$payload['answer']}\n\n";
                     } elseif (isset($payload['content']) && !empty(trim($payload['content']))) {
@@ -260,63 +278,49 @@ class IndustryDemo extends Component
                     }
                 }
             }
-            
+
             if (empty($context)) {
                 $context = "No specific information found in the knowledge base.";
             }
-            
+
             $orgName = $this->selectedDemo['organization'] ?? 'this organization';
-            
-            // Check if using OpenAI for more concise prompts
-            $aiService = app(\App\Services\AiAgentService::class);
+
             $isOpenAI = $aiService->isOpenAiProvider();
-            
-            if ($isOpenAI) {
-                // Concise prompt for GPT-5-mini
-                $systemPrompt = "You are {$orgName}'s AI assistant. Use only the Context below. Answer as {$orgName} with 'we/our'. Be brief and direct.";
-            } else {
-                // Standard prompt for Llama
-                $systemPrompt = "You are {$orgName}'s AI assistant. Use provided context. Answer as {$orgName} with 'we/our'. Keep responses brief.";
-            }
-            
+            $systemPrompt = $isOpenAI
+                ? "You are {$orgName}'s AI assistant. Use only the Context below. Answer as {$orgName} with 'we/our'. Be brief and direct."
+                : "You are {$orgName}'s AI assistant. Use provided context. Answer as {$orgName} with 'we/our'. Keep responses brief.";
+
             $chatMessages = [
                 ['role' => 'system', 'content' => $systemPrompt . "\n\nContext:\n" . $context],
-                ['role' => 'user', 'content' => $userMessage]
+                ['role' => 'user', 'content' => $message]
             ];
-            
-            // Debug: Log what context is actually being sent
+
             \Log::info('Demo context being sent to AI', [
                 'context_length' => strlen($context),
-                'context_content' => $context,
                 'system_message_length' => strlen($systemPrompt . "\n\nContext:\n" . $context),
-                'full_system_message' => $systemPrompt . "\n\nContext:\n" . $context,
                 'search_results_count' => isset($searchResults['results']) ? count($searchResults['results']) : 0,
-                'user_message' => $userMessage
+                'user_message' => $message
             ]);
-            
+
             $response = $aiService->smartLlmChat($chatMessages);
-            
+
             if ($response && isset($response['message']['content']) && !empty($response['message']['content'])) {
                 $aiResponse = $response['message']['content'];
-            } elseif (isset($searchResults) && !empty($searchResults)) {
-                // Use the best search result as fallback when AI response is empty/null
+            } elseif (!empty($searchResults)) {
                 $bestResult = $searchResults[0];
                 $payload = $bestResult['payload'] ?? $bestResult;
                 $aiResponse = $payload['answer'] ?? $payload['content'] ?? 'I found some relevant information but need more details to provide a complete answer.';
             } else {
-                // If no context, provide a helpful generic response
                 $aiResponse = "I'd be happy to help you! Could you please provide more specific details about what you're looking for?";
             }
-            
+
             $this->messages[] = [
                 'role' => 'assistant',
                 'content' => $aiResponse,
                 'timestamp' => now()
             ];
-            
         } catch (\Exception $e) {
             \Log::error('Demo chat error: ' . $e->getMessage());
-            
             $this->messages[] = [
                 'role' => 'assistant',
                 'content' => 'Sorry, I encountered an error. Please try again.',
@@ -325,14 +329,6 @@ class IndustryDemo extends Component
         } finally {
             $this->isLoading = false;
         }
-    }
-
-
-
-    public function sendSampleQuestion($question)
-    {
-        $this->query = $question;
-        $this->sendMessage();
     }
 
     private function generateDemoResponse($message)

@@ -38,7 +38,8 @@
                         <h3 class="h5 fw-bold mb-3 text-dark">💬 Try These Questions</h3>
                         <div class="d-grid gap-2">
                             @foreach($selectedDemo['sample_questions'] as $question)
-                                <button type="button" wire:click="sendSampleQuestion('{{ $question }}')" class="btn btn-outline-secondary text-start">
+                                @php $qJson = json_encode($question); @endphp
+                                <button type="button" wire:click='sendSampleQuestion({{ $qJson }})' class="btn btn-outline-secondary text-start">
                                     "{{ $question }}"
                                 </button>
                             @endforeach

@@ -53,13 +53,13 @@
         return $placeholder;
     }, $processed);
 
-    // Bare domains
-    $processed = preg_replace_callback("/(^|[\\s>(\\[\\\"'])(?!mailto:)(((?:[a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,})(\\\/[\\w\\-._~:\\/?#\\[\\]@!$&'()*+,;=%]*)?)/i", function($m) use (&$links, &$idx, $makePlaceholder, $isPlaceholder) {
+    // Bare domains (use ~ as delimiter; escape ~ in character class)
+    $processed = preg_replace_callback("~(^|[^@\\w:/>\\(\\[])(?!mailto:)(((?:[a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,})(/[\\w\\-\\._\\~:/?#\\[\\]@!$&'()*+,;=%]*)?)~i", function($m) use (&$links, &$idx, $makePlaceholder, $isPlaceholder) {
         $left = $m[1];
         $full = $m[2];
         if ($isPlaceholder($full)) return $m[0];
         if ($left && preg_match('/@|[\\w]$/', $left)) return $m[0];
-        $url = 'https://' . $full;
+        $url = 'https://' . html_entity_decode($full, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $placeholder = $makePlaceholder($idx);
         $safeUrl = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
         $safeText = htmlspecialchars($full, ENT_QUOTES, 'UTF-8');
