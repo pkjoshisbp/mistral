@@ -167,14 +167,27 @@ class WhatsappWebhookController extends Controller
                             $collection = $org->slug;
                             $search = $ai->searchQdrant($collection, $embedding, 5) ?: [];
                             $context = '';
+                            $maxContextChars = 1500; // Limit context to prevent timeouts
                             foreach (($search['results'] ?? []) as $res) {
                                 $payloadRes = $res['payload'] ?? [];
-                                foreach ($payloadRes as $k => $v) {
-                                    if (is_string($v) && $k !== 'org_id' && !empty($v)) {
-                                        $context .= ucfirst($k) . ': ' . $v . "\n";
+                                
+                                // Prioritize most relevant fields for WhatsApp
+                                $relevantFields = ['title', 'content', 'answer', 'description'];
+                                foreach ($relevantFields as $field) {
+                                    if (isset($payloadRes[$field]) && is_string($payloadRes[$field]) && !empty($payloadRes[$field])) {
+                                        $fieldContent = ucfirst($field) . ': ' . $payloadRes[$field] . "\n";
+                                        if (strlen($context . $fieldContent) > $maxContextChars) {
+                                            break 2; // Exit both loops if we hit the limit
+                                        }
+                                        $context .= $fieldContent;
                                     }
                                 }
                                 $context .= "\n";
+                                
+                                // Stop if we're approaching the limit
+                                if (strlen($context) > $maxContextChars) {
+                                    break;
+                                }
                             }
                             $usedContextChars = strlen($context);
 
