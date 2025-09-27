@@ -90,6 +90,27 @@
                         </select>
                     </div>
 
+                    <hr>
+                    <h6>Branding</h6>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="branding_enabled" wire:model="settings.branding_enabled">
+                        <label class="form-check-label" for="branding_enabled">
+                            Show "Powered by AI Chat Support" in widget
+                        </label>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="branding_badge" wire:model="settings.branding_badge">
+                        <label class="form-check-label" for="branding_badge">
+                            Show small branding badge near launcher
+                        </label>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="branding_follow" wire:model="settings.branding_follow">
+                        <label class="form-check-label" for="branding_follow">
+                            Use SEO follow link for branding (dofollow)
+                        </label>
+                    </div>
+
                     <button wire:click="saveSettings" class="btn btn-primary">
                         <i class="fas fa-save"></i> Save Settings
                     </button>

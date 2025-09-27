@@ -36,25 +36,41 @@
                             
                             <div class="mb-4">
                                 <h5>Widget Customization</h5>
-                                <form>
+                                <form id="widgetSettingsForm" method="POST" action="{{ route('customer.widget.settings.save') }}">
+                                    @csrf
                                     <div class="row">
                                         <div class="col-md-6 mb-3">
                                             <label class="form-label">Widget Position</label>
-                                            <select class="form-select">
-                                                <option value="bottom-right">Bottom Right</option>
-                                                <option value="bottom-left">Bottom Left</option>
+                                            @php $custOrg = auth()->user()->organizations->first(); $pos = $custOrg->settings['widget_position'] ?? 'bottom-right'; @endphp
+                                            <select class="form-select" id="chatPosition" name="chatPosition">
+                                                <option value="bottom-right" {{ $pos==='bottom-right' ? 'selected' : '' }}>Bottom Right</option>
+                                                <option value="bottom-left" {{ $pos==='bottom-left' ? 'selected' : '' }}>Bottom Left</option>
+                                                <option value="top-right" {{ $pos==='top-right' ? 'selected' : '' }}>Top Right</option>
+                                                <option value="top-left" {{ $pos==='top-left' ? 'selected' : '' }}>Top Left</option>
                                             </select>
                                         </div>
                                         <div class="col-md-6 mb-3">
                                             <label class="form-label">Primary Color</label>
-                                            <input type="color" class="form-control form-control-color" value="#007bff">
+                                            <input type="color" id="primaryColor" name="primaryColor" class="form-control form-control-color" value="{{ $custOrg->settings['primary_color'] ?? '#007bff' }}">
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Horizontal Offset (px)</label>
+                                            <input type="number" id="offsetX" name="offsetX" class="form-control" min="0" step="1" value="{{ (int)($custOrg->settings['widget_offset_x'] ?? 20) }}" placeholder="e.g., 20">
+                                            <small class="text-muted">Distance from left/right edge depending on position</small>
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Vertical Offset (px)</label>
+                                            <input type="number" id="offsetY" name="offsetY" class="form-control" min="0" step="1" value="{{ (int)($custOrg->settings['widget_offset_y'] ?? 20) }}" placeholder="e.g., 20">
+                                            <small class="text-muted">Distance from top/bottom edge depending on position</small>
                                         </div>
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Welcome Message</label>
-                                        <input type="text" class="form-control" value="Hello! How can I help you today?" placeholder="Enter welcome message">
+                                        <input type="text" id="welcomeMessage" name="welcomeMessage" class="form-control" value="{{ $custOrg->settings['welcome_message'] ?? 'Hello! How can I help you today?' }}" placeholder="Enter welcome message">
                                     </div>
-                                    <button type="button" class="btn btn-success">Save Settings</button>
+                                    <button type="submit" class="btn btn-success">Save Settings</button>
                                 </form>
                             </div>
                         </div>
@@ -126,5 +142,36 @@ function copyWidgetCode() {
         alert('Widget code copied to clipboard!');
     });
 }
+
+// Handle form submit with fetch to show toast without reload
+document.getElementById('widgetSettingsForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const form = e.target;
+    const payload = {
+        primaryColor: document.getElementById('primaryColor').value,
+        chatPosition: document.getElementById('chatPosition').value,
+        offsetX: parseInt(document.getElementById('offsetX').value || '20', 10),
+        offsetY: parseInt(document.getElementById('offsetY').value || '20', 10),
+        welcomeMessage: document.getElementById('welcomeMessage').value,
+        _token: form.querySelector('input[name="_token"]').value
+    };
+    try {
+        const res = await fetch(form.action, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': payload._token, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Failed to save settings');
+        const data = await res.json();
+        if (data.success) {
+            alert('Widget settings saved successfully!');
+        } else {
+            alert('Could not save settings.');
+        }
+    } catch (err) {
+        console.error(err);
+        alert('Error saving widget settings.');
+    }
+});
 </script>
 @endsection

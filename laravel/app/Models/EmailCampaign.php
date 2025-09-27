@@ -46,6 +46,11 @@ class EmailCampaign extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function recipients()
+    {
+        return $this->hasMany(EmailCampaignRecipient::class, 'email_campaign_id');
+    }
+
     public function getSuccessRateAttribute(): float
     {
         if ($this->total_recipients === 0) {

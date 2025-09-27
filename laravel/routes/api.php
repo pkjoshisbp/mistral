@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\LeadController;
 use App\Http\Controllers\Api\AnalyticsTrackingController;
 use App\Http\Controllers\Api\FaqSyncController;
+use App\Http\Controllers\Api\WhatsappWebhookController;
 
 Route::post('/leads', [LeadController::class, 'store']);
 Route::get('/leads', [LeadController::class, 'index']);
@@ -27,3 +28,7 @@ Route::post('/analytics/track', [AnalyticsTrackingController::class, 'track']);
 
 // Import FAQs for an organization (auth via organization api_token)
 Route::post('/organizations/{slug}/faqs/import', [FaqSyncController::class, 'import']);
+
+// WhatsApp webhook endpoints
+Route::get('/webhooks/whatsapp', [WhatsappWebhookController::class, 'verify']);
+Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive']);

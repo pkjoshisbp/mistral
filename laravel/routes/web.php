@@ -464,6 +464,10 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/users', function () {
         return view('admin.users');
     })->name('users');
+
+    // Admin can impersonate a user
+    Route::get('/impersonate/{userId}', [\App\Http\Controllers\Admin\ImpersonationController::class, 'start'])->name('impersonate.start');
+    Route::get('/impersonate/stop', [\App\Http\Controllers\Admin\ImpersonationController::class, 'stop'])->name('impersonate.stop');
     
     Route::get('/credit-manager', \App\Livewire\Admin\CreditManager::class)->name('credit-manager');
     
@@ -493,10 +497,17 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/reviews', function () {
         return view('admin.reviews');
     })->name('reviews');
+
+    // Quick OTP log viewer (admin only)
+    Route::get('/otp-logs', function () {
+        $otps = \App\Models\EmailOtp::orderBy('created_at', 'desc')->limit(50)->get();
+        return view('admin.otp-logs', compact('otps'));
+    })->name('otp-logs');
     
     // Email Management Routes
     Route::get('/email-templates', \App\Livewire\Admin\EmailTemplateManager::class)->name('email-templates');
     Route::get('/email-campaigns', \App\Livewire\Admin\EmailCampaignManager::class)->name('email-campaigns');
+    Route::get('/whatsapp-campaigns', \App\Livewire\Admin\WhatsappCampaignManager::class)->name('whatsapp-campaigns');
     Route::get('/email-composer', \App\Livewire\Admin\EmailComposer::class)->name('email-composer');
     
     // Widget Management Route
@@ -590,6 +601,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/widget', function () {
             return view('customer.widget');
         })->name('widget');
+        Route::post('/widget/settings', [\App\Http\Controllers\Customer\WidgetSettingsController::class, 'save'])->name('widget.settings.save');
         Route::get('/whatsapp', function () {
             return view('customer.whatsapp');
         })->name('whatsapp');

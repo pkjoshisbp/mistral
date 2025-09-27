@@ -585,7 +585,13 @@ class AdditionalEmailTemplateSeeder extends Seeder
         ];
 
         foreach ($templates as $template) {
-            EmailTemplate::create($template);
+            EmailTemplate::updateOrCreate(
+                [
+                    'name' => $template['name'],
+                    'industry_type' => $template['industry_type'],
+                ],
+                $template
+            );
         }
     }
 }

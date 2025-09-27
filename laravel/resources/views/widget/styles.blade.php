@@ -3,11 +3,11 @@
     ========================================================== */
 
 /* Base */
-.ai-chat-widget { position: fixed !important; z-index: 999999 !important; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif !important; }
-.ai-chat-widget.bottom-right { bottom: 20px !important; right: 20px !important; }
-.ai-chat-widget.bottom-left { bottom: 20px !important; left: 20px !important; }
-.ai-chat-widget.top-right { top: 20px !important; right: 20px !important; }
-.ai-chat-widget.top-left { top: 20px !important; left: 20px !important; }
+.ai-chat-widget { position: fixed !important; z-index: 999999 !important; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif !important; --ai-offset-x: 20px; --ai-offset-y: 20px; }
+.ai-chat-widget.bottom-right { bottom: var(--ai-offset-y) !important; right: var(--ai-offset-x) !important; }
+.ai-chat-widget.bottom-left { bottom: var(--ai-offset-y) !important; left: var(--ai-offset-x) !important; }
+.ai-chat-widget.top-right { top: var(--ai-offset-y) !important; right: var(--ai-offset-x) !important; }
+.ai-chat-widget.top-left { top: var(--ai-offset-y) !important; left: var(--ai-offset-x) !important; }
 
 /* Launcher Button */
 .ai-chat-button { width:60px !important; height:60px !important; background:linear-gradient(135deg,#667eea,#764ba2) !important; border:none !important; border-radius:50% !important; display:flex !important; align-items:center !important; justify-content:center !important; color:#fff !important; cursor:pointer !important; box-shadow:0 4px 14px rgba(0,0,0,.18) !important; transition:transform .25s ease, box-shadow .25s ease !important; position:relative !important; }
@@ -15,7 +15,12 @@
 .ai-chat-notification { position:absolute !important; top:-4px !important; right:-4px !important; width:20px !important; height:20px !important; background:#ff424d !important; color:#fff !important; border-radius:50% !important; font-size:11px !important; font-weight:600 !important; display:flex !important; align-items:center !important; justify-content:center !important; }
 
 /* Window */
-.ai-chat-window { position:absolute !important; bottom:80px !important; right:0 !important; width:400px !important; height:560px !important; max-height:calc(100dvh - 40px) !important; background:#fff !important; border-radius:18px !important; box-shadow:0 18px 48px -8px rgba(20,20,40,.22),0 6px 18px -4px rgba(20,20,40,.18) !important; display:none !important; overflow:hidden !important; border:1px solid #e5e9ef !important; display:flex !important; flex-direction:column !important; transition:all .3s ease !important; }
+.ai-chat-window { position:absolute !important; bottom:calc(60px + 0px) !important; right:0 !important; width:400px !important; height:560px !important; max-height:calc(100dvh - 40px) !important; background:#fff !important; border-radius:18px !important; box-shadow:0 18px 48px -8px rgba(20,20,40,.22),0 6px 18px -4px rgba(20,20,40,.18) !important; display:none !important; overflow:hidden !important; border:1px solid #e5e9ef !important; display:flex !important; flex-direction:column !important; transition:all .3s ease !important; }
+/* Adjust chat window vertical position depending on top/bottom with offset */
+.ai-chat-widget.bottom-right .ai-chat-window,
+.ai-chat-widget.bottom-left .ai-chat-window { bottom: calc(60px + var(--ai-offset-y)) !important; }
+.ai-chat-widget.top-right .ai-chat-window,
+.ai-chat-widget.top-left .ai-chat-window { top: calc(60px + var(--ai-offset-y)) !important; bottom: auto !important; }
 .ai-chat-window.ai-chat-expanded { width:600px !important; height:700px !important; }
 @media (max-width:480px){ .ai-chat-window { width:calc(100vw - 24px) !important; height:calc(100dvh - 140px) !important; right:0 !important; bottom:84px !important; } }
 @media (max-width:480px){ .ai-chat-window.ai-chat-expanded { width:calc(100vw - 12px) !important; height:calc(100dvh - 32px) !important; bottom:12px !important; } }
@@ -84,4 +89,7 @@
 .ai-chat-widget svg { pointer-events:none !important; }
 .ai-chat-widget button { font-family:inherit !important; }
 .ai-chat-widget * { box-sizing:border-box !important; }
+
+/* Branding footer */
+.ai-chat-branding a { color: {{ $theme['primaryColor'] }} !important; }
 

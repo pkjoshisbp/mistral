@@ -182,21 +182,23 @@
                                 <div class="col-md-6">
                                     <div class="mb-3">
                                         <label class="form-label">Primary Color</label>
-                                        <input type="color" class="form-control form-control-color" id="primaryColor" value="#667eea">
+                                        @php $custOrg = auth()->user()->organizations->first(); @endphp
+                                        <input type="color" class="form-control form-control-color" id="primaryColor" value="{{ $custOrg->settings['primary_color'] ?? '#667eea' }}">
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Chat Bubble Position</label>
                                         <select class="form-select" id="chatPosition">
-                                            <option value="bottom-right">Bottom Right</option>
-                                            <option value="bottom-left">Bottom Left</option>
-                                            <option value="top-right">Top Right</option>
-                                            <option value="top-left">Top Left</option>
+                                            @php $pos = $custOrg->settings['widget_position'] ?? 'bottom-right'; @endphp
+                                            <option value="bottom-right" {{ $pos==='bottom-right' ? 'selected' : '' }}>Bottom Right</option>
+                                            <option value="bottom-left" {{ $pos==='bottom-left' ? 'selected' : '' }}>Bottom Left</option>
+                                            <option value="top-right" {{ $pos==='top-right' ? 'selected' : '' }}>Top Right</option>
+                                            <option value="top-left" {{ $pos==='top-left' ? 'selected' : '' }}>Top Left</option>
                                         </select>
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Welcome Message</label>
-                                        <input type="text" class="form-control" id="welcomeMessage" 
-                                               value="Hi! How can I help you today?" placeholder="Enter welcome message">
+                         <input type="text" class="form-control" id="welcomeMessage" 
+                             value="{{ $custOrg->settings['welcome_message'] ?? 'Hi! How can I help you today?' }}" placeholder="Enter welcome message">
                                     </div>
                                 </div>
                                 <div class="col-md-6">

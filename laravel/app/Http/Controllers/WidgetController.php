@@ -38,9 +38,15 @@ class WidgetController
             'apiUrl' => config('app.url'),
             'theme' => $organization->settings['widget_theme'] ?? 'default',
             'position' => $organization->settings['widget_position'] ?? 'bottom-right',
+            'offsetX' => (int)($organization->settings['widget_offset_x'] ?? 20),
+            'offsetY' => (int)($organization->settings['widget_offset_y'] ?? 20),
             'primaryColor' => $organization->settings['primary_color'] ?? '#007bff',
             'welcomeMessage' => $organization->settings['welcome_message'] ?? 'Hello! How can I help you today?',
-            'requireContactForGuests' => (bool)($organization->settings['require_contact_for_guests'] ?? false)
+            'requireContactForGuests' => (bool)($organization->settings['require_contact_for_guests'] ?? false),
+            // Branding/backlink controls (defaults: enabled + dofollow)
+            'brandingEnabled' => array_key_exists('branding_enabled', $organization->settings ?? []) ? (bool)$organization->settings['branding_enabled'] : true,
+            'brandingFollow' => array_key_exists('branding_follow', $organization->settings ?? []) ? (bool)$organization->settings['branding_follow'] : true,
+            'brandingBadge' => (bool)($organization->settings['branding_badge'] ?? false),
         ];
 
         $script = view('widget.script', compact('widgetConfig'))->render();

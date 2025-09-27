@@ -201,7 +201,14 @@ class EmailTemplateSeeder extends Seeder
         ];
 
         foreach ($templates as $template) {
-            EmailTemplate::create($template);
+            // Use a stable unique key (name + industry_type) to avoid duplicates and allow updates
+            EmailTemplate::updateOrCreate(
+                [
+                    'name' => $template['name'],
+                    'industry_type' => $template['industry_type'],
+                ],
+                $template
+            );
         }
     }
 }

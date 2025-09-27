@@ -127,7 +127,7 @@
             
             // Create widget container
             const widgetHTML = `
-                <div id="${widgetId}" class="ai-chat-widget ${this.config.position}">
+                <div id="${widgetId}" class="ai-chat-widget ${this.config.position}" style="--ai-offset-x: ${this.config.offsetX || 20}px; --ai-offset-y: ${this.config.offsetY || 20}px;">
                     <!-- Chat Button -->
                     <div id="${buttonId}" class="ai-chat-button">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -138,6 +138,12 @@
                         </svg>
                         <span class="ai-chat-notification" id="${notificationId}">1</span>
                     </div>
+
+                    ${this.config.brandingEnabled && this.config.brandingBadge ? `
+                        <div class="ai-chat-badge" style="position:absolute; ${this.config.position.includes('bottom') ? 'bottom: -18px;' : 'top: -18px;'} ${this.config.position.includes('right') ? 'right: 0;' : 'left: 0;'} font-size:11px;color:#7a8594;">
+                            <a href="https://ai-chat.support" target="_blank" ${this.config.brandingFollow ? 'rel="noopener noreferrer"' : 'rel="nofollow noopener noreferrer"'}>Powered by AI Chat Support</a>
+                        </div>
+                    ` : ''}
 
                     <!-- Chat Window -->
                     <div id="${windowId}" class="ai-chat-window" style="display: none;">
@@ -198,6 +204,13 @@
                                 </svg>
                             </button>
                         </div>
+
+                        <!-- Branding Footer -->
+                        ${this.config.brandingEnabled ? `
+                        <div class="ai-chat-branding" style="padding:10px 14px; background:#f7f9fb; border-top:1px solid #e5e9ef; text-align:center; font-size:12px; color:#6b7280;">
+                            Powered by <a href="https://ai-chat.support" target="_blank" ${this.config.brandingFollow ? 'rel="noopener noreferrer"' : 'rel="nofollow noopener noreferrer"'} style="color: {{ $theme['primaryColor'] ?? '#007bff' }}; text-decoration: none; font-weight: 600;">AI Chat Support</a>
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
             `;

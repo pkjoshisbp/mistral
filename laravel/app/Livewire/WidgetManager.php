@@ -34,7 +34,10 @@ class WidgetManager extends Component
             'text_color' => '#333333',
             'border_radius' => '10px',
             'widget_position' => 'bottom-right',
-            'widget_theme' => 'default'
+            'widget_theme' => 'default',
+            'branding_enabled' => true,
+            'branding_badge' => false,
+            'branding_follow' => true,
         ];
     }
 

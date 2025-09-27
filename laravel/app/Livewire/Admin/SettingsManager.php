@@ -44,6 +44,13 @@ class SettingsManager extends Component
     public $llamacpp_model_repo = 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom';
     public $llamacpp_threads = 4;
     public $llamacpp_context_length = 4096;
+
+    // WhatsApp Cloud Settings
+    public $whatsapp_api_version = 'v20.0';
+    public $whatsapp_business_account_id = '';
+    public $whatsapp_phone_number_id = '';
+    public $whatsapp_access_token = '';
+    public $whatsapp_verify_token = '';
     
     public function mount()
     {
@@ -159,6 +166,32 @@ class SettingsManager extends Component
         $this->llamacpp_model_repo = AdminSetting::get('llamacpp_model_repo', 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom');
         $this->llamacpp_threads = AdminSetting::get('llamacpp_threads', 4);
         $this->llamacpp_context_length = AdminSetting::get('llamacpp_context_length', 4096);
+
+        // WhatsApp Settings
+        $this->whatsapp_api_version = AdminSetting::get('whatsapp_api_version', 'v20.0');
+        $this->whatsapp_business_account_id = AdminSetting::get('whatsapp_business_account_id', '');
+        $this->whatsapp_phone_number_id = AdminSetting::get('whatsapp_phone_number_id', '');
+        $this->whatsapp_access_token = AdminSetting::get('whatsapp_access_token', '');
+        $this->whatsapp_verify_token = AdminSetting::get('whatsapp_verify_token', '');
+    }
+
+    public function saveWhatsappSettings()
+    {
+        $this->validate([
+            'whatsapp_api_version' => 'required|string',
+            'whatsapp_business_account_id' => 'nullable|string',
+            'whatsapp_phone_number_id' => 'required|string',
+            'whatsapp_access_token' => 'required|string',
+            'whatsapp_verify_token' => 'required|string',
+        ]);
+
+        AdminSetting::set('whatsapp_api_version', $this->whatsapp_api_version, 'text', 'whatsapp', 'WhatsApp API Version');
+        AdminSetting::set('whatsapp_business_account_id', $this->whatsapp_business_account_id, 'text', 'whatsapp', 'Business Account ID');
+        AdminSetting::set('whatsapp_phone_number_id', $this->whatsapp_phone_number_id, 'text', 'whatsapp', 'Phone Number ID');
+        AdminSetting::set('whatsapp_access_token', $this->whatsapp_access_token, 'password', 'whatsapp', 'Access Token', null, true);
+        AdminSetting::set('whatsapp_verify_token', $this->whatsapp_verify_token, 'password', 'whatsapp', 'Webhook Verify Token', null, true);
+
+        session()->flash('success', 'WhatsApp settings saved successfully!');
     }
 
     public function savePaymentSettings()

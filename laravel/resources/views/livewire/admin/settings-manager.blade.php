@@ -28,6 +28,11 @@
                             <i class="fas fa-robot"></i>
                             AI Settings
                         </button>
+                        <button wire:click="$set('activeTab', 'whatsapp')" 
+                                class="list-group-item list-group-item-action {{ $activeTab === 'whatsapp' ? 'active' : '' }}">
+                            <i class="fab fa-whatsapp"></i>
+                            WhatsApp
+                        </button>
                     </div>
                 </div>
             </div>
@@ -423,6 +428,58 @@
                                         Saving...
                                     </span>
                                 </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            @endif
+
+            @if($activeTab === 'whatsapp')
+                <!-- WhatsApp Settings -->
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="card-title mb-0"><i class="fab fa-whatsapp"></i> WhatsApp Cloud Settings</h4>
+                    </div>
+                    <div class="card-body">
+                        <form wire:submit.prevent="saveWhatsappSettings">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">API Version</label>
+                                        <input type="text" class="form-control" wire:model="whatsapp_api_version" placeholder="v20.0">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">Business Account ID</label>
+                                        <input type="text" class="form-control" wire:model="whatsapp_business_account_id" placeholder="">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">Phone Number ID</label>
+                                        <input type="text" class="form-control" wire:model="whatsapp_phone_number_id" placeholder="">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">Access Token</label>
+                                        <input type="password" class="form-control" wire:model="whatsapp_access_token" placeholder="">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">Webhook Verify Token</label>
+                                        <input type="text" class="form-control" wire:model="whatsapp_verify_token" placeholder="">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-end">
+                                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save WhatsApp Settings</button>
                             </div>
                         </form>
                     </div>

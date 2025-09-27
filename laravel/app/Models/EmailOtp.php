@@ -49,12 +49,22 @@ class EmailOtp extends Model
             ->where('type', $type)
             ->delete();
 
-        return self::create([
+        $record = self::create([
             'email' => $email,
             'otp' => str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT),
             'type' => $type,
             'expires_at' => Carbon::now()->addMinutes(10) // 10 minutes expiry
         ]);
+
+        // Log OTP for support visibility (admin-only page also lists recent OTPs)
+        \Log::info('Email OTP generated', [
+            'email' => $record->email,
+            'type' => $record->type,
+            'otp' => $record->otp,
+            'expires_at' => $record->expires_at
+        ]);
+
+        return $record;
     }
 
     /**

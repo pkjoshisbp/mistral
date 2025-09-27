@@ -216,6 +216,12 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{ route('admin.whatsapp-campaigns') }}" class="nav-link {{ request()->routeIs('admin.whatsapp-campaigns') ? 'active' : '' }}">
+              <i class="nav-icon fab fa-whatsapp"></i>
+              <p>WhatsApp Campaigns</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.email-composer') }}" class="nav-link {{ request()->routeIs('admin.email-composer') ? 'active' : '' }}">
               <i class="nav-icon fas fa-edit"></i>
               <p>Compose Email</p>
@@ -241,6 +247,12 @@
             <a href="{{ route('admin.settings') }}" class="nav-link {{ request()->routeIs('admin.settings') ? 'active' : '' }}">
               <i class="nav-icon fas fa-cogs"></i>
               <p>Settings</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.otp-logs') }}" class="nav-link {{ request()->routeIs('admin.otp-logs') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-key"></i>
+              <p>OTP Logs</p>
             </a>
           </li>
           <li class="nav-item">
@@ -283,6 +295,12 @@
 
   <!-- Content Wrapper -->
   <div class="content-wrapper">
+    @if(session('impersonator_id'))
+      <div class="alert alert-warning text-center m-0">
+        <strong>Impersonating:</strong> {{ Auth::user()->email }}
+        <a href="{{ route('admin.impersonate.stop') }}" class="ms-3 btn btn-sm btn-outline-dark">Stop Impersonation</a>
+      </div>
+    @endif
     <!-- Content Header -->
     <div class="content-header">
       <div class="container-fluid">
@@ -340,31 +358,18 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
 <!-- AdminLTE App -->
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/js/adminlte.min.js"></script>
-<!-- Alpine.js -->
-<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<!-- Alpine.js (use jsDelivr to satisfy CSP) -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <!-- Livewire Scripts -->
 @livewireScripts
 
 <script>
-    // Debug Livewire initialization
-    console.log('Livewire config check:', window.livewireScriptConfig);
-    
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOM loaded, Livewire available:', typeof window.Livewire !== 'undefined');
-        
-        // Add form submission debugging
-        document.addEventListener('livewire:init', function() {
-            console.log('Livewire initialized successfully');
-        });
-        
-        document.addEventListener('livewire:start', function() {
-            console.log('Livewire request started');
-        });
-        
-        document.addEventListener('livewire:finish', function() {
-            console.log('Livewire request finished');
-        });
-    });
+  // Lightweight Livewire availability check (avoid noisy console spam)
+  document.addEventListener('livewire:init', function() {
+    if (!window.Livewire) {
+      console.warn('Livewire not found on admin layout');
+    }
+  });
 </script>
 </body>
 </html>

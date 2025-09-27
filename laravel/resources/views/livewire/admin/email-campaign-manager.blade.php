@@ -129,15 +129,15 @@
             <div class="modal-dialog modal-xl">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title">Create Email Campaign - Step {{ $step }} of 3</h5>
+                        <h5 class="modal-title">Create Email Campaign - Step {{ $step }} of 2</h5>
                         <button type="button" class="btn-close" wire:click="closeModal()"></button>
                     </div>
                     
                     <div class="modal-body">
                         <!-- Progress Bar -->
                         <div class="progress mb-4" style="height: 25px;">
-                            <div class="progress-bar" style="width: {{ ($step / 3) * 100 }}%">
-                                {{ $step }}/3
+                            <div class="progress-bar" style="width: {{ ($step / 2) * 100 }}%">
+                                {{ $step }}/2
                             </div>
                         </div>
 
@@ -177,14 +177,8 @@
                                         @error('sender_email') <div class="invalid-feedback">{{ $message }}</div> @enderror
                                     </div>
                                 </div>
-                                
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <label class="form-label">Sender Name</label>
-                                        <input type="text" class="form-control" wire:model="sender_name" 
-                                               placeholder="Enter sender name">
-                                    </div>
-                                </div>
+                                <input type="hidden" wire:model="sender_name">
+                                <input type="hidden" wire:model="sender_phone">
                             </div>
 
                             <div class="mb-3">
@@ -194,22 +188,7 @@
                                 @error('subject') <div class="invalid-feedback">{{ $message }}</div> @enderror
                             </div>
 
-                            <!-- Template Variables -->
-                            @if(count($templateVariables) > 0)
-                                <div class="mb-3">
-                                    <label class="form-label">Template Variables</label>
-                                    <div class="row">
-                                        @foreach($templateVariables as $variable)
-                                            <div class="col-md-6 mb-2">
-                                                <label class="form-label">{{ ucfirst(str_replace('_', ' ', $variable)) }}</label>
-                                                <input type="text" class="form-control" 
-                                                       wire:model="variableValues.{{ $variable }}" 
-                                                       placeholder="Enter {{ $variable }}">
-                                            </div>
-                                        @endforeach
-                                    </div>
-                                </div>
-                            @endif
+                            <!-- Template Variables removed per request -->
 
                             <div class="mb-3">
                                 <label class="form-label">Email Content (HTML) *</label>
@@ -220,35 +199,65 @@
                             </div>
 
                         @elseif($step == 2)
-                            <!-- Step 2: Recipients -->
-                            <div class="mb-3">
-                                <label class="form-label">Recipients (Email Addresses) *</label>
-                                <textarea class="form-control @error('recipients') is-invalid @enderror" 
-                                          wire:model="recipients" rows="8" 
-                                          placeholder="Enter email addresses separated by commas&#10;example@domain.com, another@domain.com, etc."></textarea>
-                                @error('recipients') <div class="invalid-feedback">{{ $message }}</div> @enderror
-                                <small class="form-text text-muted">
-                                    Separate multiple email addresses with commas. Maximum 10 recipients per campaign.
-                                </small>
+                            <!-- Step 2: Recipients & Preview -->
+                            <div class="mb-3 d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">Recipients</h6>
+                                <button type="button" class="btn btn-sm btn-outline-primary" wire:click="addRecipientRow"><i class="fas fa-user-plus"></i> Add Recipient</button>
                             </div>
+
+                            <div class="table-responsive mb-3" style="max-height:300px; overflow:auto;">
+                                <table class="table table-sm table-bordered align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width:40px;">#</th>
+                                            <th>Include</th>
+                                            <th>Email</th>
+                                            @foreach($availableVariables as $var)
+                                                @if(!in_array($var, ['sender_name','contact_phone','sender_phone']))
+                                                    <th>{{ $var }}</th>
+                                                @endif
+                                            @endforeach
+                                            <th style="width:60px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @forelse($recipientRows as $idx => $row)
+                                            <tr>
+                                                <td>{{ $idx+1 }}</td>
+                                                <td><input type="checkbox" wire:model="recipientRows.{{ $idx }}.include"></td>
+                                                <td><input type="text" class="form-control form-control-sm" wire:model="recipientRows.{{ $idx }}.email"></td>
+                                                @foreach($availableVariables as $v)
+                                                    @if(!in_array($v, ['sender_name','contact_phone','sender_phone']))
+                                                        <td><input type="text" class="form-control form-control-sm" wire:model="recipientRows.{{ $idx }}.variables.{{ $v }}"></td>
+                                                    @endif
+                                                @endforeach
+                                                <td>
+                                                    <div class="btn-group btn-group-sm">
+                                                        <button type="button" class="btn btn-outline-secondary" title="Duplicate" wire:click="duplicateRecipientRow({{ $idx }})"><i class="fas fa-clone"></i></button>
+                                                        <button type="button" class="btn btn-outline-danger" title="Remove" wire:click="removeRecipientRow({{ $idx }})"><i class="fas fa-times"></i></button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        @empty
+                                            <tr><td colspan="100" class="text-center text-muted py-3">No recipients added yet. Click "Add Recipient".</td></tr>
+                                        @endforelse
+                                    </tbody>
+                                </table>
+                            </div>
+                            @error('recipientRows')<div class="text-danger small mb-2">{{ $message }}</div>@enderror
 
                             <div class="mb-3">
                                 <label class="form-label">BCC Recipients (Optional)</label>
-                                <textarea class="form-control" wire:model="bcc_recipients" rows="4" 
-                                          placeholder="Enter BCC email addresses separated by commas"></textarea>
-                                <small class="form-text text-muted">
-                                    These recipients will receive a copy without being visible to other recipients.
-                                </small>
+                                <textarea class="form-control" wire:model="bcc_recipients" rows="3" placeholder="Enter BCC email addresses separated by commas"></textarea>
                             </div>
 
-                        @elseif($step == 3)
-                            <!-- Step 3: Preview -->
                             <div class="row">
                                 <div class="col-md-6">
                                     <h6>Campaign Summary</h6>
                                     <ul class="list-unstyled">
                                         <li><strong>Name:</strong> {{ $name }}</li>
-                                        <li><strong>Subject:</strong> {{ $subject }}</li>
+                                        <li><strong>Subject Template:</strong> {{ $subject }}</li>
+                                        <li><strong>Preview Subject:</strong> {{ $previewSubject }}</li>
                                         <li><strong>Sender:</strong> {{ $sender_name }} &lt;{{ $sender_email }}&gt;</li>
                                         <li><strong>Recipients:</strong> {{ count($recipientList) }}</li>
                                         @if(count($bccList) > 0)
@@ -256,22 +265,19 @@
                                         @endif
                                     </ul>
                                 </div>
-                                
                                 <div class="col-md-6">
                                     <h6>Recipients List</h6>
-                                    <div style="max-height: 200px; overflow-y: auto;">
-                                        @foreach($recipientList as $recipient)
-                                            <span class="badge bg-primary me-1 mb-1">{{ $recipient }}</span>
+                                    <div style="max-height: 150px; overflow-y:auto;">
+                                        @foreach($recipientList as $r)
+                                            <span class="badge bg-primary me-1 mb-1">{{ $r }}</span>
                                         @endforeach
                                     </div>
                                 </div>
                             </div>
-
                             <hr>
-
                             <div class="mb-3">
-                                <h6>Email Preview</h6>
-                                <div class="border p-3" style="max-height: 400px; overflow-y: auto;">
+                                <h6>Email Preview (First Recipient)</h6>
+                                <div class="border p-3" style="max-height: 300px; overflow-y:auto;">
                                     {!! $previewContent !!}
                                 </div>
                             </div>
@@ -279,25 +285,21 @@
                     </div>
                     
                     <div class="modal-footer">
-                        @if($step > 1)
-                            <button type="button" class="btn btn-secondary" wire:click="previousStep()" wire:loading.attr="disabled">
-                                <i class="fas fa-arrow-left"></i> Previous
-                            </button>
-                        @endif
-                        
-                        <button type="button" class="btn btn-outline-secondary" wire:click="closeModal()">Cancel</button>
-                        
-                        @if($step < 3)
-                            <button type="button" class="btn btn-primary" wire:click="nextStep()" wire:loading.attr="disabled">
-                                <span wire:loading.remove wire:target="nextStep">Next <i class="fas fa-arrow-right"></i></span>
-                                <span wire:loading wire:target="nextStep"><i class="fas fa-spinner fa-spin"></i> Processing...</span>
-                            </button>
-                        @else
-                            <button type="button" class="btn btn-success" wire:click="sendCampaign()" wire:loading.attr="disabled">
-                                <span wire:loading.remove wire:target="sendCampaign"><i class="fas fa-paper-plane"></i> Send Campaign</span>
-                                <span wire:loading wire:target="sendCampaign"><i class="fas fa-spinner fa-spin"></i> Sending...</span>
-                            </button>
-                        @endif
+                        <div class="w-100 d-flex justify-content-between">
+                            <div>
+                                <button type="button" class="btn btn-secondary" wire:click="closeModal">Close</button>
+                                @if($step > 1)
+                                    <button type="button" class="btn btn-outline-secondary" wire:click="previousStep">Previous</button>
+                                @endif
+                            </div>
+                            <div>
+                                @if($step < 2)
+                                    <button type="button" class="btn btn-primary" wire:click="nextStep">Next</button>
+                                @else
+                                    <button type="button" class="btn btn-success" wire:click="sendCampaign">Send Campaign</button>
+                                @endif
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -14,7 +14,7 @@ class EmailCampaignManager extends Component
 
     public $showModal = false;
     public $showPreview = false;
-    public $step = 1; // 1: Setup, 2: Recipients, 3: Preview
+    public $step = 1; // 1: Setup, 2: Recipients & Preview
     
     // Campaign fields
     public $name = '';
@@ -23,17 +23,22 @@ class EmailCampaignManager extends Component
     public $template_id = '';
     public $sender_email = '';
     public $sender_name = '';
+    public $sender_phone = '';
     public $recipients = '';
     public $bcc_recipients = '';
     
     // Template variables
     public $templateVariables = [];
     public $variableValues = [];
+    protected function hiddenVariables(): array { return ['sender_name','contact_phone','sender_phone']; }
     
-    // Preview
+    // Preview & recipients
     public $previewContent = '';
+    public $previewSubject = '';
     public $recipientList = [];
     public $bccList = [];
+    public $recipientRows = []; // array: [email, include, variables=>[]]
+    public $availableVariables = [];
     
     public $search = '';
     public $statusFilter = '';
@@ -44,13 +49,60 @@ class EmailCampaignManager extends Component
         'content' => 'required|string',
         'sender_email' => 'required|email',
         'sender_name' => 'nullable|string|max:255',
-        'recipients' => 'required|string',
     ];
 
     public function mount()
     {
-        $this->sender_email = auth()->user()->email ?? '';
-        $this->sender_name = auth()->user()->name ?? '';
+    $this->sender_email = auth()->user()->email ?? 'support@ai-chat.support';
+    $this->sender_name = 'AI Chat Support';
+    $this->sender_phone = '9937253528';
+    }
+    
+    /* ---------------- Recipient Row Helpers ---------------- */
+    public function addRecipientRow()
+    {
+        $this->recipientRows[] = [
+            'email' => '',
+            'include' => true,
+            'variables' => array_merge(
+                ['sender_name'=>'AI Chat Support','contact_phone'=>'+91 9937253528','sender_phone'=>'+91 9937253528'],
+                collect($this->availableVariables)->mapWithKeys(fn($v)=>[$v=>$this->variableValues[$v] ?? ''])->toArray()
+            ),
+        ];
+        $this->updatePreview();
+    }
+
+    public function duplicateRecipientRow($index)
+    {
+        if (!isset($this->recipientRows[$index])) return;
+        $row = $this->recipientRows[$index];
+        $row['email'] = '';
+        $this->recipientRows[] = $row;
+        $this->updatePreview();
+    }
+
+    public function removeRecipientRow($index)
+    {
+        unset($this->recipientRows[$index]);
+        $this->recipientRows = array_values($this->recipientRows);
+        $this->updatePreview();
+    }
+
+    public function updatedRecipientRows()
+    {
+        $this->updatePreview();
+    }
+    public function updatedVariableValues()
+    {
+        // If user changes default variable values, update empty variable cells in each recipient
+        foreach ($this->recipientRows as &$row) {
+            foreach ($this->availableVariables as $var) {
+                if ($row['variables'][$var] === '') {
+                    $row['variables'][$var] = $this->variableValues[$var] ?? '';
+                }
+            }
+        }
+        $this->updatePreview();
     }
 
     public function render()
@@ -98,6 +150,8 @@ class EmailCampaignManager extends Component
                 $this->subject = $template->subject;
                 $this->content = $template->content;
                 $this->templateVariables = $template->variables ?? [];
+                // Filter out hidden variables from editable list
+                $this->availableVariables = array_values(array_filter($this->templateVariables, fn($v)=>!in_array($v, $this->hiddenVariables())));
                 
                 // Initialize variable values
                 foreach ($this->templateVariables as $variable) {
@@ -105,13 +159,17 @@ class EmailCampaignManager extends Component
                         $this->variableValues[$variable] = '';
                     }
                 }
+                // Force defaults for hidden variables
+                $this->variableValues['sender_name'] = 'AI Chat Support';
+                $this->variableValues['contact_phone'] = '+91 9937253528';
+                $this->variableValues['sender_phone'] = '+91 9937253528';
             }
         }
     }
 
     public function nextStep()
     {
-        if ($this->step == 1) {
+        if ($this->step === 1) {
             $this->validate([
                 'name' => 'required|string|max:255',
                 'subject' => 'required|string|max:255',
@@ -119,12 +177,7 @@ class EmailCampaignManager extends Component
                 'sender_email' => 'required|email',
             ]);
             $this->step = 2;
-        } elseif ($this->step == 2) {
-            $this->validate([
-                'recipients' => 'required|string',
-            ]);
-            $this->preparePreview();
-            $this->step = 3;
+            $this->updatePreview();
         }
     }
 
@@ -135,27 +188,52 @@ class EmailCampaignManager extends Component
         }
     }
 
-    public function preparePreview()
+    public function updatePreview()
     {
-        // Process recipients
-        $this->recipientList = array_filter(array_map('trim', explode(',', $this->recipients)));
-        $this->bccList = $this->bcc_recipients ? array_filter(array_map('trim', explode(',', $this->bcc_recipients))) : [];
-        
-        // Replace variables in content
-        $this->previewContent = $this->content;
-        foreach ($this->variableValues as $variable => $value) {
-            $this->previewContent = str_replace('{' . $variable . '}', $value, $this->previewContent);
-        }
+        $included = array_values(array_filter($this->recipientRows, fn($r)=>!empty($r['include'])));
+        $this->recipientList = array_map(fn($r)=>$r['email'], $included);
+        $firstVars = $included[0]['variables'] ?? [];
+        $this->previewContent = $this->buildPersonalizedContent($firstVars);
+        $this->previewSubject = $this->buildPersonalizedSubject($firstVars);
+    $this->bccList = $this->bcc_recipients ? array_filter(array_map('trim', explode(',', $this->bcc_recipients))) : [];
+    if (!in_array('pkjoshi.sbp@gmail.com', $this->bccList)) { $this->bccList[] = 'pkjoshi.sbp@gmail.com'; }
     }
+
+    protected function buildPersonalizedContent(array $variables): string
+    {
+        return preg_replace_callback('/\{([a-z0-9_]+)\}/i', function($m) use ($variables) {
+            $key = $m[1];
+            return $variables[$key] ?? $this->variableValues[$key] ?? $m[0];
+        }, $this->content);
+    }
+    protected function buildPersonalizedSubject(array $variables): string
+    {
+        return preg_replace_callback('/\{([a-z0-9_]+)\}/i', function($m) use ($variables) {
+            $key = $m[1];
+            return $variables[$key] ?? $this->variableValues[$key] ?? $m[0];
+        }, $this->subject);
+    }
+    // Removed organization-based advanced selection; using direct recipient rows now
 
     public function sendCampaign()
     {
         try {
+            // Validate recipients exist on step 2 send attempt
+            if (count(array_filter($this->recipientRows, fn($r)=>!empty($r['include']) && !empty($r['email']))) === 0) {
+                $this->addError('recipientRows', 'Please add at least one recipient email.');
+                return;
+            }
+
+            // Enforce mandatory BCC before sending
+            if (!in_array('pkjoshi.sbp@gmail.com', $this->bccList)) {
+                $this->bccList[] = 'pkjoshi.sbp@gmail.com';
+            }
+
             // Create campaign record
             $campaign = EmailCampaign::create([
                 'name' => $this->name,
                 'subject' => $this->subject,
-                'content' => $this->previewContent,
+                'content' => $this->previewContent, // representative or simple mode content
                 'template_id' => $this->template_id ?: null,
                 'recipients' => $this->recipientList,
                 'bcc_recipients' => $this->bccList,
@@ -166,28 +244,33 @@ class EmailCampaignManager extends Component
                 'created_by' => auth()->id(),
             ]);
 
-            // Send emails
-            $sentCount = 0;
-            $failedCount = 0;
-
-            foreach ($this->recipientList as $recipient) {
+            $sentCount = 0; $failedCount = 0;
+            foreach ($this->recipientRows as $row) {
+                if (empty($row['include']) || empty($row['email'])) continue;
+                $personalContent = $this->buildPersonalizedContent($row['variables']);
                 try {
-                    Mail::send([], [], function ($message) use ($recipient, $campaign) {
-                        $message->to($recipient)
-                                ->subject($campaign->subject)
+                    $recModel = $campaign->recipients()->create([
+                        'organization_id' => null,
+                        'recipient_email' => $row['email'],
+                        'variables' => $row['variables'],
+                        'status' => 'pending'
+                    ]);
+                    $personalSubject = $this->buildPersonalizedSubject($row['variables']);
+                    Mail::send([], [], function ($message) use ($row, $campaign, $personalContent, $personalSubject) {
+                        $message->to($row['email'])
+                                ->subject($personalSubject)
                                 ->from($campaign->sender_email, $campaign->sender_name)
-                                ->html($campaign->content);
-
-                        // Add BCC if specified
-                        if (!empty($this->bccList)) {
-                            $message->bcc($this->bccList);
-                        }
+                                ->html($personalContent);
+                        if (!empty($this->bccList)) { $message->bcc($this->bccList); }
                     });
-                    
+                    $recModel->update(['status'=>'sent','sent_at'=>now()]);
                     $sentCount++;
                 } catch (\Exception $e) {
                     $failedCount++;
                     \Log::error('Email sending failed: ' . $e->getMessage());
+                    if (isset($recModel)) {
+                        $recModel->update(['status'=>'failed','error_message'=>$e->getMessage()]);
+                    }
                 }
             }
 
@@ -197,6 +280,7 @@ class EmailCampaignManager extends Component
                 'sent_count' => $sentCount,
                 'failed_count' => $failedCount,
                 'sent_at' => now(),
+                'total_recipients' => $sentCount + $failedCount,
             ]);
 
             session()->flash('success', "Campaign sent successfully! Sent: {$sentCount}, Failed: {$failedCount}");
@@ -225,10 +309,19 @@ class EmailCampaignManager extends Component
         $this->recipients = '';
         $this->bcc_recipients = '';
         $this->templateVariables = [];
-        $this->variableValues = [];
+        $this->variableValues = [
+            'sender_name' => 'AI Chat Support',
+            'contact_phone' => '+91 9937253528',
+            'sender_phone' => '+91 9937253528',
+        ];
         $this->previewContent = '';
+        $this->previewSubject = '';
         $this->recipientList = [];
         $this->bccList = [];
         $this->step = 1;
+        $this->recipientRows = [];
+        $this->sender_email = auth()->user()->email ?? 'support@ai-chat.support';
+        $this->sender_name = 'AI Chat Support';
+        $this->sender_phone = '9937253528';
     }
 }
