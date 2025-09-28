@@ -45,4 +45,9 @@ return [
         'secret_key' => env('HCAPTCHA_SECRET_KEY'),
     ],
 
+    'shopify' => [
+        'key' => env('SHOPIFY_API_KEY'),
+        'secret' => env('SHOPIFY_API_SECRET'),
+    ],
+
 ];

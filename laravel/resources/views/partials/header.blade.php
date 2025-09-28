@@ -30,13 +30,7 @@
                     <a class="nav-link" href="{{ route('blog.index') }}">{{ __('common.blog') }}</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{ route('reviews.index') }}">Reviews</a>
-                </li>
-                <li class="nav-item">
                     <a class="nav-link" href="{{ route('contact') }}">{{ __('common.contact') }}</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ route('affiliate.register') }}">Become an Affiliate</a>
                 </li>
             </ul>
             

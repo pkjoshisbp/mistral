@@ -34,6 +34,20 @@ Route::get('/contact', function () {
     return view('contact');
 })->name('contact');
 
+Route::get('/integrations', \App\Livewire\Public\Integrations::class)->name('integrations');
+
+Route::get('/download/wordpress-plugin', function () {
+    $filePath = base_path('../plugins/wordpress/ai-chat-support-v1.0.1.zip');
+    
+    if (file_exists($filePath)) {
+        return response()->download($filePath, 'ai-chat-support-v1.0.1.zip');
+    }
+    
+    abort(404, 'Plugin file not found');
+})->name('download.wordpress-plugin');
+
+Route::get('/shopify/install', \App\Livewire\Public\ShopifyInstall::class)->name('shopify.install');
+
 Route::get('/terms', function () {
     $terms = \App\Models\TermsAndConditions::getTerms();
     return view('public.terms', compact('terms'));

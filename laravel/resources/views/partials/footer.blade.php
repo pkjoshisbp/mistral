@@ -25,7 +25,7 @@
                 <ul class="list-unstyled">
                     <li><a href="{{ route('home') }}#features">{{ __('marketing.features') }}</a></li>
                     <li><a href="{{ route('home') }}#pricing">{{ __('marketing.pricing') }}</a></li>
-                    <li><a href="#">{{ __('marketing.integration') }}</a></li>
+                    <li><a href="{{ route('integrations') }}">{{ __('marketing.integration') }}</a></li>
                     <li><a href="#">{{ __('marketing.api_docs') }}</a></li>
                 </ul>
             </div>
@@ -35,6 +35,7 @@
                 <ul class="list-unstyled">
                     <li><a href="{{ route('about') }}">{{ __('common.about_us') }}</a></li>
                     <li><a href="{{ route('blog.index') }}">{{ __('common.blog') }}</a></li>
+                    <li><a href="{{ route('affiliate.register') }}">Become an Affiliate</a></li>
                     <li><a href="#">{{ __('common.careers') }}</a></li>
                     <li><a href="{{ route('contact') }}">{{ __('common.contact') }}</a></li>
                 </ul>

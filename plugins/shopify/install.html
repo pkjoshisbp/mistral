@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat Support - Shopify App Installation</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f6f6f7;
+            color: #202223;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .header p {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+            margin: 20px 0;
+        }
+        .feature-list li {
+            padding: 8px 0;
+            display: flex;
+            align-items: center;
+        }
+        .feature-list li::before {
+            content: "✓";
+            color: #00d084;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        .install-section {
+            background: #f1f2f3;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .install-btn {
+            background: #008060;
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 4px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin: 10px 0;
+            transition: background 0.2s;
+        }
+        .install-btn:hover {
+            background: #006644;
+            text-decoration: none;
+            color: white;
+        }
+        .pricing {
+            background: #fafbfb;
+            border: 1px solid #e1e3e5;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .pricing h3 {
+            margin: 0 0 15px 0;
+            color: #202223;
+        }
+        .price-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e1e3e5;
+        }
+        .price-item:last-child {
+            border-bottom: none;
+        }
+        .price-name {
+            font-weight: 500;
+        }
+        .price-value {
+            color: #008060;
+            font-weight: 600;
+        }
+        .note {
+            background: #fff9c4;
+            border: 1px solid #ffd803;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .note strong {
+            color: #9c6500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 AI Chat Support</h1>
+            <p>Intelligent chat widget for automated customer service</p>
+        </div>
+        
+        <div class="content">
+            <h2>Transform Your Customer Support with AI</h2>
+            <p>Add an AI-powered chat widget that automatically answers customer questions about your products, orders, and policies - 24/7.</p>
+            
+            <h3>What you get:</h3>
+            <ul class="feature-list">
+                <li>AI assistant trained on your store's products and policies</li>
+                <li>24/7 automated customer support</li>
+                <li>Instant answers to product questions and order inquiries</li>
+                <li>Mobile-responsive chat widget</li>
+                <li>Customizable design to match your brand</li>
+                <li>Real-time analytics and conversation history</li>
+                <li>Easy one-click installation</li>
+                <li>No monthly subscriptions - pay only for usage</li>
+            </ul>
+
+            <div class="pricing">
+                <h3>💰 Flexible Pricing</h3>
+                <div class="price-item">
+                    <span class="price-name">Pay as you go</span>
+                    <span class="price-value">$5 (100K tokens)</span>
+                </div>
+                <div class="price-item">
+                    <span class="price-name">Basic Credits</span>
+                    <span class="price-value">$69 (2M tokens)</span>
+                </div>
+                <div class="price-item">
+                    <span class="price-name">Standard Credits</span>
+                    <span class="price-value">$129 (4M tokens)</span>
+                </div>
+                <div class="price-item">
+                    <span class="price-name">Premium Credits</span>
+                    <span class="price-value">$299 (10M tokens)</span>
+                </div>
+                <small>💡 100K tokens = approximately 300-1000 conversations</small>
+            </div>
+
+            <div class="note">
+                <strong>🚀 Perfect for testing:</strong> Start with our $5 pay-as-you-go option to thoroughly test the system with real conversations before committing to larger packages.
+            </div>
+
+            <div class="install-section">
+                <h3>Ready to get started?</h3>
+                <p>Click below to install AI Chat Support on your Shopify store. Setup takes less than 60 seconds!</p>
+                <button id="install-btn" class="install-btn">
+                    Install AI Chat Support
+                </button>
+                <br>
+                <small>✓ Free to install ✓ No setup fees ✓ Cancel anytime</small>
+            </div>
+
+            <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e1e3e5; color: #6d7175;">
+                <p>Questions? Contact us at <a href="mailto:support@ai-chat.support">support@ai-chat.support</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.getElementById('install-btn').addEventListener('click', function() {
+        // Get shop domain from URL or prompt user
+        var shop = new URLSearchParams(window.location.search).get('shop');
+        
+        if (!shop) {
+            shop = prompt('Please enter your Shopify store domain (e.g., mystore.myshopify.com):');
+            if (!shop) return;
+            
+            // Clean up the shop name
+            shop = shop.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            if (!shop.includes('.myshopify.com')) {
+                shop = shop.replace('.com', '') + '.myshopify.com';
+            }
+        }
+        
+        // Disable button and show loading
+        this.disabled = true;
+        this.textContent = 'Installing...';
+        
+        // Call our registration endpoint
+        fetch('https://ai-chat.support/api/integrations/register', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider: 'shopify',
+                shop: shop
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.ok && data.install_url) {
+                // Redirect to Shopify OAuth
+                window.location.href = data.install_url;
+            } else {
+                alert('Installation failed: ' + (data.message || 'Unknown error'));
+                this.disabled = false;
+                this.textContent = 'Install AI Chat Support';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Installation failed. Please try again.');
+            this.disabled = false;
+            this.textContent = 'Install AI Chat Support';
+        });
+    });
+    </script>
+</body>
+</html>
