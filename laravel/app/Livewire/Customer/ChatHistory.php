@@ -78,7 +78,8 @@ class ChatHistory extends Component
     {
         $org = Auth::user()->primaryOrganization();
         if (!$org) {
-            return; // No organization context
+            session()->flash('error', 'No organization access.');
+            return;
         }
 
         $conversation = ChatConversation::with('messages')
@@ -86,7 +87,12 @@ class ChatHistory extends Component
             ->where('organization_id', $org->id)
             ->first();
 
-        if ($conversation) {
+        if (!$conversation) {
+            session()->flash('error', 'Chat conversation not found or access denied.');
+            return;
+        }
+
+        try {
             // Basic HTML content for PDF/text export
             $html = view('exports.chat-conversation', [
                 'conversation' => $conversation,
@@ -105,6 +111,9 @@ class ChatHistory extends Component
             return response()->streamDownload(function () use ($html) {
                 echo strip_tags($html);
             }, 'chat-conversation-' . $sessionId . '.txt');
+        } catch (\Exception $e) {
+            session()->flash('error', 'Failed to export conversation: ' . $e->getMessage());
+            return;
         }
     }
 

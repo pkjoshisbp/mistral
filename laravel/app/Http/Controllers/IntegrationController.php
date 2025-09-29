@@ -109,15 +109,22 @@ class IntegrationController extends Controller
             ],
             [
                 'shop' => $pending->site,
-                'settings' => [
-                    'widget_position' => 'bottom-right',
-                    'primary_color' => '#007bff',
-                    'welcome_message' => $request->input('welcome_message', 'Hello! How can I help you today?'),
-                    'widget_offset_x' => 20,
-                    'widget_offset_y' => 20
-                ]
+                'settings' => [] // No widget settings here anymore
             ]
         );
+
+        // Save widget settings to organization instead
+        $organizationSettings = $organization->settings ?? [];
+        $organizationSettings = array_merge($organizationSettings, [
+            'widget_position' => 'bottom-right',
+            'primary_color' => '#007bff',
+            'welcome_message' => $request->input('welcome_message', 'Hello! How can I help you today?'),
+            'widget_offset_x' => 20,
+            'widget_offset_y' => 20
+        ]);
+        
+        $organization->settings = $organizationSettings;
+        $organization->save();
 
         // Remove pending token
         DB::table('integration_pending')->where('id', $pending->id)->delete();
@@ -150,9 +157,8 @@ class IntegrationController extends Controller
                 ->header('Content-Type', 'application/javascript');
         }
 
-        // Get integration settings
-        $integration = Integration::where('organization_id', $org_id)->first();
-        $settings = $integration->settings ?? [];
+        // Use organization settings as single source of truth
+        $settings = $organization->settings ?? [];
 
         // Generate the widget loader script
         $config = [
@@ -188,9 +194,8 @@ class IntegrationController extends Controller
     public function updateWidgetConfig(Request $request, $org_id)
     {
         $organization = Organization::findOrFail($org_id);
-        $integration = Integration::where('organization_id', $org_id)->firstOrFail();
 
-        $settings = $integration->settings ?? [];
+        $settings = $organization->settings ?? [];
         
         // Update widget settings
         if ($request->has('widget_position')) {
@@ -209,8 +214,8 @@ class IntegrationController extends Controller
             $settings['widget_offset_y'] = (int) $request->input('widget_offset_y');
         }
 
-        $integration->settings = $settings;
-        $integration->save();
+        $organization->settings = $settings;
+        $organization->save();
 
         Log::info('Widget config updated', [
             'org_id' => $org_id,
@@ -226,9 +231,8 @@ class IntegrationController extends Controller
     public function getWidgetConfig($org_id)
     {
         $organization = Organization::findOrFail($org_id);
-        $integration = Integration::where('organization_id', $org_id)->first();
 
-        $settings = $integration->settings ?? [
+        $settings = $organization->settings ?? [
             'widget_position' => 'bottom-right',
             'primary_color' => '#007bff',
             'welcome_message' => 'Hello! How can I help you today?',
@@ -333,30 +337,53 @@ class IntegrationController extends Controller
         $accessToken = $tokenResponse->json()['access_token'];
 
         // Create or find organization
-        $organization = Organization::firstOrCreate(
-            ['website' => "https://{$shop}"],
-            [
+        $existingOrg = Organization::where('website', "https://{$shop}")->first();
+        
+        if ($existingOrg) {
+            // Use existing organization
+            $organization = $existingOrg;
+            Log::info('Using existing organization for Shopify integration', [
+                'existing_org_id' => $organization->id,
+                'shop' => $shop
+            ]);
+        } else {
+            // Create new organization with default values
+            $organization = Organization::create([
                 'name' => $shop,
                 'slug' => Str::slug($shop . '-' . Str::random(6)),
-                'description' => 'Shopify store integrated via app'
-            ]
-        );
+                'website' => "https://{$shop}",
+                'description' => 'Shopify store integrated via app',
+                'token_balance' => 20000 // Initial 20K tokens for new organizations
+            ]);
+            
+            Log::info('Created new organization for Shopify integration', [
+                'org_id' => $organization->id,
+                'shop' => $shop
+            ]);
+        }
 
-        // Save integration
+        // Save integration (only provider-specific data)
         $integration = Integration::updateOrCreate(
             ['organization_id' => $organization->id, 'provider' => 'shopify'],
             [
                 'shop' => $shop,
                 'access_token' => $accessToken,
-                'settings' => [
-                    'widget_position' => 'bottom-right',
-                    'primary_color' => '#007bff',
-                    'welcome_message' => 'Hello! How can I help you today?',
-                    'widget_offset_x' => 20,
-                    'widget_offset_y' => 20
-                ]
+                'settings' => [] // No widget settings here anymore
             ]
         );
+
+        // Save widget settings to organization instead
+        $organizationSettings = $organization->settings ?? [];
+        $organizationSettings = array_merge($organizationSettings, [
+            'widget_position' => 'bottom-right',
+            'primary_color' => '#007bff',
+            'welcome_message' => 'Hello! How can I help you today?',
+            'widget_offset_x' => 20,
+            'widget_offset_y' => 20
+        ]);
+        
+        $organization->settings = $organizationSettings;
+        $organization->save();
 
         // Create ScriptTag to inject widget
         $this->createShopifyScriptTag($shop, $accessToken, $organization->id);

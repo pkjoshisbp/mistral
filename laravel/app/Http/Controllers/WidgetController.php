@@ -31,22 +31,25 @@ class WidgetController
             return response('Organization not found or inactive', 404);
         }
 
+        // Use organization settings as single source of truth
+        $settings = $organization->settings ?? [];
+
         $scriptVersion = now()->format('Ymd.His');
         $widgetConfig = [
             'orgId' => $orgId,
             'orgName' => $organization->name,
             'apiUrl' => config('app.url'),
-            'theme' => $organization->settings['widget_theme'] ?? 'default',
-            'position' => $organization->settings['widget_position'] ?? 'bottom-right',
-            'offsetX' => (int)($organization->settings['widget_offset_x'] ?? 20),
-            'offsetY' => (int)($organization->settings['widget_offset_y'] ?? 20),
-            'primaryColor' => $organization->settings['primary_color'] ?? '#007bff',
-            'welcomeMessage' => $organization->settings['welcome_message'] ?? 'Hello! How can I help you today?',
-            'requireContactForGuests' => (bool)($organization->settings['require_contact_for_guests'] ?? false),
+            'theme' => $settings['widget_theme'] ?? 'default',
+            'position' => $settings['widget_position'] ?? 'bottom-right',
+            'offsetX' => (int)($settings['widget_offset_x'] ?? 20),
+            'offsetY' => (int)($settings['widget_offset_y'] ?? 20),
+            'primaryColor' => $settings['primary_color'] ?? '#007bff',
+            'welcomeMessage' => $settings['welcome_message'] ?? 'Hello! How can I help you today?',
+            'requireContactForGuests' => (bool)($settings['require_contact_for_guests'] ?? false),
             // Branding/backlink controls (defaults: enabled + dofollow)
-            'brandingEnabled' => array_key_exists('branding_enabled', $organization->settings ?? []) ? (bool)$organization->settings['branding_enabled'] : true,
-            'brandingFollow' => array_key_exists('branding_follow', $organization->settings ?? []) ? (bool)$organization->settings['branding_follow'] : true,
-            'brandingBadge' => (bool)($organization->settings['branding_badge'] ?? false),
+            'brandingEnabled' => array_key_exists('branding_enabled', $settings) ? (bool)$settings['branding_enabled'] : true,
+            'brandingFollow' => array_key_exists('branding_follow', $settings) ? (bool)$settings['branding_follow'] : true,
+            'brandingBadge' => (bool)($settings['branding_badge'] ?? false),
         ];
 
         $script = view('widget.script', compact('widgetConfig'))->render();
@@ -79,11 +82,14 @@ class WidgetController
             return response('Organization not found or inactive', 404);
         }
 
+        // Use organization settings as single source of truth
+        $settings = $organization->settings ?? [];
+
         $theme = [
-            'primaryColor' => $organization->settings['primary_color'] ?? '#007bff',
-            'secondaryColor' => $organization->settings['secondary_color'] ?? '#f8f9fa',
-            'textColor' => $organization->settings['text_color'] ?? '#333333',
-            'borderRadius' => $organization->settings['border_radius'] ?? '10px'
+            'primaryColor' => $settings['primary_color'] ?? '#007bff',
+            'secondaryColor' => $settings['secondary_color'] ?? '#f8f9fa',
+            'textColor' => $settings['text_color'] ?? '#333333',
+            'borderRadius' => $settings['border_radius'] ?? '10px'
         ];
 
         $css = view('widget.styles', compact('theme'))->render();

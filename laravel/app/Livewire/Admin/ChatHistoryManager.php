@@ -40,17 +40,31 @@ class ChatHistoryManager extends Component
     public function exportSession($sessionId)
     {
         $conversation = ChatConversation::with('messages')->find($sessionId);
-        if ($conversation) {
+        if (!$conversation) {
+            session()->flash('error', 'Chat conversation not found.');
+            return;
+        }
+
+        try {
             $html = view('exports.chat-conversation', [
                 'conversation' => $conversation,
                 'duration' => $conversation->created_at->diffForHumans($conversation->updated_at, true)
             ])->render();
+            
             if (class_exists(\Dompdf\Dompdf::class)) {
                 $pdf = app('dompdf.wrapper');
                 $pdf->loadHTML($html)->setPaper('a4');
-                return response()->streamDownload(function() use ($pdf) { echo $pdf->output(); }, 'chat-conversation-' . $sessionId . '.pdf');
+                return response()->streamDownload(function() use ($pdf) { 
+                    echo $pdf->output(); 
+                }, 'chat-conversation-' . $sessionId . '.pdf');
             }
-            return response()->streamDownload(function() use ($html) { echo strip_tags($html); }, 'chat-conversation-' . $sessionId . '.txt');
+            
+            return response()->streamDownload(function() use ($html) { 
+                echo strip_tags($html); 
+            }, 'chat-conversation-' . $sessionId . '.txt');
+        } catch (\Exception $e) {
+            session()->flash('error', 'Failed to export conversation: ' . $e->getMessage());
+            return;
         }
     }
 
