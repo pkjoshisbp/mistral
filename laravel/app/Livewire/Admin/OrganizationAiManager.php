@@ -16,11 +16,13 @@ class OrganizationAiManager extends Component
     public $aiModel;
     public $availableModels = [];
     public $showSettings = false;
+    public $assistantDisplayName;
 
     protected $rules = [
         'aiBackendType' => 'required|in:ollama,llamacpp',
         'aiModelProvider' => 'required|in:llama,openai',
-        'aiModel' => 'required|string'
+        'aiModel' => 'required|string',
+        'assistantDisplayName' => 'nullable|string|max:60'
     ];
 
     public function mount()
@@ -46,6 +48,7 @@ class OrganizationAiManager extends Component
         $this->aiBackendType = $settings['ai_backend_type'] ?? AdminSetting::get('ai_backend_type', 'ollama');
         $this->aiModelProvider = $settings['ai_model_provider'] ?? AdminSetting::get('ai_model_provider', 'llama');
         $this->aiModel = $settings['ai_model'] ?? AdminSetting::get('ai_model', 'llama3.2:3b');
+        $this->assistantDisplayName = $settings['assistant_display_name'] ?? 'AI Assistant';
     }
 
     public function loadAvailableModels()
@@ -88,6 +91,11 @@ class OrganizationAiManager extends Component
             $currentSettings['ai_backend_type'] = $this->aiBackendType;
             $currentSettings['ai_model_provider'] = $this->aiModelProvider;
             $currentSettings['ai_model'] = $this->aiModel;
+            // Assistant branding
+            if ($this->assistantDisplayName !== null) {
+                $trimmed = trim($this->assistantDisplayName);
+                $currentSettings['assistant_display_name'] = $trimmed !== '' ? $trimmed : 'AI Assistant';
+            }
             
             $this->selectedOrganization->settings = $currentSettings;
             $this->selectedOrganization->save();

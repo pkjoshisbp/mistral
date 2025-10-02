@@ -39,6 +39,15 @@ class ChatMessage extends Model
 
         switch ($this->sender_type) {
             case 'ai':
+                // Prefer organization-specific assistant display name when available
+                try {
+                    if ($this->conversation && $this->conversation->organization && isset($this->conversation->organization->settings['assistant_display_name'])) {
+                        $name = (string) $this->conversation->organization->settings['assistant_display_name'];
+                        if (trim($name) !== '') {
+                            return $name;
+                        }
+                    }
+                } catch (\Throwable $e) { /* ignore and fallback */ }
                 return 'AI Assistant';
             case 'agent':
                 return 'Support Agent';

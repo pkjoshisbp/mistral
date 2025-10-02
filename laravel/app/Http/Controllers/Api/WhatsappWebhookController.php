@@ -285,10 +285,11 @@ class WhatsappWebhookController extends Controller
                                 'answer_len' => strlen($answer)
                             ]);
                             if (isset($conversation)) {
+                                $assistantName = $org->settings['assistant_display_name'] ?? 'AI Assistant';
                                 ChatMessage::create([
                                     'conversation_id' => $conversation->id,
                                     'sender_type' => 'ai',
-                                    'sender_name' => 'AI Assistant',
+                                    'sender_name' => $assistantName,
                                     'message' => $answer,
                                     'metadata' => [
                                         'source' => 'whatsapp',
@@ -506,10 +507,11 @@ class WhatsappWebhookController extends Controller
                                 'answer_len' => strlen($answer)
                             ]);
                             if (isset($conversation)) {
+                                $assistantName = $org->settings['assistant_display_name'] ?? 'AI Assistant';
                                 ChatMessage::create([
                                     'conversation_id' => $conversation->id,
                                     'sender_type' => 'ai',
-                                    'sender_name' => 'AI Assistant',
+                                    'sender_name' => $assistantName,
                                     'message' => $answer,
                                     'metadata' => [
                                         'source' => 'whatsapp',

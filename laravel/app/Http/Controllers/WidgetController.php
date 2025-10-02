@@ -264,6 +264,8 @@ class WidgetController
             $orgPhone = $organization->contact_phone ?? null;
             $orgDesc  = $organization->description ? trim($this->htmlToPlainWithLinks($organization->description)) : null;
 
+            // Assistant naming and channel-agnostic guidance
+            $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
             $systemPrompt = "You are a helpful customer service assistant for {$organization->name}. ";
             if ($orgDesc) {
                 $systemPrompt .= "About: {$orgDesc}. ";
@@ -289,7 +291,7 @@ class WidgetController
                 $systemPrompt .= "I don't have specific info for this question. ";
             }
             
-            $systemPrompt .= "Keep responses concise and direct. Always use plain text only - no HTML tags, no markdown, no special formatting. If you mention any website or resource, include the full https URL as plain text. If you suggest multiple resources, present them as a simple bulleted list with each item containing only the plain URL. Do not fabricate domains or emails; prefer {$orgWebsite} and the official contacts provided.";
+            $systemPrompt .= "Keep responses concise and direct. Always use plain text only - no HTML tags, no markdown, no special formatting. If you mention any website or resource, include the full https URL as plain text. If you suggest multiple resources, present them as a simple bulleted list with each item containing only the plain URL. Do not fabricate domains or emails; prefer {$orgWebsite} and the official contacts provided. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
             // Get AI response using llmChat for better token tracking
             $messages = [
@@ -331,6 +333,21 @@ class WidgetController
                 'raw_ai_response_preview' => substr((string) $rawResponseText, 0, 300) . '...',
             ]);
             $responseText = $this->normalizeAiResponse($responseText);
+            // Enforce official contacts only (no hallucinated emails/phones)
+            $responseTextBefore = $responseText;
+            $responseText = $this->enforceOfficialContacts(
+                $responseText,
+                $orgEmail,
+                $orgPhone,
+                $orgWebsite
+            );
+            if ($responseText !== $responseTextBefore) {
+                Log::info('Widget response contacts sanitized', [
+                    'org_id' => $orgId,
+                    'session_id' => $sessionId,
+                    'had_changes' => true
+                ]);
+            }
 
             // Detailed logging for debugging
             Log::info('Widget AI Response Debug', [
@@ -446,6 +463,61 @@ class WidgetController
     }
 
     /**
+     * Post-process AI output to prevent fabricated contact details.
+     * - If official email/phone are provided, replace any found with the official ones.
+     * - If not provided, remove any email/phone-like strings and point to website.
+     */
+    private function enforceOfficialContacts(string $text, ?string $officialEmail, ?string $officialPhone, string $officialWebsite): string
+    {
+        $out = $text;
+
+        try {
+            // Email normalization
+            $emailPattern = '/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i';
+            if (!empty($officialEmail)) {
+                // Replace any email with the official one
+                $out = preg_replace($emailPattern, $officialEmail, $out) ?? $out;
+                // Deduplicate repeated official email mentions
+                $out = preg_replace('/(' . preg_quote($officialEmail, '/') . ')(\s*,\s*\1)+/i', '$1', $out) ?? $out;
+            } else {
+                // Remove any email addresses entirely if none is official
+                $out = preg_replace($emailPattern, '', $out) ?? $out;
+            }
+
+            // Phone normalization
+            // Pattern 1: number preceded by contact words
+            $contactPrefixedPhone = '/(?<=\b(?:phone|mobile|call|contact|tel|telephone|support|reach)\s*[:\-]?\s*)(\+?\d[\d\-\s\(\)]{6,})/i';
+            // Pattern 2: standalone phone-like numbers (conservative)
+            $standalonePhone = '/\b\+?\d[\d\-\s\(\)]{8,}\b/';
+
+            if (!empty($officialPhone)) {
+                $out = preg_replace($contactPrefixedPhone, $officialPhone, $out) ?? $out;
+                $out = preg_replace($standalonePhone, $officialPhone, $out) ?? $out;
+            } else {
+                $out = preg_replace($contactPrefixedPhone, '', $out) ?? $out;
+                $out = preg_replace($standalonePhone, '', $out) ?? $out;
+            }
+
+            // Clean up extra spaces/commas
+            $out = preg_replace('/\s{2,}/', ' ', $out) ?? $out;
+            $out = preg_replace('/\s+([,;.])/', '$1', $out) ?? $out;
+
+            // If both email and phone are unavailable, encourage website contact
+            if (empty($officialEmail) && empty($officialPhone)) {
+                if (stripos($out, $officialWebsite) === false) {
+                    $out .= (function($s){ return str_ends_with($s, '.') ? '' : '.'; })($out) . " You can contact us via our official website: {$officialWebsite}";
+                }
+            }
+        } catch (\Throwable $t) {
+            // Never let sanitization break the chat flow
+            \Log::warning('Contact sanitization failed; returning original text', ['error' => $t->getMessage()]);
+            return trim($text);
+        }
+
+        return trim($out);
+    }
+
+    /**
      * Get widget configuration
      */
     public function getConfig($orgId)
@@ -510,7 +582,7 @@ class WidgetController
             ChatMessage::create([
                 'conversation_id' => $conversation->id,
                 'sender_type' => 'ai',
-                'sender_name' => 'AI Assistant',
+                'sender_name' => $assistantName,
                 'message' => $aiResponse,
                 'sent_at' => now(),
                 'metadata' => [

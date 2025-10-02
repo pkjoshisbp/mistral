@@ -128,6 +128,19 @@
                                                 </small>
                                             </div>
 
+                                            <!-- Assistant Display Name -->
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold">
+                                                    <i class="fas fa-id-badge me-1"></i>
+                Assistant Display Name
+                                                </label>
+                                                <input type="text" wire:model.defer="assistantDisplayName" class="form-control @error('assistantDisplayName') is-invalid @enderror" placeholder="e.g., Ava, Helper Bot, Support Assistant">
+                                                @error('assistantDisplayName')
+                                                    <div class="invalid-feedback">{{ $message }}</div>
+                                                @enderror
+                                                <small class="form-text text-muted">Shown to users instead of the generic 'AI Assistant' across chat widgets and messaging. Leave blank to use default.</small>
+                                            </div>
+
                                             <!-- Model Information -->
                                             @if($aiModel)
                                                 <div class="alert alert-info">

@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\AnalyticsTrackingController;
 use App\Http\Controllers\Api\FaqSyncController;
 use App\Http\Controllers\Api\WhatsappWebhookController;
 use App\Http\Controllers\IntegrationController;
+use App\Http\Controllers\Api\OrderStatusController;
 
 Route::post('/leads', [LeadController::class, 'store']);
 Route::get('/leads', [LeadController::class, 'index']);
@@ -33,6 +34,9 @@ Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive'])
 // Per-organization WhatsApp webhook endpoints (preferred)
 Route::get('/webhooks/whatsapp/{org_slug}', [WhatsappWebhookController::class, 'verifyForOrg']);
 Route::post('/webhooks/whatsapp/{org_slug}', [WhatsappWebhookController::class, 'receiveForOrg']);
+
+// Order status lookup (rate limited)
+Route::get('/order-status/latest', [OrderStatusController::class, 'latest'])->middleware('throttle:20,1');
 
 // Plugin/App Integration endpoints
 Route::prefix('integrations')->group(function () {
