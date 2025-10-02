@@ -21,6 +21,8 @@ class WhatsappCampaignManager extends Component
     public $templates = [];
     public $templateParam1 = '';
     public $buttonUrlVar1 = '';
+    public $cta_text = '';
+    public $cta_url = '';
 
     public function mount()
     {
@@ -97,6 +99,8 @@ class WhatsappCampaignManager extends Component
             'image_url' => 'nullable|url',
             'image_file' => 'nullable|image|max:5120', // 5MB
             'footer_text' => 'nullable|string|max:500',
+            'cta_text' => 'nullable|string|max:120',
+            'cta_url' => 'nullable|url|max:500',
         ]);
 
         $svc = app(WhatsappService::class);
@@ -134,6 +138,12 @@ class WhatsappCampaignManager extends Component
                 } else {
                     // For text sends, append footer if any
                     $textToSend = $this->message ?: '';
+                    // Append CTA if provided
+                    if ($this->cta_url) {
+                        $ctaLine = $this->cta_text ? ($this->cta_text . ': ' . $this->cta_url) : $this->cta_url;
+                        $textToSend = rtrim($textToSend);
+                        $textToSend .= ($textToSend ? "\n\n" : '') . $ctaLine;
+                    }
                     if ($finalFooter) {
                         $textToSend = rtrim($textToSend) . ($textToSend ? "\n\n" : '') . $finalFooter;
                     }

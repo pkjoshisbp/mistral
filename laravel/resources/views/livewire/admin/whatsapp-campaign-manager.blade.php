@@ -82,6 +82,25 @@
                 @error('message')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
 
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label class="form-label">CTA text (optional)</label>
+                        <input type="text" class="form-control @error('cta_text') is-invalid @enderror" wire:model="cta_text" placeholder="e.g., Learn more">
+                        @error('cta_text')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        <small class="text-muted">Shown before the link if provided.</small>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label class="form-label">CTA URL (optional)</label>
+                        <input type="url" class="form-control @error('cta_url') is-invalid @enderror" wire:model="cta_url" placeholder="https://example.com">
+                        @error('cta_url')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        <small class="text-muted">A clickable link will be appended to the message.</small>
+                    </div>
+                </div>
+            </div>
+
             <div class="mb-3">
                 <label class="form-label">Image URL (optional)</label>
                 <input type="url" class="form-control @error('image_url') is-invalid @enderror" wire:model="image_url" placeholder="https://.../image.jpg">

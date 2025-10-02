@@ -26,9 +26,13 @@ Route::post('/analytics/track', [AnalyticsTrackingController::class, 'track']);
 // Import FAQs for an organization (auth via organization api_token)
 Route::post('/organizations/{slug}/faqs/import', [FaqSyncController::class, 'import']);
 
-// WhatsApp webhook endpoints
+// WhatsApp webhook endpoints (global/back-compat)
 Route::get('/webhooks/whatsapp', [WhatsappWebhookController::class, 'verify']);
 Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive']);
+
+// Per-organization WhatsApp webhook endpoints (preferred)
+Route::get('/webhooks/whatsapp/{org_slug}', [WhatsappWebhookController::class, 'verifyForOrg']);
+Route::post('/webhooks/whatsapp/{org_slug}', [WhatsappWebhookController::class, 'receiveForOrg']);
 
 // Plugin/App Integration endpoints
 Route::prefix('integrations')->group(function () {

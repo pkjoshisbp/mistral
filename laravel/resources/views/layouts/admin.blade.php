@@ -201,6 +201,12 @@
               <p>Pricing Management</p>
             </a>
           </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.payments.manual-capture') }}" class="nav-link {{ request()->routeIs('admin.payments.manual-capture') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-credit-card"></i>
+              <p>Manual PayPal Capture</p>
+            </a>
+          </li>
           
           <li class="nav-header">EMAIL MARKETING</li>
           <li class="nav-item">
@@ -247,6 +253,12 @@
             <a href="{{ route('admin.settings') }}" class="nav-link {{ request()->routeIs('admin.settings') ? 'active' : '' }}">
               <i class="nav-icon fas fa-cogs"></i>
               <p>Settings</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.organization-ai') }}" class="nav-link {{ request()->routeIs('admin.organization-ai') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-robot"></i>
+              <p>Organization AI Models</p>
             </a>
           </li>
           <li class="nav-item">

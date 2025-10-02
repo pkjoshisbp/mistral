@@ -297,13 +297,16 @@ class WidgetController
                 ['role' => 'user', 'content' => $message]
             ];
             
-            // Use configured AI provider for optimal performance
-            if ($this->aiAgentService->isOpenAiProvider()) {
-                // Use OpenAI with configured model
-                $aiResponse = $this->aiAgentService->openAiChat($messages, $this->aiAgentService->getOpenAiModel(), null, $orgId);
+            // Use organization-specific AI provider and model
+            $aiProvider = $this->aiAgentService->getAiProviderForOrganization($orgId);
+            if ($aiProvider === 'openai') {
+                // Use OpenAI with organization-specific or global model
+                $model = $this->aiAgentService->getOpenAiModelForOrganization($orgId);
+                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $orgId);
             } else {
-                // Use local LLM with configured model
-                $aiResponse = $this->aiAgentService->llmChat($messages, $this->aiAgentService->getLlamaModel(), null, $orgId);
+                // Use local LLM with organization-specific or global model
+                $model = $this->aiAgentService->getLlamaModelForOrganization($orgId);
+                $aiResponse = $this->aiAgentService->llmChat($messages, $model, null, $orgId);
             }
 
             $rawResponseText = null;

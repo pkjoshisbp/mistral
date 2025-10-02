@@ -9,6 +9,7 @@ class Kernel extends ConsoleKernel
 {
     protected $commands = [
         \App\Console\Commands\ResyncFaqsToQdrant::class,
+        \App\Console\Commands\PaypalCaptureOrder::class,
     ];
 
     /**

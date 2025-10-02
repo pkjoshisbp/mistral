@@ -6,7 +6,9 @@ h1 { font-size:18px; margin-bottom:4px; }
 .meta { margin-bottom:10px; }
 .message { margin-bottom:6px; }
 .sender-user { font-weight:bold; color:#1d4ed8; }
+.sender-ai { font-weight:bold; color:#065f46; }
 .sender-bot { font-weight:bold; color:#065f46; }
+.sender-system { font-weight:bold; color:#6b7280; }
 .time { color:#6b7280; font-size:11px; }
 .content { margin-left:8px; }
 </style></head><body>
@@ -21,8 +23,8 @@ Total Messages: {{ $conversation->messages->count() }}
 @foreach($conversation->messages as $message)
 <div class="message">
     <span class="time">[{{ $message->created_at->format('H:i:s') }}]</span>
-    <span class="sender-{{ $message->sender ?? 'system' }}">{{ ucfirst($message->sender ?? 'System') }}:</span>
-    <span class="content">{{ $message->content ?? '' }}</span>
+    <span class="sender-{{ $message->sender_type ?? 'system' }}">{{ $message->sender_name ?? 'System' }}:</span>
+    <span class="content">{{ $message->message ?? '' }}</span>
 </div>
 @endforeach
 </body></html>

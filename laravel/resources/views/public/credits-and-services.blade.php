@@ -68,13 +68,13 @@
                                                        onclick="return startRazorpayCredit({ packageId: {{ $package->id }} });">
                                                         <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                     </a>
-                                                    <a href="#" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
-                                                       onclick="return startPaypalCredit({ packageId: {{ $package->id }} });">
+                                                                         <a href="{{ route('paypal.credit-checkout', ['packageId' => $package->id]) }}" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
+                                                                             onclick="return startPaypalCredit(event, { packageId: {{ $package->id }} });">
                                                         <i class="fab fa-paypal"></i> Pay with PayPal
                                                     </a>
                                                 @else
-                                                    <a href="#" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2"
-                                                       onclick="return startPaypalCredit({ packageId: {{ $package->id }} });">
+                                                                         <a href="{{ route('paypal.credit-checkout', ['packageId' => $package->id]) }}" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2"
+                                                                             onclick="return startPaypalCredit(event, { packageId: {{ $package->id }} });">
                                                         <i class="fab fa-paypal"></i> Pay with PayPal
                                                     </a>
                                                     <a href="#" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
@@ -276,8 +276,12 @@
             try { window.initializeRazorpay && window.initializeRazorpay(); } catch(e) { console.warn(e); }
         });
 
-        async function startPaypalCredit({ packageId }) {
+        let paypalInFlight = false;
+        async function startPaypalCredit(evt, { packageId }) {
             try {
+                if (evt) evt.preventDefault();
+                if (paypalInFlight) return false;
+                paypalInFlight = true;
                 const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
                 const res = await fetch('{{ route('paypal.create-credit-payment') }}', {
                     method: 'POST',
@@ -296,6 +300,8 @@
             } catch (err) {
                 console.error('PayPal credit init failed:', err);
                 alert('Something went wrong while starting PayPal.');
+            } finally {
+                paypalInFlight = false;
             }
             return false;
         }
@@ -366,7 +372,7 @@
             return false;
         }
         // make functions global for onclick handlers
-        window.startPaypalCredit = startPaypalCredit;
+    window.startPaypalCredit = startPaypalCredit;
         window.startRazorpayCredit = startRazorpayCredit;
     </script>
 @endsection

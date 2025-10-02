@@ -68,7 +68,7 @@
                                     <div style="max-height:260px;overflow:auto;" class="p-2">
                                         @foreach($conversation->messages as $message)
                                             <div class="mb-2">
-                                                <strong>{{ ucfirst($message->sender) }}</strong>
+                                                <strong>{{ $message->sender_name ?? ucfirst($message->sender_type ?? 'System') }}</strong>
                                                 <small class="text-muted">{{ $message->created_at->format('H:i') }}</small>
                                                 <div>{{ $message->message }}</div>
                                             </div>

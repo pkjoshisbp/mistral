@@ -496,6 +496,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
     Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
     Route::get('/leads', \App\Livewire\Admin\LeadsManager::class)->name('leads');
+    Route::get('/organization-ai', \App\Livewire\Admin\OrganizationAiManager::class)->name('organization-ai');
     
     // Pricing Management Routes
     Route::prefix('pricing')->name('pricing.')->group(function () {
@@ -511,6 +512,11 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/reviews', function () {
         return view('admin.reviews');
     })->name('reviews');
+
+    // Manual PayPal Capture page (admin)
+    Route::get('/payments/manual-capture', function () {
+        return view('admin.manual-capture');
+    })->name('payments.manual-capture');
 
     // Quick OTP log viewer (admin only)
     Route::get('/otp-logs', function () {
@@ -616,9 +622,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
             return view('customer.widget');
         })->name('widget');
         Route::post('/widget/settings', [\App\Http\Controllers\Customer\WidgetSettingsController::class, 'save'])->name('widget.settings.save');
-        Route::get('/whatsapp', function () {
-            return view('customer.whatsapp');
-        })->name('whatsapp');
+        Route::get('/whatsapp', \App\Livewire\Customer\WhatsappIntegration::class)->name('whatsapp');
         Route::get('/chat-test', function () {
             return view('customer.chat-test');
         })->name('chat-test');
@@ -654,9 +658,7 @@ Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class,
 
 // API Routes
 Route::prefix('api')->middleware('noindex')->group(function () {
-    // WhatsApp Webhook
-    Route::get('/whatsapp/webhook', [\App\Http\Controllers\WhatsAppController::class, 'verifyWebhook']);
-    Route::post('/whatsapp/webhook', [\App\Http\Controllers\WhatsAppController::class, 'handleWebhook']);
+    // WhatsApp Webhook (handled in routes/api.php as /api/webhooks/whatsapp)
 });
 
 // PayPal Routes
@@ -667,6 +669,9 @@ Route::prefix('paypal')->name('paypal.')->group(function () {
     Route::post('create-credit-payment', [\App\Http\Controllers\PayPalController::class, 'createCreditPayment'])
         ->middleware('auth')
         ->name('create-credit-payment');
+    Route::get('credit-checkout/{packageId}', [\App\Http\Controllers\PayPalController::class, 'creditCheckoutRedirect'])
+        ->middleware('auth')
+        ->name('credit-checkout');
     Route::get('create-subscription-direct/{planId}/{cycle}', function ($planId, $cycle = 'monthly') {
         return view('payment.paypal-redirect', compact('planId', 'cycle'));
     })->middleware('auth')->name('create-subscription-direct');
@@ -674,6 +679,11 @@ Route::prefix('paypal')->name('paypal.')->group(function () {
     Route::get('credit-success', [\App\Http\Controllers\PayPalController::class, 'handleCreditSuccess'])->name('credit-success');
     Route::get('cancel', [\App\Http\Controllers\PayPalController::class, 'handleCancel'])->name('cancel');
     Route::post('webhook', [\App\Http\Controllers\PayPalController::class, 'handleWebhook'])->name('webhook');
+
+    // Admin-only manual capture endpoint
+    Route::post('admin/capture', [\App\Http\Controllers\PayPalController::class, 'adminCapture'])
+        ->middleware(['auth','admin'])
+        ->name('admin.capture');
 });
 
 // Razorpay Routes

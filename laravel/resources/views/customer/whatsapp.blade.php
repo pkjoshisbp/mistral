@@ -47,7 +47,7 @@
                                                 <li>In Facebook Developer Console, create a new app</li>
                                                 <li>Add "WhatsApp Business Platform" product</li>
                                                 <li>Configure webhooks with this URL: 
-                                                    <code class="bg-light p-1 rounded">https://ai-chat.support/api/whatsapp/webhook</code>
+                                                    <code class="bg-light p-1 rounded">https://ai-chat.support/api/webhooks/whatsapp</code>
                                                 </li>
                                                 <li>Get your Access Token and Phone Number ID</li>
                                             </ol>
@@ -80,7 +80,7 @@
                                                     </div>
                                                     <div class="col-md-6 mb-3">
                                                         <label class="form-label">Webhook URL</label>
-                                                        <input type="text" class="form-control" value="https://ai-chat.support/api/whatsapp/webhook" readonly>
+                                                        <input type="text" class="form-control" value="https://ai-chat.support/api/webhooks/whatsapp" readonly>
                                                         <small class="text-muted">Configure this in Facebook Developer Console</small>
                                                     </div>
                                                 </div>

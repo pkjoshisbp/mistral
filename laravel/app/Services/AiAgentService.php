@@ -101,6 +101,120 @@ class AiAgentService
     }
 
     /**
+     * Get AI provider for specific organization (with fallback to global)
+     */
+    public function getAiProviderForOrganization($organizationId = null)
+    {
+        if ($organizationId && class_exists(\App\Models\Organization::class)) {
+            $organization = \App\Models\Organization::find($organizationId);
+            if ($organization && $organization->settings && isset($organization->settings['ai_model_provider'])) {
+                return $organization->settings['ai_model_provider'];
+            }
+        }
+        
+        return $this->getAiProvider();
+    }
+
+    /**
+     * Get OpenAI model for specific organization (with fallback to global)
+     */
+    public function getOpenAiModelForOrganization($organizationId = null)
+    {
+        if ($organizationId && class_exists(\App\Models\Organization::class)) {
+            $organization = \App\Models\Organization::find($organizationId);
+            if ($organization && $organization->settings && isset($organization->settings['openai_model'])) {
+                return $organization->settings['openai_model'];
+            }
+        }
+        
+        return $this->getOpenAiModel();
+    }
+
+    /**
+     * Get Llama model for specific organization (with fallback to global)
+     */
+    public function getLlamaModelForOrganization($organizationId = null)
+    {
+        if ($organizationId && class_exists(\App\Models\Organization::class)) {
+            $organization = \App\Models\Organization::find($organizationId);
+            if ($organization && $organization->settings) {
+                // Check for organization-specific backend type
+                $backendType = $organization->settings['ai_backend_type'] ?? $this->getBackendType();
+                
+                if ($backendType === 'llamacpp') {
+                    // Check organization-specific llamacpp settings
+                    $llamacppPath = $organization->settings['llamacpp_model_path'] ?? null;
+                    $llamacppRepo = $organization->settings['llamacpp_model_repo'] ?? null;
+                    
+                    if ($llamacppPath) {
+                        return $llamacppPath;
+                    } elseif ($llamacppRepo) {
+                        return $llamacppRepo;
+                    }
+                } else {
+                    // Check organization-specific llama model
+                    if (isset($organization->settings['llama_model'])) {
+                        return $organization->settings['llama_model'];
+                    }
+                }
+            }
+        }
+        
+        return $this->getLlamaModel();
+    }
+
+    /**
+     * Get backend type for specific organization (with fallback to global)
+     */
+    public function getBackendTypeForOrganization($organizationId = null)
+    {
+        if ($organizationId && class_exists(\App\Models\Organization::class)) {
+            $organization = \App\Models\Organization::find($organizationId);
+            if ($organization && $organization->settings && isset($organization->settings['ai_backend_type'])) {
+                return $organization->settings['ai_backend_type'];
+            }
+        }
+        
+        return $this->getBackendType();
+    }
+
+    /**
+     * Get AI backend type for specific organization (accepts Organization object)
+     */
+    public function getAiBackendTypeForOrganization($organization = null)
+    {
+        if ($organization && $organization->settings && isset($organization->settings['ai_backend_type'])) {
+            return $organization->settings['ai_backend_type'];
+        }
+        
+        return $this->getBackendType();
+    }
+
+    /**
+     * Get AI model provider for specific organization (with fallback to global)
+     */
+    public function getAiModelProviderForOrganization($organization = null)
+    {
+        if ($organization && $organization->settings && isset($organization->settings['ai_model_provider'])) {
+            return $organization->settings['ai_model_provider'];
+        }
+        
+        return $this->getAiProvider();
+    }
+
+    /**
+     * Get AI model for specific organization (with fallback to global)
+     */
+    public function getAiModelForOrganization($organization = null)
+    {
+        if ($organization && $organization->settings && isset($organization->settings['ai_model'])) {
+            return $organization->settings['ai_model'];
+        }
+        
+        return $this->getLlamaModel();
+    }
+
+    /**
      * Generate embeddings for given text
      */
     public function embed($text, $model = null)
