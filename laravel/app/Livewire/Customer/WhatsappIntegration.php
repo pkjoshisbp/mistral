@@ -36,11 +36,13 @@ class WhatsappIntegration extends Component
             $this->isConnected = !empty($this->accessToken) && !empty($this->phoneNumberId);
         }
         
-        // Generate organization-specific verify token
-        $this->verifyToken = 'ai_chat_' . ($org->slug ?? 'org') . '_' . substr(md5($org->id ?? 'default'), 0, 8);
+    // Generate organization-specific verify token (stable per org)
+    $this->verifyToken = 'ai_chat_' . (($org->slug ?? 'org')) . '_' . substr(md5((string)($org->id ?? 'default')), 0, 8);
         
-        // Use the correct webhook URL (the working one)
-        $this->webhookUrl = config('app.url') . '/api/webhooks/whatsapp';
+    // Use per-organization slug webhook URL
+    $base = config('app.url');
+    $slug = $org?->slug ?? 'your-org-slug';
+    $this->webhookUrl = rtrim($base, '/') . '/api/webhooks/whatsapp/' . $slug;
         
         $this->updateConnectionStatus();
     }

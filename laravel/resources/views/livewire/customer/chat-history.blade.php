@@ -141,18 +141,24 @@
                                     </tr>
                                     @if(isset($showDetails[$conversation->id]))
                                         <tr>
-                                            <td colspan="5" class="bg-light">
+                                            <td colspan="5" class="bg-light" id="conv-{{ $conversation->id }}">
                                                 <div class="chat-messages p-3" style="max-height: 300px; overflow-y: auto;">
                                                     @foreach($conversation->messages as $message)
-                                                        @php $isUser = $message->sender_type === 'user'; @endphp
-                                                        <div class="message mb-2 {{ $isUser ? 'text-right' : 'text-left' }}">
-                                                            <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded" style="max-width: 70%;">
-                                                                {!! $message->message_html !!}
-                                                            </div>
-                                                            <div class="message-time">
-                                                                <small class="text-muted">
-                                                                    {{ ($message->sent_at ?? $message->created_at)->format('h:i A') }}
-                                                                </small>
+                                                        @php 
+                                                            $isUser = $message->sender_type === 'user'; 
+                                                            $sender = $message->getSenderDisplayName();
+                                                        @endphp
+                                                        <div class="message mb-3">
+                                                            <div class="d-flex {{ $isUser ? 'justify-content-end' : 'justify-content-start' }}">
+                                                                <div class="{{ $isUser ? 'text-end' : 'text-start' }}" style="max-width: 80%;">
+                                                                    <div class="small mb-1">
+                                                                        <span class="badge {{ $isUser ? 'bg-primary' : 'bg-secondary' }}">{{ $sender }}</span>
+                                                                        <span class="text-muted ms-2">{{ ($message->sent_at ?? $message->created_at)->format('h:i A') }}</span>
+                                                                    </div>
+                                                                    <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
+                                                                        {!! $message->message_html !!}
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     @endforeach

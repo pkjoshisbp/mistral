@@ -168,7 +168,15 @@ class WidgetController
                 }
             }
 
-            // Search organization's Qdrant collection for context using enhanced search
+            // Load existing conversation to enable follow-up continuity
+            $existingConversation = ChatConversation::where('conversation_id', $sessionId)
+                ->where('organization_id', $organization->id)
+                ->first();
+            $previousContextPayloads = $existingConversation->metadata['last_context_payloads'] ?? [];
+
+            $isAffirmativeFollowUp = $this->isAffirmativeFollowUp($message);
+
+            // Search organization's Qdrant collection for context using enhanced search (or reuse last context on affirmatives)
             $collectionName = $organization->slug; // Use organization slug directly
             
             Log::info('Starting enhanced search', [
@@ -177,14 +185,23 @@ class WidgetController
                 'query' => $message
             ]);
             
-            $searchResults = $this->aiAgentService->enhancedSearch(
-                $collectionName,
-                $message, // Use original message for rewriting
-                2 // Get top 2 relevant results for faster processing
-            );
+            $searchResults = null;
+            if (!$isAffirmativeFollowUp) {
+                $searchResults = $this->aiAgentService->enhancedSearch(
+                    $collectionName,
+                    $message, // Use original message for rewriting
+                    2 // Get top 2 relevant results for faster processing
+                );
+            }
             
             $context = '';
-            if ($searchResults && isset($searchResults['results'])) {
+            $orderedResults = [];
+            if ($isAffirmativeFollowUp && !empty($previousContextPayloads)) {
+                // Reuse last context payloads for elaboration
+                $orderedResults = array_map(function ($p) {
+                    return ['payload' => $p];
+                }, $previousContextPayloads);
+            } elseif ($searchResults && isset($searchResults['results'])) {
                 // Separate FAQ results from service results to prioritize FAQs for general questions
                 $faqResults = [];
                 $serviceResults = [];
@@ -256,6 +273,38 @@ class WidgetController
                 if (!empty($collectedLinks)) {
                     $context .= "Links: " . implode(', ', $collectedLinks) . "\n\n";
                 }
+            }
+
+            // Persist last context payloads for follow-up continuity (limit to top 5)
+            try {
+                if (!empty($orderedResults)) {
+                    $payloads = [];
+                    foreach (array_slice($orderedResults, 0, 5) as $res) {
+                        $p = $res['payload'] ?? [];
+                        if (!empty($p)) {
+                            // Keep only relevant fields to reduce storage
+                            $payloads[] = [
+                                'data_type' => $p['data_type'] ?? null,
+                                'title' => $p['title'] ?? null,
+                                'content' => $p['content'] ?? null,
+                                'price' => $p['price'] ?? null,
+                                'currency' => $p['currency'] ?? null,
+                                'duration' => $p['duration'] ?? null,
+                                'requirements' => $p['requirements'] ?? null,
+                                'category' => $p['category'] ?? null,
+                                'links' => $p['links'] ?? null,
+                            ];
+                        }
+                    }
+                    if ($existingConversation) {
+                        $meta = $existingConversation->metadata ?? [];
+                        $meta['last_context_payloads'] = $payloads;
+                        $existingConversation->metadata = $meta;
+                        $existingConversation->save();
+                    }
+                }
+            } catch (\Throwable $t) {
+                Log::warning('Failed saving last context payloads', ['error' => $t->getMessage()]);
             }
 
             // Create concise system prompt with official org contact metadata
@@ -463,6 +512,34 @@ class WidgetController
     }
 
     /**
+     * Detects short affirmative follow-ups like "yes", "yes tell me more", etc.
+     */
+    private function isAffirmativeFollowUp(string $text): bool
+    {
+        $t = trim(mb_strtolower($text));
+        if ($t === '') return false;
+        // Simple affirmatives
+        $affirm = ['yes', 'yeah', 'yup', 'ya', 'sure', 'ok', 'okay', 'please', 'go ahead'];
+        foreach ($affirm as $a) {
+            if ($t === $a) return true;
+        }
+        // Phrases asking to elaborate
+        $patterns = [
+            '/^yes\b.*more/',
+            '/\btell me more\b/',
+            '/\bmore details\b/',
+            '/\bhow it works\b/',
+            '/\bexplain more\b/'
+        ];
+        foreach ($patterns as $re) {
+            if (preg_match($re, $t)) return true;
+        }
+        // Also treat short confirmations under 16 chars as affirmative if contain yes/ok/sure
+        if (mb_strlen($t) < 16 && preg_match('/\b(yes|ok|okay|sure|please)\b/', $t)) return true;
+        return false;
+    }
+
+    /**
      * Post-process AI output to prevent fabricated contact details.
      * - If official email/phone are provided, replace any found with the official ones.
      * - If not provided, remove any email/phone-like strings and point to website.
@@ -579,6 +656,7 @@ class WidgetController
             ]);
 
             // Save AI response
+            $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
             ChatMessage::create([
                 'conversation_id' => $conversation->id,
                 'sender_type' => 'ai',

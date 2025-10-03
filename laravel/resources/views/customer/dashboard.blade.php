@@ -116,7 +116,7 @@
                                             </td>
                                             <td>{{ $chat->messages_count ?? 0 }}</td>
                                             <td>
-                                                <a href="#" class="btn btn-sm btn-outline-primary">
+                                                <a href="{{ route('customer.chat-history', ['focusConversation' => $chat->id]) }}#conv-{{ $chat->id }}" class="btn btn-sm btn-outline-primary">
                                                     <i class="fas fa-eye"></i> View
                                                 </a>
                                             </td>

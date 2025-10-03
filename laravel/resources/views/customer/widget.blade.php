@@ -70,6 +70,11 @@
                                         <label class="form-label">Welcome Message</label>
                                         <input type="text" id="welcomeMessage" name="welcomeMessage" class="form-control" value="{{ $custOrg->settings['welcome_message'] ?? 'Hello! How can I help you today?' }}" placeholder="Enter welcome message">
                                     </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Assistant Display Name</label>
+                                        <input type="text" id="assistantDisplayName" name="assistantDisplayName" class="form-control" value="{{ $custOrg->settings['assistant_display_name'] ?? '' }}" placeholder="e.g., Ava, Support Bot, Acme Assistant">
+                                        <small class="text-muted">This name will appear next to AI messages in chats.</small>
+                                    </div>
                                     <button type="submit" class="btn btn-success">Save Settings</button>
                                 </form>
                             </div>
@@ -153,6 +158,7 @@ document.getElementById('widgetSettingsForm').addEventListener('submit', async f
         offsetX: parseInt(document.getElementById('offsetX').value || '20', 10),
         offsetY: parseInt(document.getElementById('offsetY').value || '20', 10),
         welcomeMessage: document.getElementById('welcomeMessage').value,
+        assistantDisplayName: document.getElementById('assistantDisplayName').value,
         _token: form.querySelector('input[name="_token"]').value
     };
     try {

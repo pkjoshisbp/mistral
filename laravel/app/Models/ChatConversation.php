@@ -46,7 +46,10 @@ class ChatConversation extends Model
 
     public function messages(): HasMany
     {
-        return $this->hasMany(ChatMessage::class, 'conversation_id');
+        // Always return messages in chronological order by sent_at (fallback to id)
+        return $this->hasMany(ChatMessage::class, 'conversation_id')
+            ->orderBy('sent_at', 'asc')
+            ->orderBy('id', 'asc');
     }
 
     public function latestMessage(): HasMany

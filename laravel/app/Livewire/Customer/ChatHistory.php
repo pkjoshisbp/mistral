@@ -16,13 +16,17 @@ class ChatHistory extends Component
     public $dateFrom = '';
     public $dateTo = '';
     public $showDetails = [];
+    public $focusConversation = null;
 
-    protected $queryString = ['search', 'dateFrom', 'dateTo'];
+    protected $queryString = ['search', 'dateFrom', 'dateTo', 'focusConversation'];
 
     public function mount()
     {
         $this->dateFrom = now()->subDays(30)->format('Y-m-d');
         $this->dateTo = now()->format('Y-m-d');
+        if ($this->focusConversation) {
+            $this->showDetails[$this->focusConversation] = true;
+        }
     }
 
     public function updatedSearch()

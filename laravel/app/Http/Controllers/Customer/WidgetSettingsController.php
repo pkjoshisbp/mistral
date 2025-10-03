@@ -26,6 +26,7 @@ class WidgetSettingsController extends Controller
             'offsetX' => 'nullable|integer|min:0|max:200',
             'offsetY' => 'nullable|integer|min:0|max:200',
             'welcomeMessage' => 'required|string|max:255',
+            'assistantDisplayName' => 'nullable|string|max:64',
         ]);
 
         $settings = $org->settings ?? [];
@@ -34,6 +35,11 @@ class WidgetSettingsController extends Controller
     if (isset($data['offsetX'])) $settings['widget_offset_x'] = (int)$data['offsetX'];
     if (isset($data['offsetY'])) $settings['widget_offset_y'] = (int)$data['offsetY'];
         $settings['welcome_message'] = $data['welcomeMessage'];
+        if (array_key_exists('assistantDisplayName', $data)) {
+            $settings['assistant_display_name'] = trim((string)$data['assistantDisplayName']) !== ''
+                ? trim((string)$data['assistantDisplayName'])
+                : null;
+        }
 
         // Optional future flag to allow SEO follow links in widget branding
         if ($request->has('brandingFollow')) {
