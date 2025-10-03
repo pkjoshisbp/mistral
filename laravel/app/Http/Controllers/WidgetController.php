@@ -315,14 +315,16 @@ class WidgetController
 
             // Assistant naming and channel-agnostic guidance
             $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
-            $systemPrompt = "You are a helpful customer service assistant for {$organization->name}. ";
+            // Strong, structured org context to minimize hallucinations
+            $systemPrompt = "You are {$assistantName}, a helpful customer service assistant for {$organization->name}. ";
             if ($orgDesc) {
                 $systemPrompt .= "About: {$orgDesc}. ";
             }
-            $systemPrompt .= "Official website: {$orgWebsite}. ";
-            if ($orgEmail) { $systemPrompt .= "Official email: {$orgEmail}. "; }
-            if ($orgPhone) { $systemPrompt .= "Official phone: {$orgPhone}. "; }
-            $systemPrompt .= "If you suggest contacting us, ONLY use the official website/email/phone above; never invent contact details. ";
+            $systemPrompt .= "\nOrganization info:\n";
+            $systemPrompt .= "- Official website: {$orgWebsite}\n";
+            if ($orgEmail) { $systemPrompt .= "- Official email: {$orgEmail}\n"; } else { $systemPrompt .= "- Official email: (not provided)\n"; }
+            if ($orgPhone) { $systemPrompt .= "- Official phone: {$orgPhone}\n"; } else { $systemPrompt .= "- Official phone: (not provided)\n"; }
+            $systemPrompt .= "Rules: Only use the official website/email/phone above. Do not invent or guess any email addresses, phone numbers, WhatsApp numbers, or other contact details. If an official contact is not provided, direct the user to the official website instead. ";
             
             // Add location context briefly if available
             if ($country || $region || $location) {
@@ -549,44 +551,51 @@ class WidgetController
         $out = $text;
 
         try {
-            // Email normalization
+            // Email normalization (no lookbehind)
             $emailPattern = '/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i';
             if (!empty($officialEmail)) {
-                // Replace any email with the official one
                 $out = preg_replace($emailPattern, $officialEmail, $out) ?? $out;
-                // Deduplicate repeated official email mentions
                 $out = preg_replace('/(' . preg_quote($officialEmail, '/') . ')(\s*,\s*\1)+/i', '$1', $out) ?? $out;
             } else {
-                // Remove any email addresses entirely if none is official
                 $out = preg_replace($emailPattern, '', $out) ?? $out;
             }
 
-            // Phone normalization
-            // Pattern 1: number preceded by contact words
-            $contactPrefixedPhone = '/(?<=\b(?:phone|mobile|call|contact|tel|telephone|support|reach)\s*[:\-]?\s*)(\+?\d[\d\-\s\(\)]{6,})/i';
-            // Pattern 2: standalone phone-like numbers (conservative)
-            $standalonePhone = '/\b\+?\d[\d\-\s\(\)]{8,}\b/';
+            // Phone normalization: replace any plausible phone number with official when provided,
+            // otherwise remove them. Avoid lookbehind: detect context by capturing groups.
+            // Conservative phone pattern: starts with optional +, then digits with optional separators, min total digits >= 7
+            $phonePattern = '/\+?[\d][\d\s\-\(\)]{6,}/';
 
             if (!empty($officialPhone)) {
-                $out = preg_replace($contactPrefixedPhone, $officialPhone, $out) ?? $out;
-                $out = preg_replace($standalonePhone, $officialPhone, $out) ?? $out;
+                $out = preg_replace($phonePattern, function($m) use ($officialPhone) {
+                    // Keep if it's clearly not a phone (e.g., numbers with letters), else replace
+                    $candidate = trim($m[0]);
+                    // Count digits to avoid replacing long IDs with too few digits
+                    $digits = preg_replace('/\D+/', '', $candidate);
+                    return strlen($digits) >= 7 ? $officialPhone : $candidate;
+                }, $out) ?? $out;
             } else {
-                $out = preg_replace($contactPrefixedPhone, '', $out) ?? $out;
-                $out = preg_replace($standalonePhone, '', $out) ?? $out;
+                $out = preg_replace($phonePattern, function($m) {
+                    $candidate = trim($m[0]);
+                    $digits = preg_replace('/\D+/', '', $candidate);
+                    return strlen($digits) >= 7 ? '' : $candidate;
+                }, $out) ?? $out;
             }
 
-            // Clean up extra spaces/commas
+            // Clean up extra spaces/commas left by removals
             $out = preg_replace('/\s{2,}/', ' ', $out) ?? $out;
             $out = preg_replace('/\s+([,;.])/', '$1', $out) ?? $out;
+            $out = trim($out);
 
             // If both email and phone are unavailable, encourage website contact
             if (empty($officialEmail) && empty($officialPhone)) {
+                if ($out !== '' && !str_ends_with($out, '.')) {
+                    $out .= '.';
+                }
                 if (stripos($out, $officialWebsite) === false) {
-                    $out .= (function($s){ return str_ends_with($s, '.') ? '' : '.'; })($out) . " You can contact us via our official website: {$officialWebsite}";
+                    $out .= ' You can contact us via our official website: ' . $officialWebsite;
                 }
             }
         } catch (\Throwable $t) {
-            // Never let sanitization break the chat flow
             \Log::warning('Contact sanitization failed; returning original text', ['error' => $t->getMessage()]);
             return trim($text);
         }
