@@ -515,6 +515,46 @@
             this.messages.push({ content, sender, timestamp: new Date() });
         }
 
+        addStreamingMessage(fullContent) {
+            const messagesContainer = document.getElementById(this.ids.messages);
+            if (!messagesContainer) return;
+
+            const messageElement = document.createElement('div');
+            messageElement.className = 'ai-chat-message ai-chat-message-bot';
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            messageElement.innerHTML = `
+                <div class="ai-chat-message-content"></div>
+                <div class="ai-chat-message-time">${time}</div>
+            `;
+            const contentEl = messageElement.querySelector('.ai-chat-message-content');
+            messagesContainer.appendChild(messageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            // Type-out effect: append small chunks rapidly for perceived streaming
+            const text = String(fullContent || '');
+            let i = 0;
+            const step = Math.max(2, Math.floor(text.length / 120)); // dynamic chunk size (~120 steps)
+            const interval = 18; // ms per step
+
+            const tick = () => {
+                if (i >= text.length) {
+                    // Final render with linkify for clickable URLs
+                    contentEl.innerHTML = this.linkify(text);
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    return;
+                }
+                const next = text.slice(0, i += step);
+                // Light render without full linkify each tick for performance; apply simple escape
+                const safe = next.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+                contentEl.innerHTML = safe;
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                setTimeout(tick, interval);
+            };
+            tick();
+
+            this.messages.push({ content: fullContent, sender: 'bot', timestamp: new Date() });
+        }
+
         addTypingIndicator() {
             const messagesContainer = document.getElementById(this.ids.messages);
             if (!messagesContainer) return;
@@ -732,11 +772,10 @@
 
                 const data = await response.json();
 
-                // Remove typing indicator
+                // Remove typing indicator, then progressively reveal
                 this.removeTypingIndicator();
-
                 if (data.response) {
-                    this.addMessage(data.response, 'bot');
+                    this.addStreamingMessage(data.response);
                 } else {
                     this.addMessage('Sorry, I couldn\'t process your message. Please try again.', 'bot');
                 }

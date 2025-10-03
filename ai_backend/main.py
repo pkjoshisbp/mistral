@@ -198,13 +198,23 @@ async def llamacpp_server_chat(messages: list) -> dict:
                 choice = result["choices"][0]
                 message_content = choice.get("message", {}).get("content", "")
                 
+                usage = result.get("usage") or {}
+                # If llama-server does not report usage, estimate tokens (prompt+completion)
+                if not usage or not all(k in usage for k in ("prompt_tokens", "completion_tokens", "total_tokens")):
+                    # Approximate: 1 token ~ 4 chars
+                    input_text = " ".join([m.get("content", "") for m in messages])
+                    output_text = message_content or ""
+                    prompt_tokens = max(1, len(input_text) // 4)
+                    completion_tokens = max(1, len(output_text) // 4)
+                    total_tokens = prompt_tokens + completion_tokens
+                    usage = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens
+                    }
                 return {
                     "message": {"content": message_content, "role": "assistant"},
-                    "usage": result.get("usage", {
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0
-                    })
+                    "usage": usage
                 }
             else:
                 raise HTTPException(status_code=500, detail="Invalid response from llama-server")
@@ -307,8 +317,20 @@ async def run_llamacpp_chat(model_path: str, messages: list) -> dict:
         else:
             response_text = output.strip()
         
+        # Estimate usage tokens in cli mode as well
+        input_text = " ".join([m.get("content", "") for m in messages])
+        output_text = response_text or ""
+        prompt_tokens = max(1, len(input_text) // 4)
+        completion_tokens = max(1, len(output_text) // 4)
+        total_tokens = prompt_tokens + completion_tokens
+
         return {
-            "message": {"content": response_text, "role": "assistant"}
+            "message": {"content": response_text, "role": "assistant"},
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens
+            }
         }
         
     except Exception as e:
@@ -734,7 +756,20 @@ async def llm_chat(request: Request):
             result = await llamacpp_server_chat(messages)
             elapsed_ms = int((time.time() - start_time) * 1000)
             logging.info(f"llama-server chat completed model={Path(model_path).name} elapsed_ms={elapsed_ms}")
-            
+            # Ensure usage keys present
+            usage = result.get("usage") or {}
+            if not usage:
+                # As a fallback, estimate here too
+                input_text = " ".join([m.get("content", "") for m in messages])
+                output_text = result.get("message", {}).get("content", "")
+                prompt_tokens = max(1, len(input_text) // 4)
+                completion_tokens = max(1, len(output_text) // 4)
+                total_tokens = prompt_tokens + completion_tokens
+                result["usage"] = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens
+                }
             return result
             
         except Exception as e:
