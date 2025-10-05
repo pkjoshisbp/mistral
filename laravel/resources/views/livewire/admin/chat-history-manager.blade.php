@@ -65,12 +65,21 @@
                             </tr>
                             @if(isset($showDetails[$conversation->id]))
                                 <tr class="bg-light"><td colspan="5">
-                                    <div style="max-height:260px;overflow:auto;" class="p-2">
+                                    <div class="p-3 chat-messages" style="max-height: 320px; overflow-y: auto;">
                                         @foreach($conversation->messages as $message)
-                                            <div class="mb-2">
-                                                <strong>{{ $message->sender_name ?? ucfirst($message->sender_type ?? 'System') }}</strong>
-                                                <small class="text-muted">{{ $message->created_at->format('H:i') }}</small>
-                                                <div>{{ $message->message }}</div>
+                                            @php 
+                                                $isUser = ($message->sender_type === 'user');
+                                                $sender = method_exists($message, 'getSenderDisplayName') ? $message->getSenderDisplayName() : ($message->sender_name ?? ucfirst($message->sender_type ?? 'System'));
+                                                $time = ($message->sent_at ?? $message->created_at)->format('H:i');
+                                            @endphp
+                                            <div class="mb-3">
+                                                <div class="small mb-1">
+                                                    <span class="badge {{ $isUser ? 'bg-primary' : 'bg-secondary' }}">{{ $sender }}</span>
+                                                    <span class="text-muted ms-2">{{ $time }}</span>
+                                                </div>
+                                                <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
+                                                    {!! $message->message_html !!}
+                                                </div>
                                             </div>
                                         @endforeach
                                     </div>
@@ -87,3 +96,18 @@
         </div>
     </section>
 </div>
+
+<style>
+.chat-messages .message-content {
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+.chat-messages .message-content a {
+    color: #0d6efd;
+    text-decoration: underline;
+}
+.chat-messages .text-white .message-content a,
+.chat-messages .message-content.text-white a {
+    color: #e5f0ff;
+}
+</style>

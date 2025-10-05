@@ -10,7 +10,8 @@ h1 { font-size:18px; margin-bottom:4px; }
 .sender-bot { font-weight:bold; color:#065f46; }
 .sender-system { font-weight:bold; color:#6b7280; }
 .time { color:#6b7280; font-size:11px; }
-.content { margin-left:8px; }
+.content { margin-left:8px; word-break: break-word; }
+a { color: #1d4ed8; text-decoration: underline; }
 </style></head><body>
 <h1>Chat Conversation Export</h1>
 <div class="meta">
@@ -24,7 +25,7 @@ Total Messages: {{ $conversation->messages->count() }}
 <div class="message">
     <span class="time">[{{ $message->created_at->format('H:i:s') }}]</span>
     <span class="sender-{{ $message->sender_type ?? 'system' }}">{{ $message->sender_name ?? 'System' }}:</span>
-    <span class="content">{{ $message->message ?? '' }}</span>
+    <span class="content">{!! $message->message_html ?? '' !!}</span>
 </div>
 @endforeach
 </body></html>

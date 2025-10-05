@@ -10,6 +10,15 @@
                     <p class="text-muted mb-0">Connect your WhatsApp Business account to provide AI support via WhatsApp</p>
                 </div>
                 <div class="card-body">
+                    @if ($tokenExpired)
+                        <div class="alert alert-danger d-flex align-items-start">
+                            <i class="fas fa-exclamation-circle me-2 mt-1"></i>
+                            <div>
+                                <strong>Action required:</strong> Your WhatsApp access token has expired. Replies may fail until you update the token below.
+                                <div class="small mt-1">Generate a new permanent token in Facebook Developer Console and paste it into "Access Token", then click Save Configuration.</div>
+                            </div>
+                        </div>
+                    @endif
                     @if (session()->has('success'))
                         <div class="alert alert-success alert-dismissible fade show">
                             {{ session('success') }}

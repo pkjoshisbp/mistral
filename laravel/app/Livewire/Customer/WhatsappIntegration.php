@@ -17,6 +17,7 @@ class WhatsappIntegration extends Component
     public $webhookUrl;
     public $isConnected = false;
     public $connectionStatus;
+    public $tokenExpired = false;
 
     protected $rules = [
         'accessToken' => 'required|string',
@@ -29,6 +30,7 @@ class WhatsappIntegration extends Component
         if ($org && $org->settings) {
             $this->accessToken = $org->settings['whatsapp_access_token'] ?? '';
             $this->phoneNumberId = $org->settings['whatsapp_phone_number_id'] ?? '';
+            $this->tokenExpired = !empty($org->settings['whatsapp_token_expired']);
             // If an invalid value (like an email) was stored earlier, don't prefill
             if (!empty($this->phoneNumberId) && !preg_match('/^\d{5,}$/', $this->phoneNumberId)) {
                 $this->phoneNumberId = '';
@@ -62,11 +64,14 @@ class WhatsappIntegration extends Component
             $settings['whatsapp_access_token'] = $this->accessToken;
             $settings['whatsapp_phone_number_id'] = $this->phoneNumberId;
             $settings['whatsapp_verify_token'] = $this->verifyToken;
+            // Reset token expired flag on save (new token provided)
+            unset($settings['whatsapp_token_expired']);
             
             $org->settings = $settings;
             $org->save();
 
             $this->isConnected = true;
+            $this->tokenExpired = false;
             $this->updateConnectionStatus();
 
             Log::info('WhatsApp configuration saved for organization', [
@@ -125,6 +130,7 @@ class WhatsappIntegration extends Component
             unset($settings['whatsapp_access_token']);
             unset($settings['whatsapp_phone_number_id']);
             unset($settings['whatsapp_verify_token']);
+            unset($settings['whatsapp_token_expired']);
             
             $org->settings = $settings;
             $org->save();
@@ -133,6 +139,7 @@ class WhatsappIntegration extends Component
             $this->phoneNumberId = '';
             $this->isConnected = false;
             $this->connectionStatus = 'Not Connected';
+            $this->tokenExpired = false;
 
             session()->flash('success', 'WhatsApp integration disconnected.');
         } catch (\Exception $e) {

@@ -201,6 +201,16 @@
     white-space: pre-wrap;
 }
 
+.message-content a {
+    color: #0d6efd;
+    text-decoration: underline;
+}
+
+.text-white .message-content a,
+.message-content.text-white a {
+    color: #e5f0ff;
+}
+
 .chat-messages {
     background: #f8f9fa;
     border-radius: 0.25rem;

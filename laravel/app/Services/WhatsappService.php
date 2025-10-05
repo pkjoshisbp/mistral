@@ -35,18 +35,25 @@ class WhatsappService
     }
 
     /**
-     * Send an image message. Optionally override credentials per send.
+     * Send an image message. Provide either $imageUrl OR $imageMediaId.
+     * Optionally override credentials per send.
      */
-    public function sendImage(string $to, string $imageUrl, ?string $caption = null, ?string $phoneNumberId = null, ?string $accessToken = null): array
+    public function sendImage(string $to, ?string $imageUrl = null, ?string $caption = null, ?string $phoneNumberId = null, ?string $accessToken = null, ?string $imageMediaId = null): array
     {
+        $imagePayload = [];
+        if ($imageMediaId) {
+            $imagePayload['id'] = $imageMediaId;
+        } elseif ($imageUrl) {
+            $imagePayload['link'] = $imageUrl;
+        }
+        if ($caption !== null && $caption !== '') {
+            $imagePayload['caption'] = $caption;
+        }
         return $this->callWhatsapp([
             'messaging_product' => 'whatsapp',
             'to' => $to,
             'type' => 'image',
-            'image' => array_filter([
-                'link' => $imageUrl,
-                'caption' => $caption,
-            ]),
+            'image' => $imagePayload,
         ], $phoneNumberId, $accessToken);
     }
 
@@ -97,9 +104,19 @@ class WhatsappService
 
         $resp = \Http::withToken($token)->post($url, $payload);
         if (!$resp->successful()) {
-            $msg = 'WhatsApp API error: ' . $resp->status() . ' ' . $resp->body();
+            $status = $resp->status();
+            $body = $resp->body();
+            $json = $resp->json();
+            $err = $json['error'] ?? null;
+            $code = $err['code'] ?? null;
+            $subcode = $err['error_subcode'] ?? null;
+            $msg = 'WhatsApp API error: ' . $status . ' ' . $body;
             \Log::error($msg);
-            throw new \RuntimeException($msg);
+            // Detect expired/invalid token and throw specific exception
+            if ($code === 190 && in_array($subcode, [463, 467, 460, 490], true)) {
+                throw new \App\Exceptions\WhatsappTokenExpiredException($msg, $status, $code, $subcode);
+            }
+            throw new \App\Exceptions\WhatsappApiException($msg, $status, $code, $subcode);
         }
         $json = $resp->json();
         \Log::info('WhatsApp API success', [
@@ -109,6 +126,127 @@ class WhatsappService
             'response_preview' => substr($resp->body(), 0, 300)
         ]);
         return $json;
+    }
+
+    /**
+     * Mark an inbound message as read.
+     * Returns API response; logs warning if the API call fails but does not throw.
+     */
+    public function markAsRead(string $messageId, ?string $phoneNumberId = null, ?string $accessToken = null): array
+    {
+        $phoneId = $phoneNumberId ?: $this->phoneNumberId;
+        $token = $accessToken ?: $this->accessToken;
+        if (!$phoneId || !$token) {
+            throw new \RuntimeException('WhatsApp settings not configured.');
+        }
+        $url = "https://graph.facebook.com/{$this->version}/{$phoneId}/messages";
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'status' => 'read',
+            'message_id' => $messageId,
+        ];
+        \Log::info('WhatsApp mark-as-read attempt', ['message_id' => $messageId]);
+        $resp = \Http::withToken($token)->post($url, $payload);
+        if (!$resp->successful()) {
+            \Log::warning('WhatsApp mark-as-read failed', ['status' => $resp->status(), 'body' => substr($resp->body(), 0, 300)]);
+        } else {
+            \Log::info('WhatsApp mark-as-read success', ['message_id' => $messageId]);
+        }
+        return $resp->json() ?: [];
+    }
+
+    /**
+     * Send a reaction to a specific incoming message (lightweight immediate feedback).
+     */
+    public function sendReaction(string $to, string $messageId, string $emoji = "✍️", ?string $phoneNumberId = null, ?string $accessToken = null): array
+    {
+        return $this->callWhatsapp([
+            'messaging_product' => 'whatsapp',
+            'to' => $to,
+            'type' => 'reaction',
+            'reaction' => [
+                'message_id' => $messageId,
+                'emoji' => $emoji,
+            ],
+        ], $phoneNumberId, $accessToken);
+    }
+
+    /**
+     * Show a typing indicator for a specific incoming message. Also marks the message as read.
+     * Note: Some API versions auto-hide the indicator after ~25s or when a reply is sent.
+     */
+    public function sendTypingIndicator(string $incomingMessageId, string $type = 'text', ?string $phoneNumberId = null, ?string $accessToken = null): array
+    {
+        $phoneId = $phoneNumberId ?: $this->phoneNumberId;
+        $token = $accessToken ?: $this->accessToken;
+        if (!$phoneId || !$token) {
+            throw new \RuntimeException('WhatsApp settings not configured.');
+        }
+        $url = "https://graph.facebook.com/{$this->version}/{$phoneId}/messages";
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'status' => 'read',
+            'message_id' => $incomingMessageId,
+            'typing_indicator' => [ 'type' => $type ],
+        ];
+        \Log::info('WhatsApp typing-indicator attempt', ['message_id' => $incomingMessageId, 'type' => $type]);
+        $resp = \Http::withToken($token)->post($url, $payload);
+        if (!$resp->successful()) {
+            \Log::warning('WhatsApp typing-indicator failed', ['status' => $resp->status(), 'body' => substr($resp->body(), 0, 300)]);
+        } else {
+            \Log::info('WhatsApp typing-indicator success', ['message_id' => $incomingMessageId]);
+        }
+        return $resp->json() ?: [];
+    }
+    /**
+     * Upload media to WhatsApp and return media ID.
+     * $localPath must be an absolute filesystem path accessible to this process.
+     */
+    public function uploadMedia(string $localPath, string $mimeType = null, ?string $phoneNumberId = null, ?string $accessToken = null): array
+    {
+        $phoneId = $phoneNumberId ?: $this->phoneNumberId;
+        $token = $accessToken ?: $this->accessToken;
+        if (!$phoneId || !$token) {
+            throw new \RuntimeException('WhatsApp settings not configured.');
+        }
+
+        if ($mimeType === null) {
+            // Detect mime type best-effort
+            $detected = @mime_content_type($localPath);
+            $mimeType = $detected ?: 'application/octet-stream';
+        }
+        $url = "https://graph.facebook.com/{$this->version}/{$phoneId}/media";
+        \Log::info('WhatsApp media upload attempt', [
+            'phone_number_id' => $phoneId,
+            'mime' => $mimeType,
+            'filename' => basename($localPath),
+        ]);
+        $resp = \Http::asMultipart()
+            ->withToken($token)
+            ->attach('file', fopen($localPath, 'r'), basename($localPath))
+            ->post($url, [
+                'messaging_product' => 'whatsapp',
+                'type' => $mimeType,
+            ]);
+        if (!$resp->successful()) {
+            $status = $resp->status();
+            $body = $resp->body();
+            $json = $resp->json();
+            $err = $json['error'] ?? null;
+            $code = $err['code'] ?? null;
+            $subcode = $err['error_subcode'] ?? null;
+            $msg = 'WhatsApp media upload error: ' . $status . ' ' . $body;
+            \Log::error($msg);
+            if ($code === 190 && in_array($subcode, [463, 467, 460, 490], true)) {
+                throw new \App\Exceptions\WhatsappTokenExpiredException($msg, $status, $code, $subcode);
+            }
+            throw new \App\Exceptions\WhatsappApiException($msg, $status, $code, $subcode);
+        }
+        $json = $resp->json();
+        \Log::info('WhatsApp media upload success', [
+            'media_id' => $json['id'] ?? null,
+        ]);
+        return $json; // { id: 'MEDIA_ID' }
     }
 
     /**

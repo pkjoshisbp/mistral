@@ -566,7 +566,7 @@ class WidgetController
             $phonePattern = '/\+?[\d][\d\s\-\(\)]{6,}/';
 
             if (!empty($officialPhone)) {
-                $out = preg_replace($phonePattern, function($m) use ($officialPhone) {
+                $out = preg_replace_callback($phonePattern, function($m) use ($officialPhone) {
                     // Keep if it's clearly not a phone (e.g., numbers with letters), else replace
                     $candidate = trim($m[0]);
                     // Count digits to avoid replacing long IDs with too few digits
@@ -574,7 +574,7 @@ class WidgetController
                     return strlen($digits) >= 7 ? $officialPhone : $candidate;
                 }, $out) ?? $out;
             } else {
-                $out = preg_replace($phonePattern, function($m) {
+                $out = preg_replace_callback($phonePattern, function($m) {
                     $candidate = trim($m[0]);
                     $digits = preg_replace('/\D+/', '', $candidate);
                     return strlen($digits) >= 7 ? '' : $candidate;

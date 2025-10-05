@@ -91,11 +91,18 @@ class ChatMessage extends Model
             return '__ANCHOR_'.(count($anchorPlaceholders)-1).'__';
         }, $text) ?? $text;
 
-        // Strip remaining HTML tags defensively
-        $text = preg_replace('/<[^>]*>/', '', $text) ?? $text;
+    // Strip remaining HTML tags defensively
+    $text = preg_replace('/<[^>]*>/', '', $text) ?? $text;
 
-        // Escape early to prevent XSS; we'll inject safe anchors later
-        $escaped = e($text);
+    // Clean up legacy attribute fragments that may exist as plain text from older stored messages
+    // Examples: target="_blank" rel="nofollow noopener noreferer" (typo variant) or rel="nofollow noopener noreferrer"
+    $text = preg_replace('/\b(target|rel)\s*=\s*"[^"]*"/i', '', $text) ?? $text;
+    $text = preg_replace("/\b(target|rel)\s*=\s*'[^']*'/i", '', $text) ?? $text;
+    // Remove stray '>' that could be left from malformed tags
+    $text = preg_replace('/\s*>\s*/', ' ', $text) ?? $text;
+
+    // Escape early to prevent XSS; we'll inject safe anchors later
+    $escaped = e($text);
 
         // Placeholder emails to ensure they are NOT linked
         $emailPlaceholders = [];
@@ -104,29 +111,48 @@ class ChatMessage extends Model
             return '__EMAIL_'.(count($emailPlaceholders)-1).'__';
         }, $escaped) ?? $escaped;
 
-        // Linkify http/https URLs with punctuation trimming
+        // Work on a mutable copy
+        $processed = $escaped;
+
+        // First pass: linkify http/https URLs with punctuation trimming
         $processed = preg_replace_callback('/https?:\/\/[^\s<]+/i', function ($matches) {
             // The input string is already HTML-escaped, so decode to get the raw URL before building the anchor
             $full = html_entity_decode($matches[0], ENT_QUOTES | ENT_HTML5, 'UTF-8');
             $trail = '';
-            while (preg_match('/[\.,!?)]$/', $full)) {
+            while (preg_match('/[\",\.!?)]$/', $full)) {
                 $trail = substr($full, -1) . $trail;
                 $full = substr($full, 0, -1);
             }
             $display = strlen($full) > 80 ? substr($full,0,77).'...' : $full;
             return '<a href="'.e($full).'" target="_blank" rel="nofollow noopener noreferrer">'.e($display).'</a>'.$trail;
-        }, $escaped) ?? $escaped;
+        }, $processed) ?? $processed;
 
-        // Linkify bare domains while avoiding emails: require non-@, non-word char or start before domain
-        // Note: escape the `~` inside the character class because `~` is used as the regex delimiter.
-        // Additionally, do not match when the preceding character is ':' or '/' to avoid linking inside 'https://...'
+        // Protect anchors created so far to avoid matching inside their href attributes in the next pass
+        $createdAnchorPlaceholders = [];
+        $processed = preg_replace_callback('/<a\b[^>]*>.*?<\/a>/i', function($m) use (&$createdAnchorPlaceholders){
+            $createdAnchorPlaceholders[] = $m[0];
+            return '__ANCHOR_GEN_'.(count($createdAnchorPlaceholders)-1).'__';
+        }, $processed) ?? $processed;
+
+        // Second pass: linkify bare domains while avoiding emails and not touching protected anchors
         $processed = preg_replace_callback("~(^|[^@\\w:/])((?:[a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,})(/[\\w\\-\\._\\~:/?#\\[\\]@!$&'()*+,;=%]*)?~i", function($m){
             $pre = $m[1];
             $host = $m[2];
             $path = html_entity_decode($m[3] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            // Trim trailing quotes or punctuation accidentally captured in path
+            $suffix = '';
+            while ($path !== '' && preg_match("/[\"'\.,!?)]$/", $path)) {
+                $suffix = substr($path, -1) . $suffix;
+                $path = substr($path, 0, -1);
+            }
             $url = 'https://' . $host . $path;
-            return e($pre).'<a href="'.e($url).'" target="_blank" rel="nofollow noopener noreferrer">'.e($host.$path).'</a>';
+            return e($pre).'<a href="'.e($url).'" target="_blank" rel="nofollow noopener noreferrer">'.e($host.$path).'</a>'.$suffix;
         }, $processed) ?? $processed;
+
+        // Restore generated anchors
+        foreach ($createdAnchorPlaceholders as $i => $html) {
+            $processed = str_replace('__ANCHOR_GEN_'.$i.'__', $html, $processed);
+        }
 
         // Restore anchors present in the original message
         foreach ($anchorPlaceholders as $i => $html) {

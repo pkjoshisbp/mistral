@@ -115,6 +115,38 @@ class WhatsappWebhookController extends Controller
                     if (empty($messages) || empty($metadata)) { continue; }
 
                     $phoneNumberId = $metadata['phone_number_id'] ?? null;
+                    // Resolve organization by incoming phone_number_id
+                    $org = null;
+                    if ($phoneNumberId) {
+                        $org = Organization::where('settings->whatsapp_phone_number_id', $phoneNumberId)
+                            ->orWhere('settings->whatsapp->phone_number_id', $phoneNumberId)
+                            ->orWhere('settings->whatsapp_phone_id', $phoneNumberId)
+                            ->first();
+                        if (!$org) {
+                            // Fallback: if incoming phone matches admin default, try routing to ai-chat-support org
+                            $adminDefaultPhone = AdminSetting::get('whatsapp_phone_number_id', '');
+                            if ($adminDefaultPhone && $adminDefaultPhone === $phoneNumberId) {
+                                $org = Organization::where('slug', 'ai-chat-support')->first();
+                                if ($org) {
+                                    Log::info('WhatsApp webhook receive - resolved org via admin default phone mapping', [
+                                        'incoming_phone_number_id' => $phoneNumberId,
+                                        'org_id' => $org->id,
+                                        'org_slug' => $org->slug,
+                                    ]);
+                                }
+                            }
+                            if (!$org) {
+                                Log::warning('WhatsApp webhook receive - org not resolved from phone_number_id', [
+                                    'incoming_phone_number_id' => $phoneNumberId
+                                ]);
+                            }
+                        }
+                    }
+                    // Extract contact name if available
+                    $contactName = null;
+                    if (!empty($value['contacts'][0]['profile']['name'])) {
+                        $contactName = $value['contacts'][0]['profile']['name'];
+                    }
                     foreach ($messages as $msg) {
                         // Extract sender and normalize inbound text across message types
                         $from = $msg['from'] ?? null;
@@ -155,27 +187,13 @@ class WhatsappWebhookController extends Controller
                             }
                         }
 
-                        // Resolve organization by phone_number_id if any org stores it in settings
-                        $org = Organization::where('settings->whatsapp_phone_number_id', $phoneNumberId)->first();
-                        if (!$org) {
-                            // Fallback: use default org from settings if configured (admin-wide phone id)
-                            $org = Organization::find(3); // safe fallback to demo org
-                        }
-
-                        // Respect per-organization auto-reply toggle (default true)
-                        $autoReply = $org ? ($org->settings['whatsapp_auto_reply'] ?? true) : true;
-                        if ($autoReply === false) {
-                            Log::info('WhatsApp auto-reply disabled for org; skipping response', ['org_id' => $org?->id, 'from' => $from]);
-                            continue;
-                        }
-
-                        // Persist/associate conversation before AI processing
-                        $contactName = null;
+                        // We intend to reply; show typing indicator immediately (before heavy work)
                         try {
-                            if (!empty($value['contacts'][0]['profile']['name'])) {
-                                $contactName = $value['contacts'][0]['profile']['name'];
-                            }
-                        } catch (\Throwable $t) { /* ignore */ }
+                            $waSvcTmp = app(WhatsappService::class);
+                            $waSvcTmp->sendTypingIndicator($waMessageId, 'text', $phoneNumberId, null);
+                        } catch (\Throwable $te) {
+                            Log::warning('WhatsApp immediate feedback failed', ['error' => $te->getMessage()]);
+                        }
 
                         $conversation = null;
                         if ($org) {
@@ -218,7 +236,7 @@ class WhatsappWebhookController extends Controller
                             ]);
                         }
 
-                        // Build contexted AI reply
+                        // Build contexted AI reply aligned with widget behavior
                         $ai = app(AiAgentService::class);
                         Log::info('WhatsApp LLM search prep', [
                             'org_slug' => $org?->slug,
@@ -235,35 +253,49 @@ class WhatsappWebhookController extends Controller
                             $maxContextChars = 1500; // Limit context to prevent timeouts
                             foreach (($search['results'] ?? []) as $res) {
                                 $payloadRes = $res['payload'] ?? [];
-                                
-                                // Prioritize most relevant fields for WhatsApp
                                 $relevantFields = ['title', 'content', 'answer', 'description'];
                                 foreach ($relevantFields as $field) {
                                     if (isset($payloadRes[$field]) && is_string($payloadRes[$field]) && !empty($payloadRes[$field])) {
                                         $fieldContent = ucfirst($field) . ': ' . $payloadRes[$field] . "\n";
-                                        if (strlen($context . $fieldContent) > $maxContextChars) {
-                                            break 2; // Exit both loops if we hit the limit
-                                        }
+                                        if (strlen($context . $fieldContent) > $maxContextChars) { break 2; }
                                         $context .= $fieldContent;
                                     }
                                 }
                                 $context .= "\n";
-                                
-                                // Stop if we're approaching the limit
-                                if (strlen($context) > $maxContextChars) {
-                                    break;
-                                }
+                                if (strlen($context) > $maxContextChars) { break; }
                             }
                             $usedContextChars = strlen($context);
 
-                            // Prefer chat endpoint for better formatting and reliability
-                            $chatMessages = [];
-                            $system = "You are a helpful WhatsApp assistant for {$org->name}. Keep replies short and friendly.\n";
-                            if ($context) { $system .= "Context:\n{$context}"; }
-                            $chatMessages[] = ['role' => 'system', 'content' => $system];
-                            $chatMessages[] = ['role' => 'user', 'content' => $text];
+                            // Compose system prompt with official org contacts and widget-style rules
+                            $orgWebsite = $org->website ?: config('app.url');
+                            $orgEmail = $org->contact_email ?? null;
+                            $orgPhone = $org->contact_phone ?? null;
+                            $orgDesc  = $org->description ? trim(preg_replace('/\s+/', ' ', strip_tags($org->description))) : null;
+                            $assistantName = $org->settings['assistant_display_name'] ?? 'AI Assistant';
+                            $system = "You are {$assistantName}, a helpful customer service assistant for {$org->name}. ";
+                            if ($orgDesc) { $system .= "About: {$orgDesc}. "; }
+                            $system .= "\nOrganization info:\n";
+                            $system .= "- Official website: {$orgWebsite}\n";
+                            $system .= $orgEmail ? "- Official email: {$orgEmail}\n" : "- Official email: (not provided)\n";
+                            $system .= $orgPhone ? "- Official phone: {$orgPhone}\n" : "- Official phone: (not provided)\n";
+                            if ($context) { $system .= "Use this info:\n{$context}\n"; }
+                            $system .= "Rules: Only use the official website/email/phone above. Do not invent or guess any contact details. If an official contact is not provided, direct the user to the official website instead. ";
+                            $system .= "Keep responses concise and direct. Always use plain text only - no HTML or markdown. Include full https URLs when mentioning sites. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
-                            $resp = $ai->llmChat($chatMessages, null, null, $org->id ?? null);
+                            $chatMessages = [
+                                ['role' => 'system', 'content' => $system],
+                                ['role' => 'user', 'content' => $text],
+                            ];
+
+                            // Use the same provider/model selection as widget
+                            $provider = $ai->getAiProviderForOrganization($org->id ?? null);
+                            if ($provider === 'openai') {
+                                $model = $ai->getOpenAiModelForOrganization($org->id ?? null);
+                                $resp = $ai->openAiChat($chatMessages, $model, null, $org->id ?? null);
+                            } else {
+                                $model = $ai->getLlamaModelForOrganization($org->id ?? null);
+                                $resp = $ai->llmChat($chatMessages, $model, null, $org->id ?? null);
+                            }
                             $answer = $resp['message']['content'] ?? null;
                         }
                         if (!$answer || trim($answer) === '') {
@@ -273,10 +305,13 @@ class WhatsappWebhookController extends Controller
                             $answer = "Thanks for your message. Our assistant will get back to you shortly.";
                         }
 
+                        // Ensure WhatsApp receives plain text with linkified URLs (no HTML)
+                        $answer = $this->toWhatsappPlainText($answer);
+
                         // Send the reply using either org-specific token/phone or admin defaults
                         $svc = app(WhatsappService::class);
-                        $orgPhoneId = $org->settings['whatsapp_phone_number_id'] ?? null;
-                        $orgToken = $org->settings['whatsapp_access_token'] ?? null;
+                        $orgPhoneId = $org ? ($org->settings['whatsapp_phone_number_id'] ?? null) : null;
+                        $orgToken = $org ? ($org->settings['whatsapp_access_token'] ?? null) : null;
                         try {
                             $svc->sendText($from, $answer, $orgPhoneId ?: $phoneNumberId, $orgToken);
                             Log::info('WhatsApp auto-reply sent', [
@@ -298,6 +333,21 @@ class WhatsappWebhookController extends Controller
                                     'sent_at' => now(),
                                 ]);
                                 $conversation->update(['last_activity_at' => now()]);
+                            }
+                        } catch (\App\Exceptions\WhatsappTokenExpiredException $e) {
+                            // Mark org token as expired and try fallback to admin token if configured
+                            if ($org) {
+                                $settings = $org->settings ?? [];
+                                $settings['whatsapp_token_expired'] = true;
+                                $org->settings = $settings;
+                                $org->save();
+                            }
+                            Log::error('WhatsApp org token expired; attempting fallback to admin token', ['org_id' => $org?->id, 'error' => $e->getMessage()]);
+                            try {
+                                $svc->sendText($from, $answer, null, null); // use admin defaults (phone_number_id + token)
+                                Log::info('WhatsApp auto-reply sent via admin fallback', ['to' => $from, 'org_id' => $org?->id]);
+                            } catch (\Throwable $e2) {
+                                Log::error('Fallback send via admin token failed', ['error' => $e2->getMessage()]);
                             }
                         } catch (\Throwable $e) {
                             Log::error('Failed to send WhatsApp reply', ['error' => $e->getMessage()]);
@@ -402,6 +452,14 @@ class WhatsappWebhookController extends Controller
                             }
                         }
 
+                        // We intend to reply; show typing indicator
+                        try {
+                            $waSvcTmp = app(WhatsappService::class);
+                            $waSvcTmp->sendTypingIndicator($waMessageId, 'text', $phoneNumberId, null);
+                        } catch (\Throwable $te) {
+                            Log::warning('WhatsApp immediate feedback failed (slug endpoint)', ['error' => $te->getMessage()]);
+                        }
+
                         // Persist/associate conversation with explicit org
                         $contactName = null;
                         try {
@@ -448,7 +506,7 @@ class WhatsappWebhookController extends Controller
                             ]);
                         }
 
-                        // Build AI reply
+                        // Build AI reply (slug endpoint) aligned with widget behavior
                         $ai = app(AiAgentService::class);
                         Log::info('WhatsApp LLM search prep (slug endpoint)', [
                             'org_slug' => $org->slug,
@@ -480,13 +538,36 @@ class WhatsappWebhookController extends Controller
                             }
                             $usedContextChars = strlen($context);
 
-                            $chatMessages = [];
-                            $system = "You are a helpful WhatsApp assistant for {$org->name}. Keep replies short and friendly.\n";
-                            if ($context) { $system .= "Context:\n{$context}"; }
-                            $chatMessages[] = ['role' => 'system', 'content' => $system];
-                            $chatMessages[] = ['role' => 'user', 'content' => $text];
+                            // Compose system prompt with official org contacts and widget-style rules
+                            $orgWebsite = $org->website ?: config('app.url');
+                            $orgEmail = $org->contact_email ?? null;
+                            $orgPhone = $org->contact_phone ?? null;
+                            $orgDesc  = $org->description ? trim(preg_replace('/\s+/', ' ', strip_tags($org->description))) : null;
+                            $assistantName = $org->settings['assistant_display_name'] ?? 'AI Assistant';
+                            $system = "You are {$assistantName}, a helpful customer service assistant for {$org->name}. ";
+                            if ($orgDesc) { $system .= "About: {$orgDesc}. "; }
+                            $system .= "\nOrganization info:\n";
+                            $system .= "- Official website: {$orgWebsite}\n";
+                            $system .= $orgEmail ? "- Official email: {$orgEmail}\n" : "- Official email: (not provided)\n";
+                            $system .= $orgPhone ? "- Official phone: {$orgPhone}\n" : "- Official phone: (not provided)\n";
+                            if ($context) { $system .= "Use this info:\n{$context}\n"; }
+                            $system .= "Rules: Only use the official website/email/phone above. Do not invent or guess any contact details. If an official contact is not provided, direct the user to the official website instead. ";
+                            $system .= "Keep responses concise and direct. Always use plain text only - no HTML or markdown. Include full https URLs when mentioning sites. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
-                            $resp = $ai->llmChat($chatMessages, null, null, $org->id);
+                            $chatMessages = [
+                                ['role' => 'system', 'content' => $system],
+                                ['role' => 'user', 'content' => $text],
+                            ];
+
+                            // Use provider/model selection consistent with widget
+                            $provider = $ai->getAiProviderForOrganization($org->id);
+                            if ($provider === 'openai') {
+                                $model = $ai->getOpenAiModelForOrganization($org->id);
+                                $resp = $ai->openAiChat($chatMessages, $model, null, $org->id);
+                            } else {
+                                $model = $ai->getLlamaModelForOrganization($org->id);
+                                $resp = $ai->llmChat($chatMessages, $model, null, $org->id);
+                            }
                             $answer = $resp['message']['content'] ?? null;
                         }
                         if (!$answer || trim($answer) === '') {
@@ -495,6 +576,9 @@ class WhatsappWebhookController extends Controller
                             ]);
                             $answer = "Thanks for your message. Our assistant will get back to you shortly.";
                         }
+
+                        // Ensure WhatsApp receives plain text with linkified URLs (no HTML)
+                        $answer = $this->toWhatsappPlainText($answer);
 
                         // Send reply with org-scoped credentials
                         $svc = app(WhatsappService::class);
@@ -521,6 +605,18 @@ class WhatsappWebhookController extends Controller
                                 ]);
                                 $conversation->update(['last_activity_at' => now()]);
                             }
+                        } catch (\App\Exceptions\WhatsappTokenExpiredException $e) {
+                            $settings = $org->settings ?? [];
+                            $settings['whatsapp_token_expired'] = true;
+                            $org->settings = $settings;
+                            $org->save();
+                            Log::error('WhatsApp org token expired (slug endpoint); attempting admin fallback', ['org_id' => $org->id, 'error' => $e->getMessage()]);
+                            try {
+                                $svc->sendText($from, $answer, null, null);
+                                Log::info('WhatsApp auto-reply sent via admin fallback (slug endpoint)', ['to' => $from, 'org_id' => $org->id]);
+                            } catch (\Throwable $e2) {
+                                Log::error('Fallback send via admin token failed (slug endpoint)', ['error' => $e2->getMessage()]);
+                            }
                         } catch (\Throwable $e) {
                             Log::error('Failed to send WhatsApp reply (slug endpoint)', ['error' => $e->getMessage()]);
                         }
@@ -533,4 +629,54 @@ class WhatsappWebhookController extends Controller
 
         return response()->json(['status' => 'ok']);
     }
+
+    /**
+     * Convert any HTML-ish content into WhatsApp-safe plain text while preserving URLs.
+     * - Anchor tags become: "Text (https://example.com)" or just the URL if no text
+     * - Line breaks preserved for <br> and block elements
+     * - All other tags stripped; entities decoded; whitespace normalized
+     */
+    private function toWhatsappPlainText($html): string
+    {
+        if ($html === null) { return ''; }
+        $text = (string) $html;
+
+        // Normalize common block/line-break tags before stripping
+        $replacements = [
+            '/<\s*br\s*\/?\s*>/i' => "\n",
+            '/<\/(p|div|h[1-6]|li|ul|ol|blockquote)\s*>/i' => "\n",
+            '/<\s*li\s*>/i' => "- ",
+        ];
+        foreach ($replacements as $pattern => $rep) {
+            $text = preg_replace($pattern, $rep, $text);
+        }
+
+        // Convert anchors to "text (URL)" or just URL
+        $text = preg_replace_callback(
+            '/<a\s+[^>]*href=["\']?([^"\'>\s]+)["\']?[^>]*>(.*?)<\/a>/is',
+            function ($m) {
+                $href = $m[1] ?? '';
+                $label = trim(strip_tags($m[2] ?? ''));
+                if ($label === '' || strcasecmp($label, $href) === 0) {
+                    return $href;
+                }
+                return $label . ' (' . $href . ')';
+            },
+            $text
+        );
+
+        // Strip remaining tags and decode entities
+        $text = strip_tags($text);
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // Normalize whitespace and newlines
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        // Collapse 3+ blank lines to max 2
+        $text = preg_replace("/\n{3,}/", "\n\n", $text);
+        // Collapse excessive spaces
+        $text = preg_replace('/[\t ]{2,}/', ' ', $text);
+
+        return trim($text);
+    }
 }
+

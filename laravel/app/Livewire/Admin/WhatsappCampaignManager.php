@@ -5,6 +5,7 @@ namespace App\Livewire\Admin;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use App\Services\WhatsappService;
 
 class WhatsappCampaignManager extends Component
@@ -93,6 +94,15 @@ class WhatsappCampaignManager extends Component
 
     public function send()
     {
+        // If a template is selected, automatically use the template send flow
+        if (!empty($this->selectedTemplate)) {
+            // Validate only the numbers here; template flow has its own logic
+            $this->validate([
+                'numbers' => 'required|string',
+            ]);
+            return $this->sendUsingTemplate();
+        }
+
         $this->validate([
             'numbers' => 'required|string',
             'message' => 'required_without_all:image_url,image_file|string|nullable',
@@ -106,12 +116,23 @@ class WhatsappCampaignManager extends Component
         $svc = app(WhatsappService::class);
         $sent = 0; $failed = 0; $errors = [];
         $this->results = [];
-        // If an image file is uploaded, store it and use its URL
         $uploadedImageUrl = null;
+        $uploadedImageMediaId = null;
+        $localStoredPath = null;
         if ($this->image_file) {
             try {
                 $path = $this->image_file->store('whatsapp', 'public');
-                $uploadedImageUrl = Storage::url($path);
+                $localStoredPath = storage_path('app/public/' . ltrim($path, '/'));
+                // Convert to absolute URL for WhatsApp API (fallback)
+                $uploadedImageUrl = URL::to(Storage::url($path));
+                // Try uploading to WhatsApp to get media_id to avoid external link fetch
+                try {
+                    $mime = $this->image_file->getMimeType();
+                    $mediaResp = $svc->uploadMedia($localStoredPath, $mime);
+                    $uploadedImageMediaId = $mediaResp['id'] ?? null;
+                } catch (\Throwable $upEx) {
+                    \Log::warning('WhatsApp media upload failed, falling back to link', ['error' => $upEx->getMessage()]);
+                }
             } catch (\Throwable $e) {
                 \Log::error('Failed to store uploaded image for WhatsApp send', ['error' => $e->getMessage()]);
                 session()->flash('error', 'Image upload failed: ' . $e->getMessage());
@@ -133,8 +154,8 @@ class WhatsappCampaignManager extends Component
                 }
 
                 $imageToUse = $uploadedImageUrl ?: $this->image_url;
-                if ($imageToUse) {
-                    $resp = $svc->sendImage($num, $imageToUse, $finalCaption);
+                if ($imageToUse || $uploadedImageMediaId) {
+                    $resp = $svc->sendImage($num, $imageToUse, $finalCaption, null, null, $uploadedImageMediaId);
                 } else {
                     // For text sends, append footer if any
                     $textToSend = $this->message ?: '';
@@ -178,15 +199,17 @@ class WhatsappCampaignManager extends Component
             return;
         }
 
-        // Numbers validation
+        // Numbers and optional media validation
         $this->validate([
             'numbers' => 'required|string',
+            'image_file' => 'nullable|image|max:5120',
+            'image_url' => 'nullable|url',
         ]);
 
     $svc = app(WhatsappService::class);
         $sent = 0; $failed = 0; $errors = [];
         $this->results = [];
-        $components = [];
+    $components = [];
         // Determine template language
         $lang = $tpl['language'] ?? 'en';
         try {
@@ -198,22 +221,42 @@ class WhatsappCampaignManager extends Component
             // ignore, use default
         }
         // Support overriding header image with uploaded file
+        // Determine header image link preference: uploaded file > image_url field > template default
         $headerImageLink = null;
+        $headerImageMediaId = null;
         if ($this->image_file) {
             try {
                 $path = $this->image_file->store('whatsapp', 'public');
-                $headerImageLink = Storage::url($path);
+                $abs = URL::to(Storage::url($path));
+                $headerImageLink = $abs;
+                // Upload to WhatsApp to get media_id for header
+                try {
+                    $mime = $this->image_file->getMimeType();
+                    $local = storage_path('app/public/' . ltrim($path, '/'));
+                    $mediaResp = $svc->uploadMedia($local, $mime);
+                    $headerImageMediaId = $mediaResp['id'] ?? null;
+                } catch (\Throwable $upEx) {
+                    \Log::warning('WhatsApp header media upload failed, using link', ['error' => $upEx->getMessage()]);
+                }
             } catch (\Throwable $e) {
                 \Log::error('Failed to store uploaded header image for template send', ['error' => $e->getMessage()]);
             }
+        } elseif (!empty($this->image_url)) {
+            $headerImageLink = $this->image_url;
         }
 
-        if ($headerImageLink || !empty($tpl['header_image'])) {
+        if ($headerImageMediaId || $headerImageLink || !empty($tpl['header_image'])) {
+            $imageParam = [];
+            if ($headerImageMediaId) {
+                $imageParam['id'] = $headerImageMediaId;
+            } else {
+                $imageParam['link'] = $headerImageLink ?: $tpl['header_image'];
+            }
             $components[] = [
                 'type' => 'header',
                 'parameters' => [[
                     'type' => 'image',
-                    'image' => ['link' => $headerImageLink ?: $tpl['header_image']]
+                    'image' => $imageParam,
                 ]]
             ];
         }
