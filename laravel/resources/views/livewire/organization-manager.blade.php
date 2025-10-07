@@ -182,8 +182,14 @@
                             <div class="card-header">
                                 <h5 class="card-title">{{ $org->name }}</h5>
                                 <div class="card-tools">
-                                    <button wire:click="editOrganization({{ $org->id }})" class="btn btn-tool text-warning">
+                                    <button wire:click="editOrganization({{ $org->id }})" class="btn btn-tool text-warning" title="Edit">
                                         <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button wire:click="deleteOrganization({{ $org->id }})" 
+                                            onclick="return confirm('Are you sure you want to delete this organization? This will remove all associated data, users, and Qdrant collections. This action cannot be undone!')" 
+                                            class="btn btn-tool text-danger" 
+                                            title="Delete">
+                                        <i class="fas fa-trash"></i>
                                     </button>
                                 </div>
                             </div>

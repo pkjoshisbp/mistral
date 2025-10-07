@@ -3,8 +3,6 @@
 namespace App\Livewire\Public;
 
 use Livewire\Component;
-use App\Models\Integration;
-use Illuminate\Support\Str;
 
 class ShopifyInstall extends Component
 {
@@ -29,32 +27,20 @@ class ShopifyInstall extends Component
             return;
         }
         
-        // Create pending integration record
-        $integration = Integration::create([
-            'organization_id' => null, // Will be set after completion
-            'platform' => 'shopify',
-            'shop_domain' => $domain . '.myshopify.com',
-            'status' => 'pending',
-            'installation_token' => Str::random(32),
-            'settings' => json_encode([
-                'initiated_at' => now(),
-                'user_agent' => request()->userAgent(),
-                'ip_address' => request()->ip()
-            ])
-        ]);
-        
         // Build Shopify OAuth URL
-        $shopifyClientId = env('SHOPIFY_CLIENT_ID', 'your_shopify_client_id');
-        $redirectUri = urlencode(route('api.integrations.shopify.oauth.callback'));
-        $scopes = 'read_themes,write_themes,read_script_tags,write_script_tags';
-        $state = $integration->installation_token;
+        $shopifyClientId = config('services.shopify.key');
+        $redirectUri = route('api.integrations.shopify.oauth.callback');
+        $scopes = 'read_script_tags,write_script_tags';
         
         $shopifyUrl = "https://{$domain}.myshopify.com/admin/oauth/authorize?" . http_build_query([
             'client_id' => $shopifyClientId,
             'scope' => $scopes,
             'redirect_uri' => $redirectUri,
-            'state' => $state,
-            'grant_options[]' => 'per_user'
+        ]);
+        
+        \Log::info('Shopify OAuth initiated', [
+            'shop' => $domain . '.myshopify.com',
+            'redirect_uri' => $redirectUri,
         ]);
         
         // Redirect to Shopify OAuth

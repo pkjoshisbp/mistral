@@ -7,8 +7,13 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Auth;
 use App\Models\Organization;
 use App\Models\Integration;
+use App\Models\User;
+use App\Mail\ShopifyWelcomeEmail;
 
 class IntegrationController extends Controller
 {
@@ -28,7 +33,10 @@ class IntegrationController extends Controller
         
         Log::info('Integration registration attempt', [
             'provider' => $provider,
-            'shop' => $shop
+            'shop' => $shop,
+            'return_url' => $request->input('return_url'),
+            'ip' => $request->ip(),
+            'user_agent' => $request->userAgent()
         ]);
 
         if ($provider === 'shopify') {
@@ -39,6 +47,7 @@ class IntegrationController extends Controller
             return $this->registerWordPress($provider, $shop);
         }
 
+        Log::warning('Invalid provider specified', ['provider' => $provider]);
         return response()->json(['ok' => false, 'message' => 'Invalid provider'], 400);
     }
 
@@ -258,23 +267,38 @@ class IntegrationController extends Controller
     private function initiateShopifyOAuth($shop, $returnUrl = null)
     {
         $apiKey = config('services.shopify.key');
+        
+        Log::info('Initiating Shopify OAuth', [
+            'shop' => $shop,
+            'has_api_key' => !empty($apiKey),
+            'return_url' => $returnUrl
+        ]);
+        
         if (!$apiKey) {
+            Log::error('Shopify OAuth failed - API key not configured');
             return response()->json(['ok' => false, 'message' => 'Shopify API not configured'], 500);
         }
 
         $scopes = 'read_products,read_orders,read_customers,write_script_tags';
         $state = Str::random(24);
-        $redirectUri = urlencode(config('app.url') . '/api/integrations/shopify/oauth/callback');
+        $redirectUri = config('app.url') . '/api/integrations/shopify/oauth/callback';
         
         $installUrl = "https://{$shop}/admin/oauth/authorize?" . http_build_query([
             'client_id' => $apiKey,
             'scope' => $scopes,
-            'redirect_uri' => config('app.url') . '/api/integrations/shopify/oauth/callback',
+            'redirect_uri' => $redirectUri,
             'state' => $state
         ]);
 
         // Store state for verification
         session(['shopify_oauth_state' => $state, 'shopify_return_url' => $returnUrl]);
+
+        Log::info('Shopify OAuth URL generated', [
+            'shop' => $shop,
+            'state' => $state,
+            'redirect_uri' => $redirectUri,
+            'scopes' => $scopes
+        ]);
 
         return response()->json([
             'ok' => true,
@@ -315,12 +339,27 @@ class IntegrationController extends Controller
         $shop = $request->get('shop');
         $code = $request->get('code');
         $state = $request->get('state');
+        $hmac = $request->get('hmac');
 
-        // Verify state
-        if (!$state || $state !== session('shopify_oauth_state')) {
-            Log::warning('Shopify OAuth state mismatch', ['provided' => $state]);
-            return response('Invalid state parameter', 400);
+        Log::info('Shopify OAuth callback received', [
+            'shop' => $shop,
+            'has_code' => !empty($code),
+            'has_hmac' => !empty($hmac),
+            'all_params' => $request->all()
+        ]);
+
+        // Verify HMAC instead of session state (more reliable for OAuth redirects)
+        if (!$this->verifyShopifyHmac($request)) {
+            Log::warning('Shopify OAuth HMAC verification failed', [
+                'shop' => $shop,
+                'provided_hmac' => $hmac
+            ]);
+            return response('Invalid request signature', 400);
         }
+
+        Log::info('Shopify OAuth HMAC verified, exchanging code for token', [
+            'shop' => $shop
+        ]);
 
         // Exchange code for access token
         $tokenResponse = Http::asForm()->post("https://{$shop}/admin/oauth/access_token", [
@@ -330,34 +369,102 @@ class IntegrationController extends Controller
         ]);
 
         if (!$tokenResponse->successful()) {
-            Log::error('Shopify token exchange failed', ['response' => $tokenResponse->body()]);
+            Log::error('Shopify token exchange failed', [
+                'shop' => $shop,
+                'status' => $tokenResponse->status(),
+                'response' => $tokenResponse->body()
+            ]);
             return response('Failed to get access token', 500);
         }
 
         $accessToken = $tokenResponse->json()['access_token'];
-
-        // Create or find organization
-        $existingOrg = Organization::where('website', "https://{$shop}")->first();
         
-        if ($existingOrg) {
-            // Use existing organization
-            $organization = $existingOrg;
-            Log::info('Using existing organization for Shopify integration', [
-                'existing_org_id' => $organization->id,
-                'shop' => $shop
-            ]);
-        } else {
-            // Create new organization with default values
+        Log::info('Shopify access token obtained successfully', [
+            'shop' => $shop,
+            'has_token' => !empty($accessToken)
+        ]);
+
+        // Fetch shop details to get owner email and information
+        $shopResponse = Http::withHeaders([
+            'X-Shopify-Access-Token' => $accessToken,
+        ])->get("https://{$shop}/admin/api/2025-01/shop.json");
+
+        $shopData = $shopResponse->json()['shop'] ?? [];
+        $shopOwnerEmail = $shopData['email'] ?? null;
+        $shopOwnerName = $shopData['shop_owner'] ?? 'Store Owner';
+        $shopName = $shopData['name'] ?? str_replace('.myshopify.com', '', $shop);
+        $shopPhone = $shopData['phone'] ?? null;
+        
+        Log::info('Shopify shop details fetched', [
+            'shop' => $shop,
+            'shop_name' => $shopName,
+            'has_email' => !empty($shopOwnerEmail),
+            'owner_name' => $shopOwnerName
+        ]);
+
+        // Strategy: Check if user exists and has an organization first
+        $organization = null;
+        $existingUser = null;
+        
+        if ($shopOwnerEmail) {
+            $existingUser = User::where('email', $shopOwnerEmail)->first();
+            
+            if ($existingUser) {
+                // User exists - check if they have an organization
+                $userOrganizations = $existingUser->organizations;
+                
+                if ($userOrganizations->count() > 0) {
+                    // Use the user's first organization (they're already set up)
+                    $organization = $userOrganizations->first();
+                    
+                    Log::info('User already has organization - using existing org', [
+                        'user_id' => $existingUser->id,
+                        'org_id' => $organization->id,
+                        'org_name' => $organization->name,
+                        'shop' => $shop
+                    ]);
+                }
+            }
+        }
+        
+        // If no organization found from user, check by website URL
+        if (!$organization) {
+            $organization = Organization::where('website', "https://{$shop}")->first();
+            
+            if ($organization) {
+                Log::info('Found existing organization by website URL', [
+                    'org_id' => $organization->id,
+                    'shop' => $shop
+                ]);
+            }
+        }
+        
+        // If still no organization, create a new one
+        if (!$organization) {
+            // Generate unique slug
+            $baseSlug = Str::slug($shopName);
+            $slug = $baseSlug;
+            $counter = 2;
+            
+            while (Organization::where('slug', $slug)->exists()) {
+                $slug = $baseSlug . '-' . $counter;
+                $counter++;
+            }
+            
             $organization = Organization::create([
-                'name' => $shop,
-                'slug' => Str::slug($shop . '-' . Str::random(6)),
+                'name' => $shopName, // Use shop name, not owner name
+                'slug' => $slug,
                 'website' => "https://{$shop}",
-                'description' => 'Shopify store integrated via app',
+                'contact_email' => $shopOwnerEmail,
+                'contact_phone' => $shopPhone,
+                'description' => 'Shopify E-Commerce Store',
                 'token_balance' => 20000 // Initial 20K tokens for new organizations
             ]);
             
             Log::info('Created new organization for Shopify integration', [
                 'org_id' => $organization->id,
+                'org_name' => $organization->name,
+                'org_slug' => $organization->slug,
                 'shop' => $shop
             ]);
         }
@@ -372,6 +479,12 @@ class IntegrationController extends Controller
             ]
         );
 
+        Log::info('Shopify integration record saved', [
+            'integration_id' => $integration->id,
+            'org_id' => $organization->id,
+            'shop' => $shop
+        ]);
+
         // Save widget settings to organization instead
         $organizationSettings = $organization->settings ?? [];
         $organizationSettings = array_merge($organizationSettings, [
@@ -385,17 +498,127 @@ class IntegrationController extends Controller
         $organization->settings = $organizationSettings;
         $organization->save();
 
+        Log::info('Organization widget settings saved', [
+            'org_id' => $organization->id,
+            'settings' => $organizationSettings
+        ]);
+
+        // Create or find user and associate with organization
+        $user = null;
+        $isNewUser = false;
+        $generatedPassword = null;
+
+        if ($shopOwnerEmail) {
+            // Check if user already exists with this email
+            $user = User::where('email', $shopOwnerEmail)->first();
+
+            if (!$user) {
+                // Generate strong random password
+                $generatedPassword = Str::random(16);
+                
+                // Create new user
+                $user = User::create([
+                    'name' => $shopOwnerName,
+                    'email' => $shopOwnerEmail,
+                    'password' => Hash::make($generatedPassword),
+                    'email_verified_at' => now(), // Auto-verify since from Shopify
+                ]);
+                
+                // Give initial credits to new Shopify users (1000 credits = $10 worth)
+                $userCredit = \App\Models\UserCredit::getOrCreateForUser($user->id);
+                $userCredit->addCredits(1000.00, 'Initial credits for Shopify app installation', [
+                    'source' => 'shopify_install',
+                    'shop' => $shop
+                ]);
+                
+                $isNewUser = true;
+                
+                Log::info('Created new user for Shopify installation', [
+                    'user_id' => $user->id,
+                    'email' => $shopOwnerEmail,
+                    'org_id' => $organization->id,
+                    'initial_credits' => 1000.00
+                ]);
+            } else {
+                Log::info('Found existing user for Shopify installation', [
+                    'user_id' => $user->id,
+                    'email' => $shopOwnerEmail,
+                    'org_id' => $organization->id
+                ]);
+            }
+
+            // Associate user with organization (if not already associated)
+            if (!$organization->users()->where('user_id', $user->id)->exists()) {
+                $organization->users()->attach($user->id);
+                
+                Log::info('Associated user with organization', [
+                    'user_id' => $user->id,
+                    'org_id' => $organization->id
+                ]);
+            }
+
+            // Send welcome email if new user
+            if ($isNewUser && $generatedPassword) {
+                try {
+                    Mail::to($user->email)->send(new ShopifyWelcomeEmail($user, $generatedPassword, $organization));
+                    
+                    Log::info('Welcome email sent to new Shopify user', [
+                        'user_id' => $user->id,
+                        'email' => $user->email,
+                        'org_id' => $organization->id
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to send welcome email', [
+                        'user_id' => $user->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            // Auto-login the user for seamless experience
+            Auth::login($user);
+            
+            // Regenerate session to ensure fresh data
+            request()->session()->regenerate();
+            
+            // Reload user with organizations to ensure relationship is available
+            $user->load('organizations');
+            
+            Log::info('User auto-logged in after Shopify installation', [
+                'user_id' => $user->id,
+                'org_id' => $organization->id,
+                'organizations_count' => $user->organizations->count()
+            ]);
+        } else {
+            Log::warning('No email found from Shopify shop data - user not created', [
+                'shop' => $shop,
+                'org_id' => $organization->id
+            ]);
+        }
+
         // Create ScriptTag to inject widget
-        $this->createShopifyScriptTag($shop, $accessToken, $organization->id);
+        $scriptTagResult = $this->createShopifyScriptTag($shop, $accessToken, $organization->id);
 
         Log::info('Shopify integration completed', [
             'shop' => $shop,
-            'org_id' => $organization->id
+            'org_id' => $organization->id,
+            'script_tag_created' => $scriptTagResult,
+            'user_created' => $isNewUser,
+            'user_logged_in' => $user !== null
         ]);
 
-        // Redirect to return URL or app dashboard
-        $returnUrl = session('shopify_return_url', config('app.url') . '/dashboard');
-        return redirect($returnUrl . '?installed=true&org_id=' . $organization->id);
+        // Redirect to customer dashboard with success message
+        if ($user) {
+            return redirect()->route('customer.dashboard')
+                ->with('success', 'Shopify app installed successfully! Your AI chat widget is now live on your store.' . 
+                    ($isNewUser ? ' Check your email for login credentials.' : ''));
+        } else {
+            // No user created (no email from Shopify) - redirect to manual setup
+            return redirect()->route('shopify.complete-setup', [
+                'org_id' => $organization->id,
+                'shop' => $shop
+            ])->with('warning', 'Please complete your account setup to manage your AI chat widget.');
+        }
     }
 
     /**
@@ -404,6 +627,12 @@ class IntegrationController extends Controller
     private function createShopifyScriptTag($shop, $accessToken, $orgId)
     {
         $scriptSrc = config('app.url') . "/api/integrations/widget-script/{$orgId}";
+        
+        Log::info('Creating Shopify ScriptTag', [
+            'shop' => $shop,
+            'org_id' => $orgId,
+            'script_src' => $scriptSrc
+        ]);
         
         $response = Http::withHeaders([
             'X-Shopify-Access-Token' => $accessToken,
@@ -416,17 +645,24 @@ class IntegrationController extends Controller
         ]);
 
         if ($response->successful()) {
+            $scriptTagData = $response->json();
             Log::info('Shopify ScriptTag created successfully', [
                 'shop' => $shop,
                 'org_id' => $orgId,
-                'script_src' => $scriptSrc
+                'script_src' => $scriptSrc,
+                'script_tag_id' => $scriptTagData['script_tag']['id'] ?? null,
+                'response' => $scriptTagData
             ]);
+            return true;
         } else {
             Log::error('Failed to create Shopify ScriptTag', [
                 'shop' => $shop,
                 'org_id' => $orgId,
-                'response' => $response->body()
+                'status' => $response->status(),
+                'response' => $response->body(),
+                'error' => $response->json()
             ]);
+            return false;
         }
     }
 
@@ -444,20 +680,123 @@ class IntegrationController extends Controller
         ]);
 
         if ($topic === 'app/uninstalled') {
-            // Mark integration as inactive when app is uninstalled
+            // Find the integration and associated organization
             $integration = Integration::where('shop', $shop)
                 ->where('provider', 'shopify')
                 ->first();
                 
             if ($integration) {
-                $integration->update(['active' => false]);
-                Log::info('Shopify integration deactivated', [
-                    'shop' => $shop,
-                    'org_id' => $integration->organization_id
+                $organization = $integration->organization;
+                
+                if ($organization) {
+                    Log::info('Processing Shopify app uninstall - cleaning up data', [
+                        'shop' => $shop,
+                        'org_id' => $organization->id,
+                        'org_slug' => $organization->slug
+                    ]);
+
+                    try {
+                        // Delete Qdrant collection
+                        $aiService = new \App\Services\AiAgentService();
+                        $collectionName = str_replace('-', '_', $organization->slug);
+                        $aiService->deleteCollection($collectionName);
+                        Log::info('Deleted Qdrant collection for uninstalled Shopify app', [
+                            'collection' => $collectionName
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('Failed to delete Qdrant collection during Shopify uninstall', [
+                            'shop' => $shop,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+
+                    // Find and delete users associated ONLY with this organization
+                    $users = $organization->users;
+                    foreach ($users as $user) {
+                        // Only delete user if they belong to just this organization
+                        if ($user->organizations()->count() === 1) {
+                            Log::info('Deleting user associated with uninstalled Shopify app', [
+                                'user_id' => $user->id,
+                                'email' => $user->email
+                            ]);
+                            $user->delete();
+                        } else {
+                            // Just detach from this organization
+                            $organization->users()->detach($user->id);
+                            Log::info('Detached user from organization (user has other orgs)', [
+                                'user_id' => $user->id,
+                                'email' => $user->email
+                            ]);
+                        }
+                    }
+
+                    // Delete related data
+                    $organization->organizationData()->delete();
+                    
+                    // Delete chat sessions and their messages
+                    foreach ($organization->chatSessions as $session) {
+                        $session->messages()->delete();
+                    }
+                    $organization->chatSessions()->delete();
+                    
+                    // Delete chat conversations and their messages
+                    foreach ($organization->chatConversations as $conversation) {
+                        $conversation->messages()->delete();
+                    }
+                    $organization->chatConversations()->delete();
+                    
+                    $organization->tokenUsageLogs()->delete();
+                    $organization->integrations()->delete();
+                    
+                    // Delete the organization itself
+                    $organization->delete();
+                    
+                    Log::info('Successfully cleaned up organization for uninstalled Shopify app', [
+                        'shop' => $shop,
+                        'org_id' => $organization->id
+                    ]);
+                } else {
+                    // Just delete the integration if no organization found
+                    $integration->delete();
+                    Log::warning('Shopify integration found but no organization - deleted integration only', [
+                        'shop' => $shop
+                    ]);
+                }
+            } else {
+                Log::warning('Shopify uninstall webhook received but no integration found', [
+                    'shop' => $shop
                 ]);
             }
         }
 
         return response('ok', 200);
     }
+
+    /**
+     * Verify Shopify HMAC signature
+     */
+    private function verifyShopifyHmac(Request $request)
+    {
+        $hmac = $request->get('hmac');
+        
+        if (!$hmac) {
+            return false;
+        }
+
+        // Get all parameters except hmac and signature
+        $params = $request->except(['hmac', 'signature']);
+        
+        // Sort parameters alphabetically
+        ksort($params);
+        
+        // Build query string
+        $queryString = http_build_query($params);
+        
+        // Calculate HMAC
+        $calculatedHmac = hash_hmac('sha256', $queryString, config('services.shopify.secret'));
+        
+        // Compare HMACs (constant time comparison to prevent timing attacks)
+        return hash_equals($calculatedHmac, $hmac);
+    }
 }
+

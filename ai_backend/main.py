@@ -548,6 +548,28 @@ async def create_collection(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.delete("/qdrant/delete_collection")
+async def delete_collection(request: Request):
+    """Delete a collection from Qdrant"""
+    data = await request.json()
+    collection_name = data["collection_name"]
+    try:
+        # Check if collection exists before trying to delete
+        collections = qdrant.get_collections()
+        collection_names = [c.name for c in collections.collections]
+        
+        if collection_name not in collection_names:
+            logging.warning(f"Collection {collection_name} not found in Qdrant")
+            return {"status": "success", "message": f"Collection {collection_name} does not exist (already deleted)"}
+        
+        # Delete the collection
+        qdrant.delete_collection(collection_name=collection_name)
+        logging.info(f"Collection {collection_name} deleted successfully")
+        return {"status": "success", "message": f"Collection {collection_name} deleted"}
+    except Exception as e:
+        logging.error(f"Error deleting collection {collection_name}: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.get("/qdrant/collections")
 async def list_collections():
     """List all collections in Qdrant"""

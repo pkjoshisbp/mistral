@@ -5,6 +5,7 @@ namespace App\Livewire;
 use Livewire\Component;
 use App\Models\Organization;
 use App\Services\AiAgentService;
+use Illuminate\Support\Facades\Log;
 
 class OrganizationManager extends Component
 {
@@ -164,6 +165,78 @@ class OrganizationManager extends Component
     {
         $this->showEditForm = false;
         $this->reset(['name', 'slug', 'description', 'website_url', 'website', 'contact_email', 'contact_phone', 'editingOrgId']);
+    }
+
+    public function deleteOrganization($id)
+    {
+        $org = Organization::find($id);
+        if (!$org) {
+            session()->flash('error', 'Organization not found.');
+            return;
+        }
+
+        try {
+            // Delete Qdrant collection
+            $aiService = new AiAgentService();
+            $collectionName = str_replace('-', '_', $org->slug);
+            $aiService->deleteCollection($collectionName);
+            
+            Log::info('Deleted Qdrant collection for organization', [
+                'org_id' => $id,
+                'collection' => $collectionName
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to delete Qdrant collection: ' . $e->getMessage(), [
+                'org_id' => $id,
+                'slug' => $org->slug
+            ]);
+        }
+
+        // Find and handle users
+        $users = $org->users;
+        foreach ($users as $user) {
+            // Only delete user if they belong to just this organization
+            if ($user->organizations()->count() === 1) {
+                Log::info('Deleting user with organization', [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'org_id' => $id
+                ]);
+                $user->delete();
+            } else {
+                // Just detach from this organization
+                $org->users()->detach($user->id);
+                Log::info('Detached user from organization (user has other orgs)', [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'org_id' => $id
+                ]);
+            }
+        }
+
+        // Delete related data
+        $org->organizationData()->delete();
+        
+        // Delete chat sessions and their messages
+        foreach ($org->chatSessions as $session) {
+            $session->messages()->delete();
+        }
+        $org->chatSessions()->delete();
+        
+        // Delete chat conversations and their messages
+        foreach ($org->chatConversations as $conversation) {
+            $conversation->messages()->delete();
+        }
+        $org->chatConversations()->delete();
+        
+        $org->tokenUsageLogs()->delete();
+        $org->integrations()->delete();
+        
+        // Delete the organization
+        $org->delete();
+        
+        $this->loadOrganizations();
+        session()->flash('message', 'Organization deleted successfully!');
     }
 
     public function render()

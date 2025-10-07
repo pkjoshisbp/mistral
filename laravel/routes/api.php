@@ -47,6 +47,6 @@ Route::prefix('integrations')->group(function () {
     Route::post('/widget-config/{org_id}', [IntegrationController::class, 'updateWidgetConfig']);
     
     // Shopify specific routes
-    Route::get('/shopify/oauth/callback', [IntegrationController::class, 'shopifyCallback']);
-    Route::post('/webhook/shopify', [IntegrationController::class, 'shopifyWebhook']);
+    Route::get('/shopify/oauth/callback', [IntegrationController::class, 'shopifyCallback'])->name('api.integrations.shopify.oauth.callback');
+    Route::post('/webhook/shopify', [IntegrationController::class, 'shopifyWebhook'])->name('api.integrations.shopify.webhook');
 });

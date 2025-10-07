@@ -64,6 +64,21 @@ class Organization extends Model
         return $this->hasMany(TokenUsageLog::class);
     }
 
+    public function chatSessions()
+    {
+        return $this->hasMany(ChatSession::class);
+    }
+
+    public function chatConversations()
+    {
+        return $this->hasMany(ChatConversation::class);
+    }
+
+    public function integrations()
+    {
+        return $this->hasMany(Integration::class);
+    }
+
     public function getCollectionNameAttribute()
     {
         return str_replace('-', '_', $this->slug);

@@ -47,6 +47,7 @@ Route::get('/download/wordpress-plugin', function () {
 })->name('download.wordpress-plugin');
 
 Route::get('/shopify/install', \App\Livewire\Public\ShopifyInstall::class)->name('shopify.install');
+Route::get('/shopify/complete-setup', \App\Livewire\Public\ShopifyCompleteSetup::class)->name('shopify.complete-setup');
 
 Route::get('/terms', function () {
     $terms = \App\Models\TermsAndConditions::getTerms();
@@ -600,6 +601,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/documents', \App\Livewire\Customer\Documents::class)->name('documents');
         Route::get('/website-crawler', \App\Livewire\Customer\WebsiteCrawler::class)->name('crawler');
         Route::get('/api-integration', \App\Livewire\Customer\ApiIntegration::class)->name('api-integration');
+        Route::get('/integration-settings', \App\Livewire\Customer\IntegrationSettingsManager::class)->name('integration-settings');
         Route::get('/action-manager', \App\Livewire\Customer\ActionManager::class)->name('action-manager');
         Route::get('/chat-history', \App\Livewire\Customer\ChatHistory::class)->name('chat-history');
         Route::get('/token-usage', \App\Livewire\Customer\TokenUsage::class)->name('token-usage');
