@@ -279,7 +279,9 @@ class IntegrationController extends Controller
             return response()->json(['ok' => false, 'message' => 'Shopify API not configured'], 500);
         }
 
-        $scopes = 'read_products,read_orders,read_customers,write_script_tags';
+        // Minimal permissions - only what's needed for chat widget
+        // write_script_tags: Required to inject the chat widget script into the store
+        $scopes = 'write_script_tags';
         $state = Str::random(24);
         $redirectUri = config('app.url') . '/api/integrations/shopify/oauth/callback';
         
@@ -524,9 +526,9 @@ class IntegrationController extends Controller
                     'email_verified_at' => now(), // Auto-verify since from Shopify
                 ]);
                 
-                // Give initial credits to new Shopify users (1000 credits = $10 worth)
+                // Give initial credits to new Shopify users (20,000 tokens for trial)
                 $userCredit = \App\Models\UserCredit::getOrCreateForUser($user->id);
-                $userCredit->addCredits(1000.00, 'Initial credits for Shopify app installation', [
+                $userCredit->addCredits(20000.00, 'Initial trial credits for Shopify app installation', [
                     'source' => 'shopify_install',
                     'shop' => $shop
                 ]);
@@ -537,7 +539,7 @@ class IntegrationController extends Controller
                     'user_id' => $user->id,
                     'email' => $shopOwnerEmail,
                     'org_id' => $organization->id,
-                    'initial_credits' => 1000.00
+                    'initial_credits' => 20000.00
                 ]);
             } else {
                 Log::info('Found existing user for Shopify installation', [

@@ -395,6 +395,10 @@ Route::post('/analytics/track', [AnalyticsController::class, 'track'])
     ->name('analytics.track');
 Route::get('/analytics/dashboard/{orgId}', [AnalyticsController::class, 'dashboard'])->name('analytics.dashboard');
 
+// Shopify OAuth callback (needs web session middleware for auto-login)
+Route::get('/api/integrations/shopify/oauth/callback', [\App\Http\Controllers\IntegrationController::class, 'shopifyCallback'])
+    ->name('api.integrations.shopify.oauth.callback');
+
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');

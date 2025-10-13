@@ -1,7 +1,8 @@
 {
   "name": "AI Chat Support",
   "handle": "ai-chat-support",
-  "description": "Add an intelligent AI chat widget to your Shopify store for automated customer support. Handle product questions, order inquiries, and customer service - 24/7.",
+  "version": "2.0.0",
+  "description": "Privacy-first AI chat widget for automated customer support. Requires minimal permissions - only script tags to add the widget. No access to your products, orders, or customer data.",
   "developer": {
     "name": "AI Chat Support Team",
     "email": "developer@ai-chat.support",
@@ -21,10 +22,6 @@
     ]
   },
   "scopes": [
-    "read_products",
-    "read_orders", 
-    "read_customers",
-    "read_fulfillments",
     "write_script_tags"
   ],
   "categories": [
@@ -86,8 +83,8 @@
     ]
   },
   "app_store_listing": {
-    "tagline": "Intelligent AI chat widget for automated 24/7 customer support",
-    "short_description": "Add an AI-powered chat widget that automatically answers product questions, order inquiries, and provides customer support around the clock.",
+    "tagline": "Privacy-first AI chat widget - Only 1 permission needed!",
+    "short_description": "Privacy-first AI chat widget with minimal permissions. Only accesses script tags to add the widget - no access to your products, orders, or customer data. 24/7 automated support.",
     "long_description": "Transform your customer support with AI Chat Support's intelligent chat widget. Our advanced AI understands your products and can automatically answer customer questions about inventory, shipping, returns, and more - 24 hours a day, 7 days a week.\n\n**Key Features:**\n• AI-powered responses trained on your store data\n• Handles product questions, order status, and support inquiries\n• Mobile-responsive chat widget\n• Customizable design to match your brand\n• Real-time analytics and conversation history\n• Easy one-click setup\n• No monthly subscriptions - pay only for what you use\n\n**Perfect for:**\n• E-commerce stores of all sizes\n• Businesses wanting to reduce support workload\n• Stores with international customers (24/7 support)\n• Growing businesses scaling their customer service\n\n**How it works:**\n1. Install the app with one click\n2. The AI learns about your products automatically\n3. Chat widget appears on your storefront\n4. Customers get instant answers to their questions\n5. You save time and increase customer satisfaction\n\n**Pricing:**\nFlexible credit-based pricing starting at just $5 for 100K tokens (300-1000 conversations). Credits never expire, so you only pay for actual usage. Perfect for stores of any size.",
     "benefits": [
       "Reduce customer support workload by 70%",

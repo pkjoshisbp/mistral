@@ -46,7 +46,6 @@ Route::prefix('integrations')->group(function () {
     Route::get('/widget-config/{org_id}', [IntegrationController::class, 'getWidgetConfig']);
     Route::post('/widget-config/{org_id}', [IntegrationController::class, 'updateWidgetConfig']);
     
-    // Shopify specific routes
-    Route::get('/shopify/oauth/callback', [IntegrationController::class, 'shopifyCallback'])->name('api.integrations.shopify.oauth.callback');
+    // Shopify webhook route (still in API, webhook doesn't need sessions)
     Route::post('/webhook/shopify', [IntegrationController::class, 'shopifyWebhook'])->name('api.integrations.shopify.webhook');
 });

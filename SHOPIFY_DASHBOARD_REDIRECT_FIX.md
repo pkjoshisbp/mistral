@@ -40,23 +40,29 @@ $user->load('organizations');
 ### 2. Initial Credits for New Shopify Users
 **File**: `laravel/app/Http/Controllers/IntegrationController.php`
 
-New Shopify users now receive 1000 credits ($10 worth) automatically:
+New Shopify users now receive 20,000 trial credits automatically:
 
 ```php
-// Create new user
-$user = User::create([
-    'name' => $shopOwnerName,
-    'email' => $shopOwnerEmail,
-    'password' => Hash::make($generatedPassword),
-    'email_verified_at' => now(),
-]);
-
-// Give initial credits (1000 credits = $10 worth)
-$userCredit = \App\Models\UserCredit::getOrCreateForUser($user->id);
-$userCredit->addCredits(1000.00, 'Initial credits for Shopify app installation', [
-    'source' => 'shopify_install',
-    'shop' => $shop
-]);
+            if (!$user) {
+                // Generate strong random password
+                $generatedPassword = Str::random(16);
+                
+                // Create new user
+                $user = User::create([
+                    'name' => $shopOwnerName,
+                    'email' => $shopOwnerEmail,
+                    'password' => Hash::make($generatedPassword),
+                    'email_verified_at' => now(), // Auto-verify since from Shopify
+                ]);
+                
+                // Give initial credits to new Shopify users
+                $userCredit = \App\Models\UserCredit::getOrCreateForUser($user->id);
+                $userCredit->addCredits(20000.00, 'Initial trial credits for Shopify app installation', [
+                    'source' => 'shopify_install',
+                    'shop' => $shop
+                ]);
+                
+                $isNewUser = true;
 ```
 
 ## Authentication Flow Fixed
@@ -91,9 +97,8 @@ $userCredit->addCredits(1000.00, 'Initial credits for Shopify app installation',
 ## Credits System Details
 
 ### Initial Credits:
-- **Amount**: 1000 credits
-- **Value**: $10 worth
-- **Reason**: "Initial credits for Shopify app installation"
+- **Amount**: 20,000 credits
+- **Reason**: "Initial trial credits for Shopify app installation"
 - **Source**: `shopify_install`
 - **Shop**: Stored in transaction metadata
 
@@ -256,5 +261,5 @@ Log::info('User auto-logged in after Shopify installation', [
 **Date**: October 7, 2025  
 **Status**: ✅ Fixed and Ready for Testing  
 **Breaking Changes**: None  
-**Initial Credits**: 1000 credits ($10 value)  
+**Initial Credits**: 20,000 trial credits  
 **Impact**: Seamless Shopify onboarding
