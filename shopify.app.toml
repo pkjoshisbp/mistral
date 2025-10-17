@@ -1,0 +1,32 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "d9d8ed2dd9a7d99e67ca61fd135da57c"
+name = "ai-chat-support"
+application_url = "https://ai-chat.support/shopify/install"
+embedded = true
+
+[webhooks]
+api_version = "2025-01"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "https://ai-chat.support/shopify/webhooks"
+
+[webhooks.privacy_compliance]
+customer_deletion_url = "https://ai-chat.support/shopify/webhooks"
+customer_data_request_url = "https://ai-chat.support/shopify/webhooks"
+shop_deletion_url = "https://ai-chat.support/shopify/webhooks"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_script_tags"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://ai-chat.support/api/integrations/shopify/oauth/callback"
+]
+
+[app_preferences]
+url = "https://ai-chat.support/shopify/preferences"

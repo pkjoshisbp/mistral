@@ -48,6 +48,7 @@ Route::get('/download/wordpress-plugin', function () {
 
 Route::get('/shopify/install', \App\Livewire\Public\ShopifyInstall::class)->name('shopify.install');
 Route::get('/shopify/complete-setup', \App\Livewire\Public\ShopifyCompleteSetup::class)->name('shopify.complete-setup');
+Route::get('/shopify/preferences', \App\Livewire\Shopify\Preferences::class)->name('shopify.preferences');
 
 Route::get('/terms', function () {
     $terms = \App\Models\TermsAndConditions::getTerms();
@@ -398,6 +399,11 @@ Route::get('/analytics/dashboard/{orgId}', [AnalyticsController::class, 'dashboa
 // Shopify OAuth callback (needs web session middleware for auto-login)
 Route::get('/api/integrations/shopify/oauth/callback', [\App\Http\Controllers\IntegrationController::class, 'shopifyCallback'])
     ->name('api.integrations.shopify.oauth.callback');
+
+// Shopify Webhooks (mandatory for Shopify app approval)
+// These are called by Shopify and must be publicly accessible
+Route::post('/shopify/webhooks', [\App\Http\Controllers\ShopifyWebhookController::class, 'handle'])
+    ->name('shopify.webhooks');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

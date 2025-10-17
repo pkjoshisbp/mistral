@@ -386,6 +386,9 @@ class IntegrationController extends Controller
             'has_token' => !empty($accessToken)
         ]);
 
+        // Register mandatory webhooks dynamically (Option 1 - Best Practice)
+        $this->registerShopifyWebhooks($shop, $accessToken);
+
         // Fetch shop details to get owner email and information
         $shopResponse = Http::withHeaders([
             'X-Shopify-Access-Token' => $accessToken,
@@ -799,6 +802,124 @@ class IntegrationController extends Controller
         
         // Compare HMACs (constant time comparison to prevent timing attacks)
         return hash_equals($calculatedHmac, $hmac);
+    }
+
+    /**
+     * Register mandatory Shopify webhooks dynamically after OAuth
+     * This is the recommended approach (Option 1 - Best Practice)
+     */
+    /**
+     * Register mandatory Shopify webhooks dynamically after OAuth
+     * This is the recommended approach (Option 1 - Best Practice)
+     * Checks for existing webhooks before creating to avoid duplicates
+     */
+    private function registerShopifyWebhooks($shop, $accessToken)
+    {
+        // NOTE: GDPR compliance webhooks (customers/data_request, customers/redact, shop/redact)
+        // CANNOT be registered via Admin API - they return 404
+        // These MUST be configured manually in Shopify Partner Dashboard under:
+        // App Setup → Compliance webhooks
+        
+        Log::info('⚠️ REMINDER: Configure GDPR webhooks in Partner Dashboard', [
+            'shop' => $shop,
+            'required_gdpr_topics' => [
+                'customers/data_request',
+                'customers/redact', 
+                'shop/redact'
+            ],
+            'endpoint_url' => config('app.url') . '/shopify/webhooks',
+            'dashboard_url' => 'https://partners.shopify.com/',
+            'instructions' => 'Go to Partner Dashboard → Apps → Your App → App Setup → Compliance webhooks'
+        ]);
+
+        // Only register webhooks that CAN be created via Admin API
+        $webhooks = [
+            [
+                'topic' => 'app/uninstalled',
+                'address' => config('app.url') . '/shopify/webhooks',
+                'format' => 'json'
+            ]
+            // GDPR webhooks removed - must be configured in Partner Dashboard
+        ];
+
+        // First, get list of existing webhooks to avoid duplicates
+        try {
+            $existingResponse = Http::withHeaders([
+                'X-Shopify-Access-Token' => $accessToken,
+                'Content-Type' => 'application/json'
+            ])->get("https://{$shop}/admin/api/2025-01/webhooks.json");
+
+            $existingWebhooks = [];
+            if ($existingResponse->successful()) {
+                foreach ($existingResponse->json()['webhooks'] ?? [] as $existing) {
+                    $key = ($existing['topic'] ?? '') . '|' . ($existing['address'] ?? '');
+                    $existingWebhooks[$key] = $existing;
+                }
+                
+                Log::info('Found existing Shopify webhooks', [
+                    'shop' => $shop,
+                    'count' => count($existingWebhooks)
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::warning('Could not fetch existing webhooks, will attempt to create all', [
+                'shop' => $shop,
+                'error' => $e->getMessage()
+            ]);
+            $existingWebhooks = [];
+        }
+
+        // Register each webhook (skip if already exists)
+        foreach ($webhooks as $webhook) {
+            $key = $webhook['topic'] . '|' . $webhook['address'];
+            
+            // Skip if webhook already exists
+            if (isset($existingWebhooks[$key])) {
+                Log::info('Shopify webhook already exists, skipping', [
+                    'shop' => $shop,
+                    'topic' => $webhook['topic']
+                ]);
+                continue;
+            }
+
+            // Create the webhook
+            try {
+                $response = Http::withHeaders([
+                    'X-Shopify-Access-Token' => $accessToken,
+                    'Content-Type' => 'application/json',
+                ])->post("https://{$shop}/admin/api/2025-01/webhooks.json", [
+                    'webhook' => $webhook
+                ]);
+
+                if ($response->successful()) {
+                    Log::info('Shopify webhook registered successfully', [
+                        'shop' => $shop,
+                        'topic' => $webhook['topic'],
+                        'address' => $webhook['address'],
+                        'webhook_id' => $response->json()['webhook']['id'] ?? 'unknown'
+                    ]);
+                } else {
+                    Log::warning('Failed to register Shopify webhook', [
+                        'shop' => $shop,
+                        'topic' => $webhook['topic'],
+                        'status' => $response->status(),
+                        'response' => $response->body()
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::error('Exception while registering Shopify webhook', [
+                    'shop' => $shop,
+                    'topic' => $webhook['topic'],
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        Log::info('Completed Shopify webhook registration process', [
+            'shop' => $shop,
+            'api_webhooks_registered' => count($webhooks),
+            'gdpr_webhooks_status' => 'Must be configured in Partner Dashboard manually'
+        ]);
     }
 }
 

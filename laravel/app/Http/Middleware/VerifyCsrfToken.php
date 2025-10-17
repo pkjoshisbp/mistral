@@ -17,5 +17,6 @@ class VerifyCsrfToken extends Middleware
         'razorpay/webhook',
         'razorpay/webhook-test',
         'analytics/track', // Public analytics endpoint (widget + site events) - stateless
+        'shopify/webhooks', // Shopify webhooks verified via HMAC
     ];
 }
