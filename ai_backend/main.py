@@ -689,6 +689,39 @@ async def llm_answer(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/extract")
+async def extract_keyword(request: Request):
+    """Extract specific information using LLM (e.g., product keywords)"""
+    data = await request.json()
+    prompt = data["prompt"]
+    max_tokens = data.get("max_tokens", 20)
+    model = data.get("model", FALLBACK_EMBED_MODEL)
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{OLLAMA_URL}/api/generate", json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "num_predict": max_tokens,
+                    "temperature": 0.1,  # Low temperature for consistent extraction
+                    "top_k": 10,
+                    "top_p": 0.5
+                }
+            })
+            result = resp.json()
+            extracted = result.get("response", "").strip()
+            
+            # Remove any explanation text after the keyword
+            if '\n' in extracted:
+                extracted = extracted.split('\n')[0].strip()
+            
+            return {"result": extracted}
+    except Exception as e:
+        logging.error(f"Extract endpoint error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/embed_batch")
 async def embed_batch(request: Request):
     """Batch embedding to reduce per-request overhead.
