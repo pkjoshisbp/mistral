@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\FaqSyncController;
 use App\Http\Controllers\Api\WhatsappWebhookController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\Api\OrderStatusController;
+use App\Http\Controllers\Api\ShopifyDataController;
 
 Route::post('/leads', [LeadController::class, 'store']);
 Route::get('/leads', [LeadController::class, 'index']);
@@ -37,6 +38,16 @@ Route::post('/webhooks/whatsapp/{org_slug}', [WhatsappWebhookController::class, 
 
 // Order status lookup (rate limited)
 Route::get('/order-status/latest', [OrderStatusController::class, 'latest'])->middleware('throttle:20,1');
+
+// Shopify API endpoints for AI backend
+Route::prefix('shopify')->group(function () {
+    Route::post('/query', [ShopifyDataController::class, 'query']);
+    Route::get('/shop/{shop_domain}', [ShopifyDataController::class, 'getShopInfo']);
+    Route::get('/health', [ShopifyDataController::class, 'health']);
+});
+
+// Organization Shopify integration endpoints
+Route::get('/organizations/{org_slug}/shopify-domain', [ShopifyDataController::class, 'getOrgShopDomain']);
 
 // Plugin/App Integration endpoints
 Route::prefix('integrations')->group(function () {
