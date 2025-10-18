@@ -73,6 +73,16 @@
             this.loadStyles();
             this.createWidget();
             this.bindEvents();
+            
+            // Detect and apply Shopify theme colors if available
+            if (this.config.isShopify) {
+                setTimeout(() => {
+                    const colors = this.detectShopifyThemeColors();
+                    if (colors) {
+                        this.applyDynamicColors(colors);
+                    }
+                }, 500); // Wait for page to fully render
+            }
         }
 
         loadStyles() {
@@ -695,6 +705,83 @@
             }
         }
 
+        detectShopifyThemeColors() {
+            // Only run if this is a Shopify store
+            if (!this.config.isShopify) {
+                return null;
+            }
+
+            try {
+                // Try to detect primary colors from Shopify's common elements
+                const selectors = [
+                    'button[type="submit"]',
+                    '.btn--primary',
+                    '.product-form__submit',
+                    '[class*="button--primary"]',
+                    '[class*="btn-primary"]',
+                    '.shopify-payment-button__button',
+                    'button[name="add"]'
+                ];
+
+                for (const selector of selectors) {
+                    const element = document.querySelector(selector);
+                    if (element) {
+                        const styles = window.getComputedStyle(element);
+                        const bgColor = styles.backgroundColor;
+                        
+                        // Convert rgb to hex
+                        if (bgColor && bgColor.startsWith('rgb')) {
+                            const hex = this.rgbToHex(bgColor);
+                            if (hex && hex !== '#000000' && hex !== '#ffffff') {
+                                console.log('[AI Chat] Detected Shopify primary color:', hex);
+                                return {
+                                    primaryColor: hex
+                                };
+                            }
+                        }
+                    }
+                }
+
+                console.log('[AI Chat] Could not detect Shopify theme colors, using defaults');
+                return null;
+            } catch (error) {
+                console.warn('[AI Chat] Error detecting Shopify colors:', error);
+                return null;
+            }
+        }
+
+        rgbToHex(rgb) {
+            // Convert rgb(r, g, b) or rgba(r, g, b, a) to hex
+            const match = rgb.match(/\d+/g);
+            if (!match || match.length < 3) return null;
+            
+            const r = parseInt(match[0]);
+            const g = parseInt(match[1]);
+            const b = parseInt(match[2]);
+            
+            return '#' + [r, g, b].map(x => {
+                const hex = x.toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            }).join('');
+        }
+
+        applyDynamicColors(colors) {
+            if (!colors || !colors.primaryColor) return;
+
+            // Apply colors to widget elements dynamically
+            const style = document.createElement('style');
+            style.id = 'ai-chat-dynamic-colors';
+            style.innerHTML = `
+                .ai-chat-button { background: ${colors.primaryColor} !important; }
+                .ai-chat-header { background: ${colors.primaryColor} !important; }
+                .ai-chat-message-user .ai-chat-message-content { background: ${colors.primaryColor} !important; }
+                .ai-chat-send-button { background: ${colors.primaryColor} !important; }
+                .ai-chat-lead-submit { background: ${colors.primaryColor} !important; }
+                .ai-chat-input:focus { border-color: ${colors.primaryColor} !important; }
+            `;
+            document.head.appendChild(style);
+        }
+
         trackAnalytics(eventType, data = {}) {
             // Track widget interactions in analytics
             try {
@@ -759,6 +846,11 @@
                 // Include lead information if captured
                 if (this.leadCaptured && this.userInfo.name) {
                     requestBody.visitor_info = this.userInfo;
+                }
+                
+                // Add Shopify flag if this is a Shopify store
+                if (this.config.isShopify) {
+                    requestBody.is_shopify = true;
                 }
 
                 const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/chat`, {

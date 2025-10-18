@@ -76,7 +76,7 @@ class ShopifyDataController extends Controller
 
                 case 'order':
                     $data = $this->handleOrderQuery($query);
-                    $formattedText = $this->shopifyService->formatForAI($data, 'order');
+                    $formattedText = $data ? $this->shopifyService->formatForAI($data, 'order') : 'No order found with that order number or email.';
                     break;
 
                 case 'shop_info':
@@ -151,17 +151,78 @@ class ShopifyDataController extends Controller
      */
     protected function handleProductQuery(string $query)
     {
-        // Extract search keywords (remove common words)
-        $keywords = preg_replace('/\b(what|do|you|have|sell|any|products?|items?|looking|for|show|me)\b/i', '', $query);
-        $keywords = trim($keywords);
-
-        if (empty($keywords) || strlen($keywords) < 3) {
+        $original = $query;
+        
+        // Use LLM to extract product keyword(s) from natural language
+        $keywords = $this->extractProductKeyword($query);
+        
+        if (empty($keywords)) {
             // General product query - get all products
+            Log::info('[SHOPIFY] General product query', ['original' => $original, 'keywords' => 'none']);
             return $this->shopifyService->getAllProducts(10);
         } else {
-            // Specific product search
-            return $this->shopifyService->searchProducts($keywords, 5);
+            // Specific product search - search by keywords
+            Log::info('[SHOPIFY] Specific product search', ['original' => $original, 'keywords' => $keywords]);
+            return $this->shopifyService->searchProducts($keywords, 10);
         }
+    }
+
+    /**
+     * Use LLM to extract product name/keyword from natural language query
+     */
+    protected function extractProductKeyword(string $query): ?string
+    {
+        try {
+            $prompt = "Extract ONLY the product name or category being asked about. Ignore price/quality adjectives like 'cheapest', 'best', 'lowest'. Return just the product type in 1-3 words.\n\nExamples:\n\"do you have snowboard in stock?\" → snowboard\n\"what is the cheapest snowboard?\" → snowboard\n\"what is the lowest price for a gift card?\" → gift card\n\"show me your best ski wax products\" → ski wax\n\"looking for hydrogen model\" → hydrogen\n\"what products do you sell?\" → [empty]\n\"tell me about featured items\" → [empty]\n\nQuery: \"$query\"\nProduct type:";
+            
+            $response = \Illuminate\Support\Facades\Http::timeout(5)->post(config('services.ai_agent.url') . '/extract', [
+                'prompt' => $prompt,
+                'max_tokens' => 20
+            ]);
+            
+            if ($response->successful()) {
+                $result = trim($response->json('result', ''));
+                
+                // Clean up response - remove common filler words if LLM added them
+                $result = preg_replace('/\b(the|a|an|some|any)\s+/i', '', $result);
+                $result = trim($result);
+                
+                // If response is [empty] or too long, return null
+                if (empty($result) || stripos($result, '[empty]') !== false || strlen($result) > 50) {
+                    return null;
+                }
+                
+                Log::info('[SHOPIFY] LLM keyword extraction', [
+                    'query' => $query,
+                    'extracted' => $result
+                ]);
+                
+                return $result;
+            }
+        } catch (\Exception $e) {
+            Log::error('[SHOPIFY] LLM extraction failed', ['error' => $e->getMessage()]);
+            // Fallback to simple regex if LLM fails
+            return $this->fallbackKeywordExtraction($query);
+        }
+        
+        return null;
+    }
+
+    /**
+     * Fallback keyword extraction using regex (if LLM fails)
+     */
+    protected function fallbackKeywordExtraction(string $query): ?string
+    {
+        $keywords = preg_replace('/\b(what|which|do|does|you|your|have|has|sell|selling|any|all|products?|items?|looking|for|show|me|my|the|a|an|available|current|can|i|see|get|list|in|stock|and|is|what|price|lowest|highest|cost)\b/i', '', $query);
+        $keywords = preg_replace('/[^\w\s-]/', '', $keywords);
+        $keywords = trim($keywords);
+        
+        // Only return first 1-2 words
+        $words = explode(' ', $keywords);
+        $words = array_slice($words, 0, 2);
+        $keywords = implode(' ', $words);
+        
+        return strlen($keywords) >= 3 ? $keywords : null;
     }
 
     /**

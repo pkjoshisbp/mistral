@@ -18,7 +18,7 @@ class ShopifyApiService
     {
         if ($integration) {
             $this->integration = $integration;
-            $this->shopDomain = $integration->shop_domain;
+            $this->shopDomain = $integration->shop;
             $this->accessToken = $integration->access_token;
         }
     }
@@ -29,7 +29,7 @@ class ShopifyApiService
     public function setIntegration(Integration $integration)
     {
         $this->integration = $integration;
-        $this->shopDomain = $integration->shop_domain;
+        $this->shopDomain = $integration->shop;
         $this->accessToken = $integration->access_token;
         return $this;
     }
@@ -39,9 +39,9 @@ class ShopifyApiService
      */
     public static function getIntegrationByShop(string $shopDomain): ?Integration
     {
-        return Integration::where('shop_domain', $shopDomain)
-            ->where('integration_type', 'shopify')
-            ->whereNull('deleted_at')
+        return Integration::where('shop', $shopDomain)
+            ->where('provider', 'shopify')
+            ->where('active', true)
             ->first();
     }
 
@@ -87,37 +87,60 @@ class ShopifyApiService
     }
 
     /**
-     * Search products by query
+     * Search products by keyword (client-side filtering since Shopify API doesn't have fuzzy search)
      */
     public function searchProducts(string $query, int $limit = 10)
     {
-        $cacheKey = "shopify_products_{$this->shopDomain}_" . md5($query);
+        // Get all products (cached) and filter client-side
+        $allProducts = $this->getAllProducts(250); // Get more to search through
         
-        return Cache::remember($cacheKey, 300, function () use ($query, $limit) {
-            $response = $this->makeRequest('products.json', [
-                'limit' => $limit,
-                'title' => $query,
-                'status' => 'active'
-            ]);
-
-            if (!$response || !isset($response['products'])) {
-                return [];
+        \Log::info('[SHOPIFY] searchProducts called', [
+            'query' => $query,
+            'all_products_count' => count($allProducts),
+            'limit' => $limit
+        ]);
+        
+        if (empty($allProducts)) {
+            \Log::warning('[SHOPIFY] No products from getAllProducts()');
+            return [];
+        }
+        
+        $searchTerm = strtolower($query);
+        $matches = [];
+        
+        // Also search for singular version if query ends in 's'
+        $singularTerm = null;
+        if (substr($searchTerm, -1) === 's' && strlen($searchTerm) > 3) {
+            $singularTerm = substr($searchTerm, 0, -1);
+        }
+        
+        foreach ($allProducts as $product) {
+            $titleLower = strtolower($product['title'] ?? '');
+            $descLower = strtolower($product['description'] ?? '');
+            
+            // Check if search term (or singular) appears in title or description
+            $found = stripos($titleLower, $searchTerm) !== false || 
+                     stripos($descLower, $searchTerm) !== false;
+                     
+            if (!$found && $singularTerm) {
+                $found = stripos($titleLower, $singularTerm) !== false || 
+                         stripos($descLower, $singularTerm) !== false;
             }
-
-            return array_map(function ($product) {
-                return [
-                    'id' => $product['id'],
-                    'title' => $product['title'],
-                    'description' => strip_tags($product['body_html'] ?? ''),
-                    'price' => $product['variants'][0]['price'] ?? 'N/A',
-                    'currency' => $product['variants'][0]['currency_code'] ?? 'USD',
-                    'available' => ($product['variants'][0]['inventory_quantity'] ?? 0) > 0,
-                    'inventory' => $product['variants'][0]['inventory_quantity'] ?? 0,
-                    'url' => "https://{$this->shopDomain}/products/{$product['handle']}",
-                    'image' => $product['image']['src'] ?? null,
-                ];
-            }, $response['products']);
-        });
+            
+            if ($found) {
+                $matches[] = $product;
+                if (count($matches) >= $limit) {
+                    break;
+                }
+            }
+        }
+        
+        \Log::info('[SHOPIFY] searchProducts results', [
+            'query' => $query,
+            'matches_found' => count($matches)
+        ]);
+        
+        return $matches;
     }
 
     /**
@@ -176,12 +199,15 @@ class ShopifyApiService
             }
 
             return array_map(function ($product) {
+                $variant = $product['variants'][0] ?? [];
                 return [
                     'id' => $product['id'],
                     'title' => $product['title'],
                     'description' => strip_tags($product['body_html'] ?? ''),
-                    'price' => $product['variants'][0]['price'] ?? 'N/A',
-                    'available' => ($product['variants'][0]['inventory_quantity'] ?? 0) > 0,
+                    'price' => $variant['price'] ?? 'N/A',
+                    'currency' => $product['currency'] ?? 'USD',
+                    'inventory' => $variant['inventory_quantity'] ?? 0,
+                    'available' => ($variant['inventory_quantity'] ?? 0) > 0,
                     'url' => "https://{$this->shopDomain}/products/{$product['handle']}",
                 ];
             }, $response['products']);
@@ -422,5 +448,105 @@ class ShopifyApiService
             default:
                 return json_encode($data, JSON_PRETTY_PRINT);
         }
+    }
+
+    /**
+     * Get theme colors from active theme
+     */
+    public function getThemeColors()
+    {
+        try {
+            // First, get the active theme
+            $themesResponse = $this->makeRequest('themes.json');
+            
+            if (!$themesResponse || !isset($themesResponse['themes'])) {
+                return null;
+            }
+
+            // Find the active/published theme
+            $activeTheme = collect($themesResponse['themes'])
+                ->first(fn($theme) => $theme['role'] === 'main');
+
+            if (!$activeTheme) {
+                return null;
+            }
+
+            // Get theme assets to extract color settings
+            $assetsResponse = $this->makeRequest("themes/{$activeTheme['id']}/assets.json");
+            
+            if (!$assetsResponse || !isset($assetsResponse['assets'])) {
+                return null;
+            }
+
+            // Look for settings_data.json which contains theme color settings
+            $settingsAsset = collect($assetsResponse['assets'])
+                ->first(fn($asset) => $asset['key'] === 'config/settings_data.json');
+
+            if (!$settingsAsset) {
+                return null;
+            }
+
+            // Fetch the actual settings data
+            $settingsResponse = $this->makeRequest(
+                "themes/{$activeTheme['id']}/assets.json",
+                ['asset[key]' => 'config/settings_data.json']
+            );
+
+            if (!$settingsResponse || !isset($settingsResponse['asset']['value'])) {
+                return null;
+            }
+
+            $settingsData = json_decode($settingsResponse['asset']['value'], true);
+            
+            if (!$settingsData || !isset($settingsData['current'])) {
+                return null;
+            }
+
+            // Extract color values from theme settings
+            $colors = $settingsData['current']['colors'] ?? [];
+            
+            // Common Shopify theme color keys
+            $primaryColor = $colors['button'] ?? 
+                           $colors['accent'] ?? 
+                           $colors['color_primary'] ?? 
+                           $colors['primary'] ?? 
+                           '#007bff';
+
+            $textColor = $colors['text'] ?? 
+                        $colors['color_text'] ?? 
+                        $colors['body_text'] ?? 
+                        '#333333';
+
+            return [
+                'primary_color' => $this->normalizeColor($primaryColor),
+                'text_color' => $this->normalizeColor($textColor),
+            ];
+
+        } catch (\Exception $e) {
+            Log::warning('[SHOPIFY] Failed to fetch theme colors', [
+                'error' => $e->getMessage(),
+                'shop' => $this->shopDomain
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Normalize color format (handle rgba, rgb, hex)
+     */
+    private function normalizeColor($color)
+    {
+        // If it's already a hex color, return it
+        if (preg_match('/^#[0-9A-F]{6}$/i', $color)) {
+            return $color;
+        }
+
+        // If it's rgb or rgba, try to convert (simplified)
+        if (preg_match('/rgba?\((\d+),\s*(\d+),\s*(\d+)/', $color, $matches)) {
+            return sprintf('#%02x%02x%02x', $matches[1], $matches[2], $matches[3]);
+        }
+
+        // Default fallback
+        return '#007bff';
     }
 }

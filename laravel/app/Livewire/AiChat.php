@@ -6,6 +6,7 @@ use Livewire\Component;
 use App\Models\Organization;
 use App\Services\AiAgentService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Http;
 
 class AiChat extends Component
 {
@@ -208,6 +209,52 @@ $nluUser = [
         return;
     }
 
+    // ---- SHOPIFY API INTEGRATION ----
+    $shopifyContext = '';
+    try {
+        if ($this->detectShopifyQuery($userMessage)) {
+            \Log::info('Shopify query detected, fetching live data', [
+                'org_id' => $this->selectedOrgId,
+                'query' => $userMessage
+            ]);
+            
+            $organization = Organization::find($this->selectedOrgId);
+            if ($organization) {
+                $integration = $organization->integrations()
+                    ->where('provider', 'shopify')
+                    ->where('active', true)
+                    ->first();
+                
+                if ($integration && $integration->shop) {
+                    try {
+                        $response = Http::timeout(10)->post(url('/api/shopify/query'), [
+                            'shop_domain' => $integration->shop,
+                            'query' => $userMessage,
+                        ]);
+                        
+                        if ($response->successful()) {
+                            $data = $response->json();
+                            if ($data['success'] ?? false) {
+                                $shopifyContext = $data['formatted_text'] ?? '';
+                                \Log::info('Shopify data fetched successfully', [
+                                    'query_type' => $data['query_type'] ?? 'unknown',
+                                    'data_count' => count($data['data'] ?? [])
+                                ]);
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        \Log::error('Shopify API request failed', [
+                            'error' => $e->getMessage(),
+                            'shop' => $integration->shop
+                        ]);
+                    }
+                }
+            }
+        }
+    } catch (\Exception $e) {
+        \Log::error('Shopify integration error', ['error' => $e->getMessage()]);
+    }
+
     // ---- RETRIEVAL (Qdrant via nomic embeddings) ----
     $allContext = [];
     $topContext = [];
@@ -271,8 +318,15 @@ $nluUser = [
         }
 
         // Build flattened text context for LLM and logs
+        // Start with Shopify data if available
+        if (!empty($shopifyContext)) {
+            $context = "LIVE STORE DATA (use this as priority):\n\n" . $shopifyContext . "\n\n";
+        } else {
+            $context = '';
+        }
+        
         if (!empty($topContext)) {
-            $context = "Relevant information:\n\n";
+            $context .= "Additional information from knowledge base:\n\n";
             $uniquePayloads = [];
             foreach ($topContext as $item) {
                 $payload = $item['content'] ?? [];
@@ -296,11 +350,11 @@ $nluUser = [
                 // }
                 $context .= "\n";
             }
-        } else {
+        } elseif (empty($shopifyContext)) {
             $context = "No specific information found in the knowledge base.";
         }
 
-    \Log::debug('AIChat context (flattened)', ['context' => $context]);
+    \Log::debug('AIChat context (flattened)', ['context' => $context, 'has_shopify' => !empty($shopifyContext)]);
     $perf['context_ready'] = microtime(true);
 
     } catch (\Throwable $t) {
@@ -571,6 +625,32 @@ $nluUser = [
         $this->messages = [];
         $this->conversationContext = [];
         session()->forget(['ai_chat_messages', 'ai_chat_context']);
+    }
+
+    /**
+     * Detect if the query is asking about Shopify store data
+     */
+    private function detectShopifyQuery(string $query): bool
+    {
+        $query = strtolower($query);
+        
+        // Shopify-specific keywords
+        $shopifyKeywords = [
+            'product', 'products', 'item', 'items', 'sell', 'selling', 'buy', 'purchase',
+            'price', 'cost', 'how much', 'available', 'stock', 'inventory',
+            'order', 'orders', 'tracking', 'track', 'shipped', 'shipping', 'delivery',
+            'collection', 'collections', 'category', 'categories',
+            'featured', 'bestseller', 'best seller', 'popular',
+            'in stock', 'out of stock', 'catalog', 'catalogue'
+        ];
+        
+        foreach ($shopifyKeywords as $keyword) {
+            if (str_contains($query, $keyword)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     public function render()

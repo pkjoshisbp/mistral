@@ -399,12 +399,18 @@ class IntegrationController extends Controller
         $shopOwnerName = $shopData['shop_owner'] ?? 'Store Owner';
         $shopName = $shopData['name'] ?? str_replace('.myshopify.com', '', $shop);
         $shopPhone = $shopData['phone'] ?? null;
+        $shopDescription = $shopData['description'] ?? null;
+        $shopDomain = $shopData['domain'] ?? $shop;
+        $shopAddress = $shopData['address1'] ?? null;
+        $shopCity = $shopData['city'] ?? null;
+        $shopCountry = $shopData['country_name'] ?? null;
         
         Log::info('Shopify shop details fetched', [
             'shop' => $shop,
             'shop_name' => $shopName,
             'has_email' => !empty($shopOwnerEmail),
-            'owner_name' => $shopOwnerName
+            'owner_name' => $shopOwnerName,
+            'has_description' => !empty($shopDescription)
         ]);
 
         // Strategy: Check if user exists and has an organization first
@@ -422,7 +428,20 @@ class IntegrationController extends Controller
                     // Use the user's first organization (they're already set up)
                     $organization = $userOrganizations->first();
                     
-                    Log::info('User already has organization - using existing org', [
+                    // Update organization with fresh Shopify data
+                    $orgDescription = $shopDescription ?: $organization->description;
+                    if ($shopAddress && $shopCity && $shopCountry && !str_contains($orgDescription, 'Location:')) {
+                        $orgDescription .= " | Location: {$shopCity}, {$shopCountry}";
+                    }
+                    
+                    $organization->update([
+                        'contact_email' => $shopOwnerEmail ?: $organization->contact_email,
+                        'contact_phone' => $shopPhone ?: $organization->contact_phone,
+                        'description' => $orgDescription,
+                        'website' => "https://{$shopDomain}"
+                    ]);
+                    
+                    Log::info('User already has organization - updated with fresh shop info', [
                         'user_id' => $existingUser->id,
                         'org_id' => $organization->id,
                         'org_name' => $organization->name,
@@ -437,7 +456,20 @@ class IntegrationController extends Controller
             $organization = Organization::where('website', "https://{$shop}")->first();
             
             if ($organization) {
-                Log::info('Found existing organization by website URL', [
+                // Update organization with fresh Shopify data
+                $orgDescription = $shopDescription ?: $organization->description;
+                if ($shopAddress && $shopCity && $shopCountry && !str_contains($orgDescription, 'Location:')) {
+                    $orgDescription .= " | Location: {$shopCity}, {$shopCountry}";
+                }
+                
+                $organization->update([
+                    'contact_email' => $shopOwnerEmail ?: $organization->contact_email,
+                    'contact_phone' => $shopPhone ?: $organization->contact_phone,
+                    'description' => $orgDescription,
+                    'website' => "https://{$shopDomain}"
+                ]);
+                
+                Log::info('Found existing organization by website URL - updated with fresh shop info', [
                     'org_id' => $organization->id,
                     'shop' => $shop
                 ]);
@@ -456,14 +488,20 @@ class IntegrationController extends Controller
                 $counter++;
             }
             
+            // Build comprehensive description
+            $orgDescription = $shopDescription ?: 'Shopify E-Commerce Store';
+            if ($shopAddress && $shopCity && $shopCountry) {
+                $orgDescription .= " | Location: {$shopCity}, {$shopCountry}";
+            }
+            
             $organization = Organization::create([
                 'name' => $shopName, // Use shop name, not owner name
                 'slug' => $slug,
-                'website' => "https://{$shop}",
+                'website' => "https://{$shopDomain}",
                 'contact_email' => $shopOwnerEmail,
                 'contact_phone' => $shopPhone,
-                'description' => 'Shopify E-Commerce Store',
-                'token_balance' => 20000 // Initial 20K tokens for new organizations
+                'description' => $orgDescription,
+                'token_balance' => 500000 // Initial 500K tokens for Shopify stores
             ]);
             
             Log::info('Created new organization for Shopify integration', [
@@ -490,11 +528,31 @@ class IntegrationController extends Controller
             'shop' => $shop
         ]);
 
+        // Fetch theme colors from Shopify
+        try {
+            $shopifyService = new \App\Services\ShopifyApiService($integration);
+            $themeColors = $shopifyService->getThemeColors();
+            
+            if ($themeColors) {
+                Log::info('[SHOPIFY] Theme colors fetched successfully', [
+                    'org_id' => $organization->id,
+                    'colors' => $themeColors
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::warning('[SHOPIFY] Failed to fetch theme colors during setup', [
+                'error' => $e->getMessage(),
+                'org_id' => $organization->id
+            ]);
+            $themeColors = null;
+        }
+
         // Save widget settings to organization instead
         $organizationSettings = $organization->settings ?? [];
         $organizationSettings = array_merge($organizationSettings, [
             'widget_position' => 'bottom-right',
-            'primary_color' => '#007bff',
+            'primary_color' => $themeColors['primary_color'] ?? '#007bff',
+            'text_color' => $themeColors['text_color'] ?? '#333333',
             'welcome_message' => 'Hello! How can I help you today?',
             'widget_offset_x' => 20,
             'widget_offset_y' => 20

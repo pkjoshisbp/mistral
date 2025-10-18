@@ -33,6 +33,12 @@ class WidgetController
 
         // Use organization settings as single source of truth
         $settings = $organization->settings ?? [];
+        
+        // Check if organization has active Shopify integration
+        $hasShopifyIntegration = $organization->integrations()
+            ->where('provider', 'shopify')
+            ->where('active', true)
+            ->exists();
 
         $scriptVersion = now()->format('Ymd.His');
         $widgetConfig = [
@@ -50,6 +56,8 @@ class WidgetController
             'brandingEnabled' => array_key_exists('branding_enabled', $settings) ? (bool)$settings['branding_enabled'] : true,
             'brandingFollow' => array_key_exists('branding_follow', $settings) ? (bool)$settings['branding_follow'] : true,
             'brandingBadge' => (bool)($settings['branding_badge'] ?? false),
+            // Shopify integration flag
+            'isShopify' => $hasShopifyIntegration,
         ];
 
         $script = view('widget.script', compact('widgetConfig'))->render();
@@ -128,6 +136,7 @@ class WidgetController
             $sessionId = $request->input('session_id', uniqid());
             $userInfo = $request->input('user_info', []);
             $visitorInfo = $request->input('visitor_info', []); // For backward compatibility
+            $isShopify = $request->input('is_shopify', false); // Widget flag for Shopify stores
             
             // Merge user_info and visitor_info
             $allUserInfo = array_merge($userInfo, $visitorInfo);
@@ -175,6 +184,124 @@ class WidgetController
             $previousContextPayloads = $existingConversation->metadata['last_context_payloads'] ?? [];
 
             $isAffirmativeFollowUp = $this->isAffirmativeFollowUp($message);
+
+            // ---- SHOPIFY API INTEGRATION (SMART PATH) ----
+            $shopifyContext = '';
+            $shopifyData = null;
+            $hasShopifyData = false;
+            
+            try {
+                // Check if widget is from Shopify OR if query matches Shopify patterns
+                $shouldCheckShopify = $isShopify || $this->detectShopifyQuery($message);
+                
+                if ($shouldCheckShopify) {
+                    Log::info('Shopify query detected in widget', [
+                        'org_id' => $organization->id,
+                        'query' => $message,
+                        'source' => $isShopify ? 'widget_flag' : 'pattern_detection'
+                    ]);
+                    
+                    $integration = $organization->integrations()
+                        ->where('provider', 'shopify')
+                        ->where('active', true)
+                        ->first();
+                    
+                    if ($integration && $integration->shop) {
+                        try {
+                            $response = \Illuminate\Support\Facades\Http::timeout(10)->post(config('app.url') . '/api/shopify/query', [
+                                'shop_domain' => $integration->shop,
+                                'query' => $message,
+                            ]);
+                            
+                            if ($response->successful()) {
+                                $data = $response->json();
+                                if ($data['success'] ?? false) {
+                                    $shopifyData = $data;
+                                    $hasShopifyData = !empty($data['data']);
+                                    
+                                    // Build concise context for LLM
+                                    if ($hasShopifyData && ($data['query_type'] ?? '') === 'products') {
+                                        $products = $data['data'];
+                                        $productCount = count($products);
+                                        
+                                        // Sort products by price (ascending) for accurate price queries
+                                        usort($products, function($a, $b) {
+                                            return floatval($a['price']) <=> floatval($b['price']);
+                                        });
+                                        
+                                        Log::info('[SHOPIFY] Products sorted by price', [
+                                            'first' => $products[0]['title'] ?? 'N/A',
+                                            'first_price' => $products[0]['price'] ?? 'N/A',
+                                            'last' => $products[count($products)-1]['title'] ?? 'N/A',
+                                            'last_price' => $products[count($products)-1]['price'] ?? 'N/A'
+                                        ]);
+                                        
+                                        // Extract product categories/types
+                                        $categories = array_unique(array_map(function($p) {
+                                            $title = $p['title'] ?? '';
+                                            // Extract category from title (e.g., "Snowboard", "Ski Wax", etc.)
+                                            if (stripos($title, 'snowboard') !== false) return 'Snowboards';
+                                            if (stripos($title, 'ski') !== false) return 'Ski Equipment';
+                                            if (stripos($title, 'gift') !== false) return 'Gift Cards';
+                                            return 'Products';
+                                        }, $products));
+                                        
+                                        // Build smart context with price range and examples
+                                        $shopifyContext = "Available Products ({$productCount} total):\n";
+                                        $shopifyContext .= "Categories: " . implode(', ', $categories) . "\n";
+                                        
+                                        // Add price range
+                                        $availableProducts = array_filter($products, fn($p) => $p['available']);
+                                        if (!empty($availableProducts)) {
+                                            $minPrice = min(array_map(fn($p) => floatval($p['price']), $availableProducts));
+                                            $maxPrice = max(array_map(fn($p) => floatval($p['price']), $availableProducts));
+                                            $currency = $products[0]['currency'] ?? 'USD';
+                                            $shopifyContext .= "Price Range: {$currency} {$minPrice} - {$currency} {$maxPrice}\n\n";
+                                        } else {
+                                            $shopifyContext .= "\n";
+                                        }
+                                        
+                                        // Show examples: lowest price, highest price, and middle range
+                                        $exampleCount = min(5, $productCount);
+                                        $shopifyContext .= "Examples (sorted by price):\n";
+                                        for ($i = 0; $i < $exampleCount; $i++) {
+                                            $p = $products[$i];
+                                            $shopifyContext .= "- {$p['title']}: {$p['currency']} {$p['price']}";
+                                            if ($p['available']) {
+                                                $shopifyContext .= " (In stock: {$p['inventory']})";
+                                            } else {
+                                                $shopifyContext .= " (Out of stock)";
+                                            }
+                                            $shopifyContext .= "\n";
+                                        }
+                                        
+                                        if ($productCount > $exampleCount) {
+                                            $shopifyContext .= "... and " . ($productCount - $exampleCount) . " more products\n";
+                                        }
+                                        
+                                        $shopifyContext .= "\nWebsite: {$integration->shop}";
+                                    } else {
+                                        $shopifyContext = $data['formatted_text'] ?? '';
+                                    }
+                                    
+                                    Log::info('Shopify data fetched for widget', [
+                                        'query_type' => $data['query_type'] ?? 'unknown',
+                                        'data_count' => count($data['data'] ?? []),
+                                        'has_data' => $hasShopifyData
+                                    ]);
+                                }
+                            }
+                        } catch (\Exception $e) {
+                            Log::error('Shopify API request failed in widget', [
+                                'error' => $e->getMessage(),
+                                'shop' => $integration->shop
+                            ]);
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::error('Shopify integration error in widget', ['error' => $e->getMessage()]);
+            }
 
             // Search organization's Qdrant collection for context using enhanced search (or reuse last context on affirmatives)
             $collectionName = $organization->slug; // Use organization slug directly
@@ -313,36 +440,48 @@ class WidgetController
             $orgPhone = $organization->contact_phone ?? null;
             $orgDesc  = $organization->description ? trim($this->htmlToPlainWithLinks($organization->description)) : null;
 
+            // Build context with Shopify data priority
+            $finalContext = '';
+            if (!empty($shopifyContext)) {
+                $finalContext = "LIVE STORE DATA (use this as your primary source):\n\n" . $shopifyContext . "\n\n";
+            }
+            if ($context) {
+                $finalContext .= "Additional information from knowledge base:\n\n" . $context;
+            }
+
             // Assistant naming and channel-agnostic guidance
             $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
-            // Strong, structured org context to minimize hallucinations
-            $systemPrompt = "You are {$assistantName}, a helpful customer service assistant for {$organization->name}. ";
-            if ($orgDesc) {
-                $systemPrompt .= "About: {$orgDesc}. ";
-            }
-            $systemPrompt .= "\nOrganization info:\n";
-            $systemPrompt .= "- Official website: {$orgWebsite}\n";
-            if ($orgEmail) { $systemPrompt .= "- Official email: {$orgEmail}\n"; } else { $systemPrompt .= "- Official email: (not provided)\n"; }
-            if ($orgPhone) { $systemPrompt .= "- Official phone: {$orgPhone}\n"; } else { $systemPrompt .= "- Official phone: (not provided)\n"; }
-            $systemPrompt .= "Rules: Only use the official website/email/phone above. Do not invent or guess any email addresses, phone numbers, WhatsApp numbers, or other contact details. If an official contact is not provided, direct the user to the official website instead. ";
             
-            // Add location context briefly if available
-            if ($country || $region || $location) {
-                $systemPrompt .= "Customer is in ";
-                if ($country) $systemPrompt .= $country;
-                if ($region) $systemPrompt .= ", {$region}";
-                if ($location) $systemPrompt .= ", {$location}";
-                $systemPrompt .= ". ";
-            }
-            
-            if ($context) {
-                $systemPrompt .= "Use this info:\n{$context}\n";
-                $systemPrompt .= "Give a brief, helpful answer using the above information. ";
+            // Build smart system prompt
+            if ($hasShopifyData) {
+                // Shopify data available - guide LLM to be conversational
+                $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
+                $systemPrompt .= "Answer naturally and conversationally based on this LIVE PRODUCT DATA:\n\n{$shopifyContext}\n\n";
+                $systemPrompt .= "CRITICAL INSTRUCTIONS:\n";
+                $systemPrompt .= "- Products are SORTED BY PRICE (lowest first)\n";
+                $systemPrompt .= "- For 'lowest price' or 'cheapest' questions - use the FIRST available product in the list\n";
+                $systemPrompt .= "- For 'highest price' or 'most expensive' - use the LAST product\n";
+                $systemPrompt .= "- For 'what products do you sell?' - mention categories, give 2-3 examples with prices\n";
+                $systemPrompt .= "- For 'do you have [item]?' - check the examples, say yes/no with price and stock\n";
+                $systemPrompt .= "- ALWAYS use EXACT prices from the product data above\n";
+                $systemPrompt .= "- Keep responses brief (2-3 sentences), friendly, and helpful\n";
+                $systemPrompt .= "Website: {$orgWebsite}";
             } else {
-                $systemPrompt .= "I don't have specific info for this question. ";
+                // No Shopify data - standard prompt
+                $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
+                if ($orgDesc) {
+                    $systemPrompt .= "{$orgDesc}. ";
+                }
+                $systemPrompt .= "Website: {$orgWebsite}";
+                if ($orgEmail) $systemPrompt .= " | Email: {$orgEmail}";
+                if ($orgPhone) $systemPrompt .= " | Phone: {$orgPhone}";
+                $systemPrompt .= ". ";
+                
+                if ($context) {
+                    $systemPrompt .= "\nInfo:\n{$context}\n";
+                }
+                $systemPrompt .= "Be brief, friendly, and helpful. Answer in 2-3 sentences max.";
             }
-            
-            $systemPrompt .= "Keep responses concise and direct. Always use plain text only - no HTML tags, no markdown, no special formatting. If you mention any website or resource, include the full https URL as plain text. If you suggest multiple resources, present them as a simple bulleted list with each item containing only the plain URL. Do not fabricate domains or emails; prefer {$orgWebsite} and the official contacts provided. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
             // Get AI response using llmChat for better token tracking
             $messages = [
@@ -405,9 +544,10 @@ class WidgetController
                 'org_id' => $orgId,
                 'session_id' => $sessionId,
                 'user_message' => $message,
-                'context_length' => strlen($context),
-                'context_found' => !empty($context),
-                'context_preview' => $context ? substr($context, 0, 300) . '...' : 'No context',
+                'context_length' => strlen($finalContext),
+                'context_found' => !empty($finalContext),
+                'has_shopify_data' => !empty($shopifyContext),
+                'context_preview' => $finalContext ? substr($finalContext, 0, 300) . '...' : 'No context',
                 'system_prompt_length' => strlen($systemPrompt),
                 'ai_response_length' => strlen($responseText),
                 'ai_response_preview' => substr($responseText, 0, 300) . '...',
@@ -823,5 +963,39 @@ class WidgetController
         }
 
         return true; // All checks passed
+    }
+
+    /**
+     * Detect if the message is asking about Shopify-related data
+     */
+    private function detectShopifyQuery(string $message): bool
+    {
+        $lowerMessage = strtolower($message);
+        
+        // Generic Shopify keywords
+        $shopifyKeywords = [
+            'product', 'products', 'item', 'items', 'inventory', 'stock',
+            'order', 'orders', 'tracking', 'shipment', 'shipping', 'delivery',
+            'price', 'cost', 'how much', 'buy', 'purchase', 'sell',
+            'available', 'in stock', 'out of stock', 'featured'
+        ];
+        
+        foreach ($shopifyKeywords as $keyword) {
+            if (stripos($lowerMessage, $keyword) !== false) {
+                return true;
+            }
+        }
+        
+        // Check for "do you have [something]" pattern
+        if (preg_match('/\b(do you have|got|carry|got any)\b/i', $lowerMessage)) {
+            return true;
+        }
+        
+        // Check for "looking for [something]" pattern
+        if (preg_match('/\b(looking for|need|want|interested in)\b/i', $lowerMessage)) {
+            return true;
+        }
+        
+        return false;
     }
 }

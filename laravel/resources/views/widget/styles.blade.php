@@ -3,7 +3,7 @@
     ========================================================== */
 
 /* Base */
-.ai-chat-widget { position: fixed !important; z-index: 999999 !important; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif !important; --ai-offset-x: 20px; --ai-offset-y: 20px; }
+.ai-chat-widget { position: fixed !important; z-index: 2147483647 !important; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif !important; --ai-offset-x: 20px; --ai-offset-y: 20px; }
 .ai-chat-widget.bottom-right { bottom: var(--ai-offset-y) !important; right: var(--ai-offset-x) !important; }
 .ai-chat-widget.bottom-left { bottom: var(--ai-offset-y) !important; left: var(--ai-offset-x) !important; }
 .ai-chat-widget.top-right { top: var(--ai-offset-y) !important; right: var(--ai-offset-x) !important; }
