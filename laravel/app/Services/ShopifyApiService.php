@@ -70,6 +70,15 @@ class ShopifyApiService
                 return $response->json();
             }
 
+            // Handle 403 - Protected Customer Data
+            if ($response->status() === 403 && str_contains($response->body(), 'protected customer data')) {
+                Log::warning('[SHOPIFY API] Protected customer data access denied', [
+                    'endpoint' => $endpoint,
+                    'message' => 'App needs Shopify approval to access orders'
+                ]);
+                return ['error' => 'protected_data_access_denied', 'requires_approval' => true];
+            }
+
             Log::error('[SHOPIFY API] Request failed', [
                 'endpoint' => $endpoint,
                 'status' => $response->status(),
@@ -228,6 +237,14 @@ class ShopifyApiService
             'status' => 'any'
         ]);
 
+        // Check for protected data error
+        if (is_array($response) && isset($response['error']) && $response['error'] === 'protected_data_access_denied') {
+            return [
+                'error' => 'requires_approval',
+                'message' => 'Order tracking is not available yet. Our app is pending Shopify approval to access order information. You can check your order status directly in your Shopify account or contact our support team.'
+            ];
+        }
+
         if ($response && isset($response['orders']) && count($response['orders']) > 0) {
             return $this->formatOrder($response['orders'][0]);
         }
@@ -235,6 +252,15 @@ class ShopifyApiService
         // Try by ID if numeric
         if (is_numeric($orderIdentifier)) {
             $response = $this->makeRequest("orders/{$orderIdentifier}.json");
+            
+            // Check for protected data error
+            if (is_array($response) && isset($response['error']) && $response['error'] === 'protected_data_access_denied') {
+                return [
+                    'error' => 'requires_approval',
+                    'message' => 'Order tracking is not available yet. Our app is pending Shopify approval to access order information. You can check your order status directly in your Shopify account or contact our support team.'
+                ];
+            }
+            
             if ($response && isset($response['order'])) {
                 return $this->formatOrder($response['order']);
             }
@@ -410,6 +436,12 @@ class ShopifyApiService
                 if (empty($data)) {
                     return "Order not found.";
                 }
+                
+                // Handle error cases
+                if (isset($data['error']) && $data['error'] === 'requires_approval') {
+                    return $data['message'];
+                }
+                
                 $formatted = "Order {$data['name']}:\n";
                 $formatted .= "Status: " . ucfirst($data['fulfillment_status'] ?? 'pending') . "\n";
                 $formatted .= "Payment: " . ucfirst($data['financial_status']) . "\n";

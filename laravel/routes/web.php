@@ -400,6 +400,10 @@ Route::get('/analytics/dashboard/{orgId}', [AnalyticsController::class, 'dashboa
 Route::get('/api/integrations/shopify/oauth/callback', [\App\Http\Controllers\IntegrationController::class, 'shopifyCallback'])
     ->name('api.integrations.shopify.oauth.callback');
 
+// Shopify scope upgrade - redirects to request new permissions
+Route::get('/api/integrations/shopify/upgrade', [\App\Http\Controllers\IntegrationController::class, 'shopifyUpgradeScopes'])
+    ->name('api.integrations.shopify.upgrade');
+
 // Shopify Webhooks (mandatory for Shopify app approval)
 // These are called by Shopify and must be publicly accessible
 Route::post('/shopify/webhooks', [\App\Http\Controllers\ShopifyWebhookController::class, 'handle'])

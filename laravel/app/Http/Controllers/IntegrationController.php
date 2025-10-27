@@ -279,9 +279,12 @@ class IntegrationController extends Controller
             return response()->json(['ok' => false, 'message' => 'Shopify API not configured'], 500);
         }
 
-        // Minimal permissions - only what's needed for chat widget
-        // write_script_tags: Required to inject the chat widget script into the store
-        $scopes = 'write_script_tags';
+        // Request necessary scopes for full functionality
+        // write_script_tags: Inject chat widget script
+        // read_products: Access product catalog for queries
+        // read_orders: Access order information (requires app approval for protected customer data)
+        // read_themes: Access theme colors for widget branding
+        $scopes = 'write_script_tags,read_products,read_orders,read_themes';
         $state = Str::random(24);
         $redirectUri = config('app.url') . '/api/integrations/shopify/oauth/callback';
         
@@ -978,6 +981,53 @@ class IntegrationController extends Controller
             'api_webhooks_registered' => count($webhooks),
             'gdpr_webhooks_status' => 'Must be configured in Partner Dashboard manually'
         ]);
+    }
+
+    /**
+     * Upgrade Shopify app scopes for existing installations
+     */
+    public function shopifyUpgradeScopes(Request $request)
+    {
+        $shop = $request->query('shop');
+        
+        if (!$shop) {
+            return response()->json([
+                'error' => 'Missing shop parameter',
+                'usage' => 'Visit: /api/integrations/shopify/upgrade?shop=your-store.myshopify.com'
+            ], 400);
+        }
+
+        $apiKey = config('services.shopify.key');
+        
+        if (!$apiKey) {
+            return response()->json(['error' => 'Shopify API not configured'], 500);
+        }
+
+        // Use the standard OAuth authorize endpoint - same as initial install
+        // Shopify will automatically detect existing installation and show "Update" instead of "Install"
+        $scopes = 'write_script_tags,read_products,read_orders,read_themes';
+        $state = Str::random(24);
+        $redirectUri = config('app.url') . '/api/integrations/shopify/oauth/callback';
+        
+        // Use standard authorize endpoint - Shopify handles upgrade automatically
+        $upgradeUrl = "https://{$shop}/admin/oauth/authorize?" . http_build_query([
+            'client_id' => $apiKey,
+            'scope' => $scopes,
+            'redirect_uri' => $redirectUri,
+            'state' => $state
+        ]);
+
+        // Store state for verification
+        session(['shopify_oauth_state' => $state, 'shopify_scope_upgrade' => true]);
+
+        Log::info('Shopify scope upgrade initiated', [
+            'shop' => $shop,
+            'new_scopes' => $scopes,
+            'method' => 'oauth_authorize'
+        ]);
+
+        // Redirect to Shopify's permission request page
+        return redirect($upgradeUrl);
     }
 }
 
