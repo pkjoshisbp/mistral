@@ -47,8 +47,28 @@ Route::get('/download/wordpress-plugin', function () {
 })->name('download.wordpress-plugin');
 
 Route::get('/shopify/install', \App\Livewire\Public\ShopifyInstall::class)->name('shopify.install');
+Route::get('/shopify/onboarding', \App\Livewire\Public\ShopifyOnboarding::class)->name('shopify.onboarding');
 Route::get('/shopify/complete-setup', \App\Livewire\Public\ShopifyCompleteSetup::class)->name('shopify.complete-setup');
 Route::get('/shopify/preferences', \App\Livewire\Shopify\Preferences::class)->name('shopify.preferences');
+
+// Shopify App Home - Entry point when merchants click app in Shopify admin
+Route::get('/shopify/app', function () {
+    // If user is authenticated, redirect to their dashboard
+    if (auth()->check()) {
+        $user = auth()->user();
+        
+        // Check if user has organizations
+        if ($user->organizations->count() > 0) {
+            return redirect()->route('customer.dashboard');
+        } else {
+            // New user without organization - guide them to setup
+            return redirect()->route('customer.setup-organization');
+        }
+    }
+    
+    // Not authenticated - redirect to install flow
+    return redirect()->route('shopify.install');
+})->name('shopify.app');
 
 Route::get('/terms', function () {
     $terms = \App\Models\TermsAndConditions::getTerms();
@@ -663,7 +683,9 @@ Route::middleware(['auth', 'affiliate'])->prefix('affiliate')->name('affiliate.'
 Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class, 'noindex'])->group(function () {
     Route::get('{orgId}/script.js', [\App\Http\Controllers\WidgetController::class, 'getWidgetScript'])->name('widget.script');
     Route::get('{orgId}/styles.css', [\App\Http\Controllers\WidgetController::class, 'getWidgetCSS'])->name('widget.styles');
-    Route::post('{orgId}/chat', [\App\Http\Controllers\WidgetController::class, 'chat'])->name('widget.chat');
+    Route::post('{orgId}/chat', [\App\Http\Controllers\WidgetController::class, 'chat'])
+        ->middleware('throttle:widget_chat')
+        ->name('widget.chat');
     Route::options('{orgId}/chat', function() { return response('', 204); });
     Route::get('{orgId}/config', [\App\Http\Controllers\WidgetController::class, 'getConfig'])->name('widget.config');
     Route::get('{orgId}/test', function($orgId) {

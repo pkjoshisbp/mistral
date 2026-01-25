@@ -16,14 +16,17 @@
             this.config = config;
             this.isOpen = false;
             this.isExpanded = false;
-            this.sessionId = this.generateSessionId();
+            // ISSUE 5B FIX: Persist session across page navigation
+            this.sessionId = this.getOrCreateSessionId();
             this.messages = [];
-            this.welcomeShown = false; // Flag to track if welcome message was shown
+            this.welcomeShown = false;
             this.leadCaptured = this.checkLeadCaptured();
             this.userInfo = this.loadUserInfo();
             this.locationInfo = {};
             this.init();
             this.detectLocation();
+            // ISSUE 5B FIX: Load previous messages after init
+            this.loadPersistedMessages();
         }
 
         checkLeadCaptured() {
@@ -65,8 +68,78 @@
             localStorage.setItem(key, JSON.stringify(this.userInfo));
         }
 
+        // ISSUE 5B FIX: Get or create persistent session ID
+        getOrCreateSessionId() {
+            const key = `ai_session_id_${this.config.orgId}`;
+            const timestampKey = `ai_session_timestamp_${this.config.orgId}`;
+            
+            let sessionId = sessionStorage.getItem(key);
+            const lastActivity = sessionStorage.getItem(timestampKey);
+            const now = Date.now();
+            
+            // Session expires after 30 minutes of inactivity
+            if (sessionId && lastActivity && (now - parseInt(lastActivity)) < 30 * 60 * 1000) {
+                // Valid session - update timestamp
+                sessionStorage.setItem(timestampKey, now.toString());
+                return sessionId;
+            }
+            
+            // Create new session
+            sessionId = 'session_' + Math.random().toString(36).substr(2, 9) + '_' + now;
+            sessionStorage.setItem(key, sessionId);
+            sessionStorage.setItem(timestampKey, now.toString());
+            
+            return sessionId;
+        }
+
         generateSessionId() {
-            return 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+            // Deprecated - use getOrCreateSessionId instead
+            return this.getOrCreateSessionId();
+        }
+
+        // ISSUE 5B FIX: Save messages to localStorage
+        saveMessages() {
+            const key = `ai_chat_messages_${this.config.orgId}_${this.sessionId}`;
+            try {
+                localStorage.setItem(key, JSON.stringify(this.messages));
+            } catch (e) {
+                console.warn('[AI Chat] Failed to save messages:', e);
+            }
+        }
+
+        // ISSUE 5B FIX: Load messages from localStorage
+        loadPersistedMessages() {
+            const key = `ai_chat_messages_${this.config.orgId}_${this.sessionId}`;
+            try {
+                const stored = localStorage.getItem(key);
+                if (stored) {
+                    const messages = JSON.parse(stored);
+                    if (Array.isArray(messages) && messages.length > 0) {
+                        this.messages = messages;
+                        this.welcomeShown = true; // Don't show welcome if restoring messages
+                        // Render all stored messages
+                        messages.forEach(msg => {
+                            this.renderMessage(msg.text, msg.sender);
+                        });
+                    }
+                }
+            } catch (e) {
+                console.warn('[AI Chat] Failed to load messages:', e);
+            }
+        }
+
+        // ISSUE 5B FIX: Clear old session data
+        clearOldSessions() {
+            const prefix = `ai_chat_messages_${this.config.orgId}_`;
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(prefix) && !key.includes(this.sessionId)) {
+                    keys.push(key);
+                }
+            }
+            // Clear old sessions (keep only current)
+            keys.forEach(key => localStorage.removeItem(key));
         }
 
         init() {
@@ -150,8 +223,13 @@
                     </div>
 
                     ${this.config.brandingEnabled && this.config.brandingBadge ? `
-                        <div class="ai-chat-badge" style="position:absolute; ${this.config.position.includes('bottom') ? 'bottom: -18px;' : 'top: -18px;'} ${this.config.position.includes('right') ? 'right: 0;' : 'left: 0;'} font-size:11px;color:#7a8594;">
-                            <a href="https://ai-chat.support" target="_blank" ${this.config.brandingFollow ? 'rel="noopener noreferrer"' : 'rel="nofollow noopener noreferrer"'}>Powered by AI Chat Support</a>
+                        <div class="ai-chat-badge" style="position:absolute; ${this.config.position.includes('bottom') ? 'bottom: -20px;' : 'top: -20px;'} ${this.config.position.includes('right') ? 'right: 0;' : 'left: 0;'} opacity: 0.6;">
+                            <a href="https://ai-chat.support" target="_blank" rel="nofollow noopener noreferrer" aria-label="Powered by AI Chat Support" style="display:inline-flex;align-items:center;text-decoration:none;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:#7a8594;">
+                                    <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/>
+                                    <path d="M10 17l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="white"/>
+                                </svg>
+                            </a>
                         </div>
                     ` : ''}
 
@@ -215,10 +293,15 @@
                             </button>
                         </div>
 
-                        <!-- Branding Footer -->
+                        <!-- Branding Footer - Logo Only (Shopify compliant) -->
                         ${this.config.brandingEnabled ? `
-                        <div class="ai-chat-branding" style="padding:10px 14px; background:#f7f9fb; border-top:1px solid #e5e9ef; text-align:center; font-size:12px; color:#6b7280;">
-                            Powered by <a href="https://ai-chat.support" target="_blank" ${this.config.brandingFollow ? 'rel="noopener noreferrer"' : 'rel="nofollow noopener noreferrer"'} style="color: {{ $theme['primaryColor'] ?? '#007bff' }}; text-decoration: none; font-weight: 600;">AI Chat Support</a>
+                        <div class="ai-chat-branding" style="padding:8px 14px; background:#f7f9fb; border-top:1px solid #e5e9ef; text-align:center; font-size:12px; color:#6b7280; opacity: 0.7;">
+                            <a href="https://ai-chat.support" target="_blank" rel="nofollow noopener noreferrer" aria-label="Powered by AI Chat Support" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:#6b7280;">
+                                    <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/>
+                                    <path d="M10 17l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="white"/>
+                                </svg>
+                            </a>
                         </div>
                         ` : ''}
                     </div>
@@ -523,6 +606,8 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
             this.messages.push({ content, sender, timestamp: new Date() });
+            // ISSUE 5B FIX: Persist messages after each addition
+            this.saveMessages();
         }
 
         addStreamingMessage(fullContent) {
@@ -563,6 +648,8 @@
             tick();
 
             this.messages.push({ content: fullContent, sender: 'bot', timestamp: new Date() });
+            // ISSUE 5B FIX: Persist messages after bot response
+            this.saveMessages();
         }
 
         addTypingIndicator() {
@@ -863,6 +950,14 @@
                 });
 
                 const data = await response.json();
+
+                // Handle rate limiting
+                if (response.status === 429) {
+                    this.removeTypingIndicator();
+                    const waitTime = data.retry_after || 60;
+                    this.addMessage(`Please slow down! You can send up to 5 messages per minute. Please wait ${waitTime} seconds.`, 'bot');
+                    return;
+                }
 
                 // Remove typing indicator, then progressively reveal
                 this.removeTypingIndicator();

@@ -95,9 +95,7 @@
             </div>
         </div>
     </section>
-</div>
-
-<style>
+    <style>
 .chat-messages .message-content {
     word-break: break-word;
     white-space: pre-wrap;
@@ -111,3 +109,6 @@
     color: #e5f0ff;
 }
 </style>
+</div>
+
+

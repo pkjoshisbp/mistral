@@ -24,7 +24,7 @@ class CustomerMiddleware
         if (auth()->user()->role !== 'customer') {
             // If admin, redirect to admin dashboard
             if (auth()->user()->role === 'admin') {
-                return redirect()->route('dashboard');
+                return redirect()->route('admin.dashboard');
             }
             
             // Otherwise, unauthorized

@@ -2,7 +2,7 @@
 
 client_id = "d9d8ed2dd9a7d99e67ca61fd135da57c"
 name = "ai-chat-support"
-application_url = "https://ai-chat.support/shopify/install"
+application_url = "https://ai-chat.support/shopify/app"
 embedded = true
 
 [webhooks]
@@ -19,7 +19,7 @@ shop_deletion_url = "https://ai-chat.support/shopify/webhooks"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_script_tags"
+scopes = "read_products,read_orders,read_themes"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 

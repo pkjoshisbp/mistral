@@ -166,10 +166,10 @@
     <!-- AI Chat Widget -->
     <script>
         (function() {
-            // Widget will be loaded here for organization ID 3 (ai-chat-support)
-            const orgId = 3;
+            // Widget for main platform website
+            const orgSlug = 'platform';
             const script = document.createElement('script');
-            script.src = `{{ config('app.url') }}/widget/${orgId}/script.js`;
+            script.src = `{{ config('app.url') }}/widget/${orgSlug}/script.js`;
             script.async = true;
             document.head.appendChild(script);
         })();

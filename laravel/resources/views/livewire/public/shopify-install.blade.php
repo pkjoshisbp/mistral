@@ -60,40 +60,55 @@
                         </div>
                     </div>
 
-                    <form wire:submit="startInstallation">
-                        <div class="mb-4">
-                            <label for="shopDomain" class="form-label fw-bold">
-                                <i class="fab fa-shopify me-2"></i>Your Shopify Store Domain
-                            </label>
-                            <div class="input-group">
-                                <span class="input-group-text">https://</span>
-                                <input 
-                                    type="text" 
-                                    class="form-control @error('shopDomain') is-invalid @enderror" 
-                                    id="shopDomain"
-                                    wire:model="shopDomain"
-                                    placeholder="your-store-name"
-                                    autocomplete="off"
-                                >
-                                <span class="input-group-text">.myshopify.com</span>
+                    @if($showManualEntry)
+                        <div class="alert alert-info border-0 mb-4">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Note:</strong> Normally Shopify provides your store information automatically. 
+                            This manual entry is only for edge cases.
+                        </div>
+                        
+                        <form wire:submit="startInstallation">
+                            <div class="mb-4">
+                                <label for="shopDomain" class="form-label fw-bold">
+                                    <i class="fab fa-shopify me-2"></i>Your Shopify Store Domain
+                                </label>
+                                <div class="input-group">
+                                    <span class="input-group-text">https://</span>
+                                    <input 
+                                        type="text" 
+                                        class="form-control @error('shopDomain') is-invalid @enderror" 
+                                        id="shopDomain"
+                                        wire:model="shopDomain"
+                                        placeholder="your-store-name"
+                                        autocomplete="off"
+                                    >
+                                    <span class="input-group-text">.myshopify.com</span>
+                                </div>
+                                @error('shopDomain')
+                                    <div class="invalid-feedback d-block">{{ $message }}</div>
+                                @enderror
+                                <small class="form-text text-muted">
+                                    Enter just your store name (e.g., "my-awesome-store")
+                                </small>
                             </div>
-                            @error('shopDomain')
-                                <div class="invalid-feedback d-block">{{ $message }}</div>
-                            @enderror
-                            <small class="form-text text-muted">
-                                Enter just your store name (e.g., "my-awesome-store")
-                            </small>
-                        </div>
 
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-success btn-lg">
-                                <i class="fab fa-shopify me-2"></i>Install on Shopify
-                                <span class="ms-2">
-                                    <i class="fas fa-arrow-right"></i>
-                                </span>
-                            </button>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-success btn-lg">
+                                    <i class="fab fa-shopify me-2"></i>Install on Shopify
+                                    <span class="ms-2">
+                                        <i class="fas fa-arrow-right"></i>
+                                    </span>
+                                </button>
+                            </div>
+                        </form>
+                    @else
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-success" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-3 text-muted">Connecting to Shopify...</p>
                         </div>
-                    </form>
+                    @endif
                 </div>
             </div>
 

@@ -10,34 +10,26 @@ class AiChatSupportSeeder extends Seeder
 {
     public function run()
     {
-        // Create AI Chat Support organization
-        $organization = Organization::firstOrCreate(
-            ['slug' => 'ai-chat-support'],
-            [
-                'name' => 'AI Chat Support',
-                'description' => 'AI-powered customer support solution for businesses. We provide intelligent chat widgets, automated responses, and comprehensive analytics to help businesses deliver exceptional customer service. Contact: support@ai-chat.support, Phone: 9937253528, Location: Sambalpur, India',
-                'website_url' => 'https://ai-chat.support',
-                'settings' => [
-                    'contact_email' => 'support@ai-chat.support',
-                    'contact_phone' => '9937253528',
-                    'address' => 'Sambalpur, India',
-                    'collection_name' => 'ai_chat_support_docs'
-                ],
-                'is_active' => true,
-            ]
-        );
+        // Use the platform organization (main AI Chat Support website)
+        $organization = Organization::where('slug', 'platform')->first();
+        
+        if (!$organization) {
+            $this->command->error("Platform organization not found! Please create it first.");
+            return;
+        }
 
-        // Update organization if it already exists
+        // Update organization description with full details
         $organization->update([
             'description' => 'AI-powered customer support solution for businesses. We provide intelligent chat widgets, automated responses, and comprehensive analytics to help businesses deliver exceptional customer service. Contact: support@ai-chat.support, Phone: 9937253528, Location: Sambalpur, India',
-            'website_url' => 'https://ai-chat.support',
-            'settings' => [
-                'contact_email' => 'support@ai-chat.support',
-                'contact_phone' => '9937253528',
+            'contact_email' => 'support@ai-chat.support',
+            'contact_phone' => '9937253528',
+            'settings' => array_merge($organization->settings ?? [], [
                 'address' => 'Sambalpur, India',
-                'collection_name' => 'ai_chat_support_docs'
-            ]
+                'collection_name' => 'platform'
+            ])
         ]);
+        
+        $this->command->info("Using organization: {$organization->name} (ID: {$organization->id}, Slug: {$organization->slug})");
 
         // AI Chat Support FAQ and knowledge base documents
         $documents = [
@@ -86,13 +78,13 @@ class AiChatSupportSeeder extends Seeder
         // Sync to Qdrant
         try {
             $aiAgentService = app(AiAgentService::class);
-            $collectionName = 'ai-chat-support';
+            $collectionName = $organization->slug; // Use 'platform' collection
             
-            // Create collection
+            // Create collection if it doesn't exist
             $createResult = $aiAgentService->createCollection($collectionName, 768);
             
             if ($createResult) {
-                $this->command->info("Created Qdrant collection: {$collectionName}");
+                $this->command->info("Created/verified Qdrant collection: {$collectionName}");
                 
                 // Add each document to Qdrant
                 $successCount = 0;
@@ -108,7 +100,9 @@ class AiChatSupportSeeder extends Seeder
                             [
                                 'title' => $document['title'],
                                 'content' => $document['content'],
-                                'type' => $document['type']
+                                'type' => $document['type'],
+                                'organization_slug' => $organization->slug,
+                                'data_type' => 'info'
                             ],
                             'doc_' . $index
                         );
@@ -119,12 +113,12 @@ class AiChatSupportSeeder extends Seeder
                     }
                 }
                 
-                $this->command->info("Successfully updated AI Chat Support organization and synced {$successCount}/" . count($documents) . " documents to Qdrant.");
+                $this->command->info("Successfully synced {$successCount}/" . count($documents) . " documents to Qdrant collection '{$collectionName}'.");
             } else {
-                $this->command->error("Organization updated but failed to create Qdrant collection");
+                $this->command->error("Failed to create Qdrant collection");
             }
         } catch (\Exception $e) {
-            $this->command->error("Organization updated but failed to sync to Qdrant: " . $e->getMessage());
+            $this->command->error("Failed to sync to Qdrant: " . $e->getMessage());
         }
     }
 }

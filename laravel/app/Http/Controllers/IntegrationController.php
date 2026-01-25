@@ -280,11 +280,11 @@ class IntegrationController extends Controller
         }
 
         // Request necessary scopes for full functionality
-        // write_script_tags: Inject chat widget script
         // read_products: Access product catalog for queries
         // read_orders: Access order information (requires app approval for protected customer data)
         // read_themes: Access theme colors for widget branding
-        $scopes = 'write_script_tags,read_products,read_orders,read_themes';
+        // NOTE: write_script_tags removed - we use theme app extensions instead
+        $scopes = 'read_products,read_orders,read_themes';
         $state = Str::random(24);
         $redirectUri = config('app.url') . '/api/integrations/shopify/oauth/callback';
         
@@ -416,45 +416,43 @@ class IntegrationController extends Controller
             'has_description' => !empty($shopDescription)
         ]);
 
-        // Strategy: Check if user exists and has an organization first
+        // Strategy: Check if an organization already exists for this specific Shopify shop
         $organization = null;
         $existingUser = null;
         
-        if ($shopOwnerEmail) {
-            $existingUser = User::where('email', $shopOwnerEmail)->first();
+        // First, check if this exact shop already has an integration
+        $existingIntegration = Integration::where('provider', 'shopify')
+            ->where('shop', $shop)
+            ->first();
+        
+        if ($existingIntegration) {
+            // Shop already integrated - reuse the organization
+            $organization = $existingIntegration->organization;
             
-            if ($existingUser) {
-                // User exists - check if they have an organization
-                $userOrganizations = $existingUser->organizations;
-                
-                if ($userOrganizations->count() > 0) {
-                    // Use the user's first organization (they're already set up)
-                    $organization = $userOrganizations->first();
-                    
-                    // Update organization with fresh Shopify data
-                    $orgDescription = $shopDescription ?: $organization->description;
-                    if ($shopAddress && $shopCity && $shopCountry && !str_contains($orgDescription, 'Location:')) {
-                        $orgDescription .= " | Location: {$shopCity}, {$shopCountry}";
-                    }
-                    
-                    $organization->update([
-                        'contact_email' => $shopOwnerEmail ?: $organization->contact_email,
-                        'contact_phone' => $shopPhone ?: $organization->contact_phone,
-                        'description' => $orgDescription,
-                        'website' => "https://{$shopDomain}"
-                    ]);
-                    
-                    Log::info('User already has organization - updated with fresh shop info', [
-                        'user_id' => $existingUser->id,
-                        'org_id' => $organization->id,
-                        'org_name' => $organization->name,
-                        'shop' => $shop
-                    ]);
+            if ($organization) {
+                // Update organization with fresh Shopify data
+                $orgDescription = $shopDescription ?: $organization->description;
+                if ($shopAddress && $shopCity && $shopCountry && !str_contains($orgDescription, 'Location:')) {
+                    $orgDescription .= " | Location: {$shopCity}, {$shopCountry}";
                 }
+                
+                $organization->update([
+                    'contact_email' => $shopOwnerEmail ?: $organization->contact_email,
+                    'contact_phone' => $shopPhone ?: $organization->contact_phone,
+                    'description' => $orgDescription,
+                    'website' => "https://{$shopDomain}"
+                ]);
+                
+                Log::info('Found existing organization for this Shopify shop - updated with fresh data', [
+                    'org_id' => $organization->id,
+                    'org_name' => $organization->name,
+                    'shop' => $shop,
+                    'integration_id' => $existingIntegration->id
+                ]);
             }
         }
         
-        // If no organization found from user, check by website URL
+        // If no organization found for this shop, check by website URL
         if (!$organization) {
             $organization = Organization::where('website', "https://{$shop}")->first();
             
@@ -474,6 +472,19 @@ class IntegrationController extends Controller
                 
                 Log::info('Found existing organization by website URL - updated with fresh shop info', [
                     'org_id' => $organization->id,
+                    'shop' => $shop
+                ]);
+            }
+        }
+        
+        // Keep reference to existing user for later
+        if ($shopOwnerEmail) {
+            $existingUser = User::where('email', $shopOwnerEmail)->first();
+            
+            if ($existingUser) {
+                Log::info('Found existing user for Shopify shop', [
+                    'user_id' => $existingUser->id,
+                    'email' => $shopOwnerEmail,
                     'shop' => $shop
                 ]);
             }
@@ -662,21 +673,19 @@ class IntegrationController extends Controller
             ]);
         }
 
-        // Create ScriptTag to inject widget
-        $scriptTagResult = $this->createShopifyScriptTag($shop, $accessToken, $organization->id);
-
-        Log::info('Shopify integration completed', [
+        // NO LONGER AUTO-INJECT SCRIPT TAGS - Use theme app extensions instead
+        // Merchants enable the widget through their theme editor
+        Log::info('Shopify integration completed - merchant needs to enable widget in theme editor', [
             'shop' => $shop,
             'org_id' => $organization->id,
-            'script_tag_created' => $scriptTagResult,
             'user_created' => $isNewUser,
             'user_logged_in' => $user !== null
         ]);
 
-        // Redirect to customer dashboard with success message
+        // Redirect to onboarding instructions
         if ($user) {
-            return redirect()->route('customer.dashboard')
-                ->with('success', 'Shopify app installed successfully! Your AI chat widget is now live on your store.' . 
+            return redirect()->route('shopify.onboarding', ['shop' => $shop])
+                ->with('success', 'Shopify app installed successfully!' . 
                     ($isNewUser ? ' Check your email for login credentials.' : ''));
         } else {
             // No user created (no email from Shopify) - redirect to manual setup
@@ -688,48 +697,26 @@ class IntegrationController extends Controller
     }
 
     /**
-     * Create Shopify ScriptTag
+     * DEPRECATED: Create Shopify ScriptTag
+     * 
+     * We no longer auto-inject script tags - violates Shopify requirements.
+     * Merchants must enable the widget through theme app extensions in their theme editor.
+     * 
+     * @deprecated Replaced by theme app extensions
      */
     private function createShopifyScriptTag($shop, $accessToken, $orgId)
     {
-        $scriptSrc = config('app.url') . "/api/integrations/widget-script/{$orgId}";
+        // INTENTIONALLY DISABLED - DO NOT USE
+        // Shopify requires merchants to have control over theme modifications
+        // Use theme app extensions instead
         
-        Log::info('Creating Shopify ScriptTag', [
+        Log::info('[DEPRECATED] createShopifyScriptTag called but disabled', [
             'shop' => $shop,
             'org_id' => $orgId,
-            'script_src' => $scriptSrc
+            'message' => 'Script tag injection disabled per Shopify requirements'
         ]);
         
-        $response = Http::withHeaders([
-            'X-Shopify-Access-Token' => $accessToken,
-            'Content-Type' => 'application/json'
-        ])->post("https://{$shop}/admin/api/2025-01/script_tags.json", [
-            'script_tag' => [
-                'event' => 'onload',
-                'src' => $scriptSrc
-            ]
-        ]);
-
-        if ($response->successful()) {
-            $scriptTagData = $response->json();
-            Log::info('Shopify ScriptTag created successfully', [
-                'shop' => $shop,
-                'org_id' => $orgId,
-                'script_src' => $scriptSrc,
-                'script_tag_id' => $scriptTagData['script_tag']['id'] ?? null,
-                'response' => $scriptTagData
-            ]);
-            return true;
-        } else {
-            Log::error('Failed to create Shopify ScriptTag', [
-                'shop' => $shop,
-                'org_id' => $orgId,
-                'status' => $response->status(),
-                'response' => $response->body(),
-                'error' => $response->json()
-            ]);
-            return false;
-        }
+        return false; // Always return false - feature disabled
     }
 
     /**
@@ -1005,7 +992,8 @@ class IntegrationController extends Controller
 
         // Use the standard OAuth authorize endpoint - same as initial install
         // Shopify will automatically detect existing installation and show "Update" instead of "Install"
-        $scopes = 'write_script_tags,read_products,read_orders,read_themes';
+        // NOTE: write_script_tags removed - we use theme app extensions instead
+        $scopes = 'read_products,read_orders,read_themes';
         $state = Str::random(24);
         $redirectUri = config('app.url') . '/api/integrations/shopify/oauth/callback';
         

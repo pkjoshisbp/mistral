@@ -26,19 +26,29 @@ MODEL_WARMED = False
 # Config
 DEFAULT_EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")  # Fast dedicated embedding model
 FALLBACK_EMBED_MODEL = os.getenv("FALLBACK_EMBED_MODEL", "llama3.2:1b")  # Fallback if nomic fails
-DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.2:3b")  # Use Llama 3 2B as default chat model
-FALLBACK_CHAT_MODEL = os.getenv("FALLBACK_CHAT_MODEL", "llama3.2:1b")  # Fast fallback
+DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3:8b-instruct-q5_K_M")  # vast.ai Llama 3 8B via tunnel
+FALLBACK_CHAT_MODEL = os.getenv("FALLBACK_CHAT_MODEL", "llama3.2:3b")  # Fast local fallback
 EMBED_TIMEOUT_SEC = float(os.getenv("EMBED_TIMEOUT", "15"))
 MAX_EMBED_CHARS = int(os.getenv("MAX_EMBED_CHARS", "1800"))
 EMBED_CONCURRENCY = int(os.getenv("EMBED_CONCURRENCY", "2"))
 
 # Backend type configuration
 AI_BACKEND_TYPE = os.getenv("AI_BACKEND_TYPE", "ollama")  # ollama or llamacpp
+OLLAMA_URL_LOCAL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")  # Local Ollama
+OLLAMA_URL_VASTAI = "http://127.0.0.1:11435"  # vast.ai via SSH tunnel
+OLLAMA_URL = OLLAMA_URL_LOCAL  # Default to local for embeddings, health checks, etc.
 LLAMACPP_BINARY = os.getenv("LLAMACPP_BINARY", "/var/www/clients/client1/web64/web/llama.cpp/build/bin/llama-cli")
 LLAMACPP_SERVER_BINARY = os.getenv("LLAMACPP_SERVER_BINARY", "/var/www/clients/client1/web64/web/llama.cpp/build/bin/llama-server")
 LLAMACPP_SERVER_PORT = int(os.getenv("LLAMACPP_SERVER_PORT", "8112"))
 LLAMACPP_SERVER_URL = f"http://localhost:{LLAMACPP_SERVER_PORT}"
 MODELS_DIR = os.getenv("MODELS_DIR", "/var/www/clients/client1/web64/web/models")
+
+# Models hosted on vast.ai (use tunnel)
+VASTAI_MODELS = ["llama3:8b-instruct-q5_K_M", "llama3.1:8b"]
+
+def get_ollama_url(model: str) -> str:
+    """Get the appropriate Ollama URL based on the model"""
+    return OLLAMA_URL_VASTAI if model in VASTAI_MODELS else OLLAMA_URL_LOCAL
 
 # Pre-configured GGUF models
 GGUF_MODELS = {
@@ -76,7 +86,7 @@ embed_semaphore = asyncio.Semaphore(EMBED_CONCURRENCY)
 
 app = FastAPI()
 qdrant = QdrantClient(host="127.0.0.1", port=6333)
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+# OLLAMA_URL already defined at line 37 - don't override it
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -679,7 +689,8 @@ async def llm_answer(request: Request):
     model = data.get("model", FALLBACK_EMBED_MODEL)
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(f"{OLLAMA_URL}/api/generate", json={
+            ollama_url = get_ollama_url(model)
+            resp = await client.post(f"{ollama_url}/api/generate", json={
                 "model": model,
                 "prompt": prompt,
                 "stream": False
@@ -849,16 +860,26 @@ async def llm_chat(request: Request):
     except Exception:
         pass  # Don't fail the request if process check fails
     
+    # Get the appropriate Ollama URL for this model
+    ollama_url = get_ollama_url(model)
+    logging.info(f"Using Ollama URL: {ollama_url} for model: {model}")
+    
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:  # Reduced timeout since models are warmed
-            resp = await client.post(f"{OLLAMA_URL}/api/chat", json={
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{ollama_url}/api/chat", json={
                 "model": model,
                 "messages": messages,
                 "stream": False
             })
             result = resp.json()
             elapsed_ms = int((time.time() - start_time) * 1000)
-            logging.info(f"LLM chat completed model={model} elapsed_ms={elapsed_ms}")
+            logging.info(f"LLM chat completed model={model} url={ollama_url} elapsed_ms={elapsed_ms}")
+            
+            # Debug logging - full response
+            print(f"DEBUG: Full Ollama response: {result}", flush=True)
+            print(f"DEBUG: Message content: {result.get('message', {})}", flush=True)
+            logging.info(f"Full Ollama response: {result}")
+            logging.info(f"Ollama response: message={result.get('message', {})}, done={result.get('done')}")
             
             # Estimate token usage (simple approximation: ~4 chars per token)
             input_text = " ".join([msg.get("content", "") for msg in messages])
@@ -867,7 +888,7 @@ async def llm_chat(request: Request):
             output_tokens = len(output_text) // 4
             total_tokens = input_tokens + output_tokens
             
-            return {
+            response_payload = {
                 "message": result.get("message", {}),
                 "usage": {
                     "prompt_tokens": input_tokens,
@@ -875,45 +896,38 @@ async def llm_chat(request: Request):
                     "total_tokens": total_tokens
                 }
             }
+            logging.info(f"Returning payload: {response_payload}")
+            
+            return response_payload
             
     except Exception as e:
-        # Try fallback model if primary fails
-        if model != FALLBACK_CHAT_MODEL:
-            try:
-                logging.warning(f"Primary model {model} failed, trying fallback {FALLBACK_CHAT_MODEL}")
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.post(f"{OLLAMA_URL}/api/chat", json={
-                        "model": FALLBACK_CHAT_MODEL,
-                        "messages": messages,
-                        "stream": False
-                    })
-                    result = resp.json()
-                    elapsed_ms = int((time.time() - start_time) * 1000)
-                    logging.info(f"LLM chat completed with fallback model={FALLBACK_CHAT_MODEL} elapsed_ms={elapsed_ms}")
-                    
-                    # Estimate token usage for fallback too
-                    input_text = " ".join([msg.get("content", "") for msg in messages])
-                    output_text = result.get("message", {}).get("content", "")
-                    input_tokens = len(input_text) // 4
-                    output_tokens = len(output_text) // 4
-                    total_tokens = input_tokens + output_tokens
-                    
-                    return {
-                        "message": result.get("message", {}),
-                        "usage": {
-                            "prompt_tokens": input_tokens,
-                            "completion_tokens": output_tokens,
-                            "total_tokens": total_tokens
-                        }
-                    }
-            except Exception as fallback_error:
-                elapsed_ms = int((time.time() - start_time) * 1000)
-                logging.error(f"Both models failed. Primary: {str(e)}, Fallback: {str(fallback_error)} elapsed_ms={elapsed_ms}")
-                raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
-        else:
+        # Try fallback to llama-server if Ollama completely fails
+        logging.error(f"Ollama chat failed: {str(e)}. Attempting llama-server fallback...")
+        try:
+            # Fallback to local llama-server
+            result = await llamacpp_server_chat(messages)
             elapsed_ms = int((time.time() - start_time) * 1000)
-            logging.error(f"LLM chat failed model={model} elapsed_ms={elapsed_ms} error={str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+            logging.info(f"✅ llama-server fallback successful elapsed_ms={elapsed_ms}")
+            
+            # Ensure usage keys present
+            usage = result.get("usage") or {}
+            if not usage:
+                input_text = " ".join([m.get("content", "") for m in messages])
+                output_text = result.get("message", {}).get("content", "")
+                prompt_tokens = max(1, len(input_text) // 4)
+                completion_tokens = max(1, len(output_text) // 4)
+                total_tokens = prompt_tokens + completion_tokens
+                result["usage"] = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens
+                }
+            return result
+            
+        except Exception as llamacpp_error:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logging.error(f"❌ Both Ollama and llama-server failed. Ollama: {str(e)}, llama-server: {str(llamacpp_error)} elapsed_ms={elapsed_ms}")
+            raise HTTPException(status_code=500, detail=f"All LLM backends failed. Ollama: {str(e)}, llama-server: {str(llamacpp_error)}")
 
 @app.on_event("startup")
 async def warm_model():

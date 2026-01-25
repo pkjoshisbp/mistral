@@ -1,0 +1,149 @@
+{% comment %}
+  AI Chat Support Widget Block
+  This block allows merchants to add the AI chat widget to their theme
+  through the theme editor with full customization controls.
+{% endcomment %}
+
+{% schema %}
+{
+  "name": "AI Chat Widget",
+  "target": "body",
+  "stylesheet": "chat-widget.css",
+  "javascript": "chat-widget.js",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "enable_widget",
+      "label": "Enable Chat Widget",
+      "default": true,
+      "info": "Show the AI chat widget on your storefront"
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "color",
+      "id": "primary_color",
+      "label": "Primary Color",
+      "default": "#007bff",
+      "info": "Main color for the chat widget"
+    },
+    {
+      "type": "select",
+      "id": "widget_position",
+      "label": "Widget Position",
+      "options": [
+        {
+          "value": "bottom-right",
+          "label": "Bottom Right"
+        },
+        {
+          "value": "bottom-left",
+          "label": "Bottom Left"
+        }
+      ],
+      "default": "bottom-right"
+    },
+    {
+      "type": "range",
+      "id": "widget_size",
+      "label": "Widget Size",
+      "min": 50,
+      "max": 80,
+      "step": 5,
+      "unit": "px",
+      "default": 60
+    },
+    {
+      "type": "header",
+      "content": "Messages"
+    },
+    {
+      "type": "text",
+      "id": "welcome_message",
+      "label": "Welcome Message",
+      "default": "Hi! How can I help you today?",
+      "info": "First message shown to customers"
+    },
+    {
+      "type": "text",
+      "id": "placeholder_text",
+      "label": "Input Placeholder",
+      "default": "Type your message...",
+      "info": "Placeholder text in the message input field"
+    },
+    {
+      "type": "header",
+      "content": "Behavior"
+    },
+    {
+      "type": "checkbox",
+      "id": "auto_open",
+      "label": "Auto-open on Page Load",
+      "default": false,
+      "info": "Automatically open the chat widget when page loads"
+    },
+    {
+      "type": "range",
+      "id": "auto_open_delay",
+      "label": "Auto-open Delay (seconds)",
+      "min": 0,
+      "max": 30,
+      "step": 5,
+      "default": 5,
+      "info": "Delay before auto-opening (if enabled)"
+    }
+  ]
+}
+{% endschema %}
+
+{% if block.settings.enable_widget %}
+<div id="ai-chat-widget-container" 
+     data-shop="{{ shop.permanent_domain }}"
+     data-primary-color="{{ block.settings.primary_color }}"
+     data-position="{{ block.settings.widget_position }}"
+     data-size="{{ block.settings.widget_size }}"
+     data-welcome-message="{{ block.settings.welcome_message | escape }}"
+     data-placeholder="{{ block.settings.placeholder_text | escape }}"
+     data-auto-open="{{ block.settings.auto_open }}"
+     data-auto-open-delay="{{ block.settings.auto_open_delay }}">
+</div>
+
+<script>
+  (function() {
+    'use strict';
+    
+    // Get configuration from data attributes
+    var container = document.getElementById('ai-chat-widget-container');
+    if (!container) return;
+    
+    var shop = container.getAttribute('data-shop');
+    var config = {
+      orgSlug: shop.replace('.myshopify.com', ''),
+      primaryColor: container.getAttribute('data-primary-color'),
+      position: container.getAttribute('data-position'),
+      size: parseInt(container.getAttribute('data-size')),
+      welcomeMessage: container.getAttribute('data-welcome-message'),
+      placeholder: container.getAttribute('data-placeholder'),
+      autoOpen: container.getAttribute('data-auto-open') === 'true',
+      autoOpenDelay: parseInt(container.getAttribute('data-auto-open-delay')) * 1000,
+      isShopify: true
+    };
+    
+    // Load the widget script dynamically
+    var script = document.createElement('script');
+    script.src = 'https://ai-chat.support/widget/' + config.orgSlug + '/script.js';
+    script.onload = function() {
+      // Widget script loaded, it will initialize automatically
+      console.log('[AI Chat] Widget loaded for:', shop);
+    };
+    script.onerror = function() {
+      console.error('[AI Chat] Failed to load widget script');
+    };
+    
+    // Append to body
+    document.body.appendChild(script);
+  })();
+</script>
+{% endif %}

@@ -25,7 +25,12 @@ class WidgetController
      */
     public function getWidgetScript($orgId)
     {
-        $organization = Organization::find($orgId);
+        // Support both numeric ID and slug
+        if (is_numeric($orgId)) {
+            $organization = Organization::find($orgId);
+        } else {
+            $organization = Organization::where('slug', $orgId)->first();
+        }
         
         if (!$organization || !$organization->is_active) {
             return response('Organization not found or inactive', 404);
@@ -84,7 +89,12 @@ class WidgetController
      */
     public function getWidgetCSS($orgId)
     {
-        $organization = Organization::find($orgId);
+        // Support both numeric ID and slug
+        if (is_numeric($orgId)) {
+            $organization = Organization::find($orgId);
+        } else {
+            $organization = Organization::where('slug', $orgId)->first();
+        }
         
         if (!$organization || !$organization->is_active) {
             return response('Organization not found or inactive', 404);
@@ -191,8 +201,17 @@ class WidgetController
             $hasShopifyData = false;
             
             try {
-                // Check if widget is from Shopify OR if query matches Shopify patterns
-                $shouldCheckShopify = $isShopify || $this->detectShopifyQuery($message);
+                // First check if organization has active Shopify integration
+                $integration = $organization->integrations()
+                    ->where('provider', 'shopify')
+                    ->where('active', true)
+                    ->first();
+                
+                // Only check for Shopify patterns if integration exists
+                $shouldCheckShopify = false;
+                if ($integration) {
+                    $shouldCheckShopify = $isShopify || $this->detectShopifyQuery($message);
+                }
                 
                 if ($shouldCheckShopify) {
                     Log::info('Shopify query detected in widget', [
@@ -200,11 +219,6 @@ class WidgetController
                         'query' => $message,
                         'source' => $isShopify ? 'widget_flag' : 'pattern_detection'
                     ]);
-                    
-                    $integration = $organization->integrations()
-                        ->where('provider', 'shopify')
-                        ->where('active', true)
-                        ->first();
                     
                     if ($integration && $integration->shop) {
                         try {
@@ -329,7 +343,7 @@ class WidgetController
                     return ['payload' => $p];
                 }, $previousContextPayloads);
             } elseif ($searchResults && isset($searchResults['results'])) {
-                // Separate FAQ results from service results to prioritize FAQs for general questions
+                // Separate FAQ/info results from service results to prioritize FAQs for general questions
                 $faqResults = [];
                 $serviceResults = [];
                 
@@ -337,7 +351,8 @@ class WidgetController
                     $payload = $result['payload'] ?? [];
                     $dataType = $payload['data_type'] ?? '';
                     
-                    if ($dataType === 'faq') {
+                    // Treat both 'faq' and 'info' as FAQ content
+                    if ($dataType === 'faq' || $dataType === 'info') {
                         $faqResults[] = $result;
                     } else {
                         $serviceResults[] = $result;
@@ -490,15 +505,15 @@ class WidgetController
             ];
             
             // Use organization-specific AI provider and model
-            $aiProvider = $this->aiAgentService->getAiProviderForOrganization($orgId);
+            $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
             if ($aiProvider === 'openai') {
                 // Use OpenAI with organization-specific or global model
-                $model = $this->aiAgentService->getOpenAiModelForOrganization($orgId);
-                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $orgId);
+                $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
+                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id);
             } else {
                 // Use local LLM with organization-specific or global model
-                $model = $this->aiAgentService->getLlamaModelForOrganization($orgId);
-                $aiResponse = $this->aiAgentService->llmChat($messages, $model, null, $orgId);
+                $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                $aiResponse = $this->aiAgentService->llmChat($messages, $model, null, $organization->id);
             }
 
             $rawResponseText = null;
@@ -748,7 +763,12 @@ class WidgetController
      */
     public function getConfig($orgId)
     {
-        $organization = Organization::find($orgId);
+        // Support both numeric ID and slug
+        if (is_numeric($orgId)) {
+            $organization = Organization::find($orgId);
+        } else {
+            $organization = Organization::where('slug', $orgId)->first();
+        }
         
         if (!$organization || !$organization->is_active) {
             return response()->json(['error' => 'Organization not found or inactive'], 404)

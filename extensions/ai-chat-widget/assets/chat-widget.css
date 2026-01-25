@@ -1,0 +1,17 @@
+/* AI Chat Support Widget - Theme Extension Styles */
+
+/* Ensure widget container doesn't interfere with theme layout */
+#ai-chat-widget-container {
+  position: relative;
+  z-index: 1;
+}
+
+#ai-chat-support-embed {
+  position: relative;
+  z-index: 1;
+}
+
+/* Widget will load its own styles, these are just fallbacks */
+.ai-chat-widget-loading {
+  display: none;
+}

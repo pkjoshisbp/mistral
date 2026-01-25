@@ -213,12 +213,14 @@ class ShopifyDataController extends Controller
      */
     protected function fallbackKeywordExtraction(string $query): ?string
     {
-        $keywords = preg_replace('/\b(what|which|do|does|you|your|have|has|sell|selling|any|all|products?|items?|looking|for|show|me|my|the|a|an|available|current|can|i|see|get|list|in|stock|and|is|what|price|lowest|highest|cost)\b/i', '', $query);
+        // Remove common question words, articles, and price/quality adjectives
+        $keywords = preg_replace('/\b(what|which|do|does|you|your|have|has|sell|selling|any|all|products?|items?|looking|for|show|me|my|the|a|an|available|current|can|i|see|get|list|in|stock|and|is|what|price|lowest|highest|cost|cheapest|most expensive|best|worst|featured)\b/i', '', $query);
         $keywords = preg_replace('/[^\w\s-]/', '', $keywords);
         $keywords = trim($keywords);
         
         // Only return first 1-2 words
         $words = explode(' ', $keywords);
+        $words = array_filter($words); // Remove empty elements
         $words = array_slice($words, 0, 2);
         $keywords = implode(' ', $words);
         

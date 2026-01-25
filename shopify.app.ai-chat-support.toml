@@ -5,6 +5,16 @@ name = "ai-chat-support"
 application_url = "https://ai-chat.support/shopify/install"
 embedded = false
 
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = ""
+
+[[extensions]]
+type = "theme"
+handle = "ai-chat-widget"
+name = "AI Chat Support"
+
+
 [webhooks]
 api_version = "2025-01"
 
@@ -20,7 +30,8 @@ api_version = "2025-01"
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 # Core scopes - required for app functionality
-scopes = "read_script_tags,write_script_tags,read_products,read_orders,read_fulfillments,read_shipping,read_customers,read_inventory"
+# NOTE: write_script_tags removed - we use theme app extensions instead
+scopes = "read_products,read_orders,read_fulfillments,read_shipping,read_customers,read_inventory"
 # Optional scopes - enhance functionality but not required
 optional_scopes = [ ]
 use_legacy_install_flow = false

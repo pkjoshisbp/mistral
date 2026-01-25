@@ -770,12 +770,12 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 'url' => "{$this->baseUrl}/llm/chat",
                 'payload_preview' => $payloadPreview,
                 'payload_length' => strlen(json_encode($payload)),
-                'timeout' => 30,
+                'timeout' => 60,
                 'model' => $payload['model'],
                 'backend_type' => $payload['backend_type']
             ]);
 
-            $response = Http::timeout(30)->post("{$this->baseUrl}/llm/chat", $payload);
+            $response = Http::timeout(60)->post("{$this->baseUrl}/llm/chat", $payload);
 
             $body = $response->body();
             $responseData = $response->successful() ? $response->json() : null;

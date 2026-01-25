@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Widget Test</title>
+</head>
+<body>
+    <h1>Test AI Chat Widget</h1>
+    <p>The widget should appear in the bottom right corner.</p>
+
+    <!-- Widget code from Shopify liquid -->
+    <div id="ai-chat-widget-container"></div>
+    <script>
+      (function() {
+        'use strict';
+        
+        var config = {
+          orgSlug: 'ai-chat-support',
+          primaryColor: '#007bff',
+          position: 'bottom-right',
+          size: 60,
+          welcomeMessage: 'Welcome! How can I help you today?',
+          placeholder: 'Type your message...',
+          autoOpen: false,
+          autoOpenDelay: 5000,
+          isShopify: true
+        };
+        
+        // Load the widget script dynamically
+        var script = document.createElement('script');
+        script.src = 'https://ai-chat.support/widget/' + config.orgSlug + '/script.js';
+        script.onload = function() {
+          console.log('[AI Chat] Widget loaded for:', config.orgSlug);
+        };
+        script.onerror = function() {
+          console.error('[AI Chat] Failed to load widget script');
+        };
+        
+        document.body.appendChild(script);
+      })();
+    </script>
+</body>
+</html>
