@@ -4,6 +4,7 @@
 - Lead qualification fields (intent, priority, status) stored with widget leads.
 - Lead notifications (email + webhook) with qualified-only option.
 - Action templates by industry (admin + customer) with inactive defaults.
+- Action execution logging with API retries.
 - Intent keyword templates expanded with FAQ/general info keywords.
 - Chat persistence fixed + configurable browser TTL for chat history.
 - Admin chat history actions: reliable view + export.

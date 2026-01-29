@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\OrganizationAction;
+use App\Models\ActionExecutionLog;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
@@ -24,6 +25,8 @@ class ActionExecutorService
      */
     public function executeAction(OrganizationAction $action, array $params = []): array
     {
+        $startedAt = microtime(true);
+        $attempts = 1;
         try {
             Log::info('Executing action', [
                 'action_id' => $action->id,
@@ -35,11 +38,13 @@ class ActionExecutorService
             // Validate required parameters
             $missing = $action->validateParams($params);
             if (!empty($missing)) {
-                return [
+                $result = [
                     'success' => false,
                     'error' => 'Missing required parameters: ' . implode(', ', $missing),
                     'missing_params' => $missing
                 ];
+                $this->logExecution($action, $params, $result, $attempts, $startedAt);
+                return $result;
             }
 
             // Check cache first
@@ -48,13 +53,14 @@ class ActionExecutorService
                 $cached = Cache::get($cacheKey);
                 if ($cached) {
                     Log::info('Action result served from cache', ['action_id' => $action->id]);
+                    $this->logExecution($action, $params, $cached, $attempts, $startedAt, 'cache');
                     return $cached;
                 }
             }
 
             // Execute based on source type
             $result = match ($action->source_type) {
-                'api' => $this->executeApiAction($action, $params),
+                'api' => $this->executeApiActionWithRetries($action, $params, $attempts),
                 'csv' => $this->executeCsvAction($action, $params),
                 'excel' => $this->executeExcelAction($action, $params),
                 'google_sheets' => $this->executeGoogleSheetsAction($action, $params),
@@ -76,6 +82,7 @@ class ActionExecutorService
                 'data_count' => isset($result['data']) ? (is_array($result['data']) ? count($result['data']) : 1) : 0
             ]);
 
+            $this->logExecution($action, $params, $result, $attempts, $startedAt);
             return $result;
 
         } catch (\Exception $e) {
@@ -85,11 +92,78 @@ class ActionExecutorService
                 'trace' => $e->getTraceAsString()
             ]);
 
-            return [
+            $result = [
                 'success' => false,
                 'error' => 'Action execution failed: ' . $e->getMessage()
             ];
+            $this->logExecution($action, $params, $result, $attempts, $startedAt);
+            return $result;
         }
+    }
+
+    private function executeApiActionWithRetries(OrganizationAction $action, array $params, int &$attempts): array
+    {
+        $config = $action->getSourceConfig();
+        $maxRetries = (int) ($config['max_retries'] ?? 0);
+        $retryDelayMs = (int) ($config['retry_delay_ms'] ?? 250);
+
+        $attempts = 0;
+        $lastResult = null;
+
+        while ($attempts <= $maxRetries) {
+            $attempts++;
+            $lastResult = $this->executeApiAction($action, $params);
+
+            if (!isset($lastResult['success']) || $lastResult['success'] === true) {
+                return $lastResult;
+            }
+
+            if ($attempts <= $maxRetries && $retryDelayMs > 0) {
+                usleep($retryDelayMs * 1000);
+            }
+        }
+
+        return $lastResult ?? [
+            'success' => false,
+            'error' => 'API action failed after retries.'
+        ];
+    }
+
+    private function logExecution(OrganizationAction $action, array $params, array $result, int $attempts, float $startedAt, ?string $sourceOverride = null): void
+    {
+        try {
+            $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
+            $status = ($result['success'] ?? false) ? 'success' : 'failure';
+
+            ActionExecutionLog::create([
+                'organization_id' => $action->organization_id,
+                'action_id' => $action->id,
+                'action_type' => $action->action_type,
+                'source_type' => $sourceOverride ?: $action->source_type,
+                'status' => $status,
+                'attempts' => max(1, $attempts),
+                'duration_ms' => $durationMs,
+                'params' => $params,
+                'result_meta' => $this->extractResultMeta($result),
+                'error_message' => $result['error'] ?? null,
+            ]);
+        } catch (\Throwable $t) {
+            Log::warning('Failed to log action execution', [
+                'action_id' => $action->id,
+                'error' => $t->getMessage()
+            ]);
+        }
+    }
+
+    private function extractResultMeta(array $result): array
+    {
+        $meta = [
+            'source' => $result['source'] ?? null,
+            'total_rows' => $result['total_rows'] ?? null,
+            'missing_params' => $result['missing_params'] ?? null,
+        ];
+
+        return array_filter($meta, fn($value) => $value !== null);
     }
 
     /**
