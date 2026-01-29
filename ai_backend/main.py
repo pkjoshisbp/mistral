@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 import httpx
 import logging
+from logging.handlers import RotatingFileHandler
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 import uuid
@@ -73,6 +74,20 @@ GGUF_MODELS = {
 # Ensure models directory exists
 Path(MODELS_DIR).mkdir(exist_ok=True)
 
+# Logging setup
+LOG_DIR = Path(__file__).parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+LOG_FILE = LOG_DIR / "fastapi.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"),
+    ],
+)
+
 # Global variable to track llama-server process
 llamacpp_server_process = None
 current_llamacpp_model = None
@@ -92,8 +107,6 @@ qdrant = QdrantClient(host="127.0.0.1", port=6333)
 async def shutdown_event():
     """Clean up resources when FastAPI shuts down"""
     await stop_llamacpp_server()
-
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
 
 # Helper functions for llama.cpp server management
 async def start_llamacpp_server(model_path: str) -> bool:
@@ -791,9 +804,12 @@ async def llm_chat(request: Request):
     messages = data["messages"]
     model = data.get("model", DEFAULT_CHAT_MODEL)  # Use high quality model by default
     backend_type = data.get("backend_type", AI_BACKEND_TYPE)  # Allow override from request
+    options = data.get("options") or {}
     
     # Log incoming chat request
-    logging.info(f"llm_chat request: backend={backend_type} model={model} messages={len(messages)} msgs")
+    logging.info(
+        f"llm_chat request: backend={backend_type} model={model} messages={len(messages)} msgs options_keys={list(options.keys()) if options else []}"
+    )
 
     # If system prompt contains context, log it for debugging
     for msg in messages:
@@ -864,45 +880,64 @@ async def llm_chat(request: Request):
     ollama_url = get_ollama_url(model)
     logging.info(f"Using Ollama URL: {ollama_url} for model: {model}")
     
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(f"{ollama_url}/api/chat", json={
-                "model": model,
-                "messages": messages,
-                "stream": False
-            })
-            result = resp.json()
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            logging.info(f"LLM chat completed model={model} url={ollama_url} elapsed_ms={elapsed_ms}")
-            
-            # Debug logging - full response
-            print(f"DEBUG: Full Ollama response: {result}", flush=True)
-            print(f"DEBUG: Message content: {result.get('message', {})}", flush=True)
-            logging.info(f"Full Ollama response: {result}")
-            logging.info(f"Ollama response: message={result.get('message', {})}, done={result.get('done')}")
-            
-            # Estimate token usage (simple approximation: ~4 chars per token)
-            input_text = " ".join([msg.get("content", "") for msg in messages])
-            output_text = result.get("message", {}).get("content", "")
-            input_tokens = len(input_text) // 4
-            output_tokens = len(output_text) // 4
-            total_tokens = input_tokens + output_tokens
-            
-            response_payload = {
-                "message": result.get("message", {}),
-                "usage": {
-                    "prompt_tokens": input_tokens,
-                    "completion_tokens": output_tokens,
-                    "total_tokens": total_tokens
+    # Try primary URL first, then fallback to local if vast.ai fails
+    configs_to_try = [(ollama_url, model)]
+    if ollama_url == OLLAMA_URL_VASTAI:
+        # Fallback to local Ollama with a smaller model
+        configs_to_try.append((OLLAMA_URL_LOCAL, FALLBACK_CHAT_MODEL))
+        logging.info(f"Will fallback to local Ollama ({OLLAMA_URL_LOCAL}) with model {FALLBACK_CHAT_MODEL} if vast.ai fails")
+    
+    last_error = None
+    for url_to_try, model_to_use in configs_to_try:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                payload = {
+                    "model": model_to_use,
+                    "messages": messages,
+                    "stream": False,
                 }
-            }
-            logging.info(f"Returning payload: {response_payload}")
+                if options:
+                    payload["options"] = options
+
+                resp = await client.post(f"{url_to_try}/api/chat", json=payload)
+                result = resp.json()
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                logging.info(f"LLM chat completed model={model_to_use} url={url_to_try} elapsed_ms={elapsed_ms}")
             
-            return response_payload
+                # Debug logging - full response
+                print(f"DEBUG: Full Ollama response: {result}", flush=True)
+                print(f"DEBUG: Message content: {result.get('message', {})}", flush=True)
+                logging.info(f"Full Ollama response: {result}")
+                logging.info(f"Ollama response: message={result.get('message', {})}, done={result.get('done')}")
             
-    except Exception as e:
-        # Try fallback to llama-server if Ollama completely fails
-        logging.error(f"Ollama chat failed: {str(e)}. Attempting llama-server fallback...")
+                # Estimate token usage (simple approximation: ~4 chars per token)
+                input_text = " ".join([msg.get("content", "") for msg in messages])
+                output_text = result.get("message", {}).get("content", "")
+                input_tokens = len(input_text) // 4
+                output_tokens = len(output_text) // 4
+                total_tokens = input_tokens + output_tokens
+            
+                response_payload = {
+                    "message": result.get("message", {}),
+                    "usage": {
+                        "prompt_tokens": input_tokens,
+                        "completion_tokens": output_tokens,
+                        "total_tokens": total_tokens
+                    }
+                }
+                logging.info(f"Returning payload: {response_payload}")
+            
+                return response_payload
+                
+        except Exception as e:
+            last_error = e
+            logging.warning(f"Ollama URL {url_to_try} failed: {str(e)}")
+            continue  # Try next URL
+    
+    # If all Ollama URLs failed, try llama-server fallback
+    # If all Ollama URLs failed, try llama-server fallback
+    if last_error:
+        logging.error(f"All Ollama URLs failed. Last error: {str(last_error)}. Attempting llama-server fallback...")
         try:
             # Fallback to local llama-server
             result = await llamacpp_server_chat(messages)
@@ -926,8 +961,118 @@ async def llm_chat(request: Request):
             
         except Exception as llamacpp_error:
             elapsed_ms = int((time.time() - start_time) * 1000)
-            logging.error(f"❌ Both Ollama and llama-server failed. Ollama: {str(e)}, llama-server: {str(llamacpp_error)} elapsed_ms={elapsed_ms}")
-            raise HTTPException(status_code=500, detail=f"All LLM backends failed. Ollama: {str(e)}, llama-server: {str(llamacpp_error)}")
+            logging.error(f"❌ Both Ollama and llama-server failed. Ollama: {str(last_error)}, llama-server: {str(llamacpp_error)} elapsed_ms={elapsed_ms}")
+            raise HTTPException(status_code=500, detail=f"All LLM backends failed. Ollama: {str(last_error)}, llama-server: {str(llamacpp_error)}")
+
+@app.post("/llm/chat/stream")
+async def stream_chat(request: Request):
+    """
+    Stream chat endpoint - returns SSE for real-time token streaming
+    """
+    from fastapi.responses import StreamingResponse
+    import json
+    
+    data = await request.json()
+    start_time = time.time()
+    messages = data["messages"]
+    model = data.get("model", DEFAULT_CHAT_MODEL)
+    backend_type = data.get("backend_type", AI_BACKEND_TYPE)
+    options = data.get("options") or {}
+    
+    logging.info(
+        f"Stream chat request: model={model} backend={backend_type} messages={len(messages)} options_keys={list(options.keys()) if options else []}"
+    )
+    
+    # Get the appropriate Ollama URL for this model
+    ollama_url = get_ollama_url(model)
+    logging.info(f"Using Ollama URL: {ollama_url} for streaming model: {model}")
+    
+    # Try primary URL first, then fallback to local if vast.ai fails
+    configs_to_try = [(ollama_url, model)]
+    if ollama_url == OLLAMA_URL_VASTAI:
+        # Fallback to local Ollama with a smaller model
+        configs_to_try.append((OLLAMA_URL_LOCAL, FALLBACK_CHAT_MODEL))
+        logging.info(f"Will fallback to local Ollama ({OLLAMA_URL_LOCAL}) with model {FALLBACK_CHAT_MODEL} if vast.ai fails for streaming")
+    
+    async def generate():
+        last_error = None
+        for url_to_try, model_to_use in configs_to_try:
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    # Make streaming request to Ollama
+                    stream_payload = {
+                        "model": model_to_use,
+                        "messages": messages,
+                        "stream": True,
+                    }
+                    if options:
+                        stream_payload["options"] = options
+
+                    async with client.stream(
+                        'POST',
+                        f"{url_to_try}/api/chat",
+                        json=stream_payload
+                    ) as response:
+                        # Track tokens for usage counting
+                        full_content = ""
+                    
+                        async for line in response.aiter_lines():
+                            if not line:
+                                continue
+                        
+                            try:
+                                chunk = json.loads(line)
+                            
+                                # Extract content from message
+                                if 'message' in chunk and 'content' in chunk['message']:
+                                    content = chunk['message']['content']
+                                    full_content += content
+                                
+                                    # Send SSE format
+                                    yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
+                            
+                                # Check if done
+                                if chunk.get('done', False):
+                                    # Calculate token usage
+                                    input_text = " ".join([msg.get("content", "") for msg in messages])
+                                    input_tokens = len(input_text) // 4
+                                    output_tokens = len(full_content) // 4
+                                    total_tokens = input_tokens + output_tokens
+                                
+                                    # Send final message with usage
+                                    final_data = {
+                                        'content': '',
+                                        'done': True,
+                                        'usage': {
+                                            'prompt_tokens': input_tokens,
+                                            'completion_tokens': output_tokens,
+                                            'total_tokens': total_tokens
+                                        }
+                                    }
+                                    yield f"data: {json.dumps(final_data)}\n\n"
+                                
+                                    elapsed_ms = int((time.time() - start_time) * 1000)
+                                    logging.info(f"Stream completed model={model_to_use} url={url_to_try} tokens={total_tokens} elapsed_ms={elapsed_ms}")
+                                    return  # Success - exit generator
+                                
+                            except json.JSONDecodeError:
+                                continue
+                            
+            except Exception as e:
+                last_error = e
+                logging.warning(
+                    f"Stream failed for {url_to_try}: {str(e)} | repr={repr(e)}",
+                    exc_info=True,
+                )
+                continue  # Try next URL
+        
+        # If all Ollama URLs failed
+        if last_error:
+            logging.error(f"All Ollama stream URLs failed: {str(last_error)}")
+            error_data = {'error': f'All connection attempts failed: {str(last_error)}', 'done': True}
+            yield f"data: {json.dumps(error_data)}\n\n"
+    
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 @app.on_event("startup")
 async def warm_model():

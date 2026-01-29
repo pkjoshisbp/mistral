@@ -16,11 +16,24 @@ class ChatHistoryManager extends Component
     public $dateFrom;
     public $dateTo;
     public $showDetails = [];
+    public $focusConversation;
+
+    protected $queryString = [
+        'search' => ['except' => ''],
+        'organizationId' => ['except' => ''],
+        'dateFrom' => ['except' => ''],
+        'dateTo' => ['except' => ''],
+        'focusConversation' => ['except' => ''],
+    ];
 
     public function mount()
     {
         $this->dateFrom = now()->subDays(30)->format('Y-m-d');
         $this->dateTo = now()->format('Y-m-d');
+
+        if ($this->focusConversation) {
+            $this->showDetails[$this->focusConversation] = true;
+        }
     }
 
     public function updatingSearch() { $this->resetPage(); }

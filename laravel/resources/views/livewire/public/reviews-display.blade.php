@@ -6,8 +6,8 @@
                 <h2 class="display-5 fw-bold mb-3">
                     <i class="fas fa-star text-warning me-2"></i>Customer Reviews
                 </h2>
-                @if($organization)
-                    <p class="lead text-muted">What our customers say about {{ $organization->name }}'s AI Chat Service</p>
+                @if($organizationName)
+                    <p class="lead text-muted">What our customers say about {{ $organizationName }}'s AI Chat Service</p>
                 @else
                     <p class="lead text-muted">What our customers say about our AI Chat Services</p>
                 @endif
@@ -126,7 +126,7 @@
                                             <div>
                                                 <small class="fw-semibold text-dark">{{ $review->user->name }}</small>
                                                 @if(!$organizationId)
-                                                    <br><small class="text-muted">{{ $review->organization->name }}</small>
+                                                    <br><small class="text-muted">{{ data_get($review, 'organization.name') }}</small>
                                                 @endif
                                             </div>
                                             <small class="text-muted">{{ $review->created_at->format('M j, Y') }}</small>

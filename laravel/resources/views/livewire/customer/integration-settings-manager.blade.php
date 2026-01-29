@@ -155,6 +155,16 @@
                                         @enderror
                                     </div>
                                 </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="chat_history_ttl_hours">Chat History TTL (hours) *</label>
+                                        <input type="number" wire:model="chat_history_ttl_hours" class="form-control @error('chat_history_ttl_hours') is-invalid @enderror" id="chat_history_ttl_hours" min="1" max="168">
+                                        @error('chat_history_ttl_hours')
+                                            <span class="invalid-feedback">{{ $message }}</span>
+                                        @enderror
+                                        <small class="form-text text-muted">How long to keep chat history in the browser (1–168 hours). Default 24.</small>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="alert alert-secondary">
@@ -166,6 +176,101 @@
                                     </div>
                                 </div>
                                 <small class="d-block mt-2 text-muted">Position: {{ ucwords(str_replace('-', ' ', $widget_position)) }}</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <!-- Intent Keywords & Org Type -->
+                <div class="col-lg-6">
+                    <div class="card card-primary card-outline">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-tags"></i> Organization Type & Intent Keywords
+                            </h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label for="org_type">Organization Type</label>
+                                <div class="input-group">
+                                    <select wire:model.live="org_type" class="form-control" id="org_type">
+                                        <option value="">Select type</option>
+                                        <option value="ecommerce">E-commerce Site</option>
+                                        <option value="hospital">Hospital</option>
+                                        <option value="clinic">Clinic</option>
+                                        <option value="automobile_dealer">Automobile Dealer</option>
+                                        <option value="ngo">NGO</option>
+                                        <option value="school">School</option>
+                                        <option value="college">College</option>
+                                        <option value="restaurant">Restaurant</option>
+                                        <option value="real_estate">Real Estate</option>
+                                        <option value="travel">Travel</option>
+                                        <option value="fitness">Fitness/Gym</option>
+                                        <option value="logistics">Logistics</option>
+                                        <option value="fintech">Fintech</option>
+                                        <option value="real_estate_rental">Real Estate (Rentals)</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                    <div class="input-group-append">
+                                        <button type="button" class="btn btn-outline-primary" wire:click="applyIntentTemplate">
+                                            <i class="fas fa-magic"></i> Apply Template
+                                        </button>
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">Prefill keywords for your industry, then edit as needed.</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Booking Keywords</label>
+                                <small class="form-text text-muted">Appointment requests, scheduling, reservations.</small>
+                                <textarea wire:model.defer="intent_keywords.booking" class="form-control" rows="2" placeholder="appointment, reservation, schedule"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Pricing Keywords</label>
+                                <small class="form-text text-muted">Costs, fees, discounts, quotes.</small>
+                                <textarea wire:model.defer="intent_keywords.pricing" class="form-control" rows="2" placeholder="price, fees, cost, discount"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Realtime Data Keywords</label>
+                                <small class="form-text text-muted">Availability, stock, live status, hours right now.</small>
+                                <textarea wire:model.defer="intent_keywords.realtime_data" class="form-control" rows="2" placeholder="availability, stock, status"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Lookup Keywords</label>
+                                <small class="form-text text-muted">Find/search/list items or services.</small>
+                                <textarea wire:model.defer="intent_keywords.lookup" class="form-control" rows="2" placeholder="search, find, list"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Static Info Keywords</label>
+                                <small class="form-text text-muted">FAQs, policies, general info, contact, how-to.</small>
+                                <textarea wire:model.defer="intent_keywords.static_info" class="form-control" rows="2" placeholder="policy, refund, warranty, rules"></textarea>
+                            </div>
+                            <small class="form-text text-muted">Comma-separated keywords. These are added to global rules for your organization.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Email Notifications -->
+                <div class="col-lg-6">
+                    <div class="card card-info card-outline">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-envelope"></i> Chat Email Notifications
+                            </h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <div class="custom-control custom-switch">
+                                    <input type="checkbox" class="custom-control-input" id="notify_chat_email_enabled" wire:model="notify_chat_email_enabled">
+                                    <label class="custom-control-label" for="notify_chat_email_enabled">Send each chat interaction by email</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="notify_chat_emails">Notification Emails</label>
+                                <textarea wire:model.defer="notify_chat_emails" class="form-control" id="notify_chat_emails" rows="2" placeholder="owner@example.com, support@example.com"></textarea>
+                                <small class="form-text text-muted">Only sent when enabled. Use comma-separated emails.</small>
                             </div>
                         </div>
                     </div>

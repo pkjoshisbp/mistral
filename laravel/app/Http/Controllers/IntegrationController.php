@@ -14,6 +14,8 @@ use App\Models\Organization;
 use App\Models\Integration;
 use App\Models\User;
 use App\Mail\ShopifyWelcomeEmail;
+use App\Models\OrganizationAction;
+use App\Services\ActionService;
 
 class IntegrationController extends Controller
 {
@@ -532,7 +534,8 @@ class IntegrationController extends Controller
             [
                 'shop' => $shop,
                 'access_token' => $accessToken,
-                'settings' => [] // No widget settings here anymore
+                'settings' => [], // No widget settings here anymore
+                'active' => true
             ]
         );
 
@@ -541,6 +544,9 @@ class IntegrationController extends Controller
             'org_id' => $organization->id,
             'shop' => $shop
         ]);
+
+        // Ensure Shopify actions are auto-created (no manual setup needed)
+        $this->ensureShopifyActions($organization, $integration);
 
         // Fetch theme colors from Shopify
         try {
@@ -967,6 +973,125 @@ class IntegrationController extends Controller
             'shop' => $shop,
             'api_webhooks_registered' => count($webhooks),
             'gdpr_webhooks_status' => 'Must be configured in Partner Dashboard manually'
+        ]);
+    }
+
+    /**
+     * Ensure default Shopify actions exist for the organization
+     */
+    private function ensureShopifyActions(Organization $organization, Integration $integration): void
+    {
+        if (!$integration->shop) {
+            Log::warning('Skipping Shopify action setup: missing shop domain', [
+                'org_id' => $organization->id,
+                'integration_id' => $integration->id
+            ]);
+            return;
+        }
+
+        $baseUrl = rtrim(config('app.url'), '/');
+        $shopDomain = $integration->shop;
+
+        $actions = [
+            [
+                'name' => 'Shopify Product Search',
+                'action_type' => 'search',
+                'description' => 'Search Shopify products, prices, availability, and catalog items.',
+                'aliases' => ['product search', 'catalog lookup', 'item search', 'find products'],
+                'keywords' => ['product', 'products', 'item', 'items', 'catalog', 'price', 'pricing', 'cost', 'cheapest', 'cheap', 'lowest', 'buy', 'purchase', 'available', 'in stock', 'stock', 'inventory'],
+                'source_type' => 'api',
+                'source_config' => [
+                    'method' => 'POST',
+                    'url' => $baseUrl . '/api/shopify/query',
+                    'headers' => [
+                        'Accept' => 'application/json'
+                    ],
+                    'body' => [
+                        'shop_domain' => $shopDomain,
+                        'query' => '{query}',
+                        'query_type' => 'products'
+                    ],
+                    'timeout' => 12
+                ],
+                'min_score_threshold' => 0.6,
+                'cache_ttl' => 120,
+                'is_active' => true
+            ],
+            [
+                'name' => 'Shopify Order Tracking',
+                'action_type' => 'status',
+                'description' => 'Track orders and delivery status by order number or email.',
+                'aliases' => ['order status', 'track order', 'delivery status', 'shipment tracking'],
+                'keywords' => ['order', 'orders', 'tracking', 'track', 'shipment', 'delivery', 'where is my order', 'order status', 'order number'],
+                'source_type' => 'api',
+                'source_config' => [
+                    'method' => 'POST',
+                    'url' => $baseUrl . '/api/shopify/query',
+                    'headers' => [
+                        'Accept' => 'application/json'
+                    ],
+                    'body' => [
+                        'shop_domain' => $shopDomain,
+                        'query' => '{query}',
+                        'query_type' => 'order'
+                    ],
+                    'timeout' => 12
+                ],
+                'min_score_threshold' => 0.6,
+                'cache_ttl' => 60,
+                'is_active' => true
+            ],
+            [
+                'name' => 'Shopify Store Info',
+                'action_type' => 'search',
+                'description' => 'Get Shopify store contact, address, and business information.',
+                'aliases' => ['store info', 'shop info', 'contact info', 'address info'],
+                'keywords' => ['store', 'shop', 'contact', 'address', 'phone', 'email', 'location', 'about', 'who are you'],
+                'source_type' => 'api',
+                'source_config' => [
+                    'method' => 'POST',
+                    'url' => $baseUrl . '/api/shopify/query',
+                    'headers' => [
+                        'Accept' => 'application/json'
+                    ],
+                    'body' => [
+                        'shop_domain' => $shopDomain,
+                        'query' => '{query}',
+                        'query_type' => 'shop_info'
+                    ],
+                    'timeout' => 12
+                ],
+                'min_score_threshold' => 0.6,
+                'cache_ttl' => 600,
+                'is_active' => true
+            ]
+        ];
+
+        $actionService = app(ActionService::class);
+        $createdOrUpdated = 0;
+
+        foreach ($actions as $actionData) {
+            $action = OrganizationAction::updateOrCreate(
+                [
+                    'organization_id' => $organization->id,
+                    'name' => $actionData['name']
+                ],
+                array_merge($actionData, [
+                    'organization_id' => $organization->id,
+                    'source_config' => $actionData['source_config'],
+                    'aliases' => $actionData['aliases'],
+                    'keywords' => $actionData['keywords']
+                ])
+            );
+
+            $actionService->syncActionToVectorDB($action);
+            $createdOrUpdated++;
+        }
+
+        Log::info('Shopify actions ensured for organization', [
+            'org_id' => $organization->id,
+            'shop' => $shopDomain,
+            'actions_count' => $createdOrUpdated
         ]);
     }
 

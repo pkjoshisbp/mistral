@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Organization;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\ChatInteractionNotification;
 use App\Models\Lead;
 use App\Services\AiAgentService;
 use Illuminate\Http\Request;
@@ -56,6 +58,7 @@ class WidgetController
             'offsetY' => (int)($settings['widget_offset_y'] ?? 20),
             'primaryColor' => $settings['primary_color'] ?? '#007bff',
             'welcomeMessage' => $settings['welcome_message'] ?? 'Hello! How can I help you today?',
+            'chatHistoryTtlHours' => (int)($settings['chat_history_ttl_hours'] ?? 24),
             'requireContactForGuests' => (bool)($settings['require_contact_for_guests'] ?? false),
             // Branding/backlink controls (defaults: enabled + dofollow)
             'brandingEnabled' => array_key_exists('branding_enabled', $settings) ? (bool)$settings['branding_enabled'] : true,
@@ -170,21 +173,15 @@ class WidgetController
                     'location' => compact('country', 'region', 'location')
                 ]);
                 
-                // Save lead to database
-                try {
-                    Lead::create([
-                        'name' => $allUserInfo['name'] ?? null,
-                        'email' => $allUserInfo['email'] ?? null,
-                        'phone' => $allUserInfo['phone'] ?? null,
-                        'source' => 'widget',
-                        'organization_id' => $orgId,
-                        'session_id' => $sessionId,
-                        'location_data' => json_encode(compact('country', 'region', 'location'))
-                    ]);
-                    Log::info('Lead saved to database', ['org_id' => $orgId, 'session_id' => $sessionId]);
-                } catch (\Exception $e) {
-                    Log::error('Failed to save lead to database', ['error' => $e->getMessage(), 'org_id' => $orgId]);
-                }
+                $this->upsertWidgetLead(
+                    $organization->id,
+                    $sessionId,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    null,
+                    $message
+                );
+                Log::info('Lead upserted via widget', ['org_id' => $orgId, 'session_id' => $sessionId]);
             }
 
             // Load existing conversation to enable follow-up continuity
@@ -471,15 +468,17 @@ class WidgetController
             if ($hasShopifyData) {
                 // Shopify data available - guide LLM to be conversational
                 $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
-                $systemPrompt .= "Answer naturally and conversationally based on this LIVE PRODUCT DATA:\n\n{$shopifyContext}\n\n";
+                $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n\n";
+                $systemPrompt .= $finalContext . "\n";
                 $systemPrompt .= "CRITICAL INSTRUCTIONS:\n";
                 $systemPrompt .= "- Products are SORTED BY PRICE (lowest first)\n";
                 $systemPrompt .= "- For 'lowest price' or 'cheapest' questions - use the FIRST available product in the list\n";
                 $systemPrompt .= "- For 'highest price' or 'most expensive' - use the LAST product\n";
                 $systemPrompt .= "- For 'what products do you sell?' - mention categories, give 2-3 examples with prices\n";
                 $systemPrompt .= "- For 'do you have [item]?' - check the examples, say yes/no with price and stock\n";
+                $systemPrompt .= "- For return policy, refund, warranty/guarantee, shipping, or store rules, use the Knowledge Base if available\n";
                 $systemPrompt .= "- ALWAYS use EXACT prices from the product data above\n";
-                $systemPrompt .= "- Keep responses brief (2-3 sentences), friendly, and helpful\n";
+                $systemPrompt .= "- Keep responses brief (2-3 sentences, max 60 words), friendly, and helpful\n";
                 $systemPrompt .= "Website: {$orgWebsite}";
             } else {
                 // No Shopify data - standard prompt
@@ -495,7 +494,7 @@ class WidgetController
                 if ($context) {
                     $systemPrompt .= "\nInfo:\n{$context}\n";
                 }
-                $systemPrompt .= "Be brief, friendly, and helpful. Answer in 2-3 sentences max.";
+                $systemPrompt .= "Be brief, friendly, and helpful. Answer in 2-3 sentences max (60 words).";
             }
 
             // Get AI response using llmChat for better token tracking
@@ -598,6 +597,192 @@ class WidgetController
                 'error' => true
             ], 500)->header('X-Robots-Tag', 'noindex, nofollow');
         }
+    }
+
+    /**
+     * Stream chat - SSE endpoint for real-time streaming responses
+     */
+    public function streamChat(Request $request, $orgId)
+    {
+        $organization = is_numeric($orgId) 
+            ? Organization::find($orgId) 
+            : Organization::where('slug', $orgId)->first();
+        
+        if (!$organization || !$organization->is_active) {
+            return response()->json(['error' => 'Organization not found or inactive'], 404);
+        }
+
+        // Check token limits
+        $tokenLimitCheck = $this->checkTokenLimits($organization);
+        if ($tokenLimitCheck !== true) {
+            return response()->json($tokenLimitCheck, 429);
+        }
+
+        $message = $request->input('message');
+        $sessionId = $request->input('session_id', uniqid());
+        $userInfo = $request->input('user_info', []);
+        $visitorInfo = $request->input('visitor_info', []);
+        $allUserInfo = array_merge($userInfo, $visitorInfo);
+        $country = $request->input('country') ?? ($allUserInfo['country'] ?? null);
+        $region = $request->input('region') ?? ($allUserInfo['region'] ?? null);
+        $location = $request->input('location') ?? ($allUserInfo['location'] ?? null);
+        
+        if (!$message) {
+            return response()->json(['error' => 'Message is required'], 400);
+        }
+
+        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location) {
+            try {
+                // Build context (simplified version - you can reuse logic from chat())
+                $aiService = app(AiAgentService::class);
+                $actionService = app(\App\Services\ActionService::class);
+                
+                // Check if any action should be executed
+                $actionResult = $actionService->processQuery($message, $organization->id);
+                $intentResult = $actionResult['intent'] ?? null;
+
+                // Update lead with intent/priority if lead info is provided
+                $this->upsertWidgetLead(
+                    $organization->id,
+                    $sessionId,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult,
+                    $message
+                );
+                
+                $context = '';
+                $liveData = null;
+                
+                // If action was executed, include the live data
+                if ($actionResult['type'] === 'action_executed' && isset($actionResult['result']['success']) && $actionResult['result']['success']) {
+                    $liveData = $actionResult['result']['data'] ?? null;
+                    $actionName = $actionResult['action']['action_name'] ?? 'database query';
+                    
+                    if ($liveData) {
+                        $context .= "\n\n[LIVE DATA from {$actionName}]:\n";
+                        $context .= json_encode($liveData, JSON_PRETTY_PRINT) . "\n";
+                        $context .= "[END LIVE DATA]\n\n";
+                        $context .= "IMPORTANT: Use ONLY the LIVE DATA above to answer the question. Format it in a user-friendly way.\n\n";
+                    }
+                }
+                
+                // Search for relevant context only if no action was executed or as supplementary info
+                if (!$liveData) {
+                    $searchResults = $aiService->enhancedSearch($organization->slug, $message, 5);
+                    
+                    if ($searchResults && isset($searchResults['results'])) {
+                        $context .= "\n\nAdditional information from knowledge base:\n\n";
+                        foreach ($searchResults['results'] as $result) {
+                            $payload = $result['payload'] ?? [];
+                            if (isset($payload['title'])) $context .= "Title: " . $payload['title'] . "\n";
+                            if (isset($payload['content'])) $context .= "Content: " . $payload['content'] . "\n";
+                            $context .= "\n";
+                        }
+                    }
+                }
+
+                // Build messages
+                $systemPrompt = "You are AI Assistant for {$organization->name}.";
+                if ($context) {
+                    $systemPrompt .= $context;
+                }
+
+                // Stream from FastAPI
+                $fastApiUrl = config('services.ai_agent.url');
+                $model = \App\Models\AdminSetting::get('llama_default_model', 'llama3.2:3b');
+                
+                $ch = curl_init("{$fastApiUrl}/llm/chat/stream");
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => false,
+                    CURLOPT_HEADER => false,
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => json_encode([
+                        'messages' => [
+                            ['role' => 'system', 'content' => $systemPrompt],
+                            ['role' => 'user', 'content' => $message]
+                        ],
+                        'model' => $model,
+                        'backend_type' => 'ollama'
+                    ]),
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_WRITEFUNCTION => function ($curl, $data) {
+                        echo $data;
+                        ob_flush();
+                        flush();
+                        return strlen($data);
+                    }
+                ]);
+                
+                curl_exec($ch);
+                curl_close($ch);
+                
+            } catch (\Exception $e) {
+                echo "data: " . json_encode(['error' => $e->getMessage(), 'done' => true]) . "\n\n";
+                ob_flush();
+                flush();
+            }
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache',
+            'X-Accel-Buffering' => 'no',
+            'X-Robots-Tag' => 'noindex, nofollow'
+        ]);
+    }
+
+    private function upsertWidgetLead(int $organizationId, string $sessionId, array $userInfo, array $locationInfo, ?array $intentResult, ?string $message): void
+    {
+        if (empty($userInfo) || empty($userInfo['name']) || empty($userInfo['email'])) {
+            return;
+        }
+
+        $intent = $intentResult['intent'] ?? null;
+        $confidence = $intentResult['confidence'] ?? null;
+        $priority = $this->mapLeadPriority($intent);
+        $status = $this->mapLeadStatus($intent);
+
+        $payload = [
+            'name' => $userInfo['name'] ?? null,
+            'email' => $userInfo['email'] ?? null,
+            'phone' => $userInfo['phone'] ?? null,
+            'source' => 'widget',
+            'organization_id' => $organizationId,
+            'session_id' => $sessionId,
+            'location_data' => json_encode($locationInfo),
+            'intent' => $intent,
+            'intent_confidence' => $confidence,
+            'priority' => $priority,
+            'status' => $status,
+            'last_message' => $message,
+            'last_intent_at' => now(),
+        ];
+
+        try {
+            Lead::updateOrCreate(
+                ['organization_id' => $organizationId, 'session_id' => $sessionId],
+                $payload
+            );
+        } catch (\Exception $e) {
+            Log::error('Failed to upsert widget lead', [
+                'error' => $e->getMessage(),
+                'org_id' => $organizationId,
+                'session_id' => $sessionId
+            ]);
+        }
+    }
+
+    private function mapLeadPriority(?string $intent): string
+    {
+        return match ($intent) {
+            'booking', 'pricing' => 'high',
+            'lookup', 'realtime_data' => 'medium',
+            default => 'low',
+        };
+    }
+
+    private function mapLeadStatus(?string $intent): string
+    {
+        return in_array($intent, ['booking', 'pricing'], true) ? 'qualified' : 'new';
     }
 
     /**
@@ -838,6 +1023,9 @@ class WidgetController
                 ]
             ]);
 
+            // Optional email notification for each interaction (user + AI)
+            $this->sendChatInteractionNotification($organization, $conversation, $userMessage, $aiResponse, $userInfo, $locationInfo);
+
             // Update conversation activity
             $conversation->update([
                 'last_activity_at' => now()
@@ -863,13 +1051,63 @@ class WidgetController
         }
     }
 
+    private function sendChatInteractionNotification($organization, $conversation, $userMessage, $aiResponse, $userInfo = [], $locationInfo = []): void
+    {
+        try {
+            $settings = $organization->settings ?? [];
+            $enabled = (bool) ($settings['notify_chat_email_enabled'] ?? false);
+            if (!$enabled) {
+                return;
+            }
+
+            $emails = $settings['notify_chat_emails'] ?? [];
+            if (is_string($emails)) {
+                $emails = array_filter(array_map('trim', explode(',', $emails)));
+            }
+
+            if (!is_array($emails) || empty($emails)) {
+                return;
+            }
+
+            $payload = [
+                'organization' => $organization,
+                'conversation' => $conversation,
+                'user_message' => $userMessage,
+                'ai_response' => $aiResponse,
+                'user_info' => $userInfo,
+                'location_info' => $locationInfo
+            ];
+
+            Mail::to($emails)->send(new ChatInteractionNotification($payload));
+        } catch (\Throwable $e) {
+            Log::warning('Chat interaction email notification failed', [
+                'org_id' => $organization->id ?? null,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
     /**
      * Check if organization has exceeded token limits
      */
     private function checkTokenLimits($organization)
     {
+        // Bypass limits for the platform host only (ai-chat.support)
+        $bypassHosts = ['ai-chat.support', 'www.ai-chat.support'];
+        $bypassOrgSlugs = ['platform', 'ai-chat-support'];
+        $requestHost = request()->getHost();
+
+        if (in_array($requestHost, $bypassHosts, true) || in_array($organization->slug, $bypassOrgSlugs, true)) {
+            \Log::debug('Token limits bypassed for allowlisted host/org', [
+                'host' => $requestHost,
+                'org_id' => $organization->id,
+                'org_slug' => $organization->slug
+            ]);
+            return true;
+        }
+
         // Allow disabling token enforcement via config/services.ai_agent.enforce_limits or env AI_ENFORCE_LIMITS=false
-        $enforce = (bool) config('services.ai_agent.enforce_limits', env('AI_ENFORCE_LIMITS', false));
+        $enforce = (bool) config('services.ai_agent.enforce_limits', env('AI_ENFORCE_LIMITS', true));
         if (!$enforce) {
             \Log::debug('Token limits not enforced (config disabled)', [
                 'org_id' => $organization->id,

@@ -1,0 +1,17 @@
+<?php
+/** @var \Magento\Framework\View\Element\Template $block */
+$orgSlug = trim((string) $block->getScopeConfig()->getValue('ai_chat/widget/org_slug', \Magento\Store\Model\ScopeInterface::SCOPE_STORE));
+$enabled = (bool) $block->getScopeConfig()->isSetFlag('ai_chat/widget/enabled', \Magento\Store\Model\ScopeInterface::SCOPE_STORE);
+
+if (!$enabled || $orgSlug === '') {
+    return;
+}
+?>
+<script>
+(function() {
+    var script = document.createElement('script');
+    script.src = 'https://ai-chat.support/widget/' + encodeURIComponent('<?php echo $block->escapeHtml($orgSlug); ?>') + '/script.js';
+    script.async = true;
+    document.head.appendChild(script);
+})();
+</script>

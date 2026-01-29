@@ -49,11 +49,6 @@ class AiChatSupportSeeder extends Seeder
                 'type' => 'features'
             ],
             [
-                'title' => 'Pricing and Plans',
-                'content' => 'We offer flexible pricing plans to suit businesses of all sizes. Our plans start at $49/month for the Starter package with 2M tokens, and $199/month for the Pro plan with 10M tokens. For Indian customers, pricing is ₹4,900/month for Starter and ₹19,900/month for Pro. WhatsApp integration service is available for $50 (₹5,000 for Indian customers). All plans include comprehensive features, analytics, and support. Enterprise solutions are available with custom pricing.',
-                'type' => 'pricing'
-            ],
-            [
                 'title' => 'Integration and Setup',
                 'content' => 'AI Chat Support integrates with popular platforms including WordPress, Shopify, Magento, Wix, Squarespace, and custom websites. Integration is as simple as copying and pasting a small JavaScript code snippet. The widget is mobile-responsive and works across all devices and browsers. We also offer API integration for advanced users and custom implementations. Technical documentation and step-by-step guides are available in our help center.',
                 'type' => 'integration'
@@ -72,6 +67,46 @@ class AiChatSupportSeeder extends Seeder
                 'title' => 'Security and Privacy',
                 'content' => 'We take security seriously with enterprise-grade encryption, secure data centers, regular security audits, and compliance with GDPR, CCPA, and SOC 2 Type II standards. All conversations are encrypted in transit and at rest. We never sell or share customer data with third parties. Customers have full control over their data and can request deletion at any time. Our privacy policy clearly outlines how we collect, use, and protect information.',
                 'type' => 'security'
+            ],
+            [
+                'title' => 'How accurate is AI Chat Support?',
+                'content' => 'Accuracy improves over time as you add FAQs, business info, and real chat feedback. Many customers see high accuracy within the first week, and with continuous tuning it can reach 95–99% on common queries. We provide tools to review chat history, add missing answers, and improve responses quickly.',
+                'type' => 'accuracy'
+            ],
+            [
+                'title' => 'How can I improve AI responses?',
+                'content' => 'You can improve responses by adding clear FAQs, service descriptions, and policies, and by reviewing chat history to fill gaps. Adding synonyms and common user phrases helps the AI match intent more accurately. We also support quick updates that sync to the knowledge base instantly.',
+                'type' => 'improvement'
+            ],
+            [
+                'title' => 'What data should I add first?',
+                'content' => 'Start with FAQs, pricing policies, services or product summaries, and key policies like returns, warranty, and shipping. These cover most customer questions and immediately boost accuracy.',
+                'type' => 'onboarding'
+            ],
+            [
+                'title' => 'Does the AI learn from live chats?',
+                'content' => 'The AI uses your knowledge base and policies as the primary source. You can review chat transcripts and add missing answers to improve future responses. This creates a continuous improvement loop with full control by your team.',
+                'type' => 'learning'
+            ],
+            [
+                'title' => 'How fast is the response time?',
+                'content' => 'Most responses are delivered in a few seconds, and streaming replies make the response visible quickly. Speed depends on the model used and the complexity of the question. Faster models can be selected for latency-sensitive use cases.',
+                'type' => 'performance'
+            ],
+            [
+                'title' => 'Can I customize the AI behavior?',
+                'content' => 'Yes. You can customize the assistant name, tone, welcome message, widget design, and the business data it uses. You can also configure intent keywords to improve routing for your industry.',
+                'type' => 'customization'
+            ],
+            [
+                'title' => 'What if the AI gives a wrong answer?',
+                'content' => 'You can review chat logs, correct or add missing FAQs, and the AI will use the updated knowledge instantly. This prevents repeated mistakes and steadily improves answer quality.',
+                'type' => 'quality'
+            ],
+            [
+                'title' => 'Do you support multiple languages?',
+                'content' => 'Yes, AI Chat Support can respond in multiple languages depending on the model used. You can add FAQs in multiple languages for best accuracy.',
+                'type' => 'languages'
             ]
         ];
 
@@ -82,41 +117,40 @@ class AiChatSupportSeeder extends Seeder
             
             // Create collection if it doesn't exist
             $createResult = $aiAgentService->createCollection($collectionName, 768);
-            
+
             if ($createResult) {
                 $this->command->info("Created/verified Qdrant collection: {$collectionName}");
-                
-                // Add each document to Qdrant
-                $successCount = 0;
-                foreach ($documents as $index => $document) {
-                    // Generate embedding for the document content
+            } else {
+                $this->command->warn("Qdrant collection create returned no response; continuing to upsert documents (collection may already exist).");
+            }
+
+            // Add each document to Qdrant
+            $successCount = 0;
+            foreach ($documents as $index => $document) {
+                // Generate embedding for the document content
                     $embedResult = $aiAgentService->embed($document['content']);
-                    
-                    if ($embedResult && isset($embedResult['embedding'])) {
-                        // Add to Qdrant with the embedding
-                        $addResult = $aiAgentService->addToQdrant(
-                            $collectionName,
-                            $embedResult['embedding'],
-                            [
-                                'title' => $document['title'],
-                                'content' => $document['content'],
-                                'type' => $document['type'],
-                                'organization_slug' => $organization->slug,
-                                'data_type' => 'info'
-                            ],
-                            'doc_' . $index
-                        );
-                        
-                        if ($addResult) {
-                            $successCount++;
-                        }
+
+                    if ($embedResult && is_array($embedResult)) {
+                    // Add to Qdrant with the embedding
+                    $addResult = $aiAgentService->addToQdrant(
+                        $collectionName,
+                            $embedResult,
+                        [
+                            'title' => $document['title'],
+                            'content' => $document['content'],
+                            'type' => $document['type'],
+                            'organization_slug' => $organization->slug,
+                            'data_type' => 'info'
+                        ]
+                    );
+
+                    if ($addResult) {
+                        $successCount++;
                     }
                 }
-                
-                $this->command->info("Successfully synced {$successCount}/" . count($documents) . " documents to Qdrant collection '{$collectionName}'.");
-            } else {
-                $this->command->error("Failed to create Qdrant collection");
             }
+
+            $this->command->info("Successfully synced {$successCount}/" . count($documents) . " documents to Qdrant collection '{$collectionName}'.");
         } catch (\Exception $e) {
             $this->command->error("Failed to sync to Qdrant: " . $e->getMessage());
         }

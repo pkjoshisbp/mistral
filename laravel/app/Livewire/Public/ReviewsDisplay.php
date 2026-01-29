@@ -13,6 +13,7 @@ class ReviewsDisplay extends Component
 
     public $organizationId = null;
     public $organization = null;
+    public $organizationName = null;
     public $ratingFilter = 'all';
     public $sortBy = 'latest';
     public $showFeaturedOnly = false;
@@ -28,6 +29,7 @@ class ReviewsDisplay extends Component
         if ($organizationId) {
             $this->organizationId = $organizationId;
             $this->organization = Organization::findOrFail($organizationId);
+            $this->organizationName = data_get($this->organization, 'name');
         }
     }
 
@@ -104,7 +106,8 @@ class ReviewsDisplay extends Component
     {
         $reviews = $this->reviews;
         $stats = $this->stats;
+        $organizationName = $this->organizationName ?? data_get($this->organization, 'name');
         
-        return view('livewire.public.reviews-display', compact('reviews', 'stats'));
+        return view('livewire.public.reviews-display', compact('reviews', 'stats', 'organizationName'));
     }
 }

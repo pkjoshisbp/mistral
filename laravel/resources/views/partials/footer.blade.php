@@ -84,7 +84,7 @@
         
         // Load the AI chat widget script from local domain
         var script = document.createElement('script');
-        script.src = '{{ route('widget.script', ['orgId' => 3]) }}';
+        script.src = '{{ route('widget.script', ['orgId' => 'platform']) }}';
         script.async = true;
         script.onload = function() {
             console.log('AI Chat Widget loaded successfully');

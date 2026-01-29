@@ -239,6 +239,7 @@ class DataEntryManager extends Component
 
     public function render()
     {
-        return view('livewire.data-entry-manager');
+        return view('livewire.data-entry-manager')
+            ->layout('layouts.admin');
     }
 }

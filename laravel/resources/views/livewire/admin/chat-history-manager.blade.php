@@ -59,8 +59,12 @@
                                 </td>
                                 <td>{{ $conversation->messages->count() }}</td>
                                 <td>
-                                    <button class="btn btn-xs btn-outline-primary" wire:click="toggleDetails({{ $conversation->id }})"><i class="fas fa-eye"></i></button>
-                                    <button class="btn btn-xs btn-outline-success" wire:click="exportSession({{ $conversation->id }})"><i class="fas fa-file-export"></i></button>
+                                    <a class="btn btn-xs btn-outline-primary" href="{{ route('admin.chat-history', ['focusConversation' => $conversation->id]) }}" title="View conversation">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a class="btn btn-xs btn-outline-success" href="{{ route('admin.chat-history.export', ['id' => $conversation->id]) }}" title="Export conversation">
+                                        <i class="fas fa-file-export"></i>
+                                    </a>
                                 </td>
                             </tr>
                             @if(isset($showDetails[$conversation->id]))

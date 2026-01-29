@@ -34,11 +34,23 @@ class ActionService
         try {
             // Step 1: Detect intent
             $intentResult = $this->intentDetector->detectIntent($query, $organizationId);
-            
-            // Step 2: Check if action is needed
-            if (!$this->intentDetector->requiresAction($intentResult)) {
+
+            // Step 2: Find matching actions (even if intent says static_info) so we can run high-confidence actions
+            $matchingActions = $this->findMatchingActions($query, $organizationId, $intentResult);
+            $topAction = $matchingActions[0] ?? null;
+            $topScore = $topAction['score'] ?? 0;
+            $scoreThreshold = $topAction && isset($topAction['action']->min_score_threshold)
+                ? (float) $topAction['action']->min_score_threshold
+                : 0.7;
+
+            $requiresAction = $this->intentDetector->requiresAction($intentResult);
+            $shouldExecuteAction = $requiresAction || ($topAction && $topScore >= $scoreThreshold);
+
+            if (!$shouldExecuteAction) {
                 Log::info('No action required, using knowledge base', [
-                    'intent' => $intentResult
+                    'intent' => $intentResult,
+                    'top_action_score' => $topScore,
+                    'score_threshold' => $scoreThreshold,
                 ]);
                 
                 return [
@@ -48,9 +60,7 @@ class ActionService
                 ];
             }
 
-            // Step 3: Find matching actions
-            $matchingActions = $this->findMatchingActions($query, $organizationId, $intentResult);
-            
+            // Step 3: If we decided to execute an action, ensure we have a match
             if (empty($matchingActions)) {
                 Log::info('No matching actions found, fallback to knowledge base', [
                     'intent' => $intentResult,
@@ -71,6 +81,11 @@ class ActionService
             // Add temporal context to parameters
             $temporalContext = $this->intentDetector->extractTemporalContext($query);
             $parameters = array_merge($parameters, $temporalContext);
+
+            // Ensure API actions receive the raw user query when not extracted
+            if (!array_key_exists('query', $parameters) && $bestAction['action']->source_type === 'api') {
+                $parameters['query'] = $query;
+            }
 
             Log::info('Executing action', [
                 'action_id' => $bestAction['action']->id,
@@ -172,7 +187,7 @@ class ActionService
         // If no keyword matches, try semantic similarity as fallback
         if (empty($matches)) {
             try {
-                $queryEmbedding = $this->aiAgentService->generateEmbedding($query);
+                $queryEmbedding = $this->aiAgent->embed($query);
 
                 if ($queryEmbedding) {
                     foreach ($actions as $action) {
@@ -183,7 +198,7 @@ class ActionService
 
                         // Generate embedding for action description + aliases
                         $actionText = $action->getTextForEmbedding();
-                        $actionEmbedding = $this->aiAgentService->generateEmbedding($actionText);
+                        $actionEmbedding = $this->aiAgent->embed($actionText);
 
                         if (!$actionEmbedding) {
                             continue;
@@ -266,7 +281,8 @@ class ActionService
     public function syncActionToVectorDB(OrganizationAction $action): bool
     {
         try {
-            $collectionName = "org_{$action->organization_id}";
+            // Use organization slug as collection name
+            $collectionName = $action->organization->slug;
             
             // Prepare text for embedding
             $textForEmbedding = $action->getTextForEmbedding();
@@ -281,9 +297,11 @@ class ActionService
                 return false;
             }
             
+            // Use integer ID for Qdrant (actions use 10000+ range)
+            $qdrantId = 10000 + $action->id;
+            
             // Prepare payload with action metadata
             $payload = [
-                'id' => "action_{$action->id}",
                 'source_type' => 'action',
                 'action_id' => $action->id,
                 'action_type' => $action->action_type,
@@ -301,11 +319,12 @@ class ActionService
                 $collectionName,
                 $embedding,
                 $payload,
-                "action_{$action->id}"
+                $qdrantId
             );
             
             Log::info('Action synced to vector database', [
                 'action_id' => $action->id,
+                'qdrant_id' => $qdrantId,
                 'collection' => $collectionName,
                 'success' => $result !== null
             ]);
@@ -328,13 +347,14 @@ class ActionService
     public function removeActionFromVectorDB(OrganizationAction $action): bool
     {
         try {
-            $collectionName = "org_{$action->organization_id}";
-            $actionId = "action_{$action->id}";
+            // Use organization slug as collection name
+            $collectionName = $action->organization->slug;
+            $qdrantId = 10000 + $action->id; // Same ID format as syncActionToVectorDB
             
             // Use the deleteDataFromQdrant method from AiAgentService
             $result = $this->aiAgent->deleteDataFromQdrant(
                 $collectionName,
-                $actionId,
+                $qdrantId,
                 'action'
             );
             

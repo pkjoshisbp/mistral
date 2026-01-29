@@ -17,12 +17,40 @@ class OrganizationAiManager extends Component
     public $availableModels = [];
     public $showSettings = false;
     public $assistantDisplayName;
+    public $intentStrategy;
+    public $intentRuleThreshold = 0.8;
+    public $intentEmbeddingThreshold = 0.75;
+    public $intentUseLlm = true;
+    public $intentLlmModel;
+    public $intentLlmMaxTokens = 64;
+    public $intentLlmTemperature = 0.1;
+    public $intentLlmTopP = 0.85;
+    public $intentLlmRepeatPenalty = 1.05;
+    public $orgType;
+    public $notifyChatEmailEnabled = false;
+    public $notifyChatEmails = '';
+    public $intentKeywords = [
+        'booking' => '',
+        'pricing' => '',
+        'realtime_data' => '',
+        'lookup' => '',
+        'static_info' => ''
+    ];
 
     protected $rules = [
         'aiBackendType' => 'required|in:ollama,llamacpp',
         'aiModelProvider' => 'required|in:llama,openai',
         'aiModel' => 'required|string',
-        'assistantDisplayName' => 'nullable|string|max:60'
+        'assistantDisplayName' => 'nullable|string|max:60',
+        'intentStrategy' => 'required|in:rules_only,rules_then_embedding,rules_then_llm,hybrid',
+        'intentRuleThreshold' => 'required|numeric|min:0|max:1',
+        'intentEmbeddingThreshold' => 'required|numeric|min:0|max:1',
+        'intentUseLlm' => 'boolean',
+        'intentLlmModel' => 'nullable|string',
+        'intentLlmMaxTokens' => 'required|integer|min:16|max:256',
+        'intentLlmTemperature' => 'required|numeric|min:0|max:1',
+        'intentLlmTopP' => 'required|numeric|min:0|max:1',
+        'intentLlmRepeatPenalty' => 'required|numeric|min:0.8|max:1.5'
     ];
 
     public function mount()
@@ -49,6 +77,28 @@ class OrganizationAiManager extends Component
         $this->aiModelProvider = $settings['ai_model_provider'] ?? AdminSetting::get('ai_model_provider', 'llama');
         $this->aiModel = $settings['ai_model'] ?? AdminSetting::get('ai_model', 'llama3.2:3b');
         $this->assistantDisplayName = $settings['assistant_display_name'] ?? 'AI Assistant';
+
+        $this->orgType = $settings['org_type'] ?? null;
+        $this->notifyChatEmailEnabled = (bool) ($settings['notify_chat_email_enabled'] ?? false);
+        $this->notifyChatEmails = $this->keywordsToString($settings['notify_chat_emails'] ?? []);
+        $storedKeywords = $settings['intent_keywords'] ?? [];
+        $this->intentKeywords = [
+            'booking' => $this->keywordsToString($storedKeywords['booking'] ?? []),
+            'pricing' => $this->keywordsToString($storedKeywords['pricing'] ?? []),
+            'realtime_data' => $this->keywordsToString($storedKeywords['realtime_data'] ?? []),
+            'lookup' => $this->keywordsToString($storedKeywords['lookup'] ?? []),
+            'static_info' => $this->keywordsToString($storedKeywords['static_info'] ?? [])
+        ];
+
+        $this->intentStrategy = $settings['intent_strategy'] ?? AdminSetting::get('intent_strategy', 'hybrid');
+        $this->intentRuleThreshold = (float) ($settings['intent_rule_threshold'] ?? AdminSetting::get('intent_rule_threshold', 0.8));
+        $this->intentEmbeddingThreshold = (float) ($settings['intent_embedding_threshold'] ?? AdminSetting::get('intent_embedding_threshold', 0.75));
+        $this->intentUseLlm = (bool) ($settings['intent_use_llm'] ?? AdminSetting::get('intent_use_llm', true));
+        $this->intentLlmModel = $settings['intent_llm_model'] ?? AdminSetting::get('intent_llm_model', 'llama3.2:1b');
+        $this->intentLlmMaxTokens = (int) ($settings['intent_llm_max_tokens'] ?? AdminSetting::get('intent_llm_max_tokens', 64));
+        $this->intentLlmTemperature = (float) ($settings['intent_llm_temperature'] ?? AdminSetting::get('intent_llm_temperature', 0.1));
+        $this->intentLlmTopP = (float) ($settings['intent_llm_top_p'] ?? AdminSetting::get('intent_llm_top_p', 0.85));
+        $this->intentLlmRepeatPenalty = (float) ($settings['intent_llm_repeat_penalty'] ?? AdminSetting::get('intent_llm_repeat_penalty', 1.05));
     }
 
     public function loadAvailableModels()
@@ -96,6 +146,34 @@ class OrganizationAiManager extends Component
                 $trimmed = trim($this->assistantDisplayName);
                 $currentSettings['assistant_display_name'] = $trimmed !== '' ? $trimmed : 'AI Assistant';
             }
+
+            if ($this->orgType !== null) {
+                $currentSettings['org_type'] = $this->orgType;
+            }
+
+            $currentSettings['notify_chat_email_enabled'] = (bool) $this->notifyChatEmailEnabled;
+            $currentSettings['notify_chat_emails'] = $this->stringToKeywords($this->notifyChatEmails ?? '');
+
+            $currentSettings['intent_keywords'] = [
+                'booking' => $this->stringToKeywords($this->intentKeywords['booking'] ?? ''),
+                'pricing' => $this->stringToKeywords($this->intentKeywords['pricing'] ?? ''),
+                'realtime_data' => $this->stringToKeywords($this->intentKeywords['realtime_data'] ?? ''),
+                'lookup' => $this->stringToKeywords($this->intentKeywords['lookup'] ?? ''),
+                'static_info' => $this->stringToKeywords($this->intentKeywords['static_info'] ?? '')
+            ];
+
+            // Intent classification settings
+            $currentSettings['intent_strategy'] = $this->intentStrategy;
+            $currentSettings['intent_rule_threshold'] = $this->intentRuleThreshold;
+            $currentSettings['intent_embedding_threshold'] = $this->intentEmbeddingThreshold;
+            $currentSettings['intent_use_llm'] = (bool) $this->intentUseLlm;
+            if ($this->intentLlmModel) {
+                $currentSettings['intent_llm_model'] = $this->intentLlmModel;
+            }
+            $currentSettings['intent_llm_max_tokens'] = $this->intentLlmMaxTokens;
+            $currentSettings['intent_llm_temperature'] = $this->intentLlmTemperature;
+            $currentSettings['intent_llm_top_p'] = $this->intentLlmTopP;
+            $currentSettings['intent_llm_repeat_penalty'] = $this->intentLlmRepeatPenalty;
             
             $this->selectedOrganization->settings = $currentSettings;
             $this->selectedOrganization->save();
@@ -129,6 +207,19 @@ class OrganizationAiManager extends Component
             unset($currentSettings['ai_backend_type']);
             unset($currentSettings['ai_model_provider']);
             unset($currentSettings['ai_model']);
+            unset($currentSettings['intent_strategy']);
+            unset($currentSettings['intent_rule_threshold']);
+            unset($currentSettings['intent_embedding_threshold']);
+            unset($currentSettings['intent_use_llm']);
+            unset($currentSettings['intent_llm_model']);
+            unset($currentSettings['intent_llm_max_tokens']);
+            unset($currentSettings['intent_llm_temperature']);
+            unset($currentSettings['intent_llm_top_p']);
+            unset($currentSettings['intent_llm_repeat_penalty']);
+            unset($currentSettings['org_type']);
+            unset($currentSettings['intent_keywords']);
+            unset($currentSettings['notify_chat_email_enabled']);
+            unset($currentSettings['notify_chat_emails']);
             
             $this->selectedOrganization->settings = $currentSettings;
             $this->selectedOrganization->save();
@@ -151,6 +242,186 @@ class OrganizationAiManager extends Component
     {
         // Render within the admin layout (supports $slot)
         return view('livewire.admin.organization-ai-manager')->layout('layouts.admin');
+    }
+
+    public function applyIntentTemplate()
+    {
+        if (!$this->orgType) {
+            session()->flash('error', 'Please select an organization type first.');
+            return;
+        }
+
+        $templates = $this->getIntentKeywordTemplates();
+        $template = $templates[$this->orgType] ?? null;
+
+        if (!$template) {
+            session()->flash('error', 'No template found for this organization type.');
+            return;
+        }
+
+        foreach ($this->intentKeywords as $intent => $existing) {
+            $templateWords = $template[$intent] ?? [];
+            $merged = array_unique(array_filter(array_merge(
+                $this->stringToKeywords($existing),
+                $templateWords
+            )));
+            $this->intentKeywords[$intent] = $this->keywordsToString($merged);
+        }
+
+        session()->flash('success', 'Intent keyword template applied. Review and save.');
+    }
+
+    private function keywordsToString(array $keywords): string
+    {
+        return implode(', ', array_values(array_unique(array_filter($keywords))));
+    }
+
+    private function stringToKeywords(string $keywords): array
+    {
+        $parts = preg_split('/[,\n]/', $keywords);
+        $clean = array_map(fn($k) => trim(strtolower($k)), $parts);
+        $clean = array_filter($clean, fn($k) => $k !== '');
+        return array_values(array_unique($clean));
+    }
+
+    private function getIntentKeywordTemplates(): array
+    {
+        $templates = [
+            'ecommerce' => [
+                'booking' => ['schedule pickup', 'delivery slot', 'reserve item'],
+                'pricing' => ['price', 'discount', 'offer', 'coupon', 'shipping cost'],
+                'realtime_data' => ['stock', 'inventory', 'availability', 'in stock', 'out of stock'],
+                'lookup' => ['order status', 'track order', 'find product', 'product search'],
+                'static_info' => ['return policy', 'refund policy', 'warranty', 'terms', 'shipping policy']
+            ],
+            'hospital' => [
+                'booking' => ['appointment', 'book doctor', 'schedule visit', 'consultation'],
+                'pricing' => ['fees', 'consultation fee', 'test price', 'package cost'],
+                'realtime_data' => ['doctor available', 'bed availability', 'today schedule'],
+                'lookup' => ['find doctor', 'department', 'specialist', 'lab test'],
+                'static_info' => ['visiting hours', 'insurance', 'documents required', 'policies']
+            ],
+            'clinic' => [
+                'booking' => ['appointment', 'book slot', 'schedule visit'],
+                'pricing' => ['fees', 'consultation fee', 'test cost'],
+                'realtime_data' => ['doctor available', 'today schedule'],
+                'lookup' => ['find doctor', 'services', 'tests'],
+                'static_info' => ['policies', 'documents required', 'location']
+            ],
+            'automobile_dealer' => [
+                'booking' => ['test drive', 'service appointment', 'book service'],
+                'pricing' => ['price', 'on-road price', 'emi', 'insurance cost'],
+                'realtime_data' => ['stock', 'availability', 'delivery time'],
+                'lookup' => ['find model', 'variant', 'compare models'],
+                'static_info' => ['warranty', 'service policy', 'financing', 'exchange policy']
+            ],
+            'ngo' => [
+                'booking' => ['volunteer signup', 'schedule visit'],
+                'pricing' => ['donation', 'contribution amount'],
+                'realtime_data' => ['event today', 'live updates'],
+                'lookup' => ['programs', 'projects', 'find event'],
+                'static_info' => ['mission', 'policies', 'contact', 'about']
+            ],
+            'school' => [
+                'booking' => ['admission appointment', 'schedule visit'],
+                'pricing' => ['fees', 'tuition', 'admission cost'],
+                'realtime_data' => ['today schedule', 'exam timetable'],
+                'lookup' => ['find class', 'courses', 'faculty'],
+                'static_info' => ['admission policy', 'rules', 'uniform', 'transport']
+            ],
+            'college' => [
+                'booking' => ['campus visit', 'admission appointment'],
+                'pricing' => ['fees', 'tuition', 'scholarship'],
+                'realtime_data' => ['schedule', 'exam dates'],
+                'lookup' => ['courses', 'departments', 'faculty'],
+                'static_info' => ['admission policy', 'rules', 'hostel policy']
+            ],
+            'restaurant' => [
+                'booking' => ['table reservation', 'book table', 'reserve seat'],
+                'pricing' => ['menu price', 'cost', 'offers'],
+                'realtime_data' => ['availability', 'open now', 'wait time'],
+                'lookup' => ['menu', 'find dish', 'specials'],
+                'static_info' => ['opening hours', 'policies', 'location']
+            ],
+            'real_estate' => [
+                'booking' => ['site visit', 'schedule viewing'],
+                'pricing' => ['price', 'rent', 'emi', 'maintenance cost'],
+                'realtime_data' => ['availability', 'available now'],
+                'lookup' => ['find property', 'search listings'],
+                'static_info' => ['policies', 'documents required', 'terms']
+            ],
+            'travel' => [
+                'booking' => ['book trip', 'reserve flight', 'hotel booking'],
+                'pricing' => ['fare', 'package price', 'discount'],
+                'realtime_data' => ['availability', 'live status', 'current deals'],
+                'lookup' => ['find flights', 'search packages', 'itinerary'],
+                'static_info' => ['cancellation policy', 'refund policy', 'baggage rules']
+            ],
+            'fitness' => [
+                'booking' => ['class booking', 'schedule session', 'trainer appointment'],
+                'pricing' => ['membership fee', 'pricing', 'plans'],
+                'realtime_data' => ['class availability', 'slots today'],
+                'lookup' => ['find class', 'programs', 'trainer'],
+                'static_info' => ['policies', 'timings', 'rules']
+            ],
+            'logistics' => [
+                'booking' => ['schedule pickup', 'book shipment'],
+                'pricing' => ['shipping cost', 'rate', 'quote'],
+                'realtime_data' => ['tracking', 'delivery status', 'live status'],
+                'lookup' => ['track shipment', 'find order'],
+                'static_info' => ['service area', 'policies', 'insurance']
+            ],
+            'fintech' => [
+                'booking' => ['schedule demo', 'book consultation'],
+                'pricing' => ['fees', 'pricing', 'plans'],
+                'realtime_data' => ['status', 'balance', 'current rates'],
+                'lookup' => ['transaction', 'statement', 'account info'],
+                'static_info' => ['compliance', 'security', 'terms']
+            ],
+            'real_estate_rental' => [
+                'booking' => ['schedule viewing', 'book visit'],
+                'pricing' => ['rent', 'deposit', 'maintenance'],
+                'realtime_data' => ['availability', 'vacancy'],
+                'lookup' => ['find rental', 'search listings'],
+                'static_info' => ['lease terms', 'policies', 'documents required']
+            ],
+            'other' => [
+                'booking' => [],
+                'pricing' => [],
+                'realtime_data' => [],
+                'lookup' => [],
+                'static_info' => []
+            ]
+        ];
+
+        $commonStaticInfo = [
+            'faq',
+            'faqs',
+            'frequently asked',
+            'contact',
+            'contact info',
+            'phone',
+            'email',
+            'support',
+            'help',
+            'hours',
+            'location',
+            'address',
+            'how to'
+        ];
+
+        foreach ($templates as $type => $template) {
+            if (!array_key_exists('static_info', $template)) {
+                continue;
+            }
+
+            $templates[$type]['static_info'] = array_values(array_unique(array_merge(
+                $template['static_info'],
+                $commonStaticInfo
+            )));
+        }
+
+        return $templates;
     }
 }
         // Use the admin layout explicitly to avoid missing default Livewire layout errors

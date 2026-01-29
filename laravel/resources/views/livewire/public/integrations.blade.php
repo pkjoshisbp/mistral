@@ -7,7 +7,7 @@
             </h1>
             <p class="lead text-muted">
                 Easy integration with your favorite platforms. Install our AI Chat Support system 
-                on WordPress, WooCommerce, and Shopify with just a few clicks.
+                on WordPress, WooCommerce, Magento, and Shopify with just a few clicks.
             </p>
         </div>
     </div>
@@ -80,6 +80,79 @@
                                     <h6 class="fw-bold text-dark">Requirements:</h6>
                                     <ul class="list-unstyled">
                                         @foreach($pluginFiles['wordpress']['requirements'] as $requirement)
+                                            <li class="mb-1">
+                                                <i class="fas fa-cog text-muted me-2"></i>{{ $requirement }}
+                                            </li>
+                                        @endforeach
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Magento Extension -->
+    <div class="row mb-5">
+        <div class="col-12">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-warning text-dark py-3">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-store fa-2x me-3"></i>
+                        <div>
+                            <h3 class="mb-0">{{ $pluginFiles['magento']['name'] }}</h3>
+                            <small class="opacity-75">Version {{ $pluginFiles['magento']['version'] }}</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <!-- Description -->
+                        <div class="col-md-6 mb-4">
+                            <h5 class="fw-bold text-dark mb-3">Description</h5>
+                            <p class="text-muted mb-4">{{ $pluginFiles['magento']['description'] }}</p>
+                            
+                            <!-- Download Button -->
+                            <div class="d-grid mb-3">
+                                <button wire:click="downloadMagento" class="btn btn-warning btn-lg text-dark">
+                                    <i class="fas fa-download me-2"></i>Download Magento Extension
+                                    <small class="ms-2">({{ $pluginFiles['magento']['size'] }})</small>
+                                </button>
+                            </div>
+                            <div class="d-grid mb-3">
+                                <button wire:click="downloadMagentoComposer" class="btn btn-outline-dark btn-lg">
+                                    <i class="fas fa-download me-2"></i>Download Composer Package
+                                    <small class="ms-2">({{ $pluginFiles['magento']['composer_size'] }})</small>
+                                </button>
+                            </div>
+                            
+                            <div class="alert alert-info">
+                                <small>
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Note:</strong> Upload the ZIP contents into your Magento root directory.
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <!-- Features & Requirements -->
+                        <div class="col-md-6">
+                            <div class="row">
+                                <div class="col-12 mb-3">
+                                    <h6 class="fw-bold text-dark">Features:</h6>
+                                    <ul class="list-unstyled">
+                                        @foreach($pluginFiles['magento']['features'] as $feature)
+                                            <li class="mb-1">
+                                                <i class="fas fa-check text-success me-2"></i>{{ $feature }}
+                                            </li>
+                                        @endforeach
+                                    </ul>
+                                </div>
+                                <div class="col-12">
+                                    <h6 class="fw-bold text-dark">Requirements:</h6>
+                                    <ul class="list-unstyled">
+                                        @foreach($pluginFiles['magento']['requirements'] as $requirement)
                                             <li class="mb-1">
                                                 <i class="fas fa-cog text-muted me-2"></i>{{ $requirement }}
                                             </li>
@@ -194,6 +267,36 @@
                                 </li>
                                 <li class="list-group-item border-0 ps-0">
                                     Enter your organization details and customize settings
+                                </li>
+                            </ol>
+                        </div>
+
+                        <!-- Magento Instructions -->
+                        <div class="col-md-6 mb-4">
+                            <h5 class="fw-bold text-warning">
+                                <i class="fas fa-store me-2"></i>Magento 2
+                            </h5>
+                            <ol class="list-group list-group-numbered">
+                                <li class="list-group-item border-0 ps-0">
+                                    Download the Magento extension ZIP file using the button above
+                                </li>
+                                <li class="list-group-item border-0 ps-0">
+                                    Upload the ZIP contents into your Magento root (merge app/ folder)
+                                </li>
+                                <li class="list-group-item border-0 ps-0">
+                                    Run: php bin/magento setup:upgrade
+                                </li>
+                                <li class="list-group-item border-0 ps-0">
+                                    Run: php bin/magento cache:flush
+                                </li>
+                                <li class="list-group-item border-0 ps-0">
+                                    Go to Stores → Configuration → General → AI Chat Support
+                                </li>
+                                <li class="list-group-item border-0 ps-0">
+                                    Enable widget and enter your organization slug or ID
+                                </li>
+                                <li class="list-group-item border-0 ps-0">
+                                    Composer install: composer require aichat/magento2-widget
                                 </li>
                             </ol>
                         </div>

@@ -33,6 +33,28 @@ class Integrations extends Component
                     'Secure API integration'
                 ]
             ],
+            'magento' => [
+                'name' => 'AI Chat Support - Magento 2 Extension',
+                'version' => '1.0.0',
+                'file' => 'ai-chat-support-magento-1.0.0.zip',
+                'size' => file_exists(base_path('../plugins/magento/ai-chat-support-magento-1.0.0.zip')) ?
+                    $this->formatFileSize(filesize(base_path('../plugins/magento/ai-chat-support-magento-1.0.0.zip'))) : '~5KB',
+                'composer_file' => 'ai-chat-support-magento-composer-1.0.0.zip',
+                'composer_size' => file_exists(base_path('../plugins/magento/ai-chat-support-magento-composer-1.0.0.zip')) ?
+                    $this->formatFileSize(filesize(base_path('../plugins/magento/ai-chat-support-magento-composer-1.0.0.zip'))) : '~6KB',
+                'description' => 'Magento 2 extension that injects AI Chat Support on storefront pages with admin-configurable org slug/ID.',
+                'requirements' => [
+                    'Magento 2.3 or higher',
+                    'Admin access to configuration',
+                    'Internet connection for widget script'
+                ],
+                'features' => [
+                    'Admin config (enable + org slug/ID)',
+                    'No code changes needed',
+                    'Works across store views',
+                    'Lightweight and fast'
+                ]
+            ],
             'shopify' => [
                 'name' => 'AI Chat Support - Shopify App',
                 'version' => '1.0.0',
@@ -69,6 +91,16 @@ class Integrations extends Component
     {
         // Redirect to download route
         return $this->redirect(route('download.wordpress-plugin'));
+    }
+
+    public function downloadMagento()
+    {
+        return $this->redirect(route('download.magento-plugin'));
+    }
+
+    public function downloadMagentoComposer()
+    {
+        return $this->redirect(route('download.magento-composer-package'));
     }
     
     public function render()

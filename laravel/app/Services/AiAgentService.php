@@ -423,7 +423,17 @@ class AiAgentService
 
             $response = Http::timeout(30)->post("{$this->baseUrl}/qdrant/add", $data);
 
-            return $response->successful() ? $response->json() : null;
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::warning('AI Agent add to qdrant failed', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'collection' => $collectionName
+            ]);
+
+            return null;
         } catch (\Exception $e) {
             Log::error('AI Agent add to qdrant exception', ['error' => $e->getMessage()]);
             return null;
@@ -750,7 +760,7 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
     /**
      * LLM chat with conversation context
      */
-    public function llmChat($messages, $model = null, $userId = null, $organizationId = null)  // Default determined dynamically
+    public function llmChat($messages, $model = null, $userId = null, $organizationId = null, array $options = [])  // Default determined dynamically
     {
         try {
             // Use configured model if none provided
@@ -763,6 +773,9 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 'model' => $model,
                 'backend_type' => $this->getBackendType()
             ];
+            if (!empty($options)) {
+                $payload['options'] = $options;
+            }
             
             // Truncate logged payload to keep logs lean
             $payloadPreview = substr(json_encode($payload), 0, 100);
@@ -772,7 +785,8 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
                 'payload_length' => strlen(json_encode($payload)),
                 'timeout' => 60,
                 'model' => $payload['model'],
-                'backend_type' => $payload['backend_type']
+                'backend_type' => $payload['backend_type'],
+                'options_count' => !empty($options) ? count($options) : 0
             ]);
 
             $response = Http::timeout(60)->post("{$this->baseUrl}/llm/chat", $payload);
@@ -994,7 +1008,7 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
     /**
      * Smart LLM chat that routes to the appropriate provider
      */
-    public function smartLlmChat($messages, $model = null, $userId = null, $organizationId = null)
+    public function smartLlmChat($messages, $model = null, $userId = null, $organizationId = null, array $options = [])
     {
         if ($this->isOpenAiProvider()) {
             // Always use GPT-5-mini as it's the only allowed model
@@ -1002,7 +1016,7 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
             return $this->openAiChat($messages, $openAiModel, $userId, $organizationId);
         } else {
             $llamaModel = $model ?: $this->getLlamaModel();
-            return $this->llmChat($messages, $llamaModel, $userId, $organizationId);
+            return $this->llmChat($messages, $llamaModel, $userId, $organizationId, $options);
         }
     }
 

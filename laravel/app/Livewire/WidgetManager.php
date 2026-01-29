@@ -16,7 +16,8 @@ class WidgetManager extends Component
         'settings.welcome_message' => 'required|string|max:255',
         'settings.primary_color' => 'required|string',
         'settings.widget_position' => 'required|string',
-        'settings.widget_theme' => 'required|string'
+        'settings.widget_theme' => 'required|string',
+        'settings.chat_history_ttl_hours' => 'required|integer|min:1|max:168'
     ];
 
     public function mount()
@@ -38,6 +39,7 @@ class WidgetManager extends Component
             'branding_enabled' => true,
             'branding_badge' => false,
             'branding_follow' => true,
+            'chat_history_ttl_hours' => 24,
         ];
     }
 

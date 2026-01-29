@@ -16,6 +16,7 @@
             this.config = config;
             this.isOpen = false;
             this.isExpanded = false;
+            this.chatHistoryTtlHours = Number(this.config.chatHistoryTtlHours ?? 24);
             // ISSUE 5B FIX: Persist session across page navigation
             this.sessionId = this.getOrCreateSessionId();
             this.messages = [];
@@ -99,9 +100,15 @@
 
         // ISSUE 5B FIX: Save messages to localStorage
         saveMessages() {
+            if (this.chatHistoryTtlHours <= 0) {
+                return;
+            }
             const key = `ai_chat_messages_${this.config.orgId}_${this.sessionId}`;
             try {
-                localStorage.setItem(key, JSON.stringify(this.messages));
+                localStorage.setItem(key, JSON.stringify({
+                    messages: this.messages,
+                    savedAt: Date.now()
+                }));
             } catch (e) {
                 console.warn('[AI Chat] Failed to save messages:', e);
             }
@@ -113,14 +120,33 @@
             try {
                 const stored = localStorage.getItem(key);
                 if (stored) {
-                    const messages = JSON.parse(stored);
+                    const parsed = JSON.parse(stored);
+                    const payload = Array.isArray(parsed)
+                        ? { messages: parsed, savedAt: Date.now() }
+                        : parsed;
+
+                    const messages = payload?.messages;
+                    const savedAt = payload?.savedAt;
+                    const ttlMs = this.chatHistoryTtlHours > 0
+                        ? this.chatHistoryTtlHours * 60 * 60 * 1000
+                        : 0;
+
+                    if (ttlMs > 0 && savedAt && (Date.now() - savedAt) > ttlMs) {
+                        localStorage.removeItem(key);
+                        return;
+                    }
+
                     if (Array.isArray(messages) && messages.length > 0) {
                         this.messages = messages;
                         this.welcomeShown = true; // Don't show welcome if restoring messages
                         // Render all stored messages
                         messages.forEach(msg => {
-                            this.renderMessage(msg.text, msg.sender);
+                            this.renderMessage(msg.content, msg.sender, msg.timestamp);
                         });
+
+                        if (Array.isArray(parsed)) {
+                            this.saveMessages();
+                        }
                     }
                 }
             } catch (e) {
@@ -581,7 +607,7 @@
             return processed.replace(/\n/g, '<br>');
         }
 
-        addMessage(content, sender = 'user') {
+        renderMessage(content, sender = 'user', timestamp = null) {
             const messagesContainer = document.getElementById(this.ids.messages);
             if (!messagesContainer) {
                 console.error('AI Chat Widget: Messages container not found');
@@ -591,7 +617,9 @@
             const messageElement = document.createElement('div');
             messageElement.className = `ai-chat-message ai-chat-message-${sender}`;
             
-            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const time = timestamp
+                ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             
                                console.log('[AI Widget] Closing chat window');
             const safeContent = sender === 'bot' ? this.linkify(content) : this.linkify(content); // both user & bot for consistency
@@ -604,6 +632,10 @@
 
             messagesContainer.appendChild(messageElement);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        addMessage(content, sender = 'user') {
+            this.renderMessage(content, sender);
 
             this.messages.push({ content, sender, timestamp: new Date() });
             // ISSUE 5B FIX: Persist messages after each addition
@@ -940,31 +972,99 @@
                     requestBody.is_shopify = true;
                 }
 
-                const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/chat`, {
+                // Use fetch with streaming for real-time SSE responses
+                const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/chat/stream`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Accept': 'application/json'
+                        'Accept': 'text/event-stream'
                     },
                     body: JSON.stringify(requestBody)
                 });
 
-                const data = await response.json();
-
                 // Handle rate limiting
                 if (response.status === 429) {
+                    const data = await response.json();
                     this.removeTypingIndicator();
                     const waitTime = data.retry_after || 60;
                     this.addMessage(`Please slow down! You can send up to 5 messages per minute. Please wait ${waitTime} seconds.`, 'bot');
                     return;
                 }
 
-                // Remove typing indicator, then progressively reveal
+                if (!response.ok) {
+                    this.removeTypingIndicator();
+                    this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                    return;
+                }
+
+                // Remove typing indicator and prepare for streaming
                 this.removeTypingIndicator();
-                if (data.response) {
-                    this.addStreamingMessage(data.response);
-                } else {
-                    this.addMessage('Sorry, I couldn\'t process your message. Please try again.', 'bot');
+                
+                // Create bot message element manually
+                const messagesContainer = document.getElementById(this.ids.messages);
+                const botMessageElement = document.createElement('div');
+                botMessageElement.className = 'ai-chat-message ai-chat-message-bot';
+                const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                botMessageElement.innerHTML = `
+                    <div class="ai-chat-message-content"></div>
+                    <div class="ai-chat-message-time">${time}</div>
+                `;
+                let firstTokenTimestampSet = false;
+                messagesContainer.appendChild(botMessageElement);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+                // Read the stream
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullResponse = '';
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    // Decode chunk and add to buffer
+                    buffer += decoder.decode(value, { stream: true });
+                    
+                    // Process complete SSE messages
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop(); // Keep incomplete message in buffer
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                
+                                if (data.error) {
+                                    this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                                    return;
+                                }
+                                
+                                // Append content as it streams
+                                if (data.content) {
+                                    if (!firstTokenTimestampSet) {
+                                        const firstTokenTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                                        const timeEl = botMessageElement.querySelector('.ai-chat-message-time');
+                                        if (timeEl) {
+                                            timeEl.textContent = firstTokenTime;
+                                        }
+                                        firstTokenTimestampSet = true;
+                                    }
+                                    fullResponse += data.content;
+                                    const messageDiv = botMessageElement.querySelector('.ai-chat-message-content');
+                                    messageDiv.innerHTML = this.linkify(fullResponse);
+                                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                                }
+                            } catch (err) {
+                                console.error('Stream parse error:', err);
+                            }
+                        }
+                    }
+                }
+
+                if (fullResponse.trim().length > 0) {
+                    this.messages.push({ content: fullResponse, sender: 'bot', timestamp: new Date() });
+                    this.saveMessages();
                 }
 
             } catch (error) {

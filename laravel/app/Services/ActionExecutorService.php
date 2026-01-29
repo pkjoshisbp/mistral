@@ -396,10 +396,16 @@ class ActionExecutorService
             foreach ($where as $condition) {
                 $column = $condition['column'];
                 $operator = $condition['operator'] ?? '=';
-                $paramKey = $condition['param'];
                 
-                if (isset($params[$paramKey])) {
-                    $query->where($column, $operator, $params[$paramKey]);
+                // Support both dynamic params and static values
+                if (isset($condition['param'])) {
+                    $paramKey = $condition['param'];
+                    if (isset($params[$paramKey])) {
+                        $query->where($column, $operator, $params[$paramKey]);
+                    }
+                } elseif (isset($condition['value'])) {
+                    // Static value
+                    $query->where($column, $operator, $condition['value']);
                 }
             }
 

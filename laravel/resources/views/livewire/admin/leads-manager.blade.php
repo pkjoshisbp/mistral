@@ -29,6 +29,9 @@
                                     <th>Email</th>
                                     <th>Phone</th>
                                     <th>Source</th>
+                                    <th>Intent</th>
+                                    <th>Priority</th>
+                                    <th>Status</th>
                                     <th>Organization</th>
                                     <th>Created</th>
                                 </tr>
@@ -40,6 +43,9 @@
                                         <td>{{ $lead->email }}</td>
                                         <td>{{ $lead->phone }}</td>
                                         <td>{{ $lead->source }}</td>
+                                        <td>{{ $lead->intent ?? '-' }}</td>
+                                        <td>{{ ucfirst($lead->priority ?? 'normal') }}</td>
+                                        <td>{{ ucfirst($lead->status ?? 'new') }}</td>
                                         <td>{{ $lead->organization ? $lead->organization->name : '-' }}</td>
                                         <td>{{ $lead->created_at->format('M d, Y H:i') }}</td>
                                     </tr>

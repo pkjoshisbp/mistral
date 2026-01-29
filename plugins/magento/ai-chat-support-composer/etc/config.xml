@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Config/etc/config.xsd">
+    <default>
+        <ai_chat>
+            <widget>
+                <enabled>1</enabled>
+                <org_slug></org_slug>
+            </widget>
+        </ai_chat>
+    </default>
+</config>

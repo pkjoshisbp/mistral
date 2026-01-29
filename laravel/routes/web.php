@@ -46,6 +46,26 @@ Route::get('/download/wordpress-plugin', function () {
     abort(404, 'Plugin file not found');
 })->name('download.wordpress-plugin');
 
+Route::get('/download/magento-plugin', function () {
+    $filePath = base_path('../plugins/magento/ai-chat-support-magento-1.0.0.zip');
+
+    if (file_exists($filePath)) {
+        return response()->download($filePath, 'ai-chat-support-magento-1.0.0.zip');
+    }
+
+    abort(404, 'Plugin file not found');
+})->name('download.magento-plugin');
+
+Route::get('/download/magento-composer-package', function () {
+    $filePath = base_path('../plugins/magento/ai-chat-support-magento-composer-1.0.0.zip');
+
+    if (file_exists($filePath)) {
+        return response()->download($filePath, 'ai-chat-support-magento-composer-1.0.0.zip');
+    }
+
+    abort(404, 'Plugin file not found');
+})->name('download.magento-composer-package');
+
 Route::get('/shopify/install', \App\Livewire\Public\ShopifyInstall::class)->name('shopify.install');
 Route::get('/shopify/onboarding', \App\Livewire\Public\ShopifyOnboarding::class)->name('shopify.onboarding');
 Route::get('/shopify/complete-setup', \App\Livewire\Public\ShopifyCompleteSetup::class)->name('shopify.complete-setup');
@@ -53,7 +73,60 @@ Route::get('/shopify/preferences', \App\Livewire\Shopify\Preferences::class)->na
 
 // Shopify App Home - Entry point when merchants click app in Shopify admin
 Route::get('/shopify/app', function () {
-    // If user is authenticated, redirect to their dashboard
+    // ISSUE 5A FIX: Check if shop is already integrated before redirecting to install
+    $shop = request('shop');
+    
+    if ($shop) {
+        // Check if this shop already has an integration with access token
+        $integration = \App\Models\Integration::where('provider', 'shopify')
+            ->where('shop', $shop)
+            ->whereNotNull('access_token')
+            ->first();
+        
+        if ($integration && $integration->organization) {
+            \Log::info('Shopify app reopened - shop already integrated', [
+                'shop' => $shop,
+                'org_id' => $integration->organization_id
+            ]);
+            
+            // Shop already integrated - check if user is authenticated
+            if (auth()->check()) {
+                $user = auth()->user();
+                
+                // Check if user belongs to this organization
+                if ($user->organizations->contains($integration->organization_id)) {
+                    return redirect()->route('customer.dashboard')
+                        ->with('info', 'Welcome back! Your Shopify store is connected.');
+                }
+            }
+            
+            // User not authenticated or doesn't belong to org - try to find the user by shop email
+            if ($integration->organization->contact_email) {
+                $user = \App\Models\User::where('email', $integration->organization->contact_email)->first();
+                
+                if ($user) {
+                    // Auto-login the user for seamless experience
+                    \Auth::login($user);
+                    request()->session()->regenerate();
+                    
+                    \Log::info('Auto-logged in user for existing Shopify integration', [
+                        'user_id' => $user->id,
+                        'shop' => $shop,
+                        'org_id' => $integration->organization_id
+                    ]);
+                    
+                    return redirect()->route('customer.dashboard')
+                        ->with('success', 'Welcome back! You have been logged in automatically.');
+                }
+            }
+            
+            // No user found - redirect to onboarding to complete setup
+            return redirect()->route('shopify.onboarding', ['shop' => $shop])
+                ->with('info', 'Your Shopify store is connected. Please complete your account setup.');
+        }
+    }
+    
+    // No shop parameter or shop not integrated - check if user is authenticated
     if (auth()->check()) {
         $user = auth()->user();
         
@@ -66,7 +139,7 @@ Route::get('/shopify/app', function () {
         }
     }
     
-    // Not authenticated - redirect to install flow
+    // Not authenticated and no integration - redirect to install flow
     return redirect()->route('shopify.install');
 })->name('shopify.app');
 
@@ -530,6 +603,29 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/general-info', \App\Livewire\Admin\GeneralInfoManager::class)->name('general-info');
     Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
     Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
+    Route::get('/chat-history/{id}/export', function ($id) {
+        $conversation = \App\Models\ChatConversation::with('messages')->find($id);
+        if (!$conversation) {
+            abort(404, 'Chat conversation not found.');
+        }
+
+        $html = view('exports.chat-conversation', [
+            'conversation' => $conversation,
+            'duration' => $conversation->created_at->diffForHumans($conversation->updated_at, true)
+        ])->render();
+
+        if (class_exists(\Dompdf\Dompdf::class)) {
+            $pdf = app('dompdf.wrapper');
+            $pdf->loadHTML($html)->setPaper('a4');
+            return response()->streamDownload(function() use ($pdf) {
+                echo $pdf->output();
+            }, 'chat-conversation-' . $id . '.pdf');
+        }
+
+        return response()->streamDownload(function() use ($html) {
+            echo strip_tags($html);
+        }, 'chat-conversation-' . $id . '.txt');
+    })->name('chat-history.export');
     Route::get('/leads', \App\Livewire\Admin\LeadsManager::class)->name('leads');
     Route::get('/organization-ai', \App\Livewire\Admin\OrganizationAiManager::class)->name('organization-ai');
     
@@ -686,7 +782,11 @@ Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class,
     Route::post('{orgId}/chat', [\App\Http\Controllers\WidgetController::class, 'chat'])
         ->middleware('throttle:widget_chat')
         ->name('widget.chat');
+    Route::post('{orgId}/chat/stream', [\App\Http\Controllers\WidgetController::class, 'streamChat'])
+        ->middleware('throttle:widget_chat')
+        ->name('widget.chat.stream');
     Route::options('{orgId}/chat', function() { return response('', 204); });
+    Route::options('{orgId}/chat/stream', function() { return response('', 204); });
     Route::get('{orgId}/config', [\App\Http\Controllers\WidgetController::class, 'getConfig'])->name('widget.config');
     Route::get('{orgId}/test', function($orgId) {
         $organization = \App\Models\Organization::findOrFail($orgId);

@@ -17,7 +17,13 @@ class Lead extends Model
         'organization_id',
         'user_id', // if captured after login
         'session_id',
-        'location_data'
+        'location_data',
+        'intent',
+        'intent_confidence',
+        'priority',
+        'status',
+        'last_message',
+        'last_intent_at'
     ];
 
     public function organization()

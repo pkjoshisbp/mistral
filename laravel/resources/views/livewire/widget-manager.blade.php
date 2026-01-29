@@ -64,6 +64,11 @@
                             </div>
                         </div>
                     </div>
+                    <div class="form-group mt-2">
+                        <label>Chat History TTL (hours)</label>
+                        <input type="number" wire:model="settings.chat_history_ttl_hours" class="form-control" min="1" max="168">
+                        <small class="text-muted">How long to keep chat history in the browser (1–168 hours). Default 24.</small>
+                    </div>
 
                     <div class="row">
                         <div class="col-md-6">

@@ -4,6 +4,9 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
+use App\Models\Organization;
+use App\Models\AdminSetting;
 
 class IntentDetectionService
 {
@@ -47,6 +50,35 @@ class IntentDetectionService
         ]
     ];
 
+    // Example phrases for embedding-based intent matching
+    private const INTENT_EXAMPLES = [
+        'booking' => [
+            'book an appointment',
+            'reserve a slot',
+            'check availability for a booking'
+        ],
+        'pricing' => [
+            'what is the price',
+            'how much does it cost',
+            'pricing and fees'
+        ],
+        'realtime_data' => [
+            'check current status',
+            'live inventory status',
+            'latest availability now'
+        ],
+        'lookup' => [
+            'search for a record',
+            'find a product',
+            'look up details'
+        ],
+        'static_info' => [
+            'return policy information',
+            'tell me about your services',
+            'general FAQ and help'
+        ]
+    ];
+
     public function __construct(AiAgentService $aiAgent)
     {
         $this->aiAgent = $aiAgent;
@@ -58,6 +90,12 @@ class IntentDetectionService
     public function detectIntent(string $query, int $organizationId): array
     {
         $query = strtolower(trim($query));
+
+        $settings = $this->getIntentSettings($organizationId);
+        $strategy = $settings['intent_strategy'];
+        $ruleThreshold = $settings['intent_rule_threshold'];
+        $embeddingThreshold = $settings['intent_embedding_threshold'];
+        $useLlm = $settings['intent_use_llm'];
         
         Log::info('Intent detection started', [
             'query' => $query,
@@ -65,23 +103,42 @@ class IntentDetectionService
         ]);
 
         // Step 1: Rule-based quick detection
-        $ruleBasedIntent = $this->detectIntentByRules($query);
-        
-        // Step 2: Enhanced detection with LLM for ambiguous cases
-        $confidence = $ruleBasedIntent['confidence'];
-        $llmIntent = null;
-        
-        if ($confidence < 0.8) {
-            $llmIntent = $this->detectIntentWithLLM($query);
-        }
+        $ruleBasedIntent = $this->detectIntentByRules($query, $organizationId);
 
-        // Step 3: Combine results
-        $finalIntent = $this->combineIntentResults($ruleBasedIntent, $llmIntent);
+        if ($strategy === 'rules_only' || $ruleBasedIntent['confidence'] >= $ruleThreshold) {
+            $finalIntent = array_merge($ruleBasedIntent, [
+                'method' => 'rule_primary'
+            ]);
+        } else {
+            $embeddingIntent = null;
+            $llmIntent = null;
+
+            if (in_array($strategy, ['rules_then_embedding', 'hybrid'], true)) {
+                $embeddingIntent = $this->detectIntentWithEmbeddings($query);
+                if ($embeddingIntent && ($embeddingIntent['confidence'] ?? 0) >= $embeddingThreshold) {
+                    $finalIntent = array_merge($embeddingIntent, [
+                        'rule_backup' => $ruleBasedIntent,
+                        'method' => 'embedding_primary'
+                    ]);
+                }
+            }
+
+            if (!isset($finalIntent) && in_array($strategy, ['rules_then_llm', 'hybrid'], true) && $useLlm) {
+                $llmIntent = $this->detectIntentWithLLM($query, $settings);
+            }
+
+            if (!isset($finalIntent)) {
+                $finalIntent = $this->combineIntentResults($ruleBasedIntent, $llmIntent);
+                if ($embeddingIntent) {
+                    $finalIntent['embedding_backup'] = $embeddingIntent;
+                }
+            }
+        }
         
         Log::info('Intent detection completed', [
             'query' => $query,
             'rule_based' => $ruleBasedIntent,
-            'llm_based' => $llmIntent,
+            'llm_based' => $llmIntent ?? null,
             'final_intent' => $finalIntent
         ]);
 
@@ -91,15 +148,17 @@ class IntentDetectionService
     /**
      * Rule-based intent detection using keywords
      */
-    private function detectIntentByRules(string $query): array
+    private function detectIntentByRules(string $query, int $organizationId = 0): array
     {
         $scores = [];
+        $orgKeywords = $this->getOrgIntentKeywords($organizationId);
         
         foreach (self::INTENT_KEYWORDS as $intent => $keywords) {
+            $mergedKeywords = array_merge($keywords, $orgKeywords[$intent] ?? []);
             $score = 0;
             $matches = 0;
             
-            foreach ($keywords as $keyword) {
+            foreach ($mergedKeywords as $keyword) {
                 if (Str::contains($query, $keyword)) {
                     $score += 1;
                     $matches++;
@@ -140,32 +199,53 @@ class IntentDetectionService
         ];
     }
 
+    private function getOrgIntentKeywords(int $organizationId): array
+    {
+        if (!$organizationId) {
+            return [];
+        }
+
+        $org = Organization::find($organizationId);
+        if (!$org) {
+            return [];
+        }
+
+        $keywords = $org->settings['intent_keywords'] ?? [];
+        if (!is_array($keywords)) {
+            return [];
+        }
+
+        return $keywords;
+    }
+
     /**
      * LLM-based intent detection for complex queries
      */
-    private function detectIntentWithLLM(string $query): ?array
+    private function detectIntentWithLLM(string $query, array $settings = []): ?array
     {
         try {
-            $systemPrompt = "You are an intent classifier. Classify the user query into one of these categories:
+            // Force a fast local model for intent classification to avoid costly vast.ai hops
+            $intentModel = $settings['intent_llm_model'] ?? config('services.ai_agent.intent_model', env('AI_INTENT_MODEL', 'llama3.2:1b'));
+            $maxTokens = $settings['intent_llm_max_tokens'] ?? 64;
+            $temperature = $settings['intent_llm_temperature'] ?? 0.1;
+            $topP = $settings['intent_llm_top_p'] ?? 0.85;
+            $repeatPenalty = $settings['intent_llm_repeat_penalty'] ?? 1.05;
 
-            1. 'booking' - User wants to make a reservation, check availability, or book something
-            2. 'pricing' - User asks about costs, fees, prices, or payment information  
-            3. 'realtime_data' - User needs current/live data like status, inventory, balances
-            4. 'lookup' - User wants to find/search specific information or records
-            5. 'static_info' - User asks about policies, FAQs, general information
+            $systemPrompt = "You are an intent classifier. Choose exactly one intent: booking, pricing, realtime_data, lookup, or static_info. Mark action_needed=true only when the user wants to do something (book, check live data, search/lookup). Respond with JSON only: {\\\"intent\\\":\\\"...\\\", \\\"confidence\\\":0-1, \\\"action_needed\\\":true/false, \\\"reasoning\\\":\\\"<=12 words\\\"}. No prose.";
 
-            Also determine if this requires:
-            - 'action_needed': true if user wants to DO something (book, check live data, search records)
-            - 'action_needed': false if user just wants information/explanation
-
-            Return ONLY JSON: {\"intent\":\"category\", \"confidence\":0.0-1.0, \"action_needed\":true/false, \"reasoning\":\"brief explanation\"}";
+            $options = [
+                'num_predict' => $maxTokens,
+                'temperature' => $temperature,
+                'top_p' => $topP,
+                'repeat_penalty' => $repeatPenalty,
+            ];
 
             $messages = [
                 ['role' => 'system', 'content' => $systemPrompt],
                 ['role' => 'user', 'content' => $query]
             ];
 
-            $response = $this->aiAgent->smartLlmChat($messages);
+            $response = $this->aiAgent->smartLlmChat($messages, $intentModel, null, null, $options);
             
             if ($response && isset($response['message']['content'])) {
                 $content = trim($response['message']['content']);
@@ -237,6 +317,138 @@ class IntentDetectionService
                 'llm_backup' => $llmResult
             ]);
         }
+    }
+
+    /**
+     * Embedding-based intent detection for fast, stable routing
+     */
+    private function detectIntentWithEmbeddings(string $query): ?array
+    {
+        try {
+            $queryEmbedding = $this->aiAgent->embed($query);
+            if (!$queryEmbedding || !is_array($queryEmbedding)) {
+                return null;
+            }
+
+            $intentEmbeddings = $this->getCachedIntentEmbeddings();
+            if (empty($intentEmbeddings)) {
+                return null;
+            }
+
+            $bestIntent = null;
+            $bestScore = 0.0;
+
+            foreach ($intentEmbeddings as $intent => $embeddings) {
+                foreach ($embeddings as $embedding) {
+                    $score = $this->calculateCosineSimilarity($queryEmbedding, $embedding);
+                    if ($score > $bestScore) {
+                        $bestScore = $score;
+                        $bestIntent = $intent;
+                    }
+                }
+            }
+
+            if (!$bestIntent) {
+                return null;
+            }
+
+            return [
+                'intent' => $bestIntent,
+                'confidence' => $bestScore,
+                'action_needed' => in_array($bestIntent, ['booking', 'realtime_data', 'lookup', 'pricing'], true),
+                'reasoning' => 'embedding_match',
+                'method' => 'embedding'
+            ];
+        } catch (\Exception $e) {
+            Log::warning('Embedding intent detection failed', [
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    private function getCachedIntentEmbeddings(): array
+    {
+        return Cache::remember('intent_embeddings_v1', 3600, function () {
+            $intentEmbeddings = [];
+            $allTexts = [];
+            $intentMap = [];
+
+            foreach (self::INTENT_EXAMPLES as $intent => $examples) {
+                foreach ($examples as $example) {
+                    $intentMap[] = $intent;
+                    $allTexts[] = $example;
+                }
+            }
+
+            $embeddings = $this->aiAgent->embedBatch($allTexts);
+            if (!$embeddings || !is_array($embeddings)) {
+                return [];
+            }
+
+            foreach ($embeddings as $index => $embedding) {
+                $intent = $intentMap[$index] ?? null;
+                if (!$intent || !$embedding || !is_array($embedding)) {
+                    continue;
+                }
+                $intentEmbeddings[$intent][] = $embedding;
+            }
+
+            return $intentEmbeddings;
+        });
+    }
+
+    private function calculateCosineSimilarity(array $vectorA, array $vectorB): float
+    {
+        $dotProduct = 0.0;
+        $normA = 0.0;
+        $normB = 0.0;
+
+        $length = min(count($vectorA), count($vectorB));
+        for ($i = 0; $i < $length; $i++) {
+            $dotProduct += $vectorA[$i] * $vectorB[$i];
+            $normA += $vectorA[$i] * $vectorA[$i];
+            $normB += $vectorB[$i] * $vectorB[$i];
+        }
+
+        if ($normA == 0.0 || $normB == 0.0) {
+            return 0.0;
+        }
+
+        return $dotProduct / (sqrt($normA) * sqrt($normB));
+    }
+
+    private function getIntentSettings(int $organizationId): array
+    {
+        $org = Organization::find($organizationId);
+        $settings = $org?->settings ?? [];
+
+        $getGlobal = function (string $key, $default = null) {
+            return class_exists(AdminSetting::class)
+                ? AdminSetting::get($key, $default)
+                : $default;
+        };
+
+        return [
+            'intent_strategy' => $settings['intent_strategy']
+                ?? $getGlobal('intent_strategy', 'hybrid'),
+            'intent_rule_threshold' => (float) ($settings['intent_rule_threshold']
+                ?? $getGlobal('intent_rule_threshold', 0.8)),
+            'intent_embedding_threshold' => (float) ($settings['intent_embedding_threshold']
+                ?? $getGlobal('intent_embedding_threshold', 0.75)),
+            'intent_use_llm' => (bool) ($settings['intent_use_llm']
+                ?? $getGlobal('intent_use_llm', true)),
+            'intent_llm_model' => $settings['intent_llm_model']
+                ?? $getGlobal('intent_llm_model', null),
+            'intent_llm_max_tokens' => (int) ($settings['intent_llm_max_tokens']
+                ?? $getGlobal('intent_llm_max_tokens', 64)),
+            'intent_llm_temperature' => (float) ($settings['intent_llm_temperature']
+                ?? $getGlobal('intent_llm_temperature', 0.1)),
+            'intent_llm_top_p' => (float) ($settings['intent_llm_top_p']
+                ?? $getGlobal('intent_llm_top_p', 0.85)),
+            'intent_llm_repeat_penalty' => (float) ($settings['intent_llm_repeat_penalty']
+                ?? $getGlobal('intent_llm_repeat_penalty', 1.05)),
+        ];
     }
 
     /**
