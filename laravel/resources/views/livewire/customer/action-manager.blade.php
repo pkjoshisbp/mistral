@@ -45,6 +45,43 @@
                 When customers ask related questions, the bot will fetch real-time data and provide up-to-date answers.
             </div>
 
+            <!-- Action Templates -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h3 class="card-title">Action Templates</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <select wire:model="templateType" class="form-control">
+                                <option value="">Select Template Type</option>
+                                <option value="clinic">Clinic</option>
+                                <option value="hospital">Hospital</option>
+                                <option value="ecommerce">E-commerce</option>
+                                <option value="restaurant">Restaurant</option>
+                                <option value="real_estate">Real Estate</option>
+                                <option value="real_estate_rental">Real Estate (Rentals)</option>
+                                <option value="automobile_dealer">Automobile Dealer</option>
+                                <option value="school">School</option>
+                                <option value="college">College</option>
+                                <option value="ngo">NGO</option>
+                                <option value="travel">Travel</option>
+                                <option value="fitness">Fitness/Gym</option>
+                                <option value="logistics">Logistics</option>
+                                <option value="fintech">Fintech</option>
+                                <option value="other">Other</option>
+                            </select>
+                            <small class="text-muted">Templates are created as inactive. Configure and activate when ready.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <button wire:click="applyActionTemplate" class="btn btn-outline-primary w-100">
+                                <i class="fas fa-magic"></i> Apply Action Templates
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-header">
                     <h3 class="card-title">Your Live Data Actions</h3>

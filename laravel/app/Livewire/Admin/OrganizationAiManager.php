@@ -29,6 +29,10 @@ class OrganizationAiManager extends Component
     public $orgType;
     public $notifyChatEmailEnabled = false;
     public $notifyChatEmails = '';
+    public $leadNotifyEnabled = false;
+    public $leadNotifyEmails = '';
+    public $leadNotifyWebhookUrl = '';
+    public $leadNotifyQualifiedOnly = true;
     public $intentKeywords = [
         'booking' => '',
         'pricing' => '',
@@ -81,6 +85,10 @@ class OrganizationAiManager extends Component
         $this->orgType = $settings['org_type'] ?? null;
         $this->notifyChatEmailEnabled = (bool) ($settings['notify_chat_email_enabled'] ?? false);
         $this->notifyChatEmails = $this->keywordsToString($settings['notify_chat_emails'] ?? []);
+        $this->leadNotifyEnabled = (bool) ($settings['lead_notify_enabled'] ?? false);
+        $this->leadNotifyEmails = $this->keywordsToString($settings['lead_notify_emails'] ?? []);
+        $this->leadNotifyWebhookUrl = $settings['lead_notify_webhook_url'] ?? '';
+        $this->leadNotifyQualifiedOnly = (bool) ($settings['lead_notify_qualified_only'] ?? true);
         $storedKeywords = $settings['intent_keywords'] ?? [];
         $this->intentKeywords = [
             'booking' => $this->keywordsToString($storedKeywords['booking'] ?? []),
@@ -153,6 +161,10 @@ class OrganizationAiManager extends Component
 
             $currentSettings['notify_chat_email_enabled'] = (bool) $this->notifyChatEmailEnabled;
             $currentSettings['notify_chat_emails'] = $this->stringToKeywords($this->notifyChatEmails ?? '');
+            $currentSettings['lead_notify_enabled'] = (bool) $this->leadNotifyEnabled;
+            $currentSettings['lead_notify_emails'] = $this->stringToKeywords($this->leadNotifyEmails ?? '');
+            $currentSettings['lead_notify_webhook_url'] = trim((string) $this->leadNotifyWebhookUrl) ?: null;
+            $currentSettings['lead_notify_qualified_only'] = (bool) $this->leadNotifyQualifiedOnly;
 
             $currentSettings['intent_keywords'] = [
                 'booking' => $this->stringToKeywords($this->intentKeywords['booking'] ?? ''),

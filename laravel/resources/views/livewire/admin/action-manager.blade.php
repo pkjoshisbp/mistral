@@ -65,6 +65,44 @@
                         </div>
                     </div>
 
+                    <!-- Action Templates -->
+                    <div class="row mb-4">
+                        <div class="col-md-4">
+                            <select wire:model="templateOrganizationId" class="form-control">
+                                <option value="">Select Organization for Templates</option>
+                                @foreach($organizations as $org)
+                                    <option value="{{ $org->id }}">{{ $org->name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <select wire:model="templateType" class="form-control">
+                                <option value="">Template Type (uses org type if blank)</option>
+                                <option value="clinic">Clinic</option>
+                                <option value="hospital">Hospital</option>
+                                <option value="ecommerce">E-commerce</option>
+                                <option value="restaurant">Restaurant</option>
+                                <option value="real_estate">Real Estate</option>
+                                <option value="real_estate_rental">Real Estate (Rentals)</option>
+                                <option value="automobile_dealer">Automobile Dealer</option>
+                                <option value="school">School</option>
+                                <option value="college">College</option>
+                                <option value="ngo">NGO</option>
+                                <option value="travel">Travel</option>
+                                <option value="fitness">Fitness/Gym</option>
+                                <option value="logistics">Logistics</option>
+                                <option value="fintech">Fintech</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <button wire:click="applyActionTemplate" class="btn btn-outline-primary w-100">
+                                <i class="fas fa-magic"></i> Apply Action Templates
+                            </button>
+                            <small class="text-muted d-block mt-1">Templates are created as inactive. Configure and activate when ready.</small>
+                        </div>
+                    </div>
+
                     <!-- Actions Table -->
                     <div class="table-responsive">
                         <table class="table table-hover">

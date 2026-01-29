@@ -231,6 +231,35 @@
                                                 </div>
                                             </div>
 
+                                            <!-- Lead Notifications -->
+                                            <div class="card mb-3">
+                                                <div class="card-header">
+                                                    <strong>
+                                                        <i class="fas fa-bullseye me-1"></i>
+                                                        Lead Notifications
+                                                    </strong>
+                                                </div>
+                                                <div class="card-body">
+                                                    <div class="form-check form-switch mb-2">
+                                                        <input class="form-check-input" type="checkbox" wire:model="leadNotifyEnabled" id="leadNotifyEnabled">
+                                                        <label class="form-check-label" for="leadNotifyEnabled">Notify when a lead is captured</label>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Lead Notification Emails</label>
+                                                        <textarea wire:model.defer="leadNotifyEmails" class="form-control" rows="2" placeholder="sales@example.com, owner@example.com"></textarea>
+                                                        <small class="text-muted">Comma-separated emails.</small>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Webhook URL (optional)</label>
+                                                        <input type="url" wire:model.defer="leadNotifyWebhookUrl" class="form-control" placeholder="https://example.com/webhook">
+                                                    </div>
+                                                    <div class="form-check form-switch">
+                                                        <input class="form-check-input" type="checkbox" wire:model="leadNotifyQualifiedOnly" id="leadNotifyQualifiedOnly">
+                                                        <label class="form-check-label" for="leadNotifyQualifiedOnly">Only notify when lead is qualified (booking/pricing)</label>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <!-- Intent Classification Settings -->
                                             <div class="card mb-3">
                                                 <div class="card-header">

@@ -41,6 +41,10 @@ class IntegrationSettingsManager extends Component
     // Chat email notifications
     public $notify_chat_email_enabled = false;
     public $notify_chat_emails = '';
+    public $lead_notify_enabled = false;
+    public $lead_notify_emails = '';
+    public $lead_notify_webhook_url = '';
+    public $lead_notify_qualified_only = true;
 
     protected $rules = [
         'name' => 'required|min:3',
@@ -57,6 +61,10 @@ class IntegrationSettingsManager extends Component
         'org_type' => 'nullable|string|max:50',
         'notify_chat_email_enabled' => 'boolean',
         'notify_chat_emails' => 'nullable|string|max:1000',
+        'lead_notify_enabled' => 'boolean',
+        'lead_notify_emails' => 'nullable|string|max:1000',
+        'lead_notify_webhook_url' => 'nullable|url|max:500',
+        'lead_notify_qualified_only' => 'boolean',
     ];
 
     public function mount()
@@ -101,6 +109,10 @@ class IntegrationSettingsManager extends Component
         ];
         $this->notify_chat_email_enabled = (bool) ($settings['notify_chat_email_enabled'] ?? false);
         $this->notify_chat_emails = $this->keywordsToString($settings['notify_chat_emails'] ?? []);
+        $this->lead_notify_enabled = (bool) ($settings['lead_notify_enabled'] ?? false);
+        $this->lead_notify_emails = $this->keywordsToString($settings['lead_notify_emails'] ?? []);
+        $this->lead_notify_webhook_url = $settings['lead_notify_webhook_url'] ?? '';
+        $this->lead_notify_qualified_only = (bool) ($settings['lead_notify_qualified_only'] ?? true);
     }
 
     public function saveSettings()
@@ -136,6 +148,10 @@ class IntegrationSettingsManager extends Component
             ];
             $settings['notify_chat_email_enabled'] = (bool) $this->notify_chat_email_enabled;
             $settings['notify_chat_emails'] = $this->stringToKeywords($this->notify_chat_emails ?? '');
+            $settings['lead_notify_enabled'] = (bool) $this->lead_notify_enabled;
+            $settings['lead_notify_emails'] = $this->stringToKeywords($this->lead_notify_emails ?? '');
+            $settings['lead_notify_webhook_url'] = trim((string) $this->lead_notify_webhook_url) ?: null;
+            $settings['lead_notify_qualified_only'] = (bool) $this->lead_notify_qualified_only;
             
             $this->organization->settings = $settings;
             $this->organization->save();

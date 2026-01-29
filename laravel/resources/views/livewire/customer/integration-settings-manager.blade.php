@@ -275,6 +275,39 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="col-lg-6">
+                    <div class="card card-info card-outline">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-bullseye"></i> Lead Notifications
+                            </h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <div class="custom-control custom-switch">
+                                    <input type="checkbox" class="custom-control-input" id="lead_notify_enabled" wire:model="lead_notify_enabled">
+                                    <label class="custom-control-label" for="lead_notify_enabled">Notify when a lead is captured</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="lead_notify_emails">Lead Notification Emails</label>
+                                <textarea wire:model.defer="lead_notify_emails" class="form-control" id="lead_notify_emails" rows="2" placeholder="sales@example.com, owner@example.com"></textarea>
+                                <small class="form-text text-muted">Comma-separated emails.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="lead_notify_webhook_url">Webhook URL (optional)</label>
+                                <input type="url" wire:model.defer="lead_notify_webhook_url" class="form-control" id="lead_notify_webhook_url" placeholder="https://example.com/webhook">
+                            </div>
+                            <div class="form-group">
+                                <div class="custom-control custom-switch">
+                                    <input type="checkbox" class="custom-control-input" id="lead_notify_qualified_only" wire:model="lead_notify_qualified_only">
+                                    <label class="custom-control-label" for="lead_notify_qualified_only">Only notify when lead is qualified (booking/pricing)</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Save Button -->

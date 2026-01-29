@@ -6,7 +6,9 @@ use App\Models\Organization;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Http;
 use App\Mail\ChatInteractionNotification;
+use App\Mail\LeadCapturedNotification;
 use App\Models\Lead;
 use App\Services\AiAgentService;
 use Illuminate\Http\Request;
@@ -772,20 +774,91 @@ class WidgetController
     }
 
     private function mapLeadPriority(?string $intent): string
-    {
-        return match ($intent) {
-            'booking', 'pricing' => 'high',
-            'lookup', 'realtime_data' => 'medium',
-            default => 'low',
-        };
-    }
+        try {
+            $existingLead = Lead::where('organization_id', $organizationId)
+                ->where('session_id', $sessionId)
+                ->first();
 
-    private function mapLeadStatus(?string $intent): string
-    {
-        return in_array($intent, ['booking', 'pricing'], true) ? 'qualified' : 'new';
-    }
+            $lead = Lead::updateOrCreate(
+                ['organization_id' => $organizationId, 'session_id' => $sessionId],
+                $payload
+            );
 
+            $this->notifyLeadIfNeeded($lead, $existingLead, $intentResult, $message);
+        } catch (\Exception $e) {
+            Log::error('Failed to upsert widget lead', [
+                'error' => $e->getMessage(),
+                'org_id' => $organizationId,
+                'session_id' => $sessionId
+            ]);
+        }
+
+
+    private function notifyLeadIfNeeded(Lead $lead, ?Lead $existingLead, ?array $intentResult, ?string $message): void
+    {
+        $organization = Organization::find($lead->organization_id);
+        if (!$organization) {
+            return;
+        }
+
+        $settings = $organization->settings ?? [];
+        if (!(bool) ($settings['lead_notify_enabled'] ?? false)) {
+            return;
+        }
+
+        $qualifiedOnly = (bool) ($settings['lead_notify_qualified_only'] ?? true);
+        $newStatus = $lead->status ?? 'new';
+        $previousStatus = $existingLead?->status ?? null;
+
+        $shouldNotify = !$existingLead || ($previousStatus !== 'qualified' && $newStatus === 'qualified');
+        if ($qualifiedOnly) {
+            $shouldNotify = $shouldNotify && $newStatus === 'qualified';
+        }
+
+        if (!$shouldNotify) {
+            return;
+        }
+
+        $emails = $settings['lead_notify_emails'] ?? [];
+        if (is_string($emails)) {
+            $emails = preg_split('/[,
     /**
+        }
+        $emails = array_values(array_filter(array_map('trim', (array) $emails)));
+
+        if (!empty($emails)) {
+            try {
+                Mail::to($emails)->send(new LeadCapturedNotification($lead, $organization, $intentResult, $message));
+            } catch (\Throwable $t) {
+                Log::warning('Lead notification email failed', [
+                    'error' => $t->getMessage(),
+                    'org_id' => $lead->organization_id,
+                ]);
+            }
+        }
+
+        $webhookUrl = trim((string) ($settings['lead_notify_webhook_url'] ?? ''));
+        if ($webhookUrl !== '') {
+            try {
+                Http::timeout(8)->post($webhookUrl, [
+                    'event' => 'lead_captured',
+                    'lead' => $lead->toArray(),
+                    'organization' => [
+                        'id' => $organization->id,
+                        'name' => $organization->name,
+                        'slug' => $organization->slug,
+                    ],
+                    'intent' => $intentResult,
+                    'message' => $message,
+                ]);
+            } catch (\Throwable $t) {
+                Log::warning('Lead webhook failed', [
+                    'error' => $t->getMessage(),
+                    'org_id' => $lead->organization_id,
+                ]);
+            }
+        }
+    }
      * Convert HTML to plain text while preserving links as "text (url)" or just the URL.
      */
     private function htmlToPlainWithLinks(string $html): string

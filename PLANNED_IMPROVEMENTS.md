@@ -1,5 +1,14 @@
 # Planned Improvements (Step-by-Step)
 
+## Implemented (as of 2026-01-29)
+- Lead qualification fields (intent, priority, status) stored with widget leads.
+- Lead notifications (email + webhook) with qualified-only option.
+- Action templates by industry (admin + customer) with inactive defaults.
+- Intent keyword templates expanded with FAQ/general info keywords.
+- Chat persistence fixed + configurable browser TTL for chat history.
+- Admin chat history actions: reliable view + export.
+- Magento extension + Composer package + Marketplace listing assets.
+
 ## Phase 1 — Lead Capture & Routing (High ROI)
 1. Lead qualification rules per intent (priority/status).
 2. Lead routing notifications (email + webhook/CRM).
