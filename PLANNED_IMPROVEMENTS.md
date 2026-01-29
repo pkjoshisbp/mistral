@@ -5,6 +5,7 @@
 - Lead notifications (email + webhook) with qualified-only option.
 - Action templates by industry (admin + customer) with inactive defaults.
 - Action execution logging with API retries.
+- Live data validation rules (no hallucinated prices).
 - Intent keyword templates expanded with FAQ/general info keywords.
 - Chat persistence fixed + configurable browser TTL for chat history.
 - Admin chat history actions: reliable view + export.

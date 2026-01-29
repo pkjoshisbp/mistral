@@ -666,6 +666,7 @@ class WidgetController
                         $context .= json_encode($liveData, JSON_PRETTY_PRINT) . "\n";
                         $context .= "[END LIVE DATA]\n\n";
                         $context .= "IMPORTANT: Use ONLY the LIVE DATA above to answer the question. Format it in a user-friendly way.\n\n";
+                        $context .= $this->buildLiveDataValidationRules($liveData);
                     }
                 }
                 
@@ -888,6 +889,51 @@ class WidgetController
         $text = preg_replace("/\r\n|\r|\n/", "\n", $text);
         $text = preg_replace("/\n{3,}/", "\n\n", $text);
         return trim($text);
+    }
+
+    private function buildLiveDataValidationRules($liveData): string
+    {
+        $prices = $this->extractAllowedPrices($liveData);
+
+        $rules = "VALIDATION RULES:\n";
+        $rules .= "- Do NOT guess, estimate, or infer numbers.\n";
+        $rules .= "- If a value is not present in LIVE DATA, say it is not available.\n";
+
+        if (!empty($prices)) {
+            $rules .= "- Allowed prices (use exact values only): " . implode(', ', $prices) . "\n";
+        } else {
+            $rules .= "- If user asks about price and LIVE DATA has no price, say price is not available.\n";
+        }
+
+        return "\n" . $rules . "\n";
+    }
+
+    private function extractAllowedPrices($liveData): array
+    {
+        $prices = [];
+
+        $walk = function ($value) use (&$walk, &$prices) {
+            if (is_array($value)) {
+                foreach ($value as $key => $item) {
+                    if (is_string($key) && preg_match('/price|cost|fee|amount|total/i', $key)) {
+                        if (is_numeric($item)) {
+                            $prices[] = (string) $item;
+                        } elseif (is_string($item)) {
+                            if (preg_match('/\d+(?:\.\d+)?/', $item)) {
+                                $prices[] = trim($item);
+                            }
+                        }
+                    }
+                    $walk($item);
+                }
+            }
+        };
+
+        $walk($liveData);
+
+        $prices = array_values(array_unique(array_filter($prices)));
+        sort($prices);
+        return $prices;
     }
 
     /**
