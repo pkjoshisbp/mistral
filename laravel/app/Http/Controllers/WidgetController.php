@@ -165,6 +165,13 @@ class WidgetController
             $sessionMetadata = $this->buildLeadSessionMetadata($request, $allUserInfo);
             $intentResult = null;
 
+            $settings = $organization->settings ?? [];
+            $verifiedOnly = (bool) ($settings['verified_only_mode'] ?? false);
+            $guardrailCategories = $settings['guardrail_categories'] ?? [];
+            $approvedSensitive = $settings['approved_sensitive_categories'] ?? [];
+            $responseTone = $settings['response_tone'] ?? 'friendly';
+            $responseLanguage = $settings['response_language'] ?? 'auto';
+
             try {
                 $intentResult = app(IntentDetectionService::class)->detectIntent($message, $organization->id);
             } catch (\Throwable $t) {
@@ -489,6 +496,26 @@ class WidgetController
                 $finalContext .= "Additional information from knowledge base:\n\n" . $context;
             }
 
+            $guardrailCategory = $this->detectGuardrailCategory($message, $guardrailCategories);
+            if ($guardrailCategory && !$this->isSensitiveCategoryApproved($guardrailCategory, $approvedSensitive)) {
+                $safeResponse = $this->buildSensitiveGuardrailResponse($guardrailCategory, $organization);
+                return response()->json([
+                    'response' => $safeResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            $hasVerifiedContext = !empty($finalContext) || !empty($shopifyContext);
+            if ($verifiedOnly && !$hasVerifiedContext) {
+                $safeResponse = $this->buildVerifiedOnlyResponse($organization);
+                return response()->json([
+                    'response' => $safeResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             // Assistant naming and channel-agnostic guidance
             $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
             $businessContext = $this->buildBusinessContext($organization);
@@ -498,6 +525,7 @@ class WidgetController
             if ($hasShopifyData) {
                 // Shopify data available - guide LLM to be conversational
                 $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
+                $systemPrompt .= "Tone: {$responseTone}. Language: {$responseLanguage}. ";
                 $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n\n";
                 $systemPrompt .= $finalContext . "\n";
                 if ($businessContext) {
@@ -519,6 +547,7 @@ class WidgetController
             } else {
                 // No Shopify data - standard prompt
                 $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
+                $systemPrompt .= "Tone: {$responseTone}. Language: {$responseLanguage}. ";
                 if ($orgDesc) {
                     $systemPrompt .= "{$orgDesc}. ";
                 }
@@ -619,6 +648,16 @@ class WidgetController
                 }
             }
 
+            $suggestion = $this->buildProactiveSuggestion($intentResult);
+            if ($suggestion !== '') {
+                $responseText = trim($responseText) . "\n\n" . $suggestion;
+            }
+
+            $followUp = $this->buildFollowUpPrompt($intentResult);
+            if ($followUp !== '') {
+                $responseText = trim($responseText) . "\n\n" . $followUp;
+            }
+
             // Save conversation to database
             $conversation = $this->saveConversationToDatabase($organization, $sessionId, $message, $responseText, $allUserInfo, compact('country', 'region', 'location'), $intentResult);
 
@@ -712,12 +751,34 @@ class WidgetController
         $region = $request->input('region') ?? ($allUserInfo['region'] ?? null);
         $location = $request->input('location') ?? ($allUserInfo['location'] ?? null);
         $sessionMetadata = $this->buildLeadSessionMetadata($request, $allUserInfo);
+
+        $settings = $organization->settings ?? [];
+        $verifiedOnly = (bool) ($settings['verified_only_mode'] ?? false);
+        $guardrailCategories = $settings['guardrail_categories'] ?? [];
+        $approvedSensitive = $settings['approved_sensitive_categories'] ?? [];
+        $responseTone = $settings['response_tone'] ?? 'friendly';
+        $responseLanguage = $settings['response_language'] ?? 'auto';
         
         if (!$message) {
             return response()->json(['error' => 'Message is required'], 400);
         }
 
-        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata) {
+        $guardrailCategory = $this->detectGuardrailCategory($message, $guardrailCategories);
+        if ($guardrailCategory && !$this->isSensitiveCategoryApproved($guardrailCategory, $approvedSensitive)) {
+            $safeResponse = $this->buildSensitiveGuardrailResponse($guardrailCategory, $organization);
+            return response()->stream(function () use ($safeResponse) {
+                echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
+                ob_flush();
+                flush();
+            }, 200, [
+                'Content-Type' => 'text/event-stream',
+                'Cache-Control' => 'no-cache',
+                'X-Accel-Buffering' => 'no',
+                'X-Robots-Tag' => 'noindex, nofollow'
+            ]);
+        }
+
+        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage) {
             try {
                 // Build context (simplified version - you can reuse logic from chat())
                 $aiService = app(AiAgentService::class);
@@ -770,10 +831,19 @@ class WidgetController
                     }
                 }
 
+                if ($verifiedOnly && !$liveData && trim($context) === '') {
+                    $safeResponse = $this->buildVerifiedOnlyResponse($organization);
+                    echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
+                    ob_flush();
+                    flush();
+                    return;
+                }
+
                 // Build messages
                 $systemPrompt = "You are AI Assistant for {$organization->name}.";
                 $businessContext = $this->buildBusinessContext($organization);
                 $promotionContext = $this->buildPromotionContext($organization);
+                $systemPrompt .= " Tone: {$responseTone}. Language: {$responseLanguage}.";
                 if ($businessContext) {
                     $systemPrompt .= "\n" . $businessContext;
                 }
@@ -782,6 +852,9 @@ class WidgetController
                 }
                 if ($context) {
                     $systemPrompt .= $context;
+                }
+                if ($intentResult && isset($intentResult['intent'])) {
+                    $systemPrompt .= "\nIntent: " . $intentResult['intent'] . ". Add a short follow-up question and one proactive suggestion if appropriate.";
                 }
 
                 // Stream from FastAPI
@@ -1354,6 +1427,95 @@ class WidgetController
         }
 
         return $promotions;
+    }
+
+    private function detectGuardrailCategory(string $message, $guardrailCategories): ?string
+    {
+        $enabled = is_array($guardrailCategories) ? $guardrailCategories : [];
+        if (empty($enabled)) {
+            return null;
+        }
+
+        $text = mb_strtolower($message);
+
+        $patterns = [
+            'legal' => ['legal', 'lawsuit', 'contract', 'attorney', 'lawyer', 'compliance', 'terms', 'privacy', 'policy'],
+            'medical' => ['medical', 'doctor', 'diagnosis', 'treatment', 'symptom', 'prescription', 'health', 'clinic'],
+            'finance' => ['finance', 'loan', 'interest', 'investment', 'tax', 'insurance', 'mortgage', 'credit']
+        ];
+
+        foreach ($enabled as $category) {
+            $category = mb_strtolower(trim((string) $category));
+            if (!isset($patterns[$category])) {
+                continue;
+            }
+            foreach ($patterns[$category] as $keyword) {
+                if (str_contains($text, $keyword)) {
+                    return $category;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function isSensitiveCategoryApproved(string $category, $approvedCategories): bool
+    {
+        $approved = is_array($approvedCategories) ? $approvedCategories : [];
+        return in_array($category, $approved, true);
+    }
+
+    private function buildSensitiveGuardrailResponse(string $category, Organization $organization): string
+    {
+        $base = "I can't provide {$category} advice. For help, please contact a qualified professional.";
+        $handoff = $this->buildHandoffMessage($organization);
+        return $handoff ? ($base . ' ' . $handoff) : $base;
+    }
+
+    private function buildVerifiedOnlyResponse(Organization $organization): string
+    {
+        $base = "I don't have verified information for that yet.";
+        $handoff = $this->buildHandoffMessage($organization);
+        return $handoff ? ($base . ' ' . $handoff) : $base;
+    }
+
+    private function buildFollowUpPrompt(?array $intentResult): string
+    {
+        $intent = $intentResult['intent'] ?? '';
+        $intent = strtolower(trim($intent));
+
+        if ($intent === 'booking') {
+            return 'Would you like me to help you book an appointment?';
+        }
+        if ($intent === 'pricing') {
+            return 'Do you want a detailed quote or a specific item price?';
+        }
+        if ($intent === 'lookup' || $intent === 'realtime_data') {
+            return 'Do you want me to look up anything else for you?';
+        }
+
+        return '';
+    }
+
+    private function buildProactiveSuggestion(?array $intentResult): string
+    {
+        $intent = $intentResult['intent'] ?? '';
+        $intent = strtolower(trim($intent));
+
+        if ($intent === 'booking') {
+            return 'Suggestion: I can share available slots or book a time for you.';
+        }
+        if ($intent === 'pricing') {
+            return 'Suggestion: I can send a detailed price breakdown or compare options.';
+        }
+        if ($intent === 'realtime_data') {
+            return 'Suggestion: I can check live availability or status updates.';
+        }
+        if ($intent === 'lookup') {
+            return 'Suggestion: I can help find related items or services.';
+        }
+
+        return '';
     }
 
     private function notifyLeadIfNeeded(Lead $lead, ?Lead $existingLead, ?array $intentResult, ?string $message): void

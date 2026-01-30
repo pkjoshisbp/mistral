@@ -36,6 +36,11 @@ class OrganizationAiManager extends Component
     public $businessHours = '';
     public $holidayDates = '';
     public $seasonalPromotions = '';
+    public $responseTone = 'friendly';
+    public $responseLanguage = 'auto';
+    public $verifiedOnlyMode = false;
+    public $guardrailCategories = [];
+    public $approvedSensitiveCategories = [];
     public $intentKeywords = [
         'booking' => '',
         'pricing' => '',
@@ -57,7 +62,12 @@ class OrganizationAiManager extends Component
         'intentLlmMaxTokens' => 'required|integer|min:16|max:256',
         'intentLlmTemperature' => 'required|numeric|min:0|max:1',
         'intentLlmTopP' => 'required|numeric|min:0|max:1',
-        'intentLlmRepeatPenalty' => 'required|numeric|min:0.8|max:1.5'
+        'intentLlmRepeatPenalty' => 'required|numeric|min:0.8|max:1.5',
+        'responseTone' => 'required|string|max:30',
+        'responseLanguage' => 'required|string|max:30',
+        'verifiedOnlyMode' => 'boolean',
+        'guardrailCategories' => 'nullable|array',
+        'approvedSensitiveCategories' => 'nullable|array'
     ];
 
     public function mount()
@@ -95,6 +105,11 @@ class OrganizationAiManager extends Component
         $this->businessHours = $settings['business_hours'] ?? '';
         $this->holidayDates = $this->keywordsToString($settings['holiday_dates'] ?? []);
         $this->seasonalPromotions = $settings['seasonal_promotions'] ?? '';
+        $this->responseTone = $settings['response_tone'] ?? 'friendly';
+        $this->responseLanguage = $settings['response_language'] ?? 'auto';
+        $this->verifiedOnlyMode = (bool) ($settings['verified_only_mode'] ?? false);
+        $this->guardrailCategories = $settings['guardrail_categories'] ?? [];
+        $this->approvedSensitiveCategories = $settings['approved_sensitive_categories'] ?? [];
         $storedKeywords = $settings['intent_keywords'] ?? [];
         $this->intentKeywords = [
             'booking' => $this->keywordsToString($storedKeywords['booking'] ?? []),
@@ -174,6 +189,11 @@ class OrganizationAiManager extends Component
             $currentSettings['business_hours'] = trim((string) $this->businessHours) ?: null;
             $currentSettings['holiday_dates'] = $this->stringToKeywords($this->holidayDates ?? '');
             $currentSettings['seasonal_promotions'] = trim((string) $this->seasonalPromotions) ?: null;
+            $currentSettings['response_tone'] = $this->responseTone;
+            $currentSettings['response_language'] = $this->responseLanguage;
+            $currentSettings['verified_only_mode'] = (bool) $this->verifiedOnlyMode;
+            $currentSettings['guardrail_categories'] = array_values(array_unique($this->guardrailCategories ?? []));
+            $currentSettings['approved_sensitive_categories'] = array_values(array_unique($this->approvedSensitiveCategories ?? []));
 
             $currentSettings['intent_keywords'] = [
                 'booking' => $this->stringToKeywords($this->intentKeywords['booking'] ?? ''),

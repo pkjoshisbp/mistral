@@ -284,6 +284,65 @@
                                                         <textarea wire:model.defer="seasonalPromotions" class="form-control" rows="3" placeholder="2026-02-01 to 2026-02-10 | Winter Sale | 10% off all items"></textarea>
                                                         <small class="text-muted">One per line. Format: YYYY-MM-DD to YYYY-MM-DD | Title | Details.</small>
                                                     </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Response Tone</label>
+                                                        <select wire:model.defer="responseTone" class="form-select">
+                                                            <option value="friendly">Friendly</option>
+                                                            <option value="professional">Professional</option>
+                                                            <option value="concise">Concise</option>
+                                                        </select>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Response Language</label>
+                                                        <select wire:model.defer="responseLanguage" class="form-select">
+                                                            <option value="auto">Auto-detect</option>
+                                                            <option value="en">English</option>
+                                                            <option value="hi">Hindi</option>
+                                                            <option value="es">Spanish</option>
+                                                            <option value="fr">French</option>
+                                                            <option value="de">German</option>
+                                                        </select>
+                                                        <small class="text-muted">Auto-detect matches the user's language.</small>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <div class="form-check form-switch">
+                                                            <input class="form-check-input" type="checkbox" wire:model.defer="verifiedOnlyMode" id="verifiedOnlyMode">
+                                                            <label class="form-check-label" for="verifiedOnlyMode">Verified-only answers</label>
+                                                        </div>
+                                                        <small class="text-muted">If enabled, the assistant only answers using verified sources.</small>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold d-block">Guardrail Categories</label>
+                                                        <div class="form-check">
+                                                            <input class="form-check-input" type="checkbox" wire:model.defer="guardrailCategories" value="legal" id="guardrailCategoriesLegal">
+                                                            <label class="form-check-label" for="guardrailCategoriesLegal">Legal</label>
+                                                        </div>
+                                                        <div class="form-check">
+                                                            <input class="form-check-input" type="checkbox" wire:model.defer="guardrailCategories" value="medical" id="guardrailCategoriesMedical">
+                                                            <label class="form-check-label" for="guardrailCategoriesMedical">Medical</label>
+                                                        </div>
+                                                        <div class="form-check">
+                                                            <input class="form-check-input" type="checkbox" wire:model.defer="guardrailCategories" value="finance" id="guardrailCategoriesFinance">
+                                                            <label class="form-check-label" for="guardrailCategoriesFinance">Finance</label>
+                                                        </div>
+                                                        <small class="text-muted">Sensitive topics require approval to answer.</small>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold d-block">Approved Sensitive Categories</label>
+                                                        <div class="form-check">
+                                                            <input class="form-check-input" type="checkbox" wire:model.defer="approvedSensitiveCategories" value="legal" id="approvedSensitiveLegal">
+                                                            <label class="form-check-label" for="approvedSensitiveLegal">Legal</label>
+                                                        </div>
+                                                        <div class="form-check">
+                                                            <input class="form-check-input" type="checkbox" wire:model.defer="approvedSensitiveCategories" value="medical" id="approvedSensitiveMedical">
+                                                            <label class="form-check-label" for="approvedSensitiveMedical">Medical</label>
+                                                        </div>
+                                                        <div class="form-check">
+                                                            <input class="form-check-input" type="checkbox" wire:model.defer="approvedSensitiveCategories" value="finance" id="approvedSensitiveFinance">
+                                                            <label class="form-check-label" for="approvedSensitiveFinance">Finance</label>
+                                                        </div>
+                                                        <small class="text-muted">Only approved categories can be answered.</small>
+                                                    </div>
                                                 </div>
                                             </div>
 

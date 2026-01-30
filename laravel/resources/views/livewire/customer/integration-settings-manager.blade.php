@@ -105,6 +105,76 @@
                                     <small class="form-text text-muted">One per line. Format: YYYY-MM-DD to YYYY-MM-DD | Title | Details.</small>
                                 </div>
 
+                                <div class="form-group">
+                                    <label for="response_tone">Response Tone</label>
+                                    <select wire:model="response_tone" class="form-control @error('response_tone') is-invalid @enderror" id="response_tone">
+                                        <option value="friendly">Friendly</option>
+                                        <option value="professional">Professional</option>
+                                        <option value="concise">Concise</option>
+                                    </select>
+                                    @error('response_tone')
+                                        <span class="invalid-feedback">{{ $message }}</span>
+                                    @enderror
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="response_language">Response Language</label>
+                                    <select wire:model="response_language" class="form-control @error('response_language') is-invalid @enderror" id="response_language">
+                                        <option value="auto">Auto-detect</option>
+                                        <option value="en">English</option>
+                                        <option value="hi">Hindi</option>
+                                        <option value="es">Spanish</option>
+                                        <option value="fr">French</option>
+                                        <option value="de">German</option>
+                                    </select>
+                                    @error('response_language')
+                                        <span class="invalid-feedback">{{ $message }}</span>
+                                    @enderror
+                                    <small class="form-text text-muted">Auto-detect matches the user's language.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <div class="custom-control custom-switch">
+                                        <input type="checkbox" class="custom-control-input" id="verified_only_mode" wire:model="verified_only_mode">
+                                        <label class="custom-control-label" for="verified_only_mode">Verified-only answers (use KB/live data only)</label>
+                                    </div>
+                                    <small class="form-text text-muted">If enabled, the assistant only answers using verified sources.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="d-block">Guardrail Categories</label>
+                                    <div class="custom-control custom-checkbox">
+                                        <input type="checkbox" class="custom-control-input" id="guardrail_legal" wire:model="guardrail_categories" value="legal">
+                                        <label class="custom-control-label" for="guardrail_legal">Legal</label>
+                                    </div>
+                                    <div class="custom-control custom-checkbox">
+                                        <input type="checkbox" class="custom-control-input" id="guardrail_medical" wire:model="guardrail_categories" value="medical">
+                                        <label class="custom-control-label" for="guardrail_medical">Medical</label>
+                                    </div>
+                                    <div class="custom-control custom-checkbox">
+                                        <input type="checkbox" class="custom-control-input" id="guardrail_finance" wire:model="guardrail_categories" value="finance">
+                                        <label class="custom-control-label" for="guardrail_finance">Finance</label>
+                                    </div>
+                                    <small class="form-text text-muted">If enabled, sensitive topics require approval to answer.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="d-block">Approved Sensitive Categories</label>
+                                    <div class="custom-control custom-checkbox">
+                                        <input type="checkbox" class="custom-control-input" id="approved_legal" wire:model="approved_sensitive_categories" value="legal">
+                                        <label class="custom-control-label" for="approved_legal">Legal</label>
+                                    </div>
+                                    <div class="custom-control custom-checkbox">
+                                        <input type="checkbox" class="custom-control-input" id="approved_medical" wire:model="approved_sensitive_categories" value="medical">
+                                        <label class="custom-control-label" for="approved_medical">Medical</label>
+                                    </div>
+                                    <div class="custom-control custom-checkbox">
+                                        <input type="checkbox" class="custom-control-input" id="approved_finance" wire:model="approved_sensitive_categories" value="finance">
+                                        <label class="custom-control-label" for="approved_finance">Finance</label>
+                                    </div>
+                                    <small class="form-text text-muted">Only approved categories can be answered.</small>
+                                </div>
+
                                 @if($integration)
                                     <div class="alert alert-info">
                                         <i class="fas fa-info-circle"></i> 

@@ -13,6 +13,12 @@
 - Human escalation triggers (low confidence/complaints).
 - Agent summary handoff on escalation.
 - Multi-channel handoff messaging (email/phone/website).
+- Verified-only answer mode.
+- Response guardrails by category (legal/medical/finance).
+- Per-org approval workflow for sensitive data.
+- Multi-language + tone presets.
+- Smart follow-up prompts.
+- Proactive suggestions based on intent.
 - Action templates by industry (admin + customer) with inactive defaults.
 - Action execution logging with API retries.
 - Live data validation rules (no hallucinated prices).

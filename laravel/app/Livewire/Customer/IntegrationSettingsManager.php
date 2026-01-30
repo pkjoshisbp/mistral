@@ -22,6 +22,11 @@ class IntegrationSettingsManager extends Component
     public $business_hours = '';
     public $holiday_dates = '';
     public $seasonal_promotions = '';
+    public $response_tone = 'friendly';
+    public $response_language = 'auto';
+    public $verified_only_mode = false;
+    public $guardrail_categories = [];
+    public $approved_sensitive_categories = [];
     
     // Widget settings
     public $widget_position = 'bottom-right';
@@ -58,6 +63,11 @@ class IntegrationSettingsManager extends Component
         'business_hours' => 'nullable|string|max:2000',
         'holiday_dates' => 'nullable|string|max:2000',
         'seasonal_promotions' => 'nullable|string|max:4000',
+        'response_tone' => 'required|string|max:30',
+        'response_language' => 'required|string|max:30',
+        'verified_only_mode' => 'boolean',
+        'guardrail_categories' => 'nullable|array',
+        'approved_sensitive_categories' => 'nullable|array',
         'widget_position' => 'required|in:bottom-right,bottom-left,top-right,top-left',
         'primary_color' => 'required|string',
         'welcome_message' => 'required|string|max:255',
@@ -122,6 +132,11 @@ class IntegrationSettingsManager extends Component
         $this->business_hours = $settings['business_hours'] ?? '';
         $this->holiday_dates = $this->keywordsToString($settings['holiday_dates'] ?? []);
         $this->seasonal_promotions = $settings['seasonal_promotions'] ?? '';
+        $this->response_tone = $settings['response_tone'] ?? 'friendly';
+        $this->response_language = $settings['response_language'] ?? 'auto';
+        $this->verified_only_mode = (bool) ($settings['verified_only_mode'] ?? false);
+        $this->guardrail_categories = $settings['guardrail_categories'] ?? [];
+        $this->approved_sensitive_categories = $settings['approved_sensitive_categories'] ?? [];
     }
 
     public function saveSettings()
@@ -164,6 +179,11 @@ class IntegrationSettingsManager extends Component
             $settings['business_hours'] = trim((string) $this->business_hours) ?: null;
             $settings['holiday_dates'] = $this->stringToKeywords($this->holiday_dates ?? '');
             $settings['seasonal_promotions'] = trim((string) $this->seasonal_promotions) ?: null;
+            $settings['response_tone'] = $this->response_tone;
+            $settings['response_language'] = $this->response_language;
+            $settings['verified_only_mode'] = (bool) $this->verified_only_mode;
+            $settings['guardrail_categories'] = array_values(array_unique($this->guardrail_categories ?? []));
+            $settings['approved_sensitive_categories'] = array_values(array_unique($this->approved_sensitive_categories ?? []));
             
             $this->organization->settings = $settings;
             $this->organization->save();
