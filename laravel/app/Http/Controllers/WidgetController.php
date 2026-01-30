@@ -186,6 +186,30 @@ class WidgetController
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            if ($existingConversation && in_array($existingConversation->agent_status, ['agent_assigned', 'agent_active'], true)) {
+                $handoffText = 'A human agent is reviewing your message and will reply shortly.';
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $handoffText,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                if ($conversation) {
+                    $conversation->update([
+                        'agent_last_active_at' => now(),
+                        'last_activity_at' => now(),
+                    ]);
+                }
+
+                return response()->json(['response' => $handoffText])
+                    ->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             // Log and save lead capture if provided
             if (!empty($allUserInfo) && isset($allUserInfo['name'])) {
                 Log::info('Lead captured via widget', [
@@ -768,6 +792,41 @@ class WidgetController
             return response()->json(['error' => 'Message is required'], 400);
         }
 
+        $existingConversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organization->id)
+            ->first();
+
+        if ($existingConversation && in_array($existingConversation->agent_status, ['agent_assigned', 'agent_active'], true)) {
+            $handoffText = 'A human agent is reviewing your message and will reply shortly.';
+            $conversation = $this->saveConversationToDatabase(
+                $organization,
+                $sessionId,
+                $message,
+                $handoffText,
+                $allUserInfo,
+                compact('country', 'region', 'location'),
+                null
+            );
+
+            if ($conversation) {
+                $conversation->update([
+                    'agent_last_active_at' => now(),
+                    'last_activity_at' => now(),
+                ]);
+            }
+
+            return response()->stream(function () use ($handoffText) {
+                echo "data: " . json_encode(['content' => $handoffText, 'done' => true]) . "\n\n";
+                ob_flush();
+                flush();
+            }, 200, [
+                'Content-Type' => 'text/event-stream',
+                'Cache-Control' => 'no-cache',
+                'X-Accel-Buffering' => 'no',
+                'X-Robots-Tag' => 'noindex, nofollow'
+            ]);
+        }
+
         $guardrailCategory = $this->detectGuardrailCategory($message, $guardrailCategories);
         if ($guardrailCategory && !$this->isSensitiveCategoryApproved($guardrailCategory, $approvedSensitive)) {
             $safeResponse = $this->buildSensitiveGuardrailResponse($guardrailCategory, $organization);
@@ -1297,7 +1356,7 @@ class WidgetController
 
     private function handleEscalationIfNeeded(ChatConversation $conversation, string $userMessage, string $responseText, ?array $intentResult, Request $request, ?array $sessionMetadata = null, ?string $precomputedReason = null): void
     {
-        if ($conversation->status === 'needs_handoff') {
+        if ($conversation->status === 'needs_handoff' || $conversation->agent_status === 'escalation_requested') {
             return;
         }
 
@@ -1316,6 +1375,8 @@ class WidgetController
 
         $conversation->update([
             'status' => 'needs_handoff',
+            'agent_status' => 'escalation_requested',
+            'escalated_at' => now(),
             'metadata' => $meta,
             'last_activity_at' => now()
         ]);
@@ -2368,7 +2429,7 @@ class WidgetController
                     'visitor_region' => $locationInfo['region'] ?? null,
                     'visitor_location' => $locationInfo['location'] ?? null,
                     'status' => 'active',
-                    'agent_status' => 'ai',
+                    'agent_status' => 'ai_active',
                     'last_activity_at' => now()
                 ]
             );

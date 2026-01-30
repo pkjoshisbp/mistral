@@ -23,6 +23,12 @@ class ChatConversation extends Model
         'visitor_region',
         'visitor_location',
         'status',
+        'agent_status',
+        'assigned_agent_id',
+        'escalated_at',
+        'agent_assigned_at',
+        'agent_last_active_at',
+        'closed_at',
         'title',
         'summary',
         'metadata',
@@ -32,6 +38,10 @@ class ChatConversation extends Model
     protected $casts = [
         'metadata' => 'array',
         'last_activity_at' => 'datetime',
+        'escalated_at' => 'datetime',
+        'agent_assigned_at' => 'datetime',
+        'agent_last_active_at' => 'datetime',
+        'closed_at' => 'datetime',
     ];
 
     public function organization(): BelongsTo
@@ -42,6 +52,11 @@ class ChatConversation extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function assignedAgent(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_agent_id');
     }
 
     public function messages(): HasMany

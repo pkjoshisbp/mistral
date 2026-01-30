@@ -146,6 +146,12 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{ route('admin.live-chats') }}" class="nav-link {{ request()->routeIs('admin.live-chats') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-headset"></i>
+              <p>Live Chats</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.chat-history') }}" class="nav-link {{ request()->routeIs('admin.chat-history') ? 'active' : '' }}">
               <i class="nav-icon fas fa-history"></i>
               <p>Chat History</p>

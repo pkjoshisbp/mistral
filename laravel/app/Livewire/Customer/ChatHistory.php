@@ -119,7 +119,10 @@ class ChatHistory extends Component
 
         $conversation->update([
             'status' => 'agent',
-            'agent_status' => 'agent',
+            'agent_status' => 'agent_active',
+            'assigned_agent_id' => $conversation->assigned_agent_id ?: $agent?->id,
+            'agent_assigned_at' => $conversation->agent_assigned_at ?: now(),
+            'agent_last_active_at' => now(),
             'last_activity_at' => now(),
         ]);
 

@@ -602,6 +602,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/faqs', \App\Livewire\Admin\FaqsManager::class)->name('faqs');
     Route::get('/general-info', \App\Livewire\Admin\GeneralInfoManager::class)->name('general-info');
     Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
+    Route::get('/live-chats', \App\Livewire\Admin\AgentConsole::class)->name('live-chats');
     Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
     Route::get('/chat-history/{id}/export', function ($id) {
         $conversation = \App\Models\ChatConversation::with('messages')->find($id);
