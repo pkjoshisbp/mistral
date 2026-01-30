@@ -10,6 +10,7 @@
 - Intent distribution dashboard (analytics).
 - Unanswered question tracker (analytics).
 - Lead conversion funnel metrics (analytics).
+- Human escalation triggers (low confidence/complaints).
 - Action templates by industry (admin + customer) with inactive defaults.
 - Action execution logging with API retries.
 - Live data validation rules (no hallucinated prices).

@@ -612,7 +612,7 @@ class WidgetController
             ]);
 
             // Save conversation to database
-            $this->saveConversationToDatabase($organization, $sessionId, $message, $responseText, $allUserInfo, compact('country', 'region', 'location'), $intentResult);
+            $conversation = $this->saveConversationToDatabase($organization, $sessionId, $message, $responseText, $allUserInfo, compact('country', 'region', 'location'), $intentResult);
 
             // Log intent distribution analytics
             $this->logIntentAnalytics(
@@ -632,6 +632,17 @@ class WidgetController
                     $responseText,
                     $request,
                     compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+            }
+
+            if ($conversation) {
+                $this->handleEscalationIfNeeded(
+                    $conversation,
+                    $message,
+                    $responseText,
+                    $intentResult,
+                    $request,
                     $sessionMetadata
                 );
             }
@@ -1004,6 +1015,90 @@ class WidgetController
                 'error' => $t->getMessage()
             ]);
         }
+    }
+
+    private function handleEscalationIfNeeded(ChatConversation $conversation, string $userMessage, string $responseText, ?array $intentResult, Request $request, ?array $sessionMetadata = null): void
+    {
+        if ($conversation->status === 'needs_handoff') {
+            return;
+        }
+
+        $reason = $this->getEscalationReason($userMessage, $responseText, $intentResult);
+        if (!$reason) {
+            return;
+        }
+
+        $meta = $conversation->metadata ?? [];
+        $meta['escalation'] = [
+            'reason' => $reason,
+            'intent' => $intentResult['intent'] ?? null,
+            'confidence' => $intentResult['confidence'] ?? null,
+            'triggered_at' => now()->toISOString(),
+        ];
+
+        $conversation->update([
+            'status' => 'needs_handoff',
+            'metadata' => $meta,
+            'last_activity_at' => now()
+        ]);
+
+        try {
+            Analytics::create([
+                'organization_id' => $conversation->organization_id,
+                'visitor_id' => $conversation->visitor_id ?? $conversation->conversation_id,
+                'session_id' => $conversation->conversation_id,
+                'event_type' => 'human_escalation',
+                'page_url' => $sessionMetadata['page_url'] ?? config('app.url'),
+                'page_title' => $sessionMetadata['page_title'] ?? '',
+                'referrer' => $sessionMetadata['referrer'] ?? '',
+                'user_agent' => $request->userAgent(),
+                'ip_address' => $request->ip(),
+                'country' => $conversation->visitor_country,
+                'region' => $conversation->visitor_region,
+                'city' => $conversation->visitor_location,
+                'event_data' => [
+                    'reason' => $reason,
+                    'intent' => $intentResult['intent'] ?? null,
+                    'confidence' => $intentResult['confidence'] ?? null,
+                ],
+            ]);
+        } catch (\Throwable $t) {
+            Log::warning('Escalation analytics log failed', [
+                'org_id' => $conversation->organization_id,
+                'error' => $t->getMessage()
+            ]);
+        }
+    }
+
+    private function getEscalationReason(string $userMessage, string $responseText, ?array $intentResult): ?string
+    {
+        $message = mb_strtolower($userMessage);
+
+        if (str_contains($message, 'human') || str_contains($message, 'agent') || str_contains($message, 'representative')) {
+            return 'user_requested_human';
+        }
+
+        $complaintKeywords = [
+            'complaint', 'refund', 'cancel', 'angry', 'frustrated', 'upset', 'bad service', 'unhappy',
+            'scam', 'fraud', 'chargeback', 'lawsuit', 'legal', 'terrible', 'worst', 'disappointed'
+        ];
+
+        foreach ($complaintKeywords as $kw) {
+            if (str_contains($message, $kw)) {
+                return 'complaint_detected';
+            }
+        }
+
+        if ($this->isUnansweredResponse($responseText)) {
+            return 'unanswered';
+        }
+
+        $confidence = (float) ($intentResult['confidence'] ?? 1);
+        if ($confidence > 0 && $confidence < 0.4) {
+            return 'low_intent_confidence';
+        }
+
+        return null;
     }
 
     private function buildBusinessContext(Organization $organization): string
@@ -1556,6 +1651,8 @@ class WidgetController
                 'org_id' => $organization->id
             ]);
 
+            return $conversation;
+
         } catch (\Exception $e) {
             Log::error('Failed to save conversation to database', [
                 'session_id' => $sessionId,
@@ -1563,6 +1660,8 @@ class WidgetController
                 'error' => $e->getMessage()
             ]);
         }
+
+        return null;
     }
 
     private function sendChatInteractionNotification($organization, $conversation, $userMessage, $aiResponse, $userInfo = [], $locationInfo = []): void
