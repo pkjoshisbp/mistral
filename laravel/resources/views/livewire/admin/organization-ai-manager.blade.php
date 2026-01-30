@@ -254,6 +254,15 @@
                                                         <textarea wire:model.defer="handoffOfflineMessage" class="form-control" rows="2" placeholder="Our agents are currently offline. Please leave your contact details or reach us via the options below."></textarea>
                                                         <small class="text-muted">Contact channels are appended automatically.</small>
                                                     </div>
+                                                    <div class="form-check form-switch mb-2">
+                                                        <input class="form-check-input" type="checkbox" wire:model.defer="escalationNotifyEnabled" id="escalationNotifyEnabled">
+                                                        <label class="form-check-label" for="escalationNotifyEnabled">Send email when escalation happens</label>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Escalation Notification Emails</label>
+                                                        <textarea wire:model.defer="escalationNotifyEmails" class="form-control" rows="2" placeholder="support@example.com, owner@example.com"></textarea>
+                                                        <small class="text-muted">Comma-separated emails.</small>
+                                                    </div>
                                                 </div>
                                             </div>
 

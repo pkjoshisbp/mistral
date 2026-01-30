@@ -35,6 +35,8 @@ class OrganizationAiManager extends Component
     public $leadNotifyQualifiedOnly = true;
     public $agentAvailability = 'auto';
     public $handoffOfflineMessage = '';
+    public $escalationNotifyEnabled = false;
+    public $escalationNotifyEmails = '';
     public $businessHours = '';
     public $holidayDates = '';
     public $seasonalPromotions = '';
@@ -106,6 +108,8 @@ class OrganizationAiManager extends Component
         $this->leadNotifyQualifiedOnly = (bool) ($settings['lead_notify_qualified_only'] ?? true);
         $this->agentAvailability = $settings['agent_availability'] ?? 'auto';
         $this->handoffOfflineMessage = $settings['handoff_offline_message'] ?? '';
+        $this->escalationNotifyEnabled = (bool) ($settings['escalation_notify_enabled'] ?? false);
+        $this->escalationNotifyEmails = $this->keywordsToString($settings['escalation_notify_emails'] ?? []);
         $this->businessHours = $settings['business_hours'] ?? '';
         $this->holidayDates = $this->keywordsToString($settings['holiday_dates'] ?? []);
         $this->seasonalPromotions = $settings['seasonal_promotions'] ?? '';
@@ -192,6 +196,8 @@ class OrganizationAiManager extends Component
             $currentSettings['lead_notify_qualified_only'] = (bool) $this->leadNotifyQualifiedOnly;
             $currentSettings['agent_availability'] = $this->agentAvailability ?: 'auto';
             $currentSettings['handoff_offline_message'] = trim((string) $this->handoffOfflineMessage) ?: null;
+            $currentSettings['escalation_notify_enabled'] = (bool) $this->escalationNotifyEnabled;
+            $currentSettings['escalation_notify_emails'] = $this->stringToKeywords($this->escalationNotifyEmails ?? '');
             $currentSettings['business_hours'] = trim((string) $this->businessHours) ?: null;
             $currentSettings['holiday_dates'] = $this->stringToKeywords($this->holidayDates ?? '');
             $currentSettings['seasonal_promotions'] = trim((string) $this->seasonalPromotions) ?: null;

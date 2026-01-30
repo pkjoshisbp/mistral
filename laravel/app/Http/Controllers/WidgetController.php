@@ -15,6 +15,8 @@ use App\Services\IntentDetectionService;
 use App\Services\AiAgentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\ChatEscalationNotification;
 use Illuminate\Support\Str;
 
 class WidgetController
@@ -1381,6 +1383,8 @@ class WidgetController
             'last_activity_at' => now()
         ]);
 
+        $this->sendEscalationNotification($conversation, $reason);
+
         if (empty($conversation->summary)) {
             $summary = $this->buildConversationSummary($conversation);
             if ($summary !== '') {
@@ -1412,6 +1416,49 @@ class WidgetController
             Log::warning('Escalation analytics log failed', [
                 'org_id' => $conversation->organization_id,
                 'error' => $t->getMessage()
+            ]);
+        }
+    }
+
+    private function sendEscalationNotification(ChatConversation $conversation, string $reason): void
+    {
+        try {
+            $organization = $conversation->organization ?? Organization::find($conversation->organization_id);
+            if (!$organization) {
+                return;
+            }
+
+            $settings = $organization->settings ?? [];
+            $enabled = (bool) ($settings['escalation_notify_enabled'] ?? false);
+            if (!$enabled) {
+                return;
+            }
+
+            $emails = $settings['escalation_notify_emails'] ?? [];
+            if (is_string($emails)) {
+                $emails = array_filter(array_map('trim', preg_split('/[\s,]+/', $emails)));
+            }
+            $emails = array_values(array_filter(array_map('trim', (array) $emails)));
+            if (empty($emails)) {
+                return;
+            }
+
+            $summary = $conversation->summary ?: $this->buildConversationSummary($conversation);
+            $consoleUrl = rtrim(config('app.url'), '/') . '/customer/live-chats';
+
+            $payload = [
+                'organization' => $organization,
+                'conversation' => $conversation,
+                'reason' => $reason,
+                'summary' => $summary,
+                'console_url' => $consoleUrl,
+            ];
+
+            Mail::to($emails)->send(new ChatEscalationNotification($payload));
+        } catch (\Throwable $e) {
+            Log::warning('Escalation email notification failed', [
+                'conversation_id' => $conversation->id ?? null,
+                'error' => $e->getMessage()
             ]);
         }
     }
