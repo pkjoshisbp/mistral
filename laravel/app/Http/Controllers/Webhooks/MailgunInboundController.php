@@ -70,7 +70,7 @@ class MailgunInboundController extends Controller
 
     private function extractConversationId(string $recipient, string $subject): ?string
     {
-        if (preg_match('/chat\+([^@]+)@/i', $recipient, $matches)) {
+        if (preg_match('/ai-chat-support\+([^@]+)@/i', $recipient, $matches)) {
             return $matches[1];
         }
 

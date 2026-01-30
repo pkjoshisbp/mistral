@@ -1446,7 +1446,7 @@ class WidgetController
             $summary = $conversation->summary ?: $this->buildConversationSummary($conversation);
             $consoleUrl = rtrim(config('app.url'), '/') . '/customer/live-chats';
             $mailgunDomain = env('MAILGUN_DOMAIN');
-            $replyTo = $mailgunDomain ? ('chat+' . $conversation->conversation_id . '@' . $mailgunDomain) : null;
+            $replyTo = $mailgunDomain ? ('ai-chat-support+' . $conversation->conversation_id . '@' . $mailgunDomain) : null;
 
             $payload = [
                 'organization' => $organization,
