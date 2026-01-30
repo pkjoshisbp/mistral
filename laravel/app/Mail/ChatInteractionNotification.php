@@ -20,10 +20,18 @@ class ChatInteractionNotification extends Mailable
     public function build()
     {
         $orgName = $this->payload['organization']->name ?? 'Organization';
+        $orgEmail = $this->payload['organization']->contact_email ?? null;
         $subject = "New Chat Interaction - {$orgName}";
 
-        return $this->subject($subject)
+        $mail = $this->subject($subject)
             ->view('emails.chat-interaction-notification')
+            ->text('emails.chat-interaction-notification-text')
             ->with($this->payload);
+
+        if (!empty($orgEmail)) {
+            $mail->replyTo($orgEmail, $orgName);
+        }
+
+        return $mail;
     }
 }
