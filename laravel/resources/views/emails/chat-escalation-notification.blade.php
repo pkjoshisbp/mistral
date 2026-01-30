@@ -17,6 +17,12 @@
         <div style="padding: 10px; background: #f7f7f7; border-radius: 6px; white-space: pre-wrap;">{{ $summary }}</div>
     @endif
 
+    @if(!empty($reply_to))
+        <p style="margin: 12px 0 0 0; font-size: 12px; color: #666;">
+            Reply to this email or send context to: <strong>{{ $reply_to }}</strong>
+        </p>
+    @endif
+
     <p style="margin: 12px 0 0 0; font-size: 12px; color: #888;">
         Open the Live Chats console to respond.
         <a href="{{ $console_url }}" target="_blank" rel="noopener noreferrer">{{ $console_url }}</a>

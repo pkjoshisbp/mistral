@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\WhatsappWebhookController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\Api\OrderStatusController;
 use App\Http\Controllers\Api\ShopifyDataController;
+use App\Http\Controllers\Webhooks\MailgunInboundController;
 
 Route::post('/leads', [LeadController::class, 'store']);
 Route::get('/leads', [LeadController::class, 'index']);
@@ -31,6 +32,9 @@ Route::post('/organizations/{slug}/faqs/import', [FaqSyncController::class, 'imp
 // WhatsApp webhook endpoints (global/back-compat)
 Route::get('/webhooks/whatsapp', [WhatsappWebhookController::class, 'verify']);
 Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive']);
+
+// Mailgun inbound reply webhook
+Route::post('/webhooks/mailgun/inbound', [MailgunInboundController::class, 'handle']);
 
 // Per-organization WhatsApp webhook endpoints (preferred)
 Route::get('/webhooks/whatsapp/{org_slug}', [WhatsappWebhookController::class, 'verifyForOrg']);

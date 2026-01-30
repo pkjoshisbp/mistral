@@ -13,4 +13,8 @@ Conversation Summary:
 {{ $summary }}
 @endif
 
+@if(!empty($reply_to))
+Reply to this email or send context to: {{ $reply_to }}
+@endif
+
 Open Live Chats console: {{ $console_url }}

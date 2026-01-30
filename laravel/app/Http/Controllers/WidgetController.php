@@ -1445,6 +1445,8 @@ class WidgetController
 
             $summary = $conversation->summary ?: $this->buildConversationSummary($conversation);
             $consoleUrl = rtrim(config('app.url'), '/') . '/customer/live-chats';
+            $mailgunDomain = env('MAILGUN_DOMAIN');
+            $replyTo = $mailgunDomain ? ('chat+' . $conversation->conversation_id . '@' . $mailgunDomain) : null;
 
             $payload = [
                 'organization' => $organization,
@@ -1452,6 +1454,7 @@ class WidgetController
                 'reason' => $reason,
                 'summary' => $summary,
                 'console_url' => $consoleUrl,
+                'reply_to' => $replyTo,
             ];
 
             Mail::to($emails)->send(new ChatEscalationNotification($payload));
