@@ -87,6 +87,16 @@
                                             </div>
                                         @endforeach
                                     </div>
+                                    <div class="mt-3">
+                                        <label class="form-label">Agent Reply</label>
+                                        <textarea class="form-control" rows="3" wire:model.defer="replyMessage.{{ $conversation->id }}" placeholder="Type your reply as a support agent..."></textarea>
+                                        <div class="d-flex justify-content-end mt-2">
+                                            <button class="btn btn-sm btn-outline-primary" wire:click="sendAgentReply({{ $conversation->id }})">
+                                                <i class="fas fa-reply"></i> Send as Agent
+                                            </button>
+                                        </div>
+                                        <small class="text-muted">Agent replies are visible to customers and used as AI context for follow-ups.</small>
+                                    </div>
                                 </td></tr>
                             @endif
                         @empty

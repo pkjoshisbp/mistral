@@ -47,9 +47,12 @@
 .ai-chat-message { max-width:82% !important; display:flex !important; flex-direction:column !important; }
 .ai-chat-message-user { align-self:flex-end !important; }
 .ai-chat-message-bot { align-self:flex-start !important; }
+.ai-chat-message-agent { align-self:flex-start !important; }
 .ai-chat-message-content { padding:12px 15px !important; border-radius:18px !important; font-size:14px !important; line-height:1.5 !important; box-shadow:0 1px 2px rgba(0,0,0,.08) !important; position:relative !important; }
 .ai-chat-message-user .ai-chat-message-content { background:{{ $theme['primaryColor'] }} !important; color:#fff !important; }
 .ai-chat-message-bot .ai-chat-message-content { background:#ffffff !important; color:{{ $theme['textColor'] }} !important; border:1px solid #e3e7ec !important; }
+.ai-chat-message-agent .ai-chat-message-content { background:#f1f5ff !important; color:#1f2a44 !important; border:1px solid #d6def5 !important; }
+.ai-chat-message-sender { font-size:11px !important; font-weight:600 !important; margin-bottom:6px !important; color:#4b5a78 !important; }
 .ai-chat-message-time { font-size:11px !important; color:#7a8594 !important; margin-top:4px !important; padding:0 4px !important; }
 
 /* Typing Indicator */

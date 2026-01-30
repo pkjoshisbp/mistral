@@ -20,6 +20,8 @@
             // ISSUE 5B FIX: Persist session across page navigation
             this.sessionId = this.getOrCreateSessionId();
             this.messages = [];
+            this.lastAgentMessageId = 0;
+            this.agentPoller = null;
             this.welcomeShown = false;
             this.leadCaptured = this.checkLeadCaptured();
             this.userInfo = this.loadUserInfo();
@@ -141,7 +143,10 @@
                         this.welcomeShown = true; // Don't show welcome if restoring messages
                         // Render all stored messages
                         messages.forEach(msg => {
-                            this.renderMessage(msg.content, msg.sender, msg.timestamp);
+                            this.renderMessage(msg.content, msg.sender, msg.timestamp, msg.senderName);
+                            if (msg.sender === 'agent' && msg.messageId) {
+                                this.lastAgentMessageId = Math.max(this.lastAgentMessageId, msg.messageId);
+                            }
                         });
 
                         if (Array.isArray(parsed)) {
@@ -457,10 +462,48 @@
                         this.showWelcomeMessage();
                     }
                 }
+
+                this.startAgentPolling();
             } else {
                 window.style.setProperty('display', 'none', 'important');
                 window.style.setProperty('visibility', 'hidden', 'important');
                 button.style.transform = 'scale(1)';
+                this.stopAgentPolling();
+            }
+        }
+
+        startAgentPolling() {
+            if (this.agentPoller) return;
+            this.fetchAgentMessages();
+            this.agentPoller = setInterval(() => {
+                if (this.isOpen) {
+                    this.fetchAgentMessages();
+                }
+            }, 8000);
+        }
+
+        stopAgentPolling() {
+            if (this.agentPoller) {
+                clearInterval(this.agentPoller);
+                this.agentPoller = null;
+            }
+        }
+
+        async fetchAgentMessages() {
+            try {
+                const url = `${this.config.apiUrl}/widget/${this.config.orgId}/messages?session_id=${encodeURIComponent(this.sessionId)}&last_id=${this.lastAgentMessageId}`;
+                const response = await fetch(url, { method: 'GET' });
+                if (!response.ok) return;
+                const data = await response.json();
+                const messages = Array.isArray(data.messages) ? data.messages : [];
+                if (!messages.length) return;
+
+                messages.forEach(msg => {
+                    this.lastAgentMessageId = Math.max(this.lastAgentMessageId, msg.id || 0);
+                    this.addMessage(msg.message, 'agent', msg.sender_name, msg.id);
+                });
+            } catch (e) {
+                console.debug('[AI Widget] Agent polling failed:', e);
             }
         }
 
@@ -607,7 +650,7 @@
             return processed.replace(/\n/g, '<br>');
         }
 
-        renderMessage(content, sender = 'user', timestamp = null) {
+        renderMessage(content, sender = 'user', timestamp = null, senderName = null) {
             const messagesContainer = document.getElementById(this.ids.messages);
             if (!messagesContainer) {
                 console.error('AI Chat Widget: Messages container not found');
@@ -623,8 +666,12 @@
             
                                console.log('[AI Widget] Closing chat window');
             const safeContent = sender === 'bot' ? this.linkify(content) : this.linkify(content); // both user & bot for consistency
+            const senderLabel = sender === 'agent'
+                ? `<div class="ai-chat-message-sender">${senderName || 'Support Agent'}</div>`
+                : '';
             messageElement.innerHTML = `
                 <div class="ai-chat-message-content">
+                    ${senderLabel}
                     ${safeContent}
                 </div>
                 <div class="ai-chat-message-time">${time}</div>
@@ -634,10 +681,10 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        addMessage(content, sender = 'user') {
-            this.renderMessage(content, sender);
+        addMessage(content, sender = 'user', senderName = null, messageId = null) {
+            this.renderMessage(content, sender, null, senderName);
 
-            this.messages.push({ content, sender, timestamp: new Date() });
+            this.messages.push({ content, sender, senderName, messageId, timestamp: new Date() });
             // ISSUE 5B FIX: Persist messages after each addition
             this.saveMessages();
         }

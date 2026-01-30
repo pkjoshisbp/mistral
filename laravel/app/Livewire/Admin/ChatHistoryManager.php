@@ -5,7 +5,9 @@ namespace App\Livewire\Admin;
 use Livewire\Component;
 use Livewire\WithPagination;
 use App\Models\ChatConversation;
+use App\Models\ChatMessage;
 use App\Models\Organization;
+use Illuminate\Support\Facades\Auth;
 
 class ChatHistoryManager extends Component
 {
@@ -17,6 +19,7 @@ class ChatHistoryManager extends Component
     public $dateTo;
     public $showDetails = [];
     public $focusConversation;
+    public $replyMessage = [];
 
     protected $queryString = [
         'search' => ['except' => ''],
@@ -79,6 +82,44 @@ class ChatHistoryManager extends Component
             session()->flash('error', 'Failed to export conversation: ' . $e->getMessage());
             return;
         }
+    }
+
+    public function sendAgentReply($conversationId)
+    {
+        $conversation = ChatConversation::with('organization')->find($conversationId);
+        if (!$conversation) {
+            session()->flash('error', 'Chat conversation not found.');
+            return;
+        }
+
+        $message = trim((string) ($this->replyMessage[$conversationId] ?? ''));
+        if ($message === '') {
+            session()->flash('error', 'Agent reply cannot be empty.');
+            return;
+        }
+
+        $agent = Auth::user();
+        $agentName = $agent?->name ?: 'Support Agent';
+
+        ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'sender_type' => 'agent',
+            'sender_name' => $agentName,
+            'message' => $message,
+            'sent_at' => now(),
+            'metadata' => [
+                'agent_user_id' => $agent?->id,
+            ]
+        ]);
+
+        $conversation->update([
+            'status' => 'agent',
+            'agent_status' => 'agent',
+            'last_activity_at' => now(),
+        ]);
+
+        $this->replyMessage[$conversationId] = '';
+        session()->flash('success', 'Agent reply sent.');
     }
 
     public function render()

@@ -787,6 +787,7 @@ Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class,
         ->name('widget.chat.stream');
     Route::options('{orgId}/chat', function() { return response('', 204); });
     Route::options('{orgId}/chat/stream', function() { return response('', 204); });
+    Route::get('{orgId}/messages', [\App\Http\Controllers\WidgetController::class, 'getAgentMessages'])->name('widget.messages');
     Route::get('{orgId}/config', [\App\Http\Controllers\WidgetController::class, 'getConfig'])->name('widget.config');
     Route::get('{orgId}/test', function($orgId) {
         $organization = \App\Models\Organization::findOrFail($orgId);

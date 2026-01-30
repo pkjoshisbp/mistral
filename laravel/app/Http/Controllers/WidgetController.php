@@ -496,6 +496,11 @@ class WidgetController
                 $finalContext .= "Additional information from knowledge base:\n\n" . $context;
             }
 
+            $agentContext = $this->buildAgentContext($organization->id, $sessionId);
+            if ($agentContext) {
+                $finalContext .= "\nAgent notes:\n" . $agentContext . "\n";
+            }
+
             $guardrailCategory = $this->detectGuardrailCategory($message, $guardrailCategories);
             if ($guardrailCategory && !$this->isSensitiveCategoryApproved($guardrailCategory, $approvedSensitive)) {
                 $safeResponse = $this->buildSensitiveGuardrailResponse($guardrailCategory, $organization);
@@ -829,6 +834,11 @@ class WidgetController
                             $context .= "\n";
                         }
                     }
+                }
+
+                $agentContext = $this->buildAgentContext($organization->id, $sessionId);
+                if ($agentContext) {
+                    $context .= "\nAgent notes:\n" . $agentContext . "\n";
                 }
 
                 if ($verifiedOnly && !$liveData && trim($context) === '') {
@@ -1301,6 +1311,43 @@ class WidgetController
         }
 
         return implode("\n", $lines);
+    }
+
+    private function buildAgentContext(int $organizationId, string $sessionId): string
+    {
+        if ($sessionId === '') {
+            return '';
+        }
+
+        $conversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organizationId)
+            ->first();
+
+        if (!$conversation) {
+            return '';
+        }
+
+        $messages = ChatMessage::where('conversation_id', $conversation->id)
+            ->where('sender_type', 'agent')
+            ->orderByDesc('sent_at')
+            ->limit(3)
+            ->get();
+
+        if ($messages->isEmpty()) {
+            return '';
+        }
+
+        $lines = [];
+        foreach ($messages as $msg) {
+            $name = $msg->getSenderDisplayName();
+            $text = trim(strip_tags((string) $msg->message));
+            if ($text === '') {
+                continue;
+            }
+            $lines[] = "- {$name}: {$text}";
+        }
+
+        return implode("\n", array_reverse($lines));
     }
 
     private function extractTimezoneFromBusinessHours(string $hours): array
@@ -1853,6 +1900,58 @@ class WidgetController
             'position' => $organization->settings['widget_position'] ?? 'bottom-right',
             'primaryColor' => $organization->settings['primary_color'] ?? '#007bff'
         ])->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    /**
+     * Fetch agent messages for a widget session
+     */
+    public function getAgentMessages(Request $request, $orgId)
+    {
+        $organization = is_numeric($orgId)
+            ? Organization::find($orgId)
+            : Organization::where('slug', $orgId)->first();
+
+        if (!$organization || !$organization->is_active) {
+            return response()->json(['messages' => []], 404)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $sessionId = (string) $request->query('session_id');
+        $lastId = (int) $request->query('last_id', 0);
+
+        if ($sessionId === '') {
+            return response()->json(['messages' => []], 200)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $conversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organization->id)
+            ->first();
+
+        if (!$conversation) {
+            return response()->json(['messages' => []], 200)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $messages = ChatMessage::where('conversation_id', $conversation->id)
+            ->where('sender_type', 'agent')
+            ->when($lastId > 0, function ($q) use ($lastId) {
+                $q->where('id', '>', $lastId);
+            })
+            ->orderBy('id', 'asc')
+            ->get();
+
+        $payload = $messages->map(function ($msg) {
+            return [
+                'id' => $msg->id,
+                'message' => $msg->message,
+                'sender_name' => $msg->getSenderDisplayName(),
+                'sent_at' => optional($msg->sent_at)->toISOString() ?? now()->toISOString(),
+            ];
+        })->values();
+
+        return response()->json(['messages' => $payload], 200)
+            ->header('X-Robots-Tag', 'noindex, nofollow');
     }
 
     /**
