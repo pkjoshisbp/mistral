@@ -5,6 +5,7 @@ namespace App\Livewire\Admin;
 use Livewire\Component;
 use App\Models\Analytics;
 use App\Models\Organization;
+use App\Models\Lead;
 use Carbon\Carbon;
 
 class AnalyticsDashboard extends Component
@@ -56,6 +57,25 @@ class AnalyticsDashboard extends Component
             'avg_time_on_page' => round($analyticsData->where('event_type', 'page_view')->avg('time_on_page') ?? 0, 2),
             'intent_events' => $analyticsData->where('event_type', 'intent_detected')->count(),
             'unanswered_questions' => $analyticsData->where('event_type', 'unanswered_question')->count()
+        ];
+
+        // Lead conversion funnel
+        $leadData = Lead::where('organization_id', $this->selectedOrganization)
+            ->where('created_at', '>=', $startDate)
+            ->get();
+
+        $totalLeads = $leadData->count();
+        $qualifiedLeads = $leadData->where('status', 'qualified')->count();
+        $newLeads = $leadData->where('status', 'new')->count();
+        $chatMessages = $analyticsData->where('event_type', 'chat_message')->count();
+
+        $this->analytics['lead_funnel'] = [
+            'chat_messages' => $chatMessages,
+            'leads' => $totalLeads,
+            'new_leads' => $newLeads,
+            'qualified_leads' => $qualifiedLeads,
+            'lead_capture_rate' => $chatMessages > 0 ? round(($totalLeads / $chatMessages) * 100, 2) : 0,
+            'qualification_rate' => $totalLeads > 0 ? round(($qualifiedLeads / $totalLeads) * 100, 2) : 0,
         ];
 
         // Intent distribution

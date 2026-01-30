@@ -261,6 +261,54 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Lead Conversion Funnel</h3>
+                            </div>
+                            <div class="card-body">
+                                @if(isset($analytics['lead_funnel']))
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div class="info-box bg-light">
+                                                <span class="info-box-icon bg-info"><i class="fas fa-comments"></i></span>
+                                                <div class="info-box-content">
+                                                    <span class="info-box-text">Chat Messages</span>
+                                                    <span class="info-box-number">{{ number_format($analytics['lead_funnel']['chat_messages']) }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="info-box bg-light">
+                                                <span class="info-box-icon bg-primary"><i class="fas fa-user-plus"></i></span>
+                                                <div class="info-box-content">
+                                                    <span class="info-box-text">Leads Captured</span>
+                                                    <span class="info-box-number">{{ number_format($analytics['lead_funnel']['leads']) }}</span>
+                                                    <span class="info-box-text text-muted">Capture Rate: {{ number_format($analytics['lead_funnel']['lead_capture_rate'], 2) }}%</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="info-box bg-light">
+                                                <span class="info-box-icon bg-success"><i class="fas fa-check-circle"></i></span>
+                                                <div class="info-box-content">
+                                                    <span class="info-box-text">Qualified Leads</span>
+                                                    <span class="info-box-number">{{ number_format($analytics['lead_funnel']['qualified_leads']) }}</span>
+                                                    <span class="info-box-text text-muted">Qualification Rate: {{ number_format($analytics['lead_funnel']['qualification_rate'], 2) }}%</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p class="text-muted mb-0">New Leads: {{ number_format($analytics['lead_funnel']['new_leads']) }}</p>
+                                @else
+                                    <p class="text-muted">No lead funnel data available.</p>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                </div>
             @else
                 <div class="card">
                     <div class="card-body text-center">

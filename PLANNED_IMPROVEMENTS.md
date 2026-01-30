@@ -9,6 +9,7 @@
 - Product/service availability from synced service data.
 - Intent distribution dashboard (analytics).
 - Unanswered question tracker (analytics).
+- Lead conversion funnel metrics (analytics).
 - Action templates by industry (admin + customer) with inactive defaults.
 - Action execution logging with API retries.
 - Live data validation rules (no hallucinated prices).
