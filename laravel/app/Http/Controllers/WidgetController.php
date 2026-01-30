@@ -611,6 +611,14 @@ class WidgetController
                 'full_ai_response' => $responseText
             ]);
 
+            $escalationReason = $this->getEscalationReason($message, $responseText, $intentResult);
+            if ($escalationReason) {
+                $handoffMessage = $this->buildHandoffMessage($organization);
+                if ($handoffMessage !== '') {
+                    $responseText = trim($responseText) . "\n\n" . $handoffMessage;
+                }
+            }
+
             // Save conversation to database
             $conversation = $this->saveConversationToDatabase($organization, $sessionId, $message, $responseText, $allUserInfo, compact('country', 'region', 'location'), $intentResult);
 
@@ -643,7 +651,8 @@ class WidgetController
                     $responseText,
                     $intentResult,
                     $request,
-                    $sessionMetadata
+                    $sessionMetadata,
+                    $escalationReason
                 );
             }
 
@@ -1017,13 +1026,13 @@ class WidgetController
         }
     }
 
-    private function handleEscalationIfNeeded(ChatConversation $conversation, string $userMessage, string $responseText, ?array $intentResult, Request $request, ?array $sessionMetadata = null): void
+    private function handleEscalationIfNeeded(ChatConversation $conversation, string $userMessage, string $responseText, ?array $intentResult, Request $request, ?array $sessionMetadata = null, ?string $precomputedReason = null): void
     {
         if ($conversation->status === 'needs_handoff') {
             return;
         }
 
-        $reason = $this->getEscalationReason($userMessage, $responseText, $intentResult);
+        $reason = $precomputedReason ?: $this->getEscalationReason($userMessage, $responseText, $intentResult);
         if (!$reason) {
             return;
         }
@@ -1106,6 +1115,30 @@ class WidgetController
         }
 
         return null;
+    }
+
+    private function buildHandoffMessage(Organization $organization): string
+    {
+        $email = trim((string) ($organization->contact_email ?? ''));
+        $phone = trim((string) ($organization->contact_phone ?? ''));
+        $website = $organization->website ?: config('app.url');
+
+        $channels = [];
+        if ($email !== '') {
+            $channels[] = "Email: {$email}";
+        }
+        if ($phone !== '') {
+            $channels[] = "Call/WhatsApp: {$phone}";
+        }
+        if ($website !== '') {
+            $channels[] = "Website: {$website}";
+        }
+
+        if (empty($channels)) {
+            return '';
+        }
+
+        return "If you'd like to speak with a human, you can reach us via " . implode(' | ', $channels) . ".";
     }
 
     private function buildConversationSummary(ChatConversation $conversation): string
