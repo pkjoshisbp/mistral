@@ -19,6 +19,8 @@
 - Multi-language + tone presets.
 - Smart follow-up prompts.
 - Proactive suggestions based on intent.
+- WooCommerce/WordPress marketplace listing assets prepared.
+- Shopify app submission checklist prepared.
 - Action templates by industry (admin + customer) with inactive defaults.
 - Action execution logging with API retries.
 - Live data validation rules (no hallucinated prices).
