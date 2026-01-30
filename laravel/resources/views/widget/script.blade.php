@@ -934,6 +934,25 @@
             }
         }
 
+        isUnansweredResponse(text) {
+            if (!text) return false;
+            const t = text.toLowerCase();
+            const patterns = [
+                "i don't know",
+                "i do not know",
+                "not sure",
+                "sorry, i don't",
+                "sorry, i do not",
+                "don't have that information",
+                "do not have that information",
+                "not available",
+                "unable to",
+                "can't find",
+                "cannot find"
+            ];
+            return patterns.some(p => t.includes(p));
+        }
+
         async sendMessage() {
             const input = document.getElementById(this.ids.input);
             if (!input) return;
@@ -1078,6 +1097,12 @@
                 if (fullResponse.trim().length > 0) {
                     this.messages.push({ content: fullResponse, sender: 'bot', timestamp: new Date() });
                     this.saveMessages();
+                    if (this.isUnansweredResponse(fullResponse)) {
+                        this.trackAnalytics('unanswered_question', {
+                            message,
+                            response: fullResponse
+                        });
+                    }
                 }
 
             } catch (error) {

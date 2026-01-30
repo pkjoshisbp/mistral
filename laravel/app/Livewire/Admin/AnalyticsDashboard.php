@@ -54,7 +54,8 @@ class AnalyticsDashboard extends Component
             'total_sessions' => $analyticsData->pluck('session_id')->unique()->count(),
             'widget_interactions' => $analyticsData->whereIn('event_type', ['widget_open', 'chat_message'])->count(),
             'avg_time_on_page' => round($analyticsData->where('event_type', 'page_view')->avg('time_on_page') ?? 0, 2),
-            'intent_events' => $analyticsData->where('event_type', 'intent_detected')->count()
+            'intent_events' => $analyticsData->where('event_type', 'intent_detected')->count(),
+            'unanswered_questions' => $analyticsData->where('event_type', 'unanswered_question')->count()
         ];
 
         // Intent distribution
@@ -73,6 +74,22 @@ class AnalyticsDashboard extends Component
                 ];
             })
             ->sortByDesc('count')
+            ->values();
+
+        // Unanswered question tracker
+        $unansweredEvents = $analyticsData->where('event_type', 'unanswered_question');
+        $this->analytics['unanswered_questions'] = $unansweredEvents->groupBy(function ($item) {
+                return $item->event_data['message'] ?? 'Unknown question';
+            })
+            ->map(function ($group, $question) {
+                return [
+                    'question' => $question,
+                    'count' => $group->count(),
+                    'last_seen' => $group->max('created_at')
+                ];
+            })
+            ->sortByDesc('count')
+            ->take(10)
             ->values();
 
         // Top pages

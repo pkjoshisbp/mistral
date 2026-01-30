@@ -15,7 +15,7 @@ class AnalyticsTrackingController extends Controller
         try {
             $validated = $request->validate([
                 'organization_id' => 'required|exists:organizations,id',
-                'event_type' => 'required|string|in:page_view,widget_open,chat_message,widget_close',
+                'event_type' => 'required|string|in:page_view,widget_open,chat_message,widget_close,unanswered_question',
                 'page_url' => 'required|url',
                 'page_title' => 'nullable|string',
                 'referrer' => 'nullable|string',

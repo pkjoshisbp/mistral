@@ -106,6 +106,17 @@
                             </div>
                         </div>
                     </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-secondary">
+                            <div class="inner">
+                                <h3>{{ number_format($metrics['unanswered_questions']) }}</h3>
+                                <p>Unanswered Questions</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-question-circle"></i>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Top Pages and Traffic -->
@@ -209,6 +220,42 @@
                                     </div>
                                 @else
                                     <p class="text-muted">No country data available.</p>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Unanswered Question Tracker</h3>
+                            </div>
+                            <div class="card-body">
+                                @if(isset($analytics['unanswered_questions']) && count($analytics['unanswered_questions']) > 0)
+                                    <div class="table-responsive">
+                                        <table class="table table-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th>Question</th>
+                                                    <th>Count</th>
+                                                    <th>Last Seen</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach($analytics['unanswered_questions'] as $item)
+                                                    <tr>
+                                                        <td>{{ Str::limit($item['question'], 140) }}</td>
+                                                        <td>{{ $item['count'] }}</td>
+                                                        <td>{{ $item['last_seen'] ? \Carbon\Carbon::parse($item['last_seen'])->format('M j, H:i') : '-' }}</td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                @else
+                                    <p class="text-muted">No unanswered questions logged for this period.</p>
                                 @endif
                             </div>
                         </div>

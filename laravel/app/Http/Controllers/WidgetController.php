@@ -624,6 +624,18 @@ class WidgetController
                 $sessionMetadata
             );
 
+            if ($this->isUnansweredResponse($responseText)) {
+                $this->logUnansweredQuestion(
+                    $organization->id,
+                    $sessionId,
+                    $message,
+                    $responseText,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+            }
+
             // Log the conversation for analytics
             Log::info('Widget chat', [
                 'org_id' => $orgId,
@@ -925,6 +937,69 @@ class WidgetController
             ]);
         } catch (\Throwable $t) {
             Log::warning('Intent analytics log failed', [
+                'org_id' => $organizationId,
+                'error' => $t->getMessage()
+            ]);
+        }
+    }
+
+    private function isUnansweredResponse(string $text): bool
+    {
+        $t = mb_strtolower(trim($text));
+        if ($t === '') {
+            return false;
+        }
+
+        $patterns = [
+            "i don't know",
+            "i do not know",
+            "not sure",
+            "sorry, i don't",
+            "sorry, i do not",
+            "don't have that information",
+            "do not have that information",
+            "not available",
+            "unable to",
+            "can't find",
+            "cannot find"
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (str_contains($t, $pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function logUnansweredQuestion(int $organizationId, string $sessionId, string $question, string $response, Request $request, array $locationInfo = [], ?array $sessionMetadata = null): void
+    {
+        try {
+            $pageUrl = $sessionMetadata['page_url'] ?? $request->input('page_url');
+            $pageTitle = $sessionMetadata['page_title'] ?? $request->input('page_title');
+            $referrer = $sessionMetadata['referrer'] ?? $request->input('referrer') ?? $request->headers->get('referer');
+
+            Analytics::create([
+                'organization_id' => $organizationId,
+                'visitor_id' => $sessionId,
+                'session_id' => $sessionId,
+                'event_type' => 'unanswered_question',
+                'page_url' => $pageUrl ?: config('app.url'),
+                'page_title' => $pageTitle ?: '',
+                'referrer' => $referrer ?: '',
+                'user_agent' => $request->userAgent(),
+                'ip_address' => $request->ip(),
+                'country' => $locationInfo['country'] ?? null,
+                'region' => $locationInfo['region'] ?? null,
+                'city' => $locationInfo['location'] ?? null,
+                'event_data' => [
+                    'message' => $question,
+                    'response' => $response,
+                ],
+            ]);
+        } catch (\Throwable $t) {
+            Log::warning('Unanswered question log failed', [
                 'org_id' => $organizationId,
                 'error' => $t->getMessage()
             ]);
