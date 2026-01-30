@@ -1042,6 +1042,13 @@ class WidgetController
             'last_activity_at' => now()
         ]);
 
+        if (empty($conversation->summary)) {
+            $summary = $this->buildConversationSummary($conversation);
+            if ($summary !== '') {
+                $conversation->update(['summary' => $summary]);
+            }
+        }
+
         try {
             Analytics::create([
                 'organization_id' => $conversation->organization_id,
@@ -1099,6 +1106,44 @@ class WidgetController
         }
 
         return null;
+    }
+
+    private function buildConversationSummary(ChatConversation $conversation): string
+    {
+        try {
+            $messages = $conversation->messages()
+                ->orderBy('sent_at', 'desc')
+                ->limit(6)
+                ->get()
+                ->reverse();
+
+            if ($messages->isEmpty()) {
+                return '';
+            }
+
+            $lines = [];
+            foreach ($messages as $msg) {
+                $sender = $msg->isFromUser() ? 'User' : ($msg->isFromAgent() ? 'Agent' : 'AI');
+                $text = trim(strip_tags((string) $msg->message));
+                if ($text === '') {
+                    continue;
+                }
+                $lines[] = "{$sender}: {$text}";
+            }
+
+            $contact = $conversation->getContactInfo();
+            $visitor = $conversation->getDisplayName();
+
+            $header = "Conversation summary for {$visitor} ({$contact})";
+            return $header . "\n" . implode("\n", $lines);
+        } catch (\Throwable $t) {
+            Log::warning('Conversation summary generation failed', [
+                'conversation_id' => $conversation->id,
+                'error' => $t->getMessage()
+            ]);
+        }
+
+        return '';
     }
 
     private function buildBusinessContext(Organization $organization): string

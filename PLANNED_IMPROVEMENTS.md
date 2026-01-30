@@ -11,6 +11,7 @@
 - Unanswered question tracker (analytics).
 - Lead conversion funnel metrics (analytics).
 - Human escalation triggers (low confidence/complaints).
+- Agent summary handoff on escalation.
 - Action templates by industry (admin + customer) with inactive defaults.
 - Action execution logging with API retries.
 - Live data validation rules (no hallucinated prices).
