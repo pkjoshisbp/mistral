@@ -53,8 +53,27 @@ class AnalyticsDashboard extends Component
             'unique_visitors' => $analyticsData->where('event_type', 'page_view')->pluck('visitor_id')->unique()->count(),
             'total_sessions' => $analyticsData->pluck('session_id')->unique()->count(),
             'widget_interactions' => $analyticsData->whereIn('event_type', ['widget_open', 'chat_message'])->count(),
-            'avg_time_on_page' => round($analyticsData->where('event_type', 'page_view')->avg('time_on_page') ?? 0, 2)
+            'avg_time_on_page' => round($analyticsData->where('event_type', 'page_view')->avg('time_on_page') ?? 0, 2),
+            'intent_events' => $analyticsData->where('event_type', 'intent_detected')->count()
         ];
+
+        // Intent distribution
+        $intentEvents = $analyticsData->where('event_type', 'intent_detected');
+        $this->analytics['intent_distribution'] = $intentEvents->groupBy(function ($item) {
+                return $item->event_data['intent'] ?? 'unknown';
+            })
+            ->map(function ($group, $intent) {
+                $avgConfidence = $group->average(function ($item) {
+                    return (float) ($item->event_data['confidence'] ?? 0);
+                });
+                return [
+                    'intent' => $intent,
+                    'count' => $group->count(),
+                    'avg_confidence' => round($avgConfidence, 2)
+                ];
+            })
+            ->sortByDesc('count')
+            ->values();
 
         // Top pages
         $this->analytics['top_pages'] = $analyticsData->where('event_type', 'page_view')

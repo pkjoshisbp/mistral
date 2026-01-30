@@ -95,11 +95,55 @@
                             </div>
                         </div>
                     </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-primary">
+                            <div class="inner">
+                                <h3>{{ number_format($metrics['intent_events']) }}</h3>
+                                <p>Intent Events</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-bullseye"></i>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Top Pages and Traffic -->
                 <div class="row">
-                    <div class="col-md-6">
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Intent Distribution</h3>
+                            </div>
+                            <div class="card-body">
+                                @if(isset($analytics['intent_distribution']) && count($analytics['intent_distribution']) > 0)
+                                    <div class="table-responsive">
+                                        <table class="table table-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th>Intent</th>
+                                                    <th>Count</th>
+                                                    <th>Avg Confidence</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach($analytics['intent_distribution'] as $intent)
+                                                    <tr>
+                                                        <td>{{ ucfirst(str_replace('_',' ', $intent['intent'])) }}</td>
+                                                        <td>{{ $intent['count'] }}</td>
+                                                        <td>{{ number_format($intent['avg_confidence'], 2) }}</td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                @else
+                                    <p class="text-muted">No intent data available.</p>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
                         <div class="card">
                             <div class="card-header">
                                 <h3 class="card-title">Top Pages</h3>
@@ -136,7 +180,7 @@
                         </div>
                     </div>
 
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <div class="card">
                             <div class="card-header">
                                 <h3 class="card-title">Traffic by Country</h3>

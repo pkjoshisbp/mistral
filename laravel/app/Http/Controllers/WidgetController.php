@@ -5,11 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\Organization;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
+use App\Models\Analytics;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Http;
 use App\Mail\ChatInteractionNotification;
 use App\Mail\LeadCapturedNotification;
 use App\Models\Lead;
+use App\Services\IntentDetectionService;
 use App\Services\AiAgentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -161,6 +163,16 @@ class WidgetController
             $region = $request->input('region') ?? $allUserInfo['region'] ?? null;
             $location = $request->input('location') ?? $allUserInfo['location'] ?? null;
             $sessionMetadata = $this->buildLeadSessionMetadata($request, $allUserInfo);
+            $intentResult = null;
+
+            try {
+                $intentResult = app(IntentDetectionService::class)->detectIntent($message, $organization->id);
+            } catch (\Throwable $t) {
+                Log::warning('Intent detection failed', [
+                    'org_id' => $organization->id,
+                    'error' => $t->getMessage()
+                ]);
+            }
 
             if (!$message) {
                 return response()->json(['error' => 'Message is required'], 400)
@@ -181,8 +193,17 @@ class WidgetController
                     $sessionId,
                     $allUserInfo,
                     compact('country', 'region', 'location'),
-                    null,
+                    $intentResult,
                     $message,
+                    $sessionMetadata
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
                     $sessionMetadata
                 );
                 Log::info('Lead upserted via widget', ['org_id' => $orgId, 'session_id' => $sessionId]);
@@ -591,7 +612,17 @@ class WidgetController
             ]);
 
             // Save conversation to database
-            $this->saveConversationToDatabase($organization, $sessionId, $message, $responseText, $allUserInfo, compact('country', 'region', 'location'));
+            $this->saveConversationToDatabase($organization, $sessionId, $message, $responseText, $allUserInfo, compact('country', 'region', 'location'), $intentResult);
+
+            // Log intent distribution analytics
+            $this->logIntentAnalytics(
+                $organization->id,
+                $sessionId,
+                $intentResult,
+                $request,
+                compact('country', 'region', 'location'),
+                $sessionMetadata
+            );
 
             // Log the conversation for analytics
             Log::info('Widget chat', [
@@ -860,6 +891,44 @@ class WidgetController
         return array_filter($metadata, function ($value) {
             return !is_null($value) && $value !== '';
         });
+    }
+
+    private function logIntentAnalytics(int $organizationId, string $sessionId, ?array $intentResult, Request $request, array $locationInfo = [], ?array $sessionMetadata = null): void
+    {
+        if (empty($intentResult) || empty($intentResult['intent'])) {
+            return;
+        }
+
+        try {
+            $pageUrl = $sessionMetadata['page_url'] ?? $request->input('page_url');
+            $pageTitle = $sessionMetadata['page_title'] ?? $request->input('page_title');
+            $referrer = $sessionMetadata['referrer'] ?? $request->input('referrer') ?? $request->headers->get('referer');
+
+            Analytics::create([
+                'organization_id' => $organizationId,
+                'visitor_id' => $sessionId,
+                'session_id' => $sessionId,
+                'event_type' => 'intent_detected',
+                'page_url' => $pageUrl ?: config('app.url'),
+                'page_title' => $pageTitle ?: '',
+                'referrer' => $referrer ?: '',
+                'user_agent' => $request->userAgent(),
+                'ip_address' => $request->ip(),
+                'country' => $locationInfo['country'] ?? null,
+                'region' => $locationInfo['region'] ?? null,
+                'city' => $locationInfo['location'] ?? null,
+                'event_data' => [
+                    'intent' => $intentResult['intent'] ?? null,
+                    'confidence' => $intentResult['confidence'] ?? null,
+                    'method' => $intentResult['method'] ?? null,
+                ],
+            ]);
+        } catch (\Throwable $t) {
+            Log::warning('Intent analytics log failed', [
+                'org_id' => $organizationId,
+                'error' => $t->getMessage()
+            ]);
+        }
     }
 
     private function buildBusinessContext(Organization $organization): string
@@ -1336,7 +1405,7 @@ class WidgetController
     /**
      * Save conversation to database
      */
-    private function saveConversationToDatabase($organization, $sessionId, $userMessage, $aiResponse, $userInfo = [], $locationInfo = [])
+    private function saveConversationToDatabase($organization, $sessionId, $userMessage, $aiResponse, $userInfo = [], $locationInfo = [], $intentResult = null)
     {
         try {
             // Find or create conversation
@@ -1369,7 +1438,10 @@ class WidgetController
                 'metadata' => [
                     'session_id' => $sessionId,
                     'user_info' => $userInfo,
-                    'location_info' => $locationInfo
+                    'location_info' => $locationInfo,
+                    'intent' => $intentResult['intent'] ?? null,
+                    'intent_confidence' => $intentResult['confidence'] ?? null,
+                    'intent_method' => $intentResult['method'] ?? null
                 ]
             ]);
 
@@ -1383,7 +1455,10 @@ class WidgetController
                 'sent_at' => now(),
                 'metadata' => [
                     'session_id' => $sessionId,
-                    'organization_name' => $organization->name
+                    'organization_name' => $organization->name,
+                    'intent' => $intentResult['intent'] ?? null,
+                    'intent_confidence' => $intentResult['confidence'] ?? null,
+                    'intent_method' => $intentResult['method'] ?? null
                 ]
             ]);
 
