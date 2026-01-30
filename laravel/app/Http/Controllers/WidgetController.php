@@ -392,6 +392,8 @@ class WidgetController
                         if (isset($payload['price'])) $context .= "Price: " . $payload['price'] . " " . ($payload['currency'] ?? '') . "\n";
                         if (isset($payload['duration'])) $context .= "Duration: " . $payload['duration'] . "\n";
                         if (isset($payload['requirements'])) $context .= "Requirements: " . $payload['requirements'] . "\n";
+                        $availability = $payload['availability'] ?? ($payload['metadata']['availability'] ?? null);
+                        if (!empty($availability)) $context .= "Availability: " . $availability . "\n";
                     } else {
                         // For FAQs, keep it simple
                         $contextFields = ['title', 'content', 'category'];
@@ -434,6 +436,7 @@ class WidgetController
                                 'currency' => $p['currency'] ?? null,
                                 'duration' => $p['duration'] ?? null,
                                 'requirements' => $p['requirements'] ?? null,
+                                'availability' => $p['availability'] ?? ($p['metadata']['availability'] ?? null),
                                 'category' => $p['category'] ?? null,
                                 'links' => $p['links'] ?? null,
                             ];
