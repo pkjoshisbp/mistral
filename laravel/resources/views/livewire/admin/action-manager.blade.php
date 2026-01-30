@@ -3,7 +3,7 @@
     <section class="content-header">
         <div class="container-fluid">
             <div class="row mb-2">
-                <div class="col-sm-6">
+                <div class="col-md-4">
                     <h1>Action Manager</h1>
                 </div>
                 <div class="col-sm-6">
@@ -67,7 +67,7 @@
 
                     <!-- Action Templates -->
                     <div class="row mb-4">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <select wire:model="templateOrganizationId" class="form-control">
                                 <option value="">Select Organization for Templates</option>
                                 @foreach($organizations as $org)
@@ -75,7 +75,7 @@
                                 @endforeach
                             </select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <select wire:model="templateType" class="form-control">
                                 <option value="">Template Type (uses org type if blank)</option>
                                 <option value="clinic">Clinic</option>
@@ -95,7 +95,17 @@
                                 <option value="other">Other</option>
                             </select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
+                            <select wire:model="templatePlatform" class="form-control">
+                                <option value="">Platform (all / generic)</option>
+                                <option value="woocommerce">WooCommerce</option>
+                                <option value="magento">Magento</option>
+                                <option value="shopify">Shopify</option>
+                                <option value="laravel">Laravel</option>
+                            </select>
+                            <small class="text-muted d-block mt-1">Platform templates include API endpoints; add headers/keys in each action.</small>
+                        </div>
+                        <div class="col-md-3">
                             <button wire:click="applyActionTemplate" class="btn btn-outline-primary w-100">
                                 <i class="fas fa-magic"></i> Apply Action Templates
                             </button>

@@ -18,6 +18,7 @@ class ActionManager extends Component
     public $editingAction = null;
     public $organizationId;
     public $templateType = '';
+    public $templatePlatform = '';
     
     // Form fields (simplified for customers)
     public $name = '';
@@ -73,8 +74,11 @@ class ActionManager extends Component
             return;
         }
 
+        $platformKey = $this->templatePlatform ? strtolower(trim($this->templatePlatform)) : '';
+        $templateKey = $platformKey !== '' ? $type . '_' . $platformKey : $type;
+
         $templates = $this->getActionTemplates();
-        $actions = $templates[$type] ?? null;
+        $actions = $templates[$templateKey] ?? ($templates[$type] ?? null);
         if (!$actions) {
             session()->flash('error', 'No templates found for this type.');
             return;
@@ -219,6 +223,98 @@ class ActionManager extends Component
                     'action_type' => 'inventory',
                     'description' => 'Check stock availability by SKU.',
                     'keywords' => ['stock', 'inventory', 'availability', 'in stock'],
+                    'required_params' => ['sku'],
+                ]),
+            ],
+            'ecommerce_woocommerce' => [
+                array_merge($baseApi('https://example.com/wp-json/wc/v3/orders/{order_id}'), [
+                    'name' => 'WooCommerce Order Status',
+                    'action_type' => 'status',
+                    'description' => 'Fetch WooCommerce order details by order ID.',
+                    'keywords' => ['order status', 'track order', 'wc order'],
+                    'required_params' => ['order_id'],
+                ]),
+                array_merge($baseApi('https://example.com/wp-json/wc/v3/products?search={query}'), [
+                    'name' => 'WooCommerce Product Search',
+                    'action_type' => 'search',
+                    'description' => 'Search WooCommerce products by query.',
+                    'keywords' => ['search product', 'find product', 'wc product'],
+                    'required_params' => ['query'],
+                ]),
+                array_merge($baseApi('https://example.com/wp-json/wc/v3/products/{product_id}'), [
+                    'name' => 'WooCommerce Product Detail',
+                    'action_type' => 'inventory',
+                    'description' => 'Fetch WooCommerce product details by ID.',
+                    'keywords' => ['product details', 'stock', 'availability'],
+                    'required_params' => ['product_id'],
+                ]),
+            ],
+            'ecommerce_magento' => [
+                array_merge($baseApi('https://example.com/rest/V1/orders/{order_id}'), [
+                    'name' => 'Magento Order Status',
+                    'action_type' => 'status',
+                    'description' => 'Fetch Magento order details by order ID.',
+                    'keywords' => ['order status', 'track order', 'magento order'],
+                    'required_params' => ['order_id'],
+                ]),
+                array_merge($baseApi('https://example.com/rest/V1/products?searchCriteria[searchCriteriaFilterGroups][0][filters][0][field]=name&searchCriteria[searchCriteriaFilterGroups][0][filters][0][value]={query}&searchCriteria[searchCriteriaFilterGroups][0][filters][0][conditionType]=like'), [
+                    'name' => 'Magento Product Search',
+                    'action_type' => 'search',
+                    'description' => 'Search Magento products by name.',
+                    'keywords' => ['search product', 'find product', 'magento product'],
+                    'required_params' => ['query'],
+                ]),
+                array_merge($baseApi('https://example.com/rest/V1/stockItems/{sku}'), [
+                    'name' => 'Magento Inventory Check',
+                    'action_type' => 'inventory',
+                    'description' => 'Check Magento stock by SKU.',
+                    'keywords' => ['stock', 'inventory', 'availability'],
+                    'required_params' => ['sku'],
+                ]),
+            ],
+            'ecommerce_shopify' => [
+                array_merge($baseApi('https://example.myshopify.com/admin/api/2025-01/orders/{order_id}.json'), [
+                    'name' => 'Shopify Order Status',
+                    'action_type' => 'status',
+                    'description' => 'Fetch Shopify order details by ID.',
+                    'keywords' => ['order status', 'track order', 'shopify order'],
+                    'required_params' => ['order_id'],
+                ]),
+                array_merge($baseApi('https://example.myshopify.com/admin/api/2025-01/products.json?title={query}'), [
+                    'name' => 'Shopify Product Search',
+                    'action_type' => 'search',
+                    'description' => 'Search Shopify products by title.',
+                    'keywords' => ['search product', 'find product', 'shopify product'],
+                    'required_params' => ['query'],
+                ]),
+                array_merge($baseApi('https://example.myshopify.com/admin/api/2025-01/inventory_levels.json?inventory_item_ids={inventory_item_id}'), [
+                    'name' => 'Shopify Inventory Levels',
+                    'action_type' => 'inventory',
+                    'description' => 'Check Shopify inventory levels by inventory item ID.',
+                    'keywords' => ['inventory', 'stock', 'availability'],
+                    'required_params' => ['inventory_item_id'],
+                ]),
+            ],
+            'ecommerce_laravel' => [
+                array_merge($baseApi('https://example.com/api/orders/{order_id}'), [
+                    'name' => 'Laravel Order Status',
+                    'action_type' => 'status',
+                    'description' => 'Fetch order status from Laravel API.',
+                    'keywords' => ['order status', 'track order', 'order details'],
+                    'required_params' => ['order_id'],
+                ]),
+                array_merge($baseApi('https://example.com/api/products/search?q={query}'), [
+                    'name' => 'Laravel Product Search',
+                    'action_type' => 'search',
+                    'description' => 'Search products from Laravel API.',
+                    'keywords' => ['search product', 'find product', 'product search'],
+                    'required_params' => ['query'],
+                ]),
+                array_merge($baseApi('https://example.com/api/products/{sku}/availability'), [
+                    'name' => 'Laravel Inventory Check',
+                    'action_type' => 'inventory',
+                    'description' => 'Check inventory from Laravel API by SKU.',
+                    'keywords' => ['inventory', 'stock', 'availability'],
                     'required_params' => ['sku'],
                 ]),
             ],

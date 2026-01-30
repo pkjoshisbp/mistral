@@ -2,7 +2,7 @@
     <!-- Content Header -->
     <section class="content-header">
         <div class="container-fluid">
-            <div class="row mb-2">
+                        <div class="col-md-4">
                 <div class="col-sm-6">
                     <h1>Live Data Actions</h1>
                 </div>
@@ -52,7 +52,7 @@
                 </div>
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <select wire:model="templateType" class="form-control">
                                 <option value="">Select Template Type</option>
                                 <option value="clinic">Clinic</option>
@@ -73,7 +73,17 @@
                             </select>
                             <small class="text-muted">Templates are created as inactive. Configure and activate when ready.</small>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
+                            <select wire:model="templatePlatform" class="form-control">
+                                <option value="">Platform (all / generic)</option>
+                                <option value="woocommerce">WooCommerce</option>
+                                <option value="magento">Magento</option>
+                                <option value="shopify">Shopify</option>
+                                <option value="laravel">Laravel</option>
+                            </select>
+                            <small class="text-muted">Platform templates include API endpoints; add headers/keys in each action.</small>
+                        </div>
+                        <div class="col-md-4">
                             <button wire:click="applyActionTemplate" class="btn btn-outline-primary w-100">
                                 <i class="fas fa-magic"></i> Apply Action Templates
                             </button>
