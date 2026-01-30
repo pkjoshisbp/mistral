@@ -231,6 +231,32 @@
                                                 </div>
                                             </div>
 
+                                            <!-- Human Handoff -->
+                                            <div class="card mb-3">
+                                                <div class="card-header">
+                                                    <strong>
+                                                        <i class="fas fa-user-headset me-1"></i>
+                                                        Human Handoff
+                                                    </strong>
+                                                </div>
+                                                <div class="card-body">
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold" for="agentAvailability">Agent Availability</label>
+                                                        <select id="agentAvailability" wire:model.defer="agentAvailability" class="form-select">
+                                                            <option value="auto">Auto (use business hours)</option>
+                                                            <option value="online">Always Online</option>
+                                                            <option value="offline">Always Offline</option>
+                                                        </select>
+                                                        <small class="text-muted">Auto uses business hours if configured.</small>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Offline Message</label>
+                                                        <textarea wire:model.defer="handoffOfflineMessage" class="form-control" rows="2" placeholder="Our agents are currently offline. Please leave your contact details or reach us via the options below."></textarea>
+                                                        <small class="text-muted">Contact channels are appended automatically.</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <!-- Lead Notifications -->
                                             <div class="card mb-3">
                                                 <div class="card-header">

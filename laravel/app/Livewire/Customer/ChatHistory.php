@@ -17,6 +17,7 @@ class ChatHistory extends Component
     public $dateTo = '';
     public $showDetails = [];
     public $focusConversation = null;
+    public $replyMessage = [];
 
     protected $queryString = ['search', 'dateFrom', 'dateTo', 'focusConversation'];
 
@@ -76,6 +77,54 @@ class ChatHistory extends Component
             $conversation->delete();
             session()->flash('success', 'Chat conversation deleted successfully.');
         }
+    }
+
+    public function sendAgentReply($conversationId)
+    {
+        $org = Auth::user()->primaryOrganization();
+        if (!$org) {
+            session()->flash('error', 'No organization found for your account.');
+            return;
+        }
+
+        $conversation = ChatConversation::with('organization')
+            ->where('id', $conversationId)
+            ->where('organization_id', $org->id)
+            ->first();
+
+        if (!$conversation) {
+            session()->flash('error', 'Chat conversation not found.');
+            return;
+        }
+
+        $message = trim((string) ($this->replyMessage[$conversationId] ?? ''));
+        if ($message === '') {
+            session()->flash('error', 'Agent reply cannot be empty.');
+            return;
+        }
+
+        $agent = Auth::user();
+        $agentName = $agent?->name ?: 'Support Agent';
+
+        ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'sender_type' => 'agent',
+            'sender_name' => $agentName,
+            'message' => $message,
+            'sent_at' => now(),
+            'metadata' => [
+                'agent_user_id' => $agent?->id,
+            ]
+        ]);
+
+        $conversation->update([
+            'status' => 'agent',
+            'agent_status' => 'agent',
+            'last_activity_at' => now(),
+        ]);
+
+        $this->replyMessage[$conversationId] = '';
+        session()->flash('success', 'Agent reply sent.');
     }
 
     public function exportSession($sessionId)

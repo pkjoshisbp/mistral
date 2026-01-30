@@ -163,6 +163,16 @@
                                                         </div>
                                                     @endforeach
                                                 </div>
+                                                <div class="mt-3">
+                                                    <label class="form-label">Agent Reply</label>
+                                                    <textarea class="form-control" rows="3" wire:model.defer="replyMessage.{{ $conversation->id }}" placeholder="Type a response that will be shown to the customer..."></textarea>
+                                                    <div class="d-flex justify-content-end mt-2">
+                                                        <button type="button" class="btn btn-primary btn-sm" wire:click="sendAgentReply({{ $conversation->id }})">
+                                                            <i class="fas fa-paper-plane"></i> Send Reply
+                                                        </button>
+                                                    </div>
+                                                    <small class="text-muted d-block mt-1">Replies are visible to customers and used as AI context.</small>
+                                                </div>
                                             </td>
                                         </tr>
                                     @endif

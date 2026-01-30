@@ -53,6 +53,8 @@ class IntegrationSettingsManager extends Component
     public $lead_notify_emails = '';
     public $lead_notify_webhook_url = '';
     public $lead_notify_qualified_only = true;
+    public $agent_availability = 'auto';
+    public $handoff_offline_message = '';
 
     protected $rules = [
         'name' => 'required|min:3',
@@ -81,6 +83,8 @@ class IntegrationSettingsManager extends Component
         'lead_notify_emails' => 'nullable|string|max:1000',
         'lead_notify_webhook_url' => 'nullable|url|max:500',
         'lead_notify_qualified_only' => 'boolean',
+        'agent_availability' => 'required|in:auto,online,offline',
+        'handoff_offline_message' => 'nullable|string|max:500',
     ];
 
     public function mount()
@@ -129,6 +133,8 @@ class IntegrationSettingsManager extends Component
         $this->lead_notify_emails = $this->keywordsToString($settings['lead_notify_emails'] ?? []);
         $this->lead_notify_webhook_url = $settings['lead_notify_webhook_url'] ?? '';
         $this->lead_notify_qualified_only = (bool) ($settings['lead_notify_qualified_only'] ?? true);
+        $this->agent_availability = $settings['agent_availability'] ?? 'auto';
+        $this->handoff_offline_message = $settings['handoff_offline_message'] ?? '';
         $this->business_hours = $settings['business_hours'] ?? '';
         $this->holiday_dates = $this->keywordsToString($settings['holiday_dates'] ?? []);
         $this->seasonal_promotions = $settings['seasonal_promotions'] ?? '';
@@ -176,6 +182,8 @@ class IntegrationSettingsManager extends Component
             $settings['lead_notify_emails'] = $this->stringToKeywords($this->lead_notify_emails ?? '');
             $settings['lead_notify_webhook_url'] = trim((string) $this->lead_notify_webhook_url) ?: null;
             $settings['lead_notify_qualified_only'] = (bool) $this->lead_notify_qualified_only;
+            $settings['agent_availability'] = $this->agent_availability;
+            $settings['handoff_offline_message'] = trim((string) $this->handoff_offline_message) ?: null;
             $settings['business_hours'] = trim((string) $this->business_hours) ?: null;
             $settings['holiday_dates'] = $this->stringToKeywords($this->holiday_dates ?? '');
             $settings['seasonal_promotions'] = trim((string) $this->seasonal_promotions) ?: null;

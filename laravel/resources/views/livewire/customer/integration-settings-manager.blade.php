@@ -377,6 +377,32 @@
                     <div class="card card-info card-outline">
                         <div class="card-header">
                             <h3 class="card-title">
+                                <i class="fas fa-user-headset"></i> Human Handoff
+                            </h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label for="agent_availability">Agent Availability</label>
+                                <select id="agent_availability" class="form-control" wire:model="agent_availability">
+                                    <option value="auto">Auto (use business hours)</option>
+                                    <option value="online">Always Online</option>
+                                    <option value="offline">Always Offline</option>
+                                </select>
+                                <small class="form-text text-muted">When set to Auto, handoff is shown only during business hours if defined.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="handoff_offline_message">Offline Message</label>
+                                <textarea wire:model.defer="handoff_offline_message" class="form-control" id="handoff_offline_message" rows="2" placeholder="Our agents are currently offline. Please leave your contact details or reach us via the options below."></textarea>
+                                <small class="form-text text-muted">Shown when agents are offline. Contact channels are appended automatically.</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-6">
+                    <div class="card card-info card-outline">
+                        <div class="card-header">
+                            <h3 class="card-title">
                                 <i class="fas fa-bullseye"></i> Lead Notifications
                             </h3>
                         </div>

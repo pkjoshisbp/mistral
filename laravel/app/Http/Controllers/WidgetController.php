@@ -1202,6 +1202,10 @@ class WidgetController
 
     private function buildHandoffMessage(Organization $organization): string
     {
+        $settings = $organization->settings ?? [];
+        $availability = $settings['agent_availability'] ?? 'auto';
+        $offlineMessage = trim((string) ($settings['handoff_offline_message'] ?? ''));
+
         $email = trim((string) ($organization->contact_email ?? ''));
         $phone = trim((string) ($organization->contact_phone ?? ''));
         $website = $organization->website ?: config('app.url');
@@ -1217,11 +1221,30 @@ class WidgetController
             $channels[] = "Website: {$website}";
         }
 
-        if (empty($channels)) {
-            return '';
+        $isWithinHours = $this->isWithinBusinessHours($organization);
+        $agentsOnline = true;
+        if ($availability === 'offline') {
+            $agentsOnline = false;
+        } elseif ($availability === 'auto' && $isWithinHours === false) {
+            $agentsOnline = false;
         }
 
-        return "If you'd like to speak with a human, you can reach us via " . implode(' | ', $channels) . ".";
+        if ($agentsOnline) {
+            if (empty($channels)) {
+                return '';
+            }
+            return "If you'd like to speak with a human, you can reach us via " . implode(' | ', $channels) . ".";
+        }
+
+        $base = $offlineMessage !== ''
+            ? rtrim($offlineMessage, '.') . '.'
+            : 'Our agents are currently offline. Please leave your contact details or reach us via the options below.';
+
+        if (empty($channels)) {
+            return $base;
+        }
+
+        return $base . ' ' . implode(' | ', $channels) . '.';
     }
 
     private function buildConversationSummary(ChatConversation $conversation): string
@@ -1311,6 +1334,190 @@ class WidgetController
         }
 
         return implode("\n", $lines);
+    }
+
+    private function isWithinBusinessHours(Organization $organization): ?bool
+    {
+        $settings = $organization->settings ?? [];
+        $rawHours = trim((string) ($settings['business_hours'] ?? ''));
+        if ($rawHours === '') {
+            return null;
+        }
+
+        [$hoursDisplay, $timezoneOverride] = $this->extractTimezoneFromBusinessHours($rawHours);
+        $hoursDisplay = trim($hoursDisplay);
+        if ($hoursDisplay === '') {
+            return null;
+        }
+
+        $windows = $this->parseBusinessHoursWindows($hoursDisplay);
+        if (empty($windows)) {
+            return null;
+        }
+
+        $timezone = $timezoneOverride ?: ($organization->timezone ?: config('app.timezone', 'UTC'));
+        $now = now()->timezone($timezone);
+        $day = $now->dayOfWeek;
+        $minutes = ($now->hour * 60) + $now->minute;
+
+        foreach ($windows as $window) {
+            if (!in_array($day, $window['days'], true)) {
+                continue;
+            }
+
+            $start = $window['start'];
+            $end = $window['end'];
+
+            if ($start <= $end) {
+                if ($minutes >= $start && $minutes <= $end) {
+                    return true;
+                }
+            } else {
+                if ($minutes >= $start || $minutes <= $end) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function parseBusinessHoursWindows(string $hours): array
+    {
+        $lines = preg_split('/\r?\n|;/', $hours);
+        $windows = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+
+            if (!preg_match('/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)[\s\-to]+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i', $line, $match)) {
+                continue;
+            }
+
+            $start = $this->parseTimeToMinutes($match[1]);
+            $end = $this->parseTimeToMinutes($match[2]);
+            if ($start === null || $end === null) {
+                continue;
+            }
+
+            $days = $this->extractDaysFromLine($line);
+            if (empty($days)) {
+                $days = [0, 1, 2, 3, 4, 5, 6];
+            }
+
+            $windows[] = [
+                'days' => $days,
+                'start' => $start,
+                'end' => $end,
+            ];
+        }
+
+        return $windows;
+    }
+
+    private function extractDaysFromLine(string $line): array
+    {
+        $line = strtolower($line);
+        $days = [];
+
+        $rangePattern = '/\b(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday|r|day)?|fri(?:day)?|sat(?:urday)?)\b\s*(?:-|to)\s*\b(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday|r|day)?|fri(?:day)?|sat(?:urday)?)\b/i';
+        if (preg_match_all($rangePattern, $line, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $start = $this->mapDayToken($match[1]);
+                $end = $this->mapDayToken($match[2]);
+                if ($start === null || $end === null) {
+                    continue;
+                }
+
+                if ($start <= $end) {
+                    for ($i = $start; $i <= $end; $i++) {
+                        $days[$i] = true;
+                    }
+                } else {
+                    for ($i = $start; $i <= 6; $i++) {
+                        $days[$i] = true;
+                    }
+                    for ($i = 0; $i <= $end; $i++) {
+                        $days[$i] = true;
+                    }
+                }
+            }
+        }
+
+        $tokenPattern = '/\b(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday|r|day)?|fri(?:day)?|sat(?:urday)?)\b/i';
+        if (preg_match_all($tokenPattern, $line, $matches)) {
+            foreach ($matches[1] as $token) {
+                $day = $this->mapDayToken($token);
+                if ($day !== null) {
+                    $days[$day] = true;
+                }
+            }
+        }
+
+        return array_keys($days);
+    }
+
+    private function mapDayToken(string $token): ?int
+    {
+        $token = strtolower($token);
+        if (str_starts_with($token, 'sun')) {
+            return 0;
+        }
+        if (str_starts_with($token, 'mon')) {
+            return 1;
+        }
+        if (str_starts_with($token, 'tue')) {
+            return 2;
+        }
+        if (str_starts_with($token, 'wed')) {
+            return 3;
+        }
+        if (str_starts_with($token, 'thu')) {
+            return 4;
+        }
+        if (str_starts_with($token, 'fri')) {
+            return 5;
+        }
+        if (str_starts_with($token, 'sat')) {
+            return 6;
+        }
+
+        return null;
+    }
+
+    private function parseTimeToMinutes(string $time): ?int
+    {
+        $clean = strtolower(trim($time));
+        $ampm = null;
+
+        if (preg_match('/\b(am|pm)\b/', $clean, $match)) {
+            $ampm = $match[1];
+            $clean = trim(preg_replace('/\b(am|pm)\b/', '', $clean));
+        }
+
+        if (!preg_match('/^(\d{1,2})(?::(\d{2}))?$/', $clean, $match)) {
+            return null;
+        }
+
+        $hour = (int) $match[1];
+        $minute = isset($match[2]) ? (int) $match[2] : 0;
+
+        if ($hour > 23 || $minute > 59) {
+            return null;
+        }
+
+        if ($ampm) {
+            if ($hour === 12) {
+                $hour = $ampm === 'am' ? 0 : 12;
+            } elseif ($ampm === 'pm') {
+                $hour += 12;
+            }
+        }
+
+        return ($hour * 60) + $minute;
     }
 
     private function buildAgentContext(int $organizationId, string $sessionId): string
