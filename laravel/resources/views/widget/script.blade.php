@@ -962,6 +962,19 @@
                     ...this.locationInfo
                 };
 
+                const urlParams = new URLSearchParams(window.location.search || '');
+                requestBody.page_url = window.location.href;
+                requestBody.page_title = document.title || null;
+                requestBody.referrer = document.referrer || null;
+                requestBody.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+                requestBody.language = navigator.language || null;
+                ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'].forEach((key) => {
+                    const value = urlParams.get(key);
+                    if (value) {
+                        requestBody[key] = value;
+                    }
+                });
+
                 // Include lead information if captured
                 if (this.leadCaptured && this.userInfo.name) {
                     requestBody.visitor_info = this.userInfo;

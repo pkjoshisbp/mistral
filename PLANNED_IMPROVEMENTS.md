@@ -3,6 +3,7 @@
 ## Implemented (as of 2026-01-29)
 - Lead qualification fields (intent, priority, status) stored with widget leads.
 - Lead notifications (email + webhook) with qualified-only option.
+- Lead enrichment (location + session metadata) for widget leads.
 - Action templates by industry (admin + customer) with inactive defaults.
 - Action execution logging with API retries.
 - Live data validation rules (no hallucinated prices).

@@ -18,6 +18,7 @@ class Lead extends Model
         'user_id', // if captured after login
         'session_id',
         'location_data',
+        'session_metadata',
         'intent',
         'intent_confidence',
         'priority',

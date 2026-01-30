@@ -160,6 +160,7 @@ class WidgetController
             $country = $request->input('country') ?? $allUserInfo['country'] ?? null;
             $region = $request->input('region') ?? $allUserInfo['region'] ?? null;
             $location = $request->input('location') ?? $allUserInfo['location'] ?? null;
+            $sessionMetadata = $this->buildLeadSessionMetadata($request, $allUserInfo);
 
             if (!$message) {
                 return response()->json(['error' => 'Message is required'], 400)
@@ -181,7 +182,8 @@ class WidgetController
                     $allUserInfo,
                     compact('country', 'region', 'location'),
                     null,
-                    $message
+                    $message,
+                    $sessionMetadata
                 );
                 Log::info('Lead upserted via widget', ['org_id' => $orgId, 'session_id' => $sessionId]);
             }
@@ -628,12 +630,13 @@ class WidgetController
         $country = $request->input('country') ?? ($allUserInfo['country'] ?? null);
         $region = $request->input('region') ?? ($allUserInfo['region'] ?? null);
         $location = $request->input('location') ?? ($allUserInfo['location'] ?? null);
+        $sessionMetadata = $this->buildLeadSessionMetadata($request, $allUserInfo);
         
         if (!$message) {
             return response()->json(['error' => 'Message is required'], 400);
         }
 
-        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location) {
+        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata) {
             try {
                 // Build context (simplified version - you can reuse logic from chat())
                 $aiService = app(AiAgentService::class);
@@ -650,7 +653,8 @@ class WidgetController
                     $allUserInfo,
                     compact('country', 'region', 'location'),
                     $intentResult,
-                    $message
+                    $message,
+                    $sessionMetadata
                 );
                 
                 $context = '';
@@ -733,7 +737,7 @@ class WidgetController
         ]);
     }
 
-    private function upsertWidgetLead(int $organizationId, string $sessionId, array $userInfo, array $locationInfo, ?array $intentResult, ?string $message): void
+    private function upsertWidgetLead(int $organizationId, string $sessionId, array $userInfo, array $locationInfo, ?array $intentResult, ?string $message, ?array $sessionMetadata = null): void
     {
         if (empty($userInfo) || empty($userInfo['name']) || empty($userInfo['email'])) {
             return;
@@ -760,21 +764,10 @@ class WidgetController
             'last_intent_at' => now(),
         ];
 
-        try {
-            Lead::updateOrCreate(
-                ['organization_id' => $organizationId, 'session_id' => $sessionId],
-                $payload
-            );
-        } catch (\Exception $e) {
-            Log::error('Failed to upsert widget lead', [
-                'error' => $e->getMessage(),
-                'org_id' => $organizationId,
-                'session_id' => $sessionId
-            ]);
+        if (!empty($sessionMetadata)) {
+            $payload['session_metadata'] = json_encode($sessionMetadata);
         }
-    }
 
-    private function mapLeadPriority(?string $intent): string
         try {
             $existingLead = Lead::where('organization_id', $organizationId)
                 ->where('session_id', $sessionId)
@@ -793,7 +786,55 @@ class WidgetController
                 'session_id' => $sessionId
             ]);
         }
+    }
 
+    private function mapLeadPriority(?string $intent): string
+    {
+        $intent = strtolower(trim($intent ?? ''));
+
+        if (in_array($intent, ['booking', 'appointment', 'purchase', 'pricing', 'quote', 'demo', 'contact'], true)) {
+            return 'high';
+        }
+
+        if (in_array($intent, ['realtime_data', 'lookup'], true)) {
+            return 'medium';
+        }
+
+        return 'normal';
+    }
+
+    private function mapLeadStatus(?string $intent): string
+    {
+        $intent = strtolower(trim($intent ?? ''));
+
+        if (in_array($intent, ['booking', 'appointment', 'purchase', 'pricing', 'quote', 'demo', 'contact'], true)) {
+            return 'qualified';
+        }
+
+        return 'new';
+    }
+
+    private function buildLeadSessionMetadata(Request $request, array $allUserInfo): array
+    {
+        $metadata = [
+            'ip' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'referrer' => $request->input('referrer') ?: $request->headers->get('referer'),
+            'page_url' => $request->input('page_url'),
+            'page_title' => $request->input('page_title'),
+            'timezone' => $request->input('timezone') ?? ($allUserInfo['timezone'] ?? null),
+            'language' => $request->input('language') ?? ($allUserInfo['language'] ?? null),
+            'utm_source' => $request->input('utm_source'),
+            'utm_medium' => $request->input('utm_medium'),
+            'utm_campaign' => $request->input('utm_campaign'),
+            'utm_term' => $request->input('utm_term'),
+            'utm_content' => $request->input('utm_content'),
+        ];
+
+        return array_filter($metadata, function ($value) {
+            return !is_null($value) && $value !== '';
+        });
+    }
 
     private function notifyLeadIfNeeded(Lead $lead, ?Lead $existingLead, ?array $intentResult, ?string $message): void
     {
@@ -822,8 +863,7 @@ class WidgetController
 
         $emails = $settings['lead_notify_emails'] ?? [];
         if (is_string($emails)) {
-            $emails = preg_split('/[,
-    /**
+            $emails = preg_split('/[\s,]+/', $emails);
         }
         $emails = array_values(array_filter(array_map('trim', (array) $emails)));
 
@@ -860,6 +900,8 @@ class WidgetController
             }
         }
     }
+
+    /**
      * Convert HTML to plain text while preserving links as "text (url)" or just the URL.
      */
     private function htmlToPlainWithLinks(string $html): string
