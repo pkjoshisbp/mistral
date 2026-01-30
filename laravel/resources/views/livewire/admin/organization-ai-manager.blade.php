@@ -279,6 +279,11 @@
                                                         <textarea wire:model.defer="holidayDates" class="form-control" rows="2" placeholder="2026-01-26|Republic Day, 2026-03-29|Spring Break"></textarea>
                                                         <small class="text-muted">Comma-separated dates. Use YYYY-MM-DD with optional label after |.</small>
                                                     </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Seasonal Promotions</label>
+                                                        <textarea wire:model.defer="seasonalPromotions" class="form-control" rows="3" placeholder="2026-02-01 to 2026-02-10 | Winter Sale | 10% off all items"></textarea>
+                                                        <small class="text-muted">One per line. Format: YYYY-MM-DD to YYYY-MM-DD | Title | Details.</small>
+                                                    </div>
                                                 </div>
                                             </div>
 

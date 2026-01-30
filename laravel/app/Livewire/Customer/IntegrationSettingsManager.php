@@ -21,6 +21,7 @@ class IntegrationSettingsManager extends Component
     public $contact_phone;
     public $business_hours = '';
     public $holiday_dates = '';
+    public $seasonal_promotions = '';
     
     // Widget settings
     public $widget_position = 'bottom-right';
@@ -56,6 +57,7 @@ class IntegrationSettingsManager extends Component
         'contact_phone' => 'nullable|string|max:50',
         'business_hours' => 'nullable|string|max:2000',
         'holiday_dates' => 'nullable|string|max:2000',
+        'seasonal_promotions' => 'nullable|string|max:4000',
         'widget_position' => 'required|in:bottom-right,bottom-left,top-right,top-left',
         'primary_color' => 'required|string',
         'welcome_message' => 'required|string|max:255',
@@ -119,6 +121,7 @@ class IntegrationSettingsManager extends Component
         $this->lead_notify_qualified_only = (bool) ($settings['lead_notify_qualified_only'] ?? true);
         $this->business_hours = $settings['business_hours'] ?? '';
         $this->holiday_dates = $this->keywordsToString($settings['holiday_dates'] ?? []);
+        $this->seasonal_promotions = $settings['seasonal_promotions'] ?? '';
     }
 
     public function saveSettings()
@@ -160,6 +163,7 @@ class IntegrationSettingsManager extends Component
             $settings['lead_notify_qualified_only'] = (bool) $this->lead_notify_qualified_only;
             $settings['business_hours'] = trim((string) $this->business_hours) ?: null;
             $settings['holiday_dates'] = $this->stringToKeywords($this->holiday_dates ?? '');
+            $settings['seasonal_promotions'] = trim((string) $this->seasonal_promotions) ?: null;
             
             $this->organization->settings = $settings;
             $this->organization->save();

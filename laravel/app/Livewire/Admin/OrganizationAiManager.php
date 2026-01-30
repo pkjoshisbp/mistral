@@ -35,6 +35,7 @@ class OrganizationAiManager extends Component
     public $leadNotifyQualifiedOnly = true;
     public $businessHours = '';
     public $holidayDates = '';
+    public $seasonalPromotions = '';
     public $intentKeywords = [
         'booking' => '',
         'pricing' => '',
@@ -93,6 +94,7 @@ class OrganizationAiManager extends Component
         $this->leadNotifyQualifiedOnly = (bool) ($settings['lead_notify_qualified_only'] ?? true);
         $this->businessHours = $settings['business_hours'] ?? '';
         $this->holidayDates = $this->keywordsToString($settings['holiday_dates'] ?? []);
+        $this->seasonalPromotions = $settings['seasonal_promotions'] ?? '';
         $storedKeywords = $settings['intent_keywords'] ?? [];
         $this->intentKeywords = [
             'booking' => $this->keywordsToString($storedKeywords['booking'] ?? []),
@@ -171,6 +173,7 @@ class OrganizationAiManager extends Component
             $currentSettings['lead_notify_qualified_only'] = (bool) $this->leadNotifyQualifiedOnly;
             $currentSettings['business_hours'] = trim((string) $this->businessHours) ?: null;
             $currentSettings['holiday_dates'] = $this->stringToKeywords($this->holidayDates ?? '');
+            $currentSettings['seasonal_promotions'] = trim((string) $this->seasonalPromotions) ?: null;
 
             $currentSettings['intent_keywords'] = [
                 'booking' => $this->stringToKeywords($this->intentKeywords['booking'] ?? ''),

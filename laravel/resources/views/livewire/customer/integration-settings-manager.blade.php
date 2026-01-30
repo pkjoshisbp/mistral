@@ -96,6 +96,15 @@
                                     <small class="form-text text-muted">Comma-separated dates. Use YYYY-MM-DD with optional label after |.</small>
                                 </div>
 
+                                <div class="form-group">
+                                    <label for="seasonal_promotions">Seasonal Promotions</label>
+                                    <textarea wire:model="seasonal_promotions" class="form-control @error('seasonal_promotions') is-invalid @enderror" id="seasonal_promotions" rows="3" placeholder="2026-02-01 to 2026-02-10 | Winter Sale | 10% off all items"></textarea>
+                                    @error('seasonal_promotions')
+                                        <span class="invalid-feedback">{{ $message }}</span>
+                                    @enderror
+                                    <small class="form-text text-muted">One per line. Format: YYYY-MM-DD to YYYY-MM-DD | Title | Details.</small>
+                                </div>
+
                                 @if($integration)
                                     <div class="alert alert-info">
                                         <i class="fas fa-info-circle"></i> 

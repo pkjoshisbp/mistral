@@ -468,6 +468,7 @@ class WidgetController
             // Assistant naming and channel-agnostic guidance
             $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
             $businessContext = $this->buildBusinessContext($organization);
+            $promotionContext = $this->buildPromotionContext($organization);
             
             // Build smart system prompt
             if ($hasShopifyData) {
@@ -477,6 +478,9 @@ class WidgetController
                 $systemPrompt .= $finalContext . "\n";
                 if ($businessContext) {
                     $systemPrompt .= $businessContext . "\n";
+                }
+                if ($promotionContext) {
+                    $systemPrompt .= $promotionContext . "\n";
                 }
                 $systemPrompt .= "CRITICAL INSTRUCTIONS:\n";
                 $systemPrompt .= "- Products are SORTED BY PRICE (lowest first)\n";
@@ -501,6 +505,9 @@ class WidgetController
 
                 if ($businessContext) {
                     $systemPrompt .= "\n" . $businessContext . "\n";
+                }
+                if ($promotionContext) {
+                    $systemPrompt .= "\n" . $promotionContext . "\n";
                 }
                 
                 if ($context) {
@@ -700,8 +707,12 @@ class WidgetController
                 // Build messages
                 $systemPrompt = "You are AI Assistant for {$organization->name}.";
                 $businessContext = $this->buildBusinessContext($organization);
+                $promotionContext = $this->buildPromotionContext($organization);
                 if ($businessContext) {
                     $systemPrompt .= "\n" . $businessContext;
+                }
+                if ($promotionContext) {
+                    $systemPrompt .= "\n" . $promotionContext;
                 }
                 if ($context) {
                     $systemPrompt .= $context;
@@ -927,6 +938,102 @@ class WidgetController
         }
 
         return $holidays;
+    }
+
+    private function buildPromotionContext(Organization $organization): string
+    {
+        $settings = $organization->settings ?? [];
+        $raw = trim((string) ($settings['seasonal_promotions'] ?? ''));
+
+        if ($raw === '') {
+            return '';
+        }
+
+        $timezone = $organization->timezone ?: config('app.timezone', 'UTC');
+        $now = now()->timezone($timezone);
+        $promotions = $this->parsePromotionLines($raw, $timezone);
+
+        if (empty($promotions)) {
+            return '';
+        }
+
+        $active = [];
+        $upcoming = [];
+
+        foreach ($promotions as $promo) {
+            $start = $promo['start'];
+            $end = $promo['end'];
+
+            if ($start && $end && $now->between($start, $end)) {
+                $active[] = $promo;
+            } elseif ($start && $start->greaterThan($now)) {
+                $upcoming[] = $promo;
+            }
+        }
+
+        $lines = ["Promotions & offers:"];
+        if (!empty($active)) {
+            foreach ($active as $promo) {
+                $lines[] = "- Active: {$promo['title']} ({$promo['start']->toDateString()} to {$promo['end']->toDateString()}) - {$promo['details']}";
+            }
+        }
+
+        if (empty($active) && !empty($upcoming)) {
+            foreach (array_slice($upcoming, 0, 3) as $promo) {
+                $lines[] = "- Upcoming: {$promo['title']} ({$promo['start']->toDateString()} to {$promo['end']->toDateString()}) - {$promo['details']}";
+            }
+        }
+
+        if (count($lines) === 1) {
+            return '';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function parsePromotionLines(string $raw, string $timezone): array
+    {
+        $lines = preg_split('/\r?\n/', $raw);
+        $promotions = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+
+            $start = null;
+            $end = null;
+            $title = '';
+            $details = '';
+
+            if (preg_match('/^(\d{4}-\d{2}-\d{2})\s*(?:to|-)\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([^|]+)\s*\|\s*(.+)$/i', $line, $m)) {
+                $start = \Carbon\Carbon::createFromFormat('Y-m-d', trim($m[1]), $timezone)->startOfDay();
+                $end = \Carbon\Carbon::createFromFormat('Y-m-d', trim($m[2]), $timezone)->endOfDay();
+                $title = trim($m[3]);
+                $details = trim($m[4]);
+            } elseif (preg_match('/^(\d{4}-\d{2}-\d{2})\s*(?:to|-)\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(.+)$/i', $line, $m)) {
+                $start = \Carbon\Carbon::createFromFormat('Y-m-d', trim($m[1]), $timezone)->startOfDay();
+                $end = \Carbon\Carbon::createFromFormat('Y-m-d', trim($m[2]), $timezone)->endOfDay();
+                $title = trim($m[3]);
+                $details = '';
+            } else {
+                continue;
+            }
+
+            if ($title === '' && $details === '') {
+                continue;
+            }
+
+            $promotions[] = [
+                'start' => $start,
+                'end' => $end,
+                'title' => $title !== '' ? $title : 'Promotion',
+                'details' => $details !== '' ? $details : 'Details available on request.',
+            ];
+        }
+
+        return $promotions;
     }
 
     private function notifyLeadIfNeeded(Lead $lead, ?Lead $existingLead, ?array $intentResult, ?string $message): void
