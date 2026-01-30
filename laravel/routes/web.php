@@ -734,6 +734,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/api-integration', \App\Livewire\Customer\ApiIntegration::class)->name('api-integration');
         Route::get('/integration-settings', \App\Livewire\Customer\IntegrationSettingsManager::class)->name('integration-settings');
         Route::get('/action-manager', \App\Livewire\Customer\ActionManager::class)->name('action-manager');
+        Route::get('/live-chats', \App\Livewire\Customer\AgentConsole::class)->name('live-chats');
         Route::get('/chat-history', \App\Livewire\Customer\ChatHistory::class)->name('chat-history');
         Route::get('/token-usage', \App\Livewire\Customer\TokenUsage::class)->name('token-usage');
         Route::get('/credits', \App\Livewire\Customer\Credits::class)->name('credits');
