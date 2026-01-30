@@ -771,6 +771,36 @@ class WidgetController
         $guardrailCategory = $this->detectGuardrailCategory($message, $guardrailCategories);
         if ($guardrailCategory && !$this->isSensitiveCategoryApproved($guardrailCategory, $approvedSensitive)) {
             $safeResponse = $this->buildSensitiveGuardrailResponse($guardrailCategory, $organization);
+            $conversation = $this->saveConversationToDatabase(
+                $organization,
+                $sessionId,
+                $message,
+                $safeResponse,
+                $allUserInfo,
+                compact('country', 'region', 'location'),
+                null
+            );
+
+            $this->logIntentAnalytics(
+                $organization->id,
+                $sessionId,
+                null,
+                $request,
+                compact('country', 'region', 'location'),
+                $sessionMetadata
+            );
+
+            if ($conversation) {
+                $this->handleEscalationIfNeeded(
+                    $conversation,
+                    $message,
+                    $safeResponse,
+                    null,
+                    $request,
+                    $sessionMetadata
+                );
+            }
+
             return response()->stream(function () use ($safeResponse) {
                 echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
                 ob_flush();
@@ -846,6 +876,49 @@ class WidgetController
                     echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
                     ob_flush();
                     flush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $safeResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($safeResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $safeResponse,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $safeResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
                     return;
                 }
 
@@ -871,6 +944,9 @@ class WidgetController
                 $fastApiUrl = config('services.ai_agent.url');
                 $model = \App\Models\AdminSetting::get('llama_default_model', 'llama3.2:3b');
                 
+                $fullResponse = '';
+                $sseBuffer = '';
+
                 $ch = curl_init("{$fastApiUrl}/llm/chat/stream");
                 curl_setopt_array($ch, [
                     CURLOPT_RETURNTRANSFER => false,
@@ -885,7 +961,30 @@ class WidgetController
                         'backend_type' => 'ollama'
                     ]),
                     CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                    CURLOPT_WRITEFUNCTION => function ($curl, $data) {
+                    CURLOPT_WRITEFUNCTION => function ($curl, $data) use (&$sseBuffer, &$fullResponse) {
+                        $sseBuffer .= $data;
+
+                        $parts = explode("\n\n", $sseBuffer);
+                        $sseBuffer = array_pop($parts);
+
+                        foreach ($parts as $part) {
+                            $part = trim($part);
+                            if ($part === '') {
+                                continue;
+                            }
+
+                            $lines = preg_split('/\r?\n/', $part);
+                            foreach ($lines as $line) {
+                                $line = trim($line);
+                                if (str_starts_with($line, 'data: ')) {
+                                    $payload = json_decode(substr($line, 6), true);
+                                    if (isset($payload['content'])) {
+                                        $fullResponse .= $payload['content'];
+                                    }
+                                }
+                            }
+                        }
+
                         echo $data;
                         ob_flush();
                         flush();
@@ -895,6 +994,93 @@ class WidgetController
                 
                 curl_exec($ch);
                 curl_close($ch);
+
+                if (trim($sseBuffer) !== '') {
+                    $lines = preg_split('/\r?\n/', trim($sseBuffer));
+                    foreach ($lines as $line) {
+                        $line = trim($line);
+                        if (str_starts_with($line, 'data: ')) {
+                            $payload = json_decode(substr($line, 6), true);
+                            if (isset($payload['content'])) {
+                                $fullResponse .= $payload['content'];
+                            }
+                        }
+                    }
+                }
+
+                $finalResponse = trim($fullResponse);
+                $escalationReason = $this->getEscalationReason($message, $finalResponse, $intentResult);
+                $postfixParts = [];
+
+                if ($escalationReason) {
+                    $handoffMessage = $this->buildHandoffMessage($organization);
+                    if ($handoffMessage !== '') {
+                        $postfixParts[] = $handoffMessage;
+                    }
+                }
+
+                $suggestion = $this->buildProactiveSuggestion($intentResult);
+                if ($suggestion !== '') {
+                    $postfixParts[] = $suggestion;
+                }
+
+                $followUp = $this->buildFollowUpPrompt($intentResult);
+                if ($followUp !== '') {
+                    $postfixParts[] = $followUp;
+                }
+
+                if (!empty($postfixParts)) {
+                    $suffix = "\n\n" . implode("\n\n", $postfixParts);
+                    echo "data: " . json_encode(['content' => $suffix, 'done' => true]) . "\n\n";
+                    ob_flush();
+                    flush();
+                    $finalResponse = trim($finalResponse) . $suffix;
+                }
+
+                if ($finalResponse !== '') {
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $finalResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($finalResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $finalResponse,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $finalResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata,
+                            $escalationReason
+                        );
+                    }
+                }
                 
             } catch (\Exception $e) {
                 echo "data: " . json_encode(['error' => $e->getMessage(), 'done' => true]) . "\n\n";
