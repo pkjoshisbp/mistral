@@ -260,6 +260,28 @@
                                                 </div>
                                             </div>
 
+                                            <!-- Business Hours & Holidays -->
+                                            <div class="card mb-3">
+                                                <div class="card-header">
+                                                    <strong>
+                                                        <i class="fas fa-clock me-1"></i>
+                                                        Business Hours & Holidays
+                                                    </strong>
+                                                </div>
+                                                <div class="card-body">
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Business Hours</label>
+                                                        <textarea wire:model.defer="businessHours" class="form-control" rows="2" placeholder="Mon-Fri: 9:00 AM - 6:00 PM; Sat: 10:00 AM - 4:00 PM"></textarea>
+                                                        <small class="text-muted">Used for time-aware answers (open/closed questions).</small>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Holiday Dates</label>
+                                                        <textarea wire:model.defer="holidayDates" class="form-control" rows="2" placeholder="2026-01-26|Republic Day, 2026-03-29|Spring Break"></textarea>
+                                                        <small class="text-muted">Comma-separated dates. Use YYYY-MM-DD with optional label after |.</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <!-- Intent Classification Settings -->
                                             <div class="card mb-3">
                                                 <div class="card-header">

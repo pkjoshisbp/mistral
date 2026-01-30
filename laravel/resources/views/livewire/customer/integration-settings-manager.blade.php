@@ -78,6 +78,24 @@
                                     @enderror
                                 </div>
 
+                                <div class="form-group">
+                                    <label for="business_hours">Business Hours</label>
+                                    <textarea wire:model="business_hours" class="form-control @error('business_hours') is-invalid @enderror" id="business_hours" rows="2" placeholder="Mon-Fri: 9:00 AM - 6:00 PM; Sat: 10:00 AM - 4:00 PM"></textarea>
+                                    @error('business_hours')
+                                        <span class="invalid-feedback">{{ $message }}</span>
+                                    @enderror
+                                    <small class="form-text text-muted">Shown to the AI for time-aware answers.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="holiday_dates">Holiday Dates</label>
+                                    <textarea wire:model="holiday_dates" class="form-control @error('holiday_dates') is-invalid @enderror" id="holiday_dates" rows="2" placeholder="2026-01-26|Republic Day, 2026-03-29|Spring Break"></textarea>
+                                    @error('holiday_dates')
+                                        <span class="invalid-feedback">{{ $message }}</span>
+                                    @enderror
+                                    <small class="form-text text-muted">Comma-separated dates. Use YYYY-MM-DD with optional label after |.</small>
+                                </div>
+
                                 @if($integration)
                                     <div class="alert alert-info">
                                         <i class="fas fa-info-circle"></i> 

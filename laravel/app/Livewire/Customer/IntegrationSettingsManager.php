@@ -19,6 +19,8 @@ class IntegrationSettingsManager extends Component
     public $website;
     public $contact_email;
     public $contact_phone;
+    public $business_hours = '';
+    public $holiday_dates = '';
     
     // Widget settings
     public $widget_position = 'bottom-right';
@@ -52,6 +54,8 @@ class IntegrationSettingsManager extends Component
         'website' => 'nullable|url',
         'contact_email' => 'nullable|email',
         'contact_phone' => 'nullable|string|max:50',
+        'business_hours' => 'nullable|string|max:2000',
+        'holiday_dates' => 'nullable|string|max:2000',
         'widget_position' => 'required|in:bottom-right,bottom-left,top-right,top-left',
         'primary_color' => 'required|string',
         'welcome_message' => 'required|string|max:255',
@@ -113,6 +117,8 @@ class IntegrationSettingsManager extends Component
         $this->lead_notify_emails = $this->keywordsToString($settings['lead_notify_emails'] ?? []);
         $this->lead_notify_webhook_url = $settings['lead_notify_webhook_url'] ?? '';
         $this->lead_notify_qualified_only = (bool) ($settings['lead_notify_qualified_only'] ?? true);
+        $this->business_hours = $settings['business_hours'] ?? '';
+        $this->holiday_dates = $this->keywordsToString($settings['holiday_dates'] ?? []);
     }
 
     public function saveSettings()
@@ -152,6 +158,8 @@ class IntegrationSettingsManager extends Component
             $settings['lead_notify_emails'] = $this->stringToKeywords($this->lead_notify_emails ?? '');
             $settings['lead_notify_webhook_url'] = trim((string) $this->lead_notify_webhook_url) ?: null;
             $settings['lead_notify_qualified_only'] = (bool) $this->lead_notify_qualified_only;
+            $settings['business_hours'] = trim((string) $this->business_hours) ?: null;
+            $settings['holiday_dates'] = $this->stringToKeywords($this->holiday_dates ?? '');
             
             $this->organization->settings = $settings;
             $this->organization->save();

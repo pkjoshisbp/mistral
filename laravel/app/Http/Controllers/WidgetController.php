@@ -467,6 +467,7 @@ class WidgetController
 
             // Assistant naming and channel-agnostic guidance
             $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
+            $businessContext = $this->buildBusinessContext($organization);
             
             // Build smart system prompt
             if ($hasShopifyData) {
@@ -474,6 +475,9 @@ class WidgetController
                 $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
                 $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n\n";
                 $systemPrompt .= $finalContext . "\n";
+                if ($businessContext) {
+                    $systemPrompt .= $businessContext . "\n";
+                }
                 $systemPrompt .= "CRITICAL INSTRUCTIONS:\n";
                 $systemPrompt .= "- Products are SORTED BY PRICE (lowest first)\n";
                 $systemPrompt .= "- For 'lowest price' or 'cheapest' questions - use the FIRST available product in the list\n";
@@ -494,6 +498,10 @@ class WidgetController
                 if ($orgEmail) $systemPrompt .= " | Email: {$orgEmail}";
                 if ($orgPhone) $systemPrompt .= " | Phone: {$orgPhone}";
                 $systemPrompt .= ". ";
+
+                if ($businessContext) {
+                    $systemPrompt .= "\n" . $businessContext . "\n";
+                }
                 
                 if ($context) {
                     $systemPrompt .= "\nInfo:\n{$context}\n";
@@ -691,6 +699,10 @@ class WidgetController
 
                 // Build messages
                 $systemPrompt = "You are AI Assistant for {$organization->name}.";
+                $businessContext = $this->buildBusinessContext($organization);
+                if ($businessContext) {
+                    $systemPrompt .= "\n" . $businessContext;
+                }
                 if ($context) {
                     $systemPrompt .= $context;
                 }
@@ -834,6 +846,87 @@ class WidgetController
         return array_filter($metadata, function ($value) {
             return !is_null($value) && $value !== '';
         });
+    }
+
+    private function buildBusinessContext(Organization $organization): string
+    {
+        $settings = $organization->settings ?? [];
+        $hours = trim((string) ($settings['business_hours'] ?? ''));
+        $holidayEntries = $settings['holiday_dates'] ?? [];
+
+        if (is_string($holidayEntries)) {
+            $holidayEntries = preg_split('/[\n,]+/', $holidayEntries);
+        }
+
+        $holidayEntries = array_values(array_filter(array_map('trim', (array) $holidayEntries)));
+        $holidays = $this->normalizeHolidayEntries($holidayEntries);
+
+        if ($hours === '' && empty($holidays)) {
+            return '';
+        }
+
+        $timezone = $organization->timezone ?: config('app.timezone', 'UTC');
+        $now = now()->timezone($timezone);
+        $today = $now->toDateString();
+
+        $todayHoliday = null;
+        foreach ($holidays as $holiday) {
+            if ($holiday['date'] === $today) {
+                $todayHoliday = $holiday;
+                break;
+            }
+        }
+
+        $lines = [];
+        $lines[] = "Business hours & availability:";
+        $lines[] = "- Timezone: {$timezone}";
+        $lines[] = "- Current local time: " . $now->format('Y-m-d H:i');
+        if ($hours !== '') {
+            $lines[] = "- Business hours: {$hours}";
+        }
+        if (!empty($holidays)) {
+            $holidayText = implode(', ', array_map(function ($holiday) {
+                return $holiday['label'] ? ($holiday['date'] . ' (' . $holiday['label'] . ')') : $holiday['date'];
+            }, $holidays));
+            $lines[] = "- Holidays: {$holidayText}";
+        }
+        if ($todayHoliday) {
+            $label = $todayHoliday['label'] ? " ({$todayHoliday['label']})" : '';
+            $lines[] = "- Note: Today is listed as a holiday{$label}.";
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function normalizeHolidayEntries(array $holidayEntries): array
+    {
+        $holidays = [];
+
+        foreach ($holidayEntries as $entry) {
+            if ($entry === '') {
+                continue;
+            }
+            $date = $entry;
+            $label = null;
+
+            if (str_contains($entry, '|')) {
+                [$date, $label] = array_map('trim', explode('|', $entry, 2));
+            } elseif (str_contains($entry, ':')) {
+                [$date, $label] = array_map('trim', explode(':', $entry, 2));
+            }
+
+            $date = trim($date);
+            if ($date === '') {
+                continue;
+            }
+
+            $holidays[] = [
+                'date' => $date,
+                'label' => $label ?: null,
+            ];
+        }
+
+        return $holidays;
     }
 
     private function notifyLeadIfNeeded(Lead $lead, ?Lead $existingLead, ?array $intentResult, ?string $message): void
