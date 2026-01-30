@@ -272,7 +272,7 @@
                                                     <div class="mb-2">
                                                         <label class="form-label fw-bold">Business Hours</label>
                                                         <textarea wire:model.defer="businessHours" class="form-control" rows="2" placeholder="Mon-Fri: 9:00 AM - 6:00 PM; Sat: 10:00 AM - 4:00 PM"></textarea>
-                                                        <small class="text-muted">Used for time-aware answers (open/closed questions).</small>
+                                                        <small class="text-muted">Used for time-aware answers (open/closed questions). You can append a timezone (e.g., "IST" or "UTC+05:30").</small>
                                                     </div>
                                                     <div class="mb-2">
                                                         <label class="form-label fw-bold">Holiday Dates</label>

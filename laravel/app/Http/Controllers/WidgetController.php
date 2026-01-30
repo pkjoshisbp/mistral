@@ -1269,7 +1269,8 @@ class WidgetController
             return '';
         }
 
-        $timezone = $organization->timezone ?: config('app.timezone', 'UTC');
+        [$hoursDisplay, $timezoneOverride] = $this->extractTimezoneFromBusinessHours($hours);
+        $timezone = $timezoneOverride ?: ($organization->timezone ?: config('app.timezone', 'UTC'));
         $now = now()->timezone($timezone);
         $today = $now->toDateString();
 
@@ -1285,8 +1286,8 @@ class WidgetController
         $lines[] = "Business hours & availability:";
         $lines[] = "- Timezone: {$timezone}";
         $lines[] = "- Current local time: " . $now->format('Y-m-d H:i');
-        if ($hours !== '') {
-            $lines[] = "- Business hours: {$hours}";
+        if ($hoursDisplay !== '') {
+            $lines[] = "- Business hours: {$hoursDisplay}";
         }
         if (!empty($holidays)) {
             $holidayText = implode(', ', array_map(function ($holiday) {
@@ -1300,6 +1301,48 @@ class WidgetController
         }
 
         return implode("\n", $lines);
+    }
+
+    private function extractTimezoneFromBusinessHours(string $hours): array
+    {
+        $clean = trim($hours);
+        if ($clean === '') {
+            return ['', null];
+        }
+
+        $timezoneMap = [
+            'IST' => 'Asia/Kolkata',
+            'UTC' => 'UTC',
+            'GMT' => 'UTC',
+            'EST' => 'America/New_York',
+            'EDT' => 'America/New_York',
+            'CST' => 'America/Chicago',
+            'CDT' => 'America/Chicago',
+            'MST' => 'America/Denver',
+            'MDT' => 'America/Denver',
+            'PST' => 'America/Los_Angeles',
+            'PDT' => 'America/Los_Angeles'
+        ];
+
+        if (preg_match('/\b(UTC|GMT)([+-]\d{1,2})(?::?(\d{2}))?\b/i', $clean, $m)) {
+            $offsetHours = (int) $m[2];
+            $offsetMinutes = isset($m[3]) ? (int) $m[3] : 0;
+            $sign = $offsetHours < 0 ? '-' : '+';
+            $offsetHours = abs($offsetHours);
+            $tz = sprintf('UTC%s%02d:%02d', $sign, $offsetHours, $offsetMinutes);
+            $display = trim(preg_replace('/\b(UTC|GMT)([+-]\d{1,2})(?::?(\d{2}))?\b/i', '', $clean));
+            return [$display, $tz];
+        }
+
+        if (preg_match('/\b([A-Z]{2,4})\b/', $clean, $m)) {
+            $abbr = strtoupper($m[1]);
+            if (isset($timezoneMap[$abbr])) {
+                $display = trim(preg_replace('/\b' . preg_quote($abbr, '/') . '\b/', '', $clean));
+                return [$display, $timezoneMap[$abbr]];
+            }
+        }
+
+        return [$clean, null];
     }
 
     private function normalizeHolidayEntries(array $holidayEntries): array

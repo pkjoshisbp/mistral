@@ -84,7 +84,7 @@
                                     @error('business_hours')
                                         <span class="invalid-feedback">{{ $message }}</span>
                                     @enderror
-                                    <small class="form-text text-muted">Shown to the AI for time-aware answers.</small>
+                                    <small class="form-text text-muted">Shown to the AI for time-aware answers. You can append a timezone (e.g., "IST" or "UTC+05:30").</small>
                                 </div>
 
                                 <div class="form-group">
