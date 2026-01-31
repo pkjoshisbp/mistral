@@ -6,7 +6,6 @@ use App\Models\Organization;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\Analytics;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Http;
 use App\Mail\ChatInteractionNotification;
 use App\Mail\LeadCapturedNotification;
@@ -15,7 +14,6 @@ use App\Services\IntentDetectionService;
 use App\Services\AiAgentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use App\Mail\ChatEscalationNotification;
 use Illuminate\Support\Str;
 
