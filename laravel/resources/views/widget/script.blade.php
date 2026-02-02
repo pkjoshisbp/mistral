@@ -1096,6 +1096,7 @@
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let fullResponse = '';
+                let hasContent = false;
                 let buffer = '';
 
                 while (true) {
@@ -1115,7 +1116,11 @@
                                 const data = JSON.parse(line.slice(6));
                                 
                                 if (data.error) {
-                                    this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                                    if (!hasContent) {
+                                        this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                                    } else {
+                                        console.warn('[AI Chat] Stream error after partial response:', data.error);
+                                    }
                                     return;
                                 }
                                 
@@ -1130,6 +1135,7 @@
                                         firstTokenTimestampSet = true;
                                     }
                                     fullResponse += data.content;
+                                    hasContent = true;
                                     const messageDiv = botMessageElement.querySelector('.ai-chat-message-content');
                                     messageDiv.innerHTML = this.linkify(fullResponse);
                                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -1155,7 +1161,9 @@
             } catch (error) {
                 console.error('Chat error:', error);
                 this.removeTypingIndicator();
-                this.addMessage('Sorry, I\'m experiencing technical difficulties. Please try again later.', 'bot');
+                if (!hasContent) {
+                    this.addMessage('Sorry, I\'m experiencing technical difficulties. Please try again later.', 'bot');
+                }
             }
         }
     }

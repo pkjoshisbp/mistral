@@ -23,7 +23,11 @@ class ChatInteractionNotification extends Mailable
         $orgEmail = $this->payload['organization']->contact_email ?? null;
         $subject = "New Chat Interaction - {$orgName}";
 
+        $fromAddress = config('mail.from.address');
+        $fromName = config('mail.from.name');
+
         $mail = $this->subject($subject)
+            ->from($fromAddress, $fromName)
             ->view('emails.chat-interaction-notification')
             ->text('emails.chat-interaction-notification-text')
             ->with($this->payload);
@@ -31,6 +35,12 @@ class ChatInteractionNotification extends Mailable
         if (!empty($orgEmail)) {
             $mail->replyTo($orgEmail, $orgName);
         }
+
+        $mail->withSymfonyMessage(function ($message) use ($fromAddress) {
+            $headers = $message->getHeaders();
+            $headers->addTextHeader('List-Unsubscribe', "<mailto:{$fromAddress}>");
+            $headers->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+        });
 
         return $mail;
     }

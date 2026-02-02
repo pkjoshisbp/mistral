@@ -1,6 +1,7 @@
 {
     "require": {
         "livewire/livewire": "^3.6",
-        "barryvdh/laravel-dompdf": "^2.0"
+        "barryvdh/laravel-dompdf": "^2.0",
+        "patrickschur/language-detection": "^5.3"
     }
 }

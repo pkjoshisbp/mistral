@@ -73,7 +73,7 @@
         </div>
     </div>
 </footer>
-<!-- AI Chat Widget for Organization ID: 3 -->
+<!-- AI Chat Widget for Organization: ai-chat-support -->
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         console.log('Footer: DOM loaded, initializing chat widget...');
@@ -84,7 +84,7 @@
         
         // Load the AI chat widget script from local domain
         var script = document.createElement('script');
-        script.src = '{{ route('widget.script', ['orgId' => 'platform']) }}';
+        script.src = '{{ route('widget.script', ['orgId' => 'ai-chat-support']) }}';
         script.async = true;
         script.onload = function() {
             console.log('AI Chat Widget loaded successfully');

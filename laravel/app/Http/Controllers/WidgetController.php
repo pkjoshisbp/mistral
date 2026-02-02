@@ -6,12 +6,16 @@ use App\Models\Organization;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\Analytics;
+use App\Models\CreditPackage;
+use App\Models\SubscriptionPlan;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use App\Mail\ChatInteractionNotification;
 use App\Mail\LeadCapturedNotification;
 use App\Models\Lead;
 use App\Services\IntentDetectionService;
 use App\Services\AiAgentService;
+use App\Services\LocationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use App\Mail\ChatEscalationNotification;
@@ -511,6 +515,13 @@ class WidgetController
             $orgPhone = $organization->contact_phone ?? null;
             $orgDesc  = $organization->description ? trim($this->htmlToPlainWithLinks($organization->description)) : null;
 
+            if (($intentResult['intent'] ?? null) === 'pricing') {
+                $pricingContext = $this->buildPricingContext($organization);
+                if ($pricingContext !== '') {
+                    $context .= ($context !== '' ? "\n\n" : '') . $pricingContext;
+                }
+            }
+
             // Build context with Shopify data priority
             $finalContext = '';
             if (!empty($shopifyContext)) {
@@ -555,7 +566,8 @@ class WidgetController
                 // Shopify data available - guide LLM to be conversational
                 $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
                 $systemPrompt .= "Tone: {$responseTone}. Language: {$responseLanguage}. ";
-                $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n\n";
+                $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n";
+                $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\".\n\n";
                 $systemPrompt .= $finalContext . "\n";
                 if ($businessContext) {
                     $systemPrompt .= $businessContext . "\n";
@@ -595,18 +607,19 @@ class WidgetController
                 if ($context) {
                     $systemPrompt .= "\nInfo:\n{$context}\n";
                 }
+                $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\". ";
                 $systemPrompt .= "Be brief, friendly, and helpful. Answer in 2-3 sentences max (60 words).";
             }
 
             // Get AI response using llmChat for better token tracking
-            $messages = [
-                ['role' => 'system', 'content' => $systemPrompt],
-                ['role' => 'user', 'content' => $message]
-            ];
+            $messages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message);
             
             // Use organization-specific AI provider and model
             $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
-            if ($aiProvider === 'openai') {
+            if ($this->shouldUseOpenAiFallback($message, $organization, $responseLanguage)) {
+                $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
+                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id);
+            } elseif ($aiProvider === 'openai') {
                 // Use OpenAI with organization-specific or global model
                 $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
                 $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id);
@@ -895,6 +908,7 @@ class WidgetController
                 
                 $context = '';
                 $liveData = null;
+                $isPricingIntent = ($intentResult['intent'] ?? null) === 'pricing';
                 
                 // If action was executed, include the live data
                 if ($actionResult['type'] === 'action_executed' && isset($actionResult['result']['success']) && $actionResult['result']['success']) {
@@ -905,8 +919,17 @@ class WidgetController
                         $context .= "\n\n[LIVE DATA from {$actionName}]:\n";
                         $context .= json_encode($liveData, JSON_PRETTY_PRINT) . "\n";
                         $context .= "[END LIVE DATA]\n\n";
-                        $context .= "IMPORTANT: Use ONLY the LIVE DATA above to answer the question. Format it in a user-friendly way.\n\n";
-                        $context .= $this->buildLiveDataValidationRules($liveData);
+                        if ($isPricingIntent) {
+                            $pricingContext = $this->buildPricingContext($organization);
+                            $context .= "IMPORTANT: Use the LIVE DATA above as primary. Also include PRICING CONTEXT below (credit packages + conversation estimates) if relevant. Format it in a user-friendly way.\n\n";
+                            $context .= $this->buildLiveDataValidationRules($liveData);
+                            if ($pricingContext !== '') {
+                                $context .= "\nPRICING CONTEXT:\n{$pricingContext}\n";
+                            }
+                        } else {
+                            $context .= "IMPORTANT: Use ONLY the LIVE DATA above to answer the question. Format it in a user-friendly way.\n\n";
+                            $context .= $this->buildLiveDataValidationRules($liveData);
+                        }
                     }
                 }
                 
@@ -922,6 +945,13 @@ class WidgetController
                             if (isset($payload['content'])) $context .= "Content: " . $payload['content'] . "\n";
                             $context .= "\n";
                         }
+                    }
+                }
+
+                if ($isPricingIntent && !$liveData) {
+                    $pricingContext = $this->buildPricingContext($organization);
+                    if ($pricingContext !== '') {
+                        $context .= "\n\n" . $pricingContext;
                     }
                 }
 
@@ -999,7 +1029,25 @@ class WidgetController
                     $systemPrompt .= "\nIntent: " . $intentResult['intent'] . ". Add a short follow-up question and one proactive suggestion if appropriate.";
                 }
 
-                // Stream from FastAPI
+                $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message);
+                $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage);
+
+                if ($useOpenAiFallback) {
+                    $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
+                    $aiResponse = $this->aiAgentService->openAiChat($chatMessages, $model, null, $organization->id);
+                    $fullResponse = (string) ($aiResponse['message']['content'] ?? '');
+
+                    if (trim($fullResponse) !== '') {
+                        echo "data: " . json_encode(['content' => $fullResponse, 'done' => true]) . "\n\n";
+                        ob_flush();
+                        flush();
+                    } else {
+                        $useOpenAiFallback = false;
+                    }
+                }
+
+                if (!$useOpenAiFallback) {
+                    // Stream from FastAPI
                 $fastApiUrl = config('services.ai_agent.url');
                 $model = \App\Models\AdminSetting::get('llama_default_model', 'llama3.2:3b');
                 
@@ -1012,10 +1060,7 @@ class WidgetController
                     CURLOPT_HEADER => false,
                     CURLOPT_POST => true,
                     CURLOPT_POSTFIELDS => json_encode([
-                        'messages' => [
-                            ['role' => 'system', 'content' => $systemPrompt],
-                            ['role' => 'user', 'content' => $message]
-                        ],
+                        'messages' => $chatMessages,
                         'model' => $model,
                         'backend_type' => 'ollama'
                     ]),
@@ -1065,6 +1110,7 @@ class WidgetController
                             }
                         }
                     }
+                }
                 }
 
                 $finalResponse = trim($fullResponse);
@@ -1578,6 +1624,159 @@ class WidgetController
         }
 
         return '';
+    }
+
+    private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message): array
+    {
+        $messages = [
+            ['role' => 'system', 'content' => $systemPrompt],
+        ];
+
+        $recentMessages = $this->getRecentConversationMessages($organization, $sessionId, $message, 4);
+        if (!empty($recentMessages)) {
+            $messages = array_merge($messages, $recentMessages);
+        }
+
+        $messages[] = ['role' => 'user', 'content' => $message];
+
+        return $messages;
+    }
+
+    private function getRecentConversationMessages(Organization $organization, string $sessionId, string $message, int $limit = 4): array
+    {
+        if (!$this->isShortFollowUp($message)) {
+            return [];
+        }
+
+        $conversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organization->id)
+            ->first();
+
+        if (!$conversation) {
+            return [];
+        }
+
+        $recent = $conversation->messages()
+            ->orderBy('sent_at', 'desc')
+            ->limit($limit)
+            ->get()
+            ->reverse();
+
+        $messages = [];
+        foreach ($recent as $msg) {
+            $text = trim(strip_tags((string) $msg->message));
+            if ($text === '') {
+                continue;
+            }
+
+            $role = $msg->sender_type === 'user' ? 'user' : 'assistant';
+            $messages[] = ['role' => $role, 'content' => $text];
+        }
+
+        return $messages;
+    }
+
+    private function isShortFollowUp(string $message): bool
+    {
+        $clean = trim(mb_strtolower($message));
+        if ($clean === '') {
+            return false;
+        }
+
+        if ($this->isAffirmativeFollowUp($message)) {
+            return true;
+        }
+
+        $negatives = [
+            'no', 'nope', 'nah', 'not now', 'dont', 'don\'t', 'do not', 'not really', 'no thanks', 'no thank you',
+        ];
+
+        if (in_array($clean, $negatives, true)) {
+            return true;
+        }
+
+        return str_word_count($clean) <= 3;
+    }
+
+    private function shouldUseOpenAiFallback(string $message, Organization $organization, string $responseLanguage): bool
+    {
+        return false;
+    }
+
+    private function buildPricingContext(Organization $organization): string
+    {
+        $subscriptionPlans = SubscriptionPlan::where('is_active', true)
+            ->orderBy('sort_order')
+            ->get();
+        $creditPackages = CreditPackage::where('is_active', true)
+            ->orderBy('sort_order')
+            ->get();
+
+        if ($subscriptionPlans->isEmpty() && $creditPackages->isEmpty()) {
+            return '';
+        }
+
+        $locationService = app(LocationService::class);
+        $currency = $locationService->getUserCurrency();
+        $tokensPerConversation = (int) ($organization->settings['pricing_tokens_per_conversation'] ?? 500);
+        if ($tokensPerConversation <= 0) {
+            $tokensPerConversation = 500;
+        }
+
+        $lines = [];
+        $lines[] = "Pricing overview (conversation estimates assume ~{$tokensPerConversation} tokens per conversation):";
+
+        if ($subscriptionPlans->isNotEmpty()) {
+            $lines[] = 'Subscription plans:';
+            foreach ($subscriptionPlans as $plan) {
+                $monthly = $locationService->formatPrice($plan->getMonthlyPriceForCurrency($currency), $currency);
+                $yearly = $locationService->formatPrice($plan->getYearlyPriceForCurrency($currency), $currency);
+                $tokens = number_format((int) $plan->token_cap_monthly);
+                $estimate = $this->formatConversationEstimate((int) $plan->token_cap_monthly, $tokensPerConversation);
+                $line = "- {$plan->name}: {$monthly}/mo";
+                if ((float) $plan->yearly_price > 0) {
+                    $line .= " ({$yearly}/yr)";
+                }
+                $line .= ", {$tokens} tokens/mo (~{$estimate} conversations)";
+                if ((float) $plan->overage_price_per_100k > 0) {
+                    $overageAmount = (float) $plan->overage_price_per_100k;
+                    if ($currency === 'INR') {
+                        $overageAmount = $locationService->convertToINR($overageAmount);
+                    }
+                    $overage = $locationService->formatPrice($overageAmount, $currency) . ' per 100k tokens';
+                    $line .= ", overage {$overage}";
+                }
+                $lines[] = $line . '.';
+            }
+        }
+
+        if ($creditPackages->isNotEmpty()) {
+            $lines[] = 'Credit packages (one-time):';
+            foreach ($creditPackages as $package) {
+                $price = $locationService->formatPrice($package->getPriceForCurrency($currency), $currency);
+                $tokens = number_format((int) $package->tokens);
+                $estimate = $this->formatConversationEstimate((int) $package->tokens, $tokensPerConversation);
+                $lines[] = "- {$package->name}: {$price}, {$tokens} tokens (~{$estimate} conversations).";
+            }
+        }
+
+        $lines[] = 'Note: Conversation estimates are rough; actual usage varies by message length.';
+
+        return implode("\n", $lines);
+    }
+
+    private function formatConversationEstimate(int $tokens, int $tokensPerConversation): string
+    {
+        if ($tokens <= 0) {
+            return '0';
+        }
+        if ($tokensPerConversation <= 0) {
+            return 'N/A';
+        }
+
+        $estimate = (int) floor($tokens / $tokensPerConversation);
+
+        return number_format(max(1, $estimate));
     }
 
     private function buildBusinessContext(Organization $organization): string
