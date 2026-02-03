@@ -74,7 +74,7 @@ class CorsMiddleware
         $response->headers->set('Vary', 'Origin');
         $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
         $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization, X-Requested-With, Origin');
-        $response->headers->set('Access-Control-Allow-Credentials', 'false');
+        $response->headers->set('Access-Control-Allow-Credentials', 'true');
         $response->headers->set('X-Debug-CORS', '1');
 
         $logContext['allowed_origin'] = $allowedOrigin;

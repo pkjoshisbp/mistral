@@ -17,6 +17,8 @@
             this.isOpen = false;
             this.isExpanded = false;
             this.chatHistoryTtlHours = Number(this.config.chatHistoryTtlHours ?? 24);
+            this.agentPollingIntervalMs = Number(this.config.agentPollingIntervalMs ?? 20000);
+            this.isPollingInFlight = false;
             // ISSUE 5B FIX: Persist session across page navigation
             this.sessionId = this.getOrCreateSessionId();
             this.messages = [];
@@ -30,6 +32,9 @@
             this.detectLocation();
             // ISSUE 5B FIX: Load previous messages after init
             this.loadPersistedMessages();
+            if (this.config?.scriptVersion) {
+                console.info('[AI Widget] Script version:', this.config.scriptVersion);
+            }
         }
 
         checkLeadCaptured() {
@@ -419,6 +424,14 @@
                 });
             }
 
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    this.stopAgentPolling();
+                } else if (this.isOpen) {
+                    this.startAgentPolling();
+                }
+            });
+
             // Hide notification when opened
             button.addEventListener('click', () => {
                 const notification = document.getElementById(this.ids.notification);
@@ -476,10 +489,10 @@
             if (this.agentPoller) return;
             this.fetchAgentMessages();
             this.agentPoller = setInterval(() => {
-                if (this.isOpen) {
+                if (this.isOpen && !document.hidden) {
                     this.fetchAgentMessages();
                 }
-            }, 8000);
+            }, this.agentPollingIntervalMs);
         }
 
         stopAgentPolling() {
@@ -491,6 +504,8 @@
 
         async fetchAgentMessages() {
             try {
+                if (this.isPollingInFlight) return;
+                this.isPollingInFlight = true;
                 const url = `${this.config.apiUrl}/widget/${this.config.orgId}/messages?session_id=${encodeURIComponent(this.sessionId)}&last_id=${this.lastAgentMessageId}`;
                 const response = await fetch(url, { method: 'GET' });
                 if (!response.ok) return;
@@ -504,7 +519,21 @@
                 });
             } catch (e) {
                 console.debug('[AI Widget] Agent polling failed:', e);
+            } finally {
+                this.isPollingInFlight = false;
             }
+        }
+
+        isContactQuery(text) {
+            return /\b(contact|reach|email|phone|call|support|help|helpline|customer care|whatsapp|address|location)\b/i.test(text || '');
+        }
+
+        buildContactResponse() {
+            const parts = [];
+            if (this.config.contactEmail) parts.push(`Email: ${this.config.contactEmail}`);
+            if (this.config.contactPhone) parts.push(`Phone: ${this.config.contactPhone}`);
+            if (this.config.orgWebsite) parts.push(`Website: ${this.config.orgWebsite}`);
+            return parts.length ? `You can reach us at ${parts.join(' | ')}.` : '';
         }
 
         toggleExpand() {
@@ -1072,7 +1101,23 @@
 
                 if (!response.ok) {
                     this.removeTypingIndicator();
-                    this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                    let errorText = '';
+                    try {
+                        errorText = await response.text();
+                    } catch (readErr) {
+                        console.warn('[AI Chat] Failed to read error response:', readErr);
+                    }
+                    console.error('[AI Chat] Stream request failed:', {
+                        status: response.status,
+                        statusText: response.statusText,
+                        body: errorText
+                    });
+                    const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
+                    if (contactFallback) {
+                        this.addMessage(contactFallback, 'bot');
+                    } else {
+                        this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                    }
                     return;
                 }
 
@@ -1093,11 +1138,58 @@
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
                 // Read the stream
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
                 let fullResponse = '';
                 let hasContent = false;
                 let buffer = '';
+
+                if (!response.body) {
+                    let fallbackText = '';
+                    try {
+                        fallbackText = await response.text();
+                    } catch (readErr) {
+                        console.warn('[AI Chat] Failed to read fallback response:', readErr);
+                    }
+
+                    console.warn('[AI Chat] Stream body missing, using fallback text:', fallbackText);
+
+                    if (fallbackText.includes('data: ')) {
+                        const parts = fallbackText.split('\n\n');
+                        for (const part of parts) {
+                            if (part.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(part.slice(6));
+                                    if (data.content) {
+                                        fullResponse += data.content;
+                                    }
+                                } catch (err) {
+                                    console.error('Fallback parse error:', err);
+                                }
+                            }
+                        }
+                    } else if (fallbackText.trim().length > 0) {
+                        fullResponse = fallbackText.trim();
+                    }
+
+                    // Remove the empty bot message element before adding fallback
+                    if (botMessageElement && botMessageElement.parentNode) {
+                        botMessageElement.parentNode.removeChild(botMessageElement);
+                    }
+
+                    if (fullResponse.trim().length > 0) {
+                        this.addMessage(fullResponse, 'bot');
+                    } else {
+                        const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
+                        if (contactFallback) {
+                            this.addMessage(contactFallback, 'bot');
+                        } else {
+                            this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                        }
+                    }
+                    return;
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -1117,7 +1209,16 @@
                                 
                                 if (data.error) {
                                     if (!hasContent) {
-                                        this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                                        // Remove the empty bot message element before adding error message
+                                        if (botMessageElement && botMessageElement.parentNode) {
+                                            botMessageElement.parentNode.removeChild(botMessageElement);
+                                        }
+                                        const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
+                                        if (contactFallback) {
+                                            this.addMessage(contactFallback, 'bot');
+                                        } else {
+                                            this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                                        }
                                     } else {
                                         console.warn('[AI Chat] Stream error after partial response:', data.error);
                                     }
@@ -1141,7 +1242,7 @@
                                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                                 }
                             } catch (err) {
-                                console.error('Stream parse error:', err);
+                                console.error('Stream parse error:', err, { line });
                             }
                         }
                     }
@@ -1159,10 +1260,19 @@
                 }
 
             } catch (error) {
-                console.error('Chat error:', error);
+                console.error('Chat error:', {
+                    name: error?.name,
+                    message: error?.message,
+                    stack: error?.stack
+                });
                 this.removeTypingIndicator();
                 if (!hasContent) {
-                    this.addMessage('Sorry, I\'m experiencing technical difficulties. Please try again later.', 'bot');
+                    const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
+                    if (contactFallback) {
+                        this.addMessage(contactFallback, 'bot');
+                    } else {
+                        this.addMessage('Sorry, I\'m experiencing technical difficulties. Please try again later.', 'bot');
+                    }
                 }
             }
         }

@@ -10,11 +10,11 @@ class AiChatSupportSeeder extends Seeder
 {
     public function run()
     {
-        // Use the platform organization (main AI Chat Support website)
-        $organization = Organization::where('slug', 'platform')->first();
+        // Use the AI Chat Support organization (main platform website)
+        $organization = Organization::where('slug', 'ai-chat-support')->first();
         
         if (!$organization) {
-            $this->command->error("Platform organization not found! Please create it first.");
+            $this->command->error("AI Chat Support organization not found! Please create it first.");
             return;
         }
 
@@ -24,8 +24,7 @@ class AiChatSupportSeeder extends Seeder
             'contact_email' => 'support@ai-chat.support',
             'contact_phone' => '9937253528',
             'settings' => array_merge($organization->settings ?? [], [
-                'address' => 'Sambalpur, India',
-                'collection_name' => 'platform'
+                'address' => 'Sambalpur, India'
             ])
         ]);
         
@@ -113,7 +112,7 @@ class AiChatSupportSeeder extends Seeder
         // Sync to Qdrant
         try {
             $aiAgentService = app(AiAgentService::class);
-            $collectionName = $organization->slug; // Use 'platform' collection
+            $collectionName = $organization->slug; // Use organization slug as collection name
             
             // Create collection if it doesn't exist
             $createResult = $aiAgentService->createCollection($collectionName, 768);

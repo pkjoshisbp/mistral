@@ -29,7 +29,7 @@ class ReviewsDisplay extends Component
         if ($organizationId) {
             $this->organizationId = $organizationId;
             $this->organization = Organization::findOrFail($organizationId);
-            $this->organizationName = data_get($this->organization, 'name');
+            $this->organizationName = $this->normalizeOrganizationName(data_get($this->organization, 'name'));
         }
     }
 
@@ -106,8 +106,23 @@ class ReviewsDisplay extends Component
     {
         $reviews = $this->reviews;
         $stats = $this->stats;
-        $organizationName = $this->organizationName ?? data_get($this->organization, 'name');
+        $organizationName = $this->organizationName ?? $this->normalizeOrganizationName(data_get($this->organization, 'name'));
         
         return view('livewire.public.reviews-display', compact('reviews', 'stats', 'organizationName'));
+    }
+
+    private function normalizeOrganizationName($name): ?string
+    {
+        if (is_array($name)) {
+            $name = implode(', ', array_filter(array_map('trim', $name)));
+        }
+
+        if (is_object($name)) {
+            $name = method_exists($name, '__toString') ? (string) $name : null;
+        }
+
+        $name = is_string($name) ? trim($name) : null;
+
+        return $name !== '' ? $name : null;
     }
 }

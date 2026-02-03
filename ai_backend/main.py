@@ -876,21 +876,32 @@ async def llm_chat(request: Request):
     except Exception:
         pass  # Don't fail the request if process check fails
     
+    # Check if use_vastai is explicitly requested in options
+    use_vastai = options.get("use_vastai", False) if options else False
+    
     # Get the appropriate Ollama URL for this model
-    ollama_url = get_ollama_url(model)
+    if use_vastai:
+        ollama_url = OLLAMA_URL_VASTAI
+        logging.info(f"🚀 Forcing Vast.ai GPU for non-streaming: {ollama_url} model={model}")
+    else:
+        ollama_url = get_ollama_url(model)
     logging.info(f"Using Ollama URL: {ollama_url} for model: {model}")
     
     # Try primary URL first, then fallback to local if vast.ai fails
     configs_to_try = [(ollama_url, model)]
     if ollama_url == OLLAMA_URL_VASTAI:
-        # Fallback to local Ollama with a smaller model
-        configs_to_try.append((OLLAMA_URL_LOCAL, FALLBACK_CHAT_MODEL))
-        logging.info(f"Will fallback to local Ollama ({OLLAMA_URL_LOCAL}) with model {FALLBACK_CHAT_MODEL} if vast.ai fails")
+        # Fallback to local Ollama - try same model first, then fallback model
+        configs_to_try.append((OLLAMA_URL_LOCAL, model))
+        if model != FALLBACK_CHAT_MODEL:
+            configs_to_try.append((OLLAMA_URL_LOCAL, FALLBACK_CHAT_MODEL))
+        logging.info(f"Will fallback to local Ollama ({OLLAMA_URL_LOCAL}) with models: {model}, {FALLBACK_CHAT_MODEL} if vast.ai fails")
     
     last_error = None
     for url_to_try, model_to_use in configs_to_try:
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            # Use shorter timeout for Vast.ai to enable fast fallback
+            timeout = 15.0 if url_to_try == OLLAMA_URL_VASTAI else 60.0
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 payload = {
                     "model": model_to_use,
                     "messages": messages,
@@ -931,8 +942,10 @@ async def llm_chat(request: Request):
                 
         except Exception as e:
             last_error = e
-            logging.warning(f"Ollama URL {url_to_try} failed: {str(e)}")
-            continue  # Try next URL
+            is_vastai = url_to_try == OLLAMA_URL_VASTAI
+            logging.warning(f"{'🚨 Vast.ai' if is_vastai else 'Local Ollama'} URL {url_to_try} failed: {str(e)}")
+            if is_vastai:
+                logging.info(f"⚡ Falling back to local Ollama...")\n            continue  # Try next URL
     
     # If all Ollama URLs failed, try llama-server fallback
     # If all Ollama URLs failed, try llama-server fallback
@@ -983,22 +996,33 @@ async def stream_chat(request: Request):
         f"Stream chat request: model={model} backend={backend_type} messages={len(messages)} options_keys={list(options.keys()) if options else []}"
     )
     
+    # Check if use_vastai is explicitly requested in options
+    use_vastai = options.get("use_vastai", False) if options else False
+    
     # Get the appropriate Ollama URL for this model
-    ollama_url = get_ollama_url(model)
-    logging.info(f"Using Ollama URL: {ollama_url} for streaming model: {model}")
+    if use_vastai:
+        ollama_url = OLLAMA_URL_VASTAI
+        logging.info(f"🚀 Forcing Vast.ai GPU for streaming: {ollama_url} model={model}")
+    else:
+        ollama_url = get_ollama_url(model)
+        logging.info(f"Using Ollama URL: {ollama_url} for streaming model: {model}")
     
     # Try primary URL first, then fallback to local if vast.ai fails
     configs_to_try = [(ollama_url, model)]
     if ollama_url == OLLAMA_URL_VASTAI:
-        # Fallback to local Ollama with a smaller model
-        configs_to_try.append((OLLAMA_URL_LOCAL, FALLBACK_CHAT_MODEL))
-        logging.info(f"Will fallback to local Ollama ({OLLAMA_URL_LOCAL}) with model {FALLBACK_CHAT_MODEL} if vast.ai fails for streaming")
+        # Fallback to local Ollama - try same model first, then fallback model
+        configs_to_try.append((OLLAMA_URL_LOCAL, model))
+        if model != FALLBACK_CHAT_MODEL:
+            configs_to_try.append((OLLAMA_URL_LOCAL, FALLBACK_CHAT_MODEL))
+        logging.info(f"Will fallback to local Ollama ({OLLAMA_URL_LOCAL}) with models: {model}, {FALLBACK_CHAT_MODEL} if vast.ai fails for streaming")
     
     async def generate():
         last_error = None
         for url_to_try, model_to_use in configs_to_try:
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
+                # Use shorter timeout for Vast.ai to enable fast fallback
+                timeout = 20.0 if url_to_try == OLLAMA_URL_VASTAI else 120.0
+                async with httpx.AsyncClient(timeout=timeout) as client:
                     # Make streaming request to Ollama
                     stream_payload = {
                         "model": model_to_use,
@@ -1060,10 +1084,13 @@ async def stream_chat(request: Request):
                             
             except Exception as e:
                 last_error = e
+                is_vastai = url_to_try == OLLAMA_URL_VASTAI
                 logging.warning(
-                    f"Stream failed for {url_to_try}: {str(e)} | repr={repr(e)}",
+                    f"{'🚨 Vast.ai stream' if is_vastai else 'Local Ollama stream'} failed for {url_to_try}: {str(e)} | repr={repr(e)}",
                     exc_info=True,
                 )
+                if is_vastai:
+                    logging.info(f"⚡ Falling back to local Ollama for streaming...")
                 continue  # Try next URL
         
         # If all Ollama URLs failed

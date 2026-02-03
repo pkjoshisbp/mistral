@@ -528,39 +528,112 @@ class AiAgentService
      */
     public function enhancedSearch($collectionName, $originalQuery, $limit = 5)
     {
+        $searchStartTime = microtime(true);
         try {
             Log::info('Enhanced search started', [
                 'collection' => $collectionName,
                 'original_query' => $originalQuery
             ]);
 
-            // TEMPORARILY DISABLE QUERY REWRITE - use original query directly
-            // This fixes the issue where query rewrite was producing conversational responses
-            // that confused the search and final AI response
-            $queryToUse = $originalQuery;
-            
-            Log::info('Query rewrite skipped (disabled)', [
-                'original_query' => $originalQuery,
-                'query_used' => $queryToUse
-            ]);
+            // Use query rewrite to improve keyword matching, with safeguards
+            $rewrittenQuery = $this->rewriteQueryForSearch($originalQuery);
 
-            // Generate embedding for the original query
-            $embedding = $this->embed($queryToUse);
+            if ($rewrittenQuery === $originalQuery) {
+                Log::info('Query rewrite skipped (no change)', [
+                    'original_query' => $originalQuery,
+                    'query_used' => $rewrittenQuery
+                ]);
+            } else {
+                Log::info('Query rewrite applied', [
+                    'original_query' => $originalQuery,
+                    'query_used' => $rewrittenQuery
+                ]);
+            }
 
-            if (!$embedding || !is_array($embedding)) {
+            // Generate embeddings for both original and rewritten queries
+            $originalEmbedding = $this->embed($originalQuery);
+            $rewrittenEmbedding = $rewrittenQuery !== $originalQuery ? $this->embed($rewrittenQuery) : null;
+
+            if (!$originalEmbedding || !is_array($originalEmbedding)) {
                 Log::warning('Failed to generate embedding for enhanced search', [
-                    'query' => $queryToUse
+                    'query' => $originalQuery
                 ]);
                 return null;
             }
 
-            // Search Qdrant with the embedding
-            $searchResults = $this->searchQdrant($collectionName, $embedding, $limit);
+            // Search Qdrant with original query embedding
+            $originalResults = $this->searchQdrant($collectionName, $originalEmbedding, $limit);
+
+            // Search Qdrant with rewritten query embedding (if available)
+            $rewrittenResults = null;
+            if ($rewrittenEmbedding && is_array($rewrittenEmbedding)) {
+                $rewrittenResults = $this->searchQdrant($collectionName, $rewrittenEmbedding, $limit);
+            }
+
+            $searchElapsed = round((microtime(true) - $searchStartTime) * 1000, 2);
+            Log::info('Enhanced search completed', [
+                'collection' => $collectionName,
+                'original_query' => $originalQuery,
+                'rewritten_query' => $rewrittenQuery,
+                'original_results_count' => isset($originalResults['results']) ? count($originalResults['results']) : 0,
+                'rewritten_results_count' => isset($rewrittenResults['results']) ? count($rewrittenResults['results']) : 0,
+                'total_elapsed_ms' => $searchElapsed
+            ]);
+
+            // Merge results by best score per unique id
+            $mergedResults = [];
+            $resultsIndex = [];
+
+            foreach ([$originalResults, $rewrittenResults] as $resultSet) {
+                if (!isset($resultSet['results']) || !is_array($resultSet['results'])) {
+                    continue;
+                }
+                foreach ($resultSet['results'] as $item) {
+                    $itemId = $item['id'] ?? null;
+                    if ($itemId === null) {
+                        continue;
+                    }
+                    if (!isset($resultsIndex[$itemId]) || ($item['score'] ?? 0) > ($mergedResults[$resultsIndex[$itemId]]['score'] ?? 0)) {
+                        if (isset($resultsIndex[$itemId])) {
+                            $mergedResults[$resultsIndex[$itemId]] = $item;
+                        } else {
+                            $resultsIndex[$itemId] = count($mergedResults);
+                            $mergedResults[] = $item;
+                        }
+                    }
+                }
+            }
+
+            usort($mergedResults, function ($a, $b) {
+                return ($b['score'] ?? 0) <=> ($a['score'] ?? 0);
+            });
+
+            $topMerged = array_slice($mergedResults, 0, 3);
+            $topMergedSummary = array_map(function ($item) {
+                return [
+                    'id' => $item['id'] ?? null,
+                    'score' => $item['score'] ?? null,
+                    'data_type' => $item['payload']['data_type'] ?? null,
+                    'item_id' => $item['payload']['item_id'] ?? null,
+                    'title' => $item['payload']['title'] ?? null
+                ];
+            }, $topMerged);
+
+            Log::info('Enhanced search merged top results', [
+                'collection' => $collectionName,
+                'original_query' => $originalQuery,
+                'rewritten_query' => $rewrittenQuery,
+                'top_results' => $topMergedSummary
+            ]);
+
+            $searchResults = [
+                'results' => array_slice($mergedResults, 0, $limit)
+            ];
             
             Log::info('Enhanced search completed', [
                 'collection' => $collectionName,
                 'original_query' => $originalQuery,
-                'query_used' => $queryToUse,
+                'query_used' => $rewrittenQuery,
                 'results_count' => isset($searchResults['results']) ? count($searchResults['results']) : 0
             ]);
 
@@ -676,28 +749,34 @@ class AiAgentService
      */
     public function rewriteQueryForSearch($originalQuery)
     {
+        $startTime = microtime(true);
         try {
-            // Use the regular LLM for query rewriting instead of the GGUF model
-            $systemPrompt = "You are a query rewriter for database search. Convert the user's question into search keywords ONLY. Extract just the main topic/subject they're asking about.
-
-EXAMPLES:
-- 'What pricing plans do you offer?' → 'pricing plans'
-- 'Do you have any refund policy?' → 'refund policy'  
-- 'How much does it cost?' → 'cost pricing'
-- 'What are your business hours?' → 'business hours'
-- 'Can you provide WhatsApp integration?' → 'WhatsApp integration'
-
-Output ONLY the search keywords, no sentences, no explanations, no conversational text.";
+            // Use Vast.ai for faster query rewriting
+            $systemPrompt = "Extract the core product/category and qualifier keywords.
+Rules:
+- Keep the main noun
+- Keep user intent
+- Remove politeness and filler
+- Output 2–4 lowercase keywords only
+- Do not invent new terms";
             
             $messages = [
                 ['role' => 'system', 'content' => $systemPrompt],
                 ['role' => 'user', 'content' => $originalQuery]
             ];
             
-            $response = $this->llmChat($messages, 'llama3.2:1b');
+            // Use Vast.ai GPU with llama3:8b for faster rewriting
+            $response = $this->llmChat($messages, 'llama3:8b-instruct-q5_K_M', null, null, ['use_vastai' => true]);
+            $elapsed = round((microtime(true) - $startTime) * 1000, 2);
             
             if ($response && isset($response['message']['content'])) {
                 $rewrittenQuery = trim($response['message']['content']);
+                
+                Log::info('Query rewrite timing', [
+                    'elapsed_ms' => $elapsed,
+                    'original' => $originalQuery,
+                    'rewritten' => $rewrittenQuery
+                ]);
                 
                 // Validation: If the rewritten query is too long or conversational, use original
                 if (strlen($rewrittenQuery) > 100 || 
@@ -976,6 +1055,26 @@ Output ONLY the search keywords, no sentences, no explanations, no conversationa
         $tokensFromChars = $charCount / 4;
         
         return max($tokensFromWords, $tokensFromChars);
+    }
+
+    /**
+     * Log token usage for widget streaming responses
+     */
+    public function logWidgetTokenUsage(int $organizationId, array $messages, string $responseText, string $endpointType = 'llm_chat_stream'): void
+    {
+        try {
+            $inputTokens = (int) $this->estimateTokenCount($messages);
+            $outputTokens = max(1, (int) (strlen($responseText) / 4));
+            $totalTokens = $inputTokens + $outputTokens;
+            $summary = substr(json_encode($messages), 0, 255);
+
+            $this->logTokenUsage(null, $organizationId, $endpointType, $totalTokens, $summary);
+        } catch (\Exception $e) {
+            Log::error('Failed to log widget token usage', [
+                'organization_id' => $organizationId,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
     
     /**

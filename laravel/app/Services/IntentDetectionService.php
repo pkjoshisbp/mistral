@@ -224,8 +224,8 @@ class IntentDetectionService
     private function detectIntentWithLLM(string $query, array $settings = []): ?array
     {
         try {
-            // Force a fast local model for intent classification to avoid costly vast.ai hops
-            $intentModel = $settings['intent_llm_model'] ?? config('services.ai_agent.intent_model', env('AI_INTENT_MODEL', 'llama3.2:1b'));
+            // Use Vast.ai GPU with llama3:8b for faster intent detection (3-4s vs 26s local)
+            $intentModel = 'llama3:8b-instruct-q5_K_M';
             $maxTokens = $settings['intent_llm_max_tokens'] ?? 64;
             $temperature = $settings['intent_llm_temperature'] ?? 0.1;
             $topP = $settings['intent_llm_top_p'] ?? 0.85;
@@ -238,6 +238,7 @@ class IntentDetectionService
                 'temperature' => $temperature,
                 'top_p' => $topP,
                 'repeat_penalty' => $repeatPenalty,
+                'use_vastai' => true,  // Force Vast.ai GPU for speed
             ];
 
             $messages = [

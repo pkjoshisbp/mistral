@@ -71,7 +71,22 @@
                                                 </small>
                                             </div>
                                         @else
-                                            <span class="text-muted">No active subscription</span>
+                                            @php
+                                                $creditBalance = $user->userCredit?->balance ?? 0;
+                                                $totalPurchased = $user->userCredit?->total_purchased ?? 0;
+                                            @endphp
+                                            @if($creditBalance > 0)
+                                                <div>
+                                                    <strong class="text-info">Credits Active</strong>
+                                                    <br>
+                                                    <small class="text-muted">
+                                                        {{ number_format($creditBalance, 2) }} credits | 
+                                                        {{ $totalPurchased > 0 ? 'Paid credits' : 'Free credits' }}
+                                                    </small>
+                                                </div>
+                                            @else
+                                                <span class="text-muted">No active subscription</span>
+                                            @endif
                                         @endif
                                     </td>
                                     <td>

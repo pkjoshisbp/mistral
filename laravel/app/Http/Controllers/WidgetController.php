@@ -59,7 +59,11 @@ class WidgetController
         $widgetConfig = [
             'orgId' => $orgId,
             'orgName' => $organization->name,
+            'orgWebsite' => $organization->website ?: config('app.url'),
+            'contactEmail' => $organization->contact_email ?? null,
+            'contactPhone' => $organization->contact_phone ?? null,
             'apiUrl' => config('app.url'),
+            'scriptVersion' => $scriptVersion,
             'theme' => $settings['widget_theme'] ?? 'default',
             'position' => $settings['widget_position'] ?? 'bottom-right',
             'offsetX' => (int)($settings['widget_offset_x'] ?? 20),
@@ -556,18 +560,51 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            $isContactQuery = $this->isContactQuery($message);
+
+            if ($isContactQuery) {
+                $contactResponse = $this->buildContactResponse($orgEmail, $orgPhone, $orgWebsite);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $contactResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+
+                return response()->json([
+                    'response' => $contactResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             // Assistant naming and channel-agnostic guidance
             $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
             $businessContext = $this->buildBusinessContext($organization);
             $promotionContext = $this->buildPromotionContext($organization);
-            
+
             // Build smart system prompt
             if ($hasShopifyData) {
                 // Shopify data available - guide LLM to be conversational
                 $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
                 $systemPrompt .= "Tone: {$responseTone}. Language: {$responseLanguage}. ";
                 $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n";
-                $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\".\n\n";
+                $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\".\n";
+                $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question.\n";
+                $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n\n";
                 $systemPrompt .= $finalContext . "\n";
                 if ($businessContext) {
                     $systemPrompt .= $businessContext . "\n";
@@ -608,13 +645,23 @@ class WidgetController
                     $systemPrompt .= "\nInfo:\n{$context}\n";
                 }
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\". ";
-                $systemPrompt .= "Be brief, friendly, and helpful. Answer in 2-3 sentences max (60 words).";
+                $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question. ";
+                $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
             }
 
             // Get AI response using llmChat for better token tracking
             $messages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message);
             
             // Use organization-specific AI provider and model
+            $maxTokens = 120;
+            if ($isContactQuery) {
+                $maxTokens = 60;
+            } elseif (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
+                || strlen($message) > 120
+                || strlen($finalContext) > 2000) {
+                $maxTokens = 220;
+            }
+            $localOptions = ['num_predict' => $maxTokens, 'temperature' => 0.3];
             $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
             if ($this->shouldUseOpenAiFallback($message, $organization, $responseLanguage)) {
                 $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
@@ -626,7 +673,7 @@ class WidgetController
             } else {
                 // Use local LLM with organization-specific or global model
                 $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
-                $aiResponse = $this->aiAgentService->llmChat($messages, $model, null, $organization->id);
+                $aiResponse = $this->aiAgentService->llmChat($messages, $model, null, $organization->id, $localOptions);
             }
 
             $rawResponseText = null;
@@ -1011,11 +1058,26 @@ class WidgetController
                     return;
                 }
 
+                $orgWebsite = $organization->website ?: config('app.url');
+                $orgEmail = $organization->contact_email ?? null;
+                $orgPhone = $organization->contact_phone ?? null;
+
+                $contactQuickResponse = $this->isContactQuery($message)
+                    ? $this->buildContactResponse($orgEmail, $orgPhone, $orgWebsite)
+                    : null;
+
                 // Build messages
                 $systemPrompt = "You are AI Assistant for {$organization->name}.";
                 $businessContext = $this->buildBusinessContext($organization);
                 $promotionContext = $this->buildPromotionContext($organization);
                 $systemPrompt .= " Tone: {$responseTone}. Language: {$responseLanguage}.";
+                $systemPrompt .= " Write in first-person plural as the business (use \"we/our\"), not \"they\".";
+                $systemPrompt .= " Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short.";
+                $systemPrompt .= " If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
+                $systemPrompt .= " Website: {$orgWebsite}";
+                if ($orgEmail) $systemPrompt .= " | Email: {$orgEmail}";
+                if ($orgPhone) $systemPrompt .= " | Phone: {$orgPhone}";
+                $systemPrompt .= ".";
                 if ($businessContext) {
                     $systemPrompt .= "\n" . $businessContext;
                 }
@@ -1031,6 +1093,19 @@ class WidgetController
 
                 $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message);
                 $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage);
+                $maxTokens = $contactQuickResponse ? 60 : 140;
+                if (!$contactQuickResponse && (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
+                    || strlen($message) > 120
+                    || strlen($context) > 2000)) {
+                    $maxTokens = 240;
+                }
+
+                if ($contactQuickResponse) {
+                    $fullResponse = $contactQuickResponse;
+                    echo "data: " . json_encode(['content' => $fullResponse, 'done' => true]) . "\n\n";
+                    ob_flush();
+                    flush();
+                } else {
 
                 if ($useOpenAiFallback) {
                     $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
@@ -1047,66 +1122,78 @@ class WidgetController
                 }
 
                 if (!$useOpenAiFallback) {
-                    // Stream from FastAPI
-                $fastApiUrl = config('services.ai_agent.url');
-                $model = \App\Models\AdminSetting::get('llama_default_model', 'llama3.2:3b');
-                
-                $fullResponse = '';
-                $sseBuffer = '';
+                    // Stream from FastAPI with Vast.ai GPU
+                    $responseStartTime = microtime(true);
+                    Log::info('Starting LLM response generation', ['model' => 'llama3:8b-instruct-q5_K_M', 'use_vastai' => true]);
+                    
+                    $fastApiUrl = config('services.ai_agent.url');
+                    $model = 'llama3:8b-instruct-q5_K_M';  // Use Vast.ai model
+                    
+                    $fullResponse = '';
+                    $sseBuffer = '';
 
-                $ch = curl_init("{$fastApiUrl}/llm/chat/stream");
-                curl_setopt_array($ch, [
-                    CURLOPT_RETURNTRANSFER => false,
-                    CURLOPT_HEADER => false,
-                    CURLOPT_POST => true,
-                    CURLOPT_POSTFIELDS => json_encode([
-                        'messages' => $chatMessages,
-                        'model' => $model,
-                        'backend_type' => 'ollama'
-                    ]),
-                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                    CURLOPT_WRITEFUNCTION => function ($curl, $data) use (&$sseBuffer, &$fullResponse) {
-                        $sseBuffer .= $data;
+                    $ch = curl_init("{$fastApiUrl}/llm/chat/stream");
+                    curl_setopt_array($ch, [
+                        CURLOPT_RETURNTRANSFER => false,
+                        CURLOPT_HEADER => false,
+                        CURLOPT_POST => true,
+                        CURLOPT_POSTFIELDS => json_encode([
+                            'messages' => $chatMessages,
+                            'model' => $model,
+                            'backend_type' => 'ollama',
+                            'options' => [
+                                'num_predict' => $maxTokens,
+                                'temperature' => 0.3,
+                                'use_vastai' => true
+                            ]
+                        ]),
+                        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                        CURLOPT_WRITEFUNCTION => function ($curl, $data) use (&$sseBuffer, &$fullResponse) {
+                            $sseBuffer .= $data;
 
-                        $parts = explode("\n\n", $sseBuffer);
-                        $sseBuffer = array_pop($parts);
+                            $parts = explode("\n\n", $sseBuffer);
+                            $sseBuffer = array_pop($parts);
 
-                        foreach ($parts as $part) {
-                            $part = trim($part);
-                            if ($part === '') {
-                                continue;
-                            }
+                            foreach ($parts as $part) {
+                                $part = trim($part);
+                                if ($part === '') {
+                                    continue;
+                                }
 
-                            $lines = preg_split('/\r?\n/', $part);
-                            foreach ($lines as $line) {
-                                $line = trim($line);
-                                if (str_starts_with($line, 'data: ')) {
-                                    $payload = json_decode(substr($line, 6), true);
-                                    if (isset($payload['content'])) {
-                                        $fullResponse .= $payload['content'];
+                                $lines = preg_split('/\r?\n/', $part);
+                                foreach ($lines as $line) {
+                                    $line = trim($line);
+                                    if (str_starts_with($line, 'data: ')) {
+                                        $payload = json_decode(substr($line, 6), true);
+                                        if (isset($payload['content'])) {
+                                            $fullResponse .= $payload['content'];
+                                        }
                                     }
                                 }
                             }
+
+                            echo $data;
+                            ob_flush();
+                            flush();
+                            return strlen($data);
                         }
+                    ]);
+                    
+                    curl_exec($ch);
+                    curl_close($ch);
+                    
+                    $responseElapsedMs = round((microtime(true) - $responseStartTime) * 1000, 2);
+                    Log::info('LLM response generation completed', ['elapsed_ms' => $responseElapsedMs, 'response_length' => strlen($fullResponse)]);
 
-                        echo $data;
-                        ob_flush();
-                        flush();
-                        return strlen($data);
-                    }
-                ]);
-                
-                curl_exec($ch);
-                curl_close($ch);
-
-                if (trim($sseBuffer) !== '') {
-                    $lines = preg_split('/\r?\n/', trim($sseBuffer));
-                    foreach ($lines as $line) {
-                        $line = trim($line);
-                        if (str_starts_with($line, 'data: ')) {
-                            $payload = json_decode(substr($line, 6), true);
-                            if (isset($payload['content'])) {
-                                $fullResponse .= $payload['content'];
+                    if (trim($sseBuffer) !== '') {
+                        $lines = preg_split('/\r?\n/', trim($sseBuffer));
+                        foreach ($lines as $line) {
+                            $line = trim($line);
+                            if (str_starts_with($line, 'data: ')) {
+                                $payload = json_decode(substr($line, 6), true);
+                                if (isset($payload['content'])) {
+                                    $fullResponse .= $payload['content'];
+                                }
                             }
                         }
                     }
@@ -1143,6 +1230,21 @@ class WidgetController
                 }
 
                 if ($finalResponse !== '') {
+                    Log::info('Widget AI stream response', [
+                        'org_id' => $organization->id,
+                        'session_id' => $sessionId,
+                        'response_length' => strlen($finalResponse),
+                        'context_length' => strlen($context),
+                        'used_live_data' => $liveData ? true : false,
+                    ]);
+
+                    $this->aiAgentService->logWidgetTokenUsage(
+                        $organization->id,
+                        $chatMessages,
+                        $finalResponse,
+                        'llm_chat_stream'
+                    );
+
                     $conversation = $this->saveConversationToDatabase(
                         $organization,
                         $sessionId,
@@ -1624,6 +1726,25 @@ class WidgetController
         }
 
         return '';
+    }
+
+    private function isContactQuery(string $message): bool
+    {
+        return (bool) preg_match('/\b(contact|reach|email|phone|call|support|help|helpline|customer care|whatsapp|address|location)\b/i', $message);
+    }
+
+    private function buildContactResponse(?string $email, ?string $phone, string $website): string
+    {
+        $parts = [];
+        if ($email) {
+            $parts[] = "Email: {$email}";
+        }
+        if ($phone) {
+            $parts[] = "Phone: {$phone}";
+        }
+        $parts[] = "Website: {$website}";
+
+        return 'You can reach us at ' . implode(' | ', $parts) . '.';
     }
 
     private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message): array

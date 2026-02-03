@@ -12,6 +12,7 @@
 /* Launcher Button */
 .ai-chat-button { width:60px !important; height:60px !important; background:linear-gradient(135deg,#667eea,#764ba2) !important; border:none !important; border-radius:50% !important; display:flex !important; align-items:center !important; justify-content:center !important; color:#fff !important; cursor:pointer !important; box-shadow:0 4px 14px rgba(0,0,0,.18) !important; transition:transform .25s ease, box-shadow .25s ease !important; position:relative !important; }
 .ai-chat-button:hover { transform:scale(1.08) !important; box-shadow:0 6px 26px rgba(0,0,0,.25) !important; }
+.ai-chat-button svg { width:28px !important; height:28px !important; fill:currentColor !important; color:#fff !important; display:block !important; max-width:none !important; max-height:none !important; min-width:0 !important; min-height:0 !important; flex-shrink:0 !important; }
 .ai-chat-notification { position:absolute !important; top:-4px !important; right:-4px !important; width:20px !important; height:20px !important; background:#ff424d !important; color:#fff !important; border-radius:50% !important; font-size:11px !important; font-weight:600 !important; display:flex !important; align-items:center !important; justify-content:center !important; }
 
 /* Window */
@@ -34,6 +35,7 @@
 .ai-chat-status-dot { width:8px !important; height:8px !important; background:#31d158 !important; border-radius:50% !important; box-shadow:0 0 0 4px rgba(49,209,88,.25) !important; animation:pulse 2.4s infinite !important; }
 @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(.6);opacity:.55} }
 .ai-chat-expand, .ai-chat-close { background:rgba(255,255,255,.15) !important; border:none !important; color:#fff !important; width:34px !important; height:34px !important; border-radius:10px !important; display:flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; transition:background .25s ease, transform .25s ease !important; }
+.ai-chat-expand svg, .ai-chat-close svg { fill:currentColor !important; stroke:currentColor !important; color:#fff !important; }
 .ai-chat-expand:hover, .ai-chat-close:hover { background:rgba(255,255,255,.28) !important; }
 .ai-chat-close:hover { transform:rotate(90deg) !important; }
 
@@ -69,6 +71,7 @@
 .ai-chat-input:focus { border-color:{{ $theme['primaryColor'] }} !important; box-shadow:0 0 0 3px rgba(0,123,255,.15) !important; outline:none !important; }
 .ai-chat-input::placeholder { color:#8c97a3 !important; }
 .ai-chat-send-button { width:46px !important; height:46px !important; background:{{ $theme['primaryColor'] }} !important; border:none !important; border-radius:14px !important; display:flex !important; align-items:center !important; justify-content:center !important; color:#fff !important; cursor:pointer !important; transition:background .25s ease, transform .25s ease !important; box-shadow:0 4px 12px -2px rgba(0,123,255,.45) !important; }
+.ai-chat-send-button svg { fill:currentColor !important; color:#fff !important; }
 .ai-chat-send-button:hover { background:rgba(0,123,255,.9) !important; transform:translateY(-2px) !important; }
 .ai-chat-send-button:active { transform:translateY(0) !important; box-shadow:0 2px 6px rgba(0,0,0,.25) !important; }
 .ai-chat-send-button:disabled { background:#9aa4b1 !important; box-shadow:none !important; cursor:not-allowed !important; }
@@ -88,8 +91,12 @@
 .ai-chat-lead-skip:hover { background:#e1e7ec !important; color:#1a2632 !important; }
 .ai-chat-lead-form[style*='display: none'] { display:none !important; }
 
-/* Utility */
-.ai-chat-widget svg { pointer-events:none !important; }
+/* Utility - WordPress & Theme Compatibility */
+.ai-chat-widget svg { pointer-events:none !important; display:inline-block !important; vertical-align:middle !important; max-width:none !important; max-height:none !important; min-width:0 !important; min-height:0 !important; overflow:visible !important; }
+.ai-chat-widget svg path { vector-effect:non-scaling-stroke !important; }
+.ai-chat-widget button svg { width:auto !important; height:auto !important; flex-shrink:0 !important; }
+.ai-chat-widget svg path, .ai-chat-widget svg circle, .ai-chat-widget svg rect, .ai-chat-widget svg polygon { fill:inherit !important; stroke:inherit !important; }
+.ai-chat-button svg, .ai-chat-send-button svg, .ai-chat-expand svg, .ai-chat-close svg { width:initial !important; height:initial !important; display:block !important; }
 .ai-chat-widget button { font-family:inherit !important; }
 .ai-chat-widget * { box-sizing:border-box !important; }
 
