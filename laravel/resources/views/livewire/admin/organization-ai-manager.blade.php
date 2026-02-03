@@ -223,7 +223,20 @@
                                                 <div class="card-body">
                                                     <div class="form-check form-switch mb-2">
                                                         <input class="form-check-input" type="checkbox" wire:model="notifyChatEmailEnabled" id="notifyChatEmailEnabled">
-                                                        <label class="form-check-label" for="notifyChatEmailEnabled">Send each chat interaction by email</label>
+                                                        <label class="form-check-label" for="notifyChatEmailEnabled">Enable chat email notifications</label>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold" for="notifyChatEmailMode">Email Frequency</label>
+                                                        <select id="notifyChatEmailMode" class="form-select" wire:model="notifyChatEmailMode">
+                                                            <option value="immediate">Send every interaction</option>
+                                                            <option value="digest">Send digest every few minutes</option>
+                                                        </select>
+                                                        <small class="text-muted">Digest mode groups multiple messages into a single email.</small>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold" for="notifyChatEmailIntervalMinutes">Digest Interval (minutes)</label>
+                                                        <input type="number" min="1" max="120" id="notifyChatEmailIntervalMinutes" class="form-control" wire:model="notifyChatEmailIntervalMinutes">
+                                                        <small class="text-muted">Used only for digest mode. Recommended: 10-15 minutes.</small>
                                                     </div>
                                                     <label class="form-label fw-bold">Notification Emails</label>
                                                     <textarea wire:model.defer="notifyChatEmails" class="form-control" rows="2" placeholder="owner@example.com, support@example.com"></textarea>

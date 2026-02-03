@@ -29,6 +29,8 @@ class OrganizationAiManager extends Component
     public $orgType;
     public $notifyChatEmailEnabled = false;
     public $notifyChatEmails = '';
+    public $notifyChatEmailMode = 'immediate';
+    public $notifyChatEmailIntervalMinutes = 10;
     public $leadNotifyEnabled = false;
     public $leadNotifyEmails = '';
     public $leadNotifyWebhookUrl = '';
@@ -71,7 +73,9 @@ class OrganizationAiManager extends Component
         'responseLanguage' => 'required|string|max:30',
         'verifiedOnlyMode' => 'boolean',
         'guardrailCategories' => 'nullable|array',
-        'approvedSensitiveCategories' => 'nullable|array'
+        'approvedSensitiveCategories' => 'nullable|array',
+        'notifyChatEmailMode' => 'required|in:immediate,digest',
+        'notifyChatEmailIntervalMinutes' => 'required|integer|min:1|max:120'
     ];
 
     public function mount()
@@ -102,6 +106,8 @@ class OrganizationAiManager extends Component
         $this->orgType = $settings['org_type'] ?? null;
         $this->notifyChatEmailEnabled = (bool) ($settings['notify_chat_email_enabled'] ?? false);
         $this->notifyChatEmails = $this->keywordsToString($settings['notify_chat_emails'] ?? []);
+        $this->notifyChatEmailMode = $settings['notify_chat_email_mode'] ?? 'immediate';
+        $this->notifyChatEmailIntervalMinutes = (int) ($settings['notify_chat_email_interval_minutes'] ?? 10);
         $this->leadNotifyEnabled = (bool) ($settings['lead_notify_enabled'] ?? false);
         $this->leadNotifyEmails = $this->keywordsToString($settings['lead_notify_emails'] ?? []);
         $this->leadNotifyWebhookUrl = $settings['lead_notify_webhook_url'] ?? '';
@@ -190,6 +196,8 @@ class OrganizationAiManager extends Component
 
             $currentSettings['notify_chat_email_enabled'] = (bool) $this->notifyChatEmailEnabled;
             $currentSettings['notify_chat_emails'] = $this->stringToKeywords($this->notifyChatEmails ?? '');
+            $currentSettings['notify_chat_email_mode'] = $this->notifyChatEmailMode ?? 'immediate';
+            $currentSettings['notify_chat_email_interval_minutes'] = (int) ($this->notifyChatEmailIntervalMinutes ?? 10);
             $currentSettings['lead_notify_enabled'] = (bool) $this->leadNotifyEnabled;
             $currentSettings['lead_notify_emails'] = $this->stringToKeywords($this->leadNotifyEmails ?? '');
             $currentSettings['lead_notify_webhook_url'] = trim((string) $this->leadNotifyWebhookUrl) ?: null;

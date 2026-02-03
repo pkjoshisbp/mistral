@@ -49,6 +49,8 @@ class IntegrationSettingsManager extends Component
     // Chat email notifications
     public $notify_chat_email_enabled = false;
     public $notify_chat_emails = '';
+    public $notify_chat_email_mode = 'immediate';
+    public $notify_chat_email_interval_minutes = 10;
     public $lead_notify_enabled = false;
     public $lead_notify_emails = '';
     public $lead_notify_webhook_url = '';
@@ -81,6 +83,8 @@ class IntegrationSettingsManager extends Component
         'org_type' => 'nullable|string|max:50',
         'notify_chat_email_enabled' => 'boolean',
         'notify_chat_emails' => 'nullable|string|max:1000',
+        'notify_chat_email_mode' => 'required|in:immediate,digest',
+        'notify_chat_email_interval_minutes' => 'required|integer|min:1|max:120',
         'lead_notify_enabled' => 'boolean',
         'lead_notify_emails' => 'nullable|string|max:1000',
         'lead_notify_webhook_url' => 'nullable|url|max:500',
@@ -133,6 +137,8 @@ class IntegrationSettingsManager extends Component
         ];
         $this->notify_chat_email_enabled = (bool) ($settings['notify_chat_email_enabled'] ?? false);
         $this->notify_chat_emails = $this->keywordsToString($settings['notify_chat_emails'] ?? []);
+        $this->notify_chat_email_mode = $settings['notify_chat_email_mode'] ?? 'immediate';
+        $this->notify_chat_email_interval_minutes = (int) ($settings['notify_chat_email_interval_minutes'] ?? 10);
         $this->lead_notify_enabled = (bool) ($settings['lead_notify_enabled'] ?? false);
         $this->lead_notify_emails = $this->keywordsToString($settings['lead_notify_emails'] ?? []);
         $this->lead_notify_webhook_url = $settings['lead_notify_webhook_url'] ?? '';
@@ -184,6 +190,8 @@ class IntegrationSettingsManager extends Component
             ];
             $settings['notify_chat_email_enabled'] = (bool) $this->notify_chat_email_enabled;
             $settings['notify_chat_emails'] = $this->stringToKeywords($this->notify_chat_emails ?? '');
+            $settings['notify_chat_email_mode'] = $this->notify_chat_email_mode ?? 'immediate';
+            $settings['notify_chat_email_interval_minutes'] = (int) ($this->notify_chat_email_interval_minutes ?? 10);
             $settings['lead_notify_enabled'] = (bool) $this->lead_notify_enabled;
             $settings['lead_notify_emails'] = $this->stringToKeywords($this->lead_notify_emails ?? '');
             $settings['lead_notify_webhook_url'] = trim((string) $this->lead_notify_webhook_url) ?: null;

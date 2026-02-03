@@ -361,8 +361,21 @@
                             <div class="form-group">
                                 <div class="custom-control custom-switch">
                                     <input type="checkbox" class="custom-control-input" id="notify_chat_email_enabled" wire:model="notify_chat_email_enabled">
-                                    <label class="custom-control-label" for="notify_chat_email_enabled">Send each chat interaction by email</label>
+                                    <label class="custom-control-label" for="notify_chat_email_enabled">Enable chat email notifications</label>
                                 </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="notify_chat_email_mode">Email Frequency</label>
+                                <select id="notify_chat_email_mode" class="form-control" wire:model="notify_chat_email_mode">
+                                    <option value="immediate">Send every interaction</option>
+                                    <option value="digest">Send digest every few minutes</option>
+                                </select>
+                                <small class="form-text text-muted">Digest mode groups multiple messages into a single email.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="notify_chat_email_interval_minutes">Digest Interval (minutes)</label>
+                                <input type="number" min="1" max="120" class="form-control" id="notify_chat_email_interval_minutes" wire:model="notify_chat_email_interval_minutes">
+                                <small class="form-text text-muted">Used only for digest mode. Recommended: 10-15 minutes.</small>
                             </div>
                             <div class="form-group">
                                 <label for="notify_chat_emails">Notification Emails</label>

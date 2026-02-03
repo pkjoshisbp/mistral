@@ -19,7 +19,9 @@ use App\Services\LocationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use App\Mail\ChatEscalationNotification;
+use App\Mail\ChatInteractionDigestNotification;
 use Illuminate\Support\Str;
+use App\Models\OrganizationData;
 
 class WidgetController
 {
@@ -523,6 +525,50 @@ class WidgetController
                 $pricingContext = $this->buildPricingContext($organization);
                 if ($pricingContext !== '') {
                     $context .= ($context !== '' ? "\n\n" : '') . $pricingContext;
+                } elseif ($this->shouldUsePricingFallback($context, $shopifyContext)) {
+                    Log::info('Pricing context missing - returning pricing fallback response', [
+                        'org_id' => $organization->id,
+                        'org_slug' => $organization->slug,
+                        'session_id' => $sessionId
+                    ]);
+
+                    $safeResponse = $this->buildPricingUnavailableResponse($organization);
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $safeResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $safeResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return response()->json([
+                        'response' => $safeResponse,
+                        'session_id' => $sessionId,
+                        'timestamp' => now()->toISOString()
+                    ])->header('X-Robots-Tag', 'noindex, nofollow');
                 }
             }
 
@@ -999,6 +1045,61 @@ class WidgetController
                     $pricingContext = $this->buildPricingContext($organization);
                     if ($pricingContext !== '') {
                         $context .= "\n\n" . $pricingContext;
+                    } elseif ($this->shouldUsePricingFallback($context, null)) {
+                        Log::info('Pricing context missing - returning pricing fallback response (stream)', [
+                            'org_id' => $organization->id,
+                            'org_slug' => $organization->slug,
+                            'session_id' => $sessionId
+                        ]);
+
+                        $safeResponse = $this->buildPricingUnavailableResponse($organization);
+                        echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
+                        ob_flush();
+                        flush();
+
+                        $conversation = $this->saveConversationToDatabase(
+                            $organization,
+                            $sessionId,
+                            $message,
+                            $safeResponse,
+                            $allUserInfo,
+                            compact('country', 'region', 'location'),
+                            $intentResult
+                        );
+
+                        $this->logIntentAnalytics(
+                            $organization->id,
+                            $sessionId,
+                            $intentResult,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+
+                        if ($this->isUnansweredResponse($safeResponse)) {
+                            $this->logUnansweredQuestion(
+                                $organization->id,
+                                $sessionId,
+                                $message,
+                                $safeResponse,
+                                $request,
+                                compact('country', 'region', 'location'),
+                                $sessionMetadata
+                            );
+                        }
+
+                        if ($conversation) {
+                            $this->handleEscalationIfNeeded(
+                                $conversation,
+                                $message,
+                                $safeResponse,
+                                $intentResult,
+                                $request,
+                                $sessionMetadata
+                            );
+                        }
+
+                        return;
                     }
                 }
 
@@ -1236,6 +1337,11 @@ class WidgetController
                         'response_length' => strlen($finalResponse),
                         'context_length' => strlen($context),
                         'used_live_data' => $liveData ? true : false,
+                        'response_preview' => mb_substr($finalResponse, 0, 800),
+                        'context_preview' => mb_substr($context, 0, 800),
+                        'app_timezone' => config('app.timezone', 'UTC'),
+                        'logged_at_local' => now()->toIso8601String(),
+                        'logged_at_utc' => now('UTC')->toIso8601String(),
                     ]);
 
                     $this->aiAgentService->logWidgetTokenUsage(
@@ -1826,6 +1932,20 @@ class WidgetController
 
     private function buildPricingContext(Organization $organization): string
     {
+        $settings = $organization->settings ?? [];
+        $pricingEnabled = (bool) ($settings['pricing_context_enabled'] ?? false);
+        $allowedSlugs = ['ai-chat-support', 'platform'];
+        $allowPlatformPricing = $pricingEnabled || in_array($organization->slug, $allowedSlugs, true);
+
+        $servicePricing = $this->buildServicePricingContext($organization);
+        if ($servicePricing !== '') {
+            return $servicePricing;
+        }
+
+        if (!$allowPlatformPricing) {
+            return '';
+        }
+
         $subscriptionPlans = SubscriptionPlan::where('is_active', true)
             ->orderBy('sort_order')
             ->get();
@@ -1884,6 +2004,63 @@ class WidgetController
         $lines[] = 'Note: Conversation estimates are rough; actual usage varies by message length.';
 
         return implode("\n", $lines);
+    }
+
+    private function buildServicePricingContext(Organization $organization): string
+    {
+        $services = OrganizationData::where('organization_id', $organization->id)
+            ->where('type', 'service')
+            ->orderByDesc('id')
+            ->get();
+
+        if ($services->isEmpty()) {
+            return '';
+        }
+
+        $lines = [];
+        foreach ($services as $service) {
+            $meta = is_array($service->metadata) ? $service->metadata : [];
+            $price = $meta['price'] ?? null;
+            $currency = $meta['currency'] ?? null;
+            if ($price === null || $price === '') {
+                continue;
+            }
+
+            $priceText = trim((string) $price);
+            if ($currency) {
+                $priceText = trim((string) $currency) . ' ' . $priceText;
+            }
+
+            $name = $service->name ?: 'Service';
+            $lines[] = "- {$name}: {$priceText}";
+        }
+
+        if (empty($lines)) {
+            return '';
+        }
+
+        array_unshift($lines, 'Service pricing:');
+        return implode("\n", $lines);
+    }
+
+    private function shouldUsePricingFallback(string $context, ?string $shopifyContext): bool
+    {
+        $combined = trim($context . "\n" . ($shopifyContext ?? ''));
+        if ($combined === '') {
+            return true;
+        }
+
+        return !preg_match('/\b(price|pricing|cost|plan|package|\$|₹|€|£)\b/i', $combined);
+    }
+
+    private function buildPricingUnavailableResponse(Organization $organization): string
+    {
+        $orgWebsite = $organization->website ?: config('app.url');
+        $orgEmail = $organization->contact_email ?? null;
+        $orgPhone = $organization->contact_phone ?? null;
+        $contact = $this->buildContactResponse($orgEmail, $orgPhone, $orgWebsite);
+
+        return "We don’t have pricing details available in our knowledge base yet. " . $contact;
     }
 
     private function formatConversationEstimate(int $tokens, int $tokensPerConversation): string
@@ -2883,6 +3060,60 @@ class WidgetController
             }
 
             if (!is_array($emails) || empty($emails)) {
+                return;
+            }
+
+            $mode = $settings['notify_chat_email_mode'] ?? 'immediate';
+            $intervalMinutes = (int) ($settings['notify_chat_email_interval_minutes'] ?? 10);
+            $intervalMinutes = max(1, $intervalMinutes);
+
+            if ($mode === 'digest') {
+                $metadata = is_array($conversation->metadata) ? $conversation->metadata : [];
+                $lastSentAt = $metadata['email_last_sent_at'] ?? null;
+                $lastSentMessageId = $metadata['email_last_message_id'] ?? null;
+                if ($lastSentAt) {
+                    try {
+                        $lastSentAtTime = \Carbon\Carbon::parse($lastSentAt);
+                        if ($lastSentAtTime->diffInMinutes(now()) < $intervalMinutes) {
+                            return;
+                        }
+                    } catch (\Throwable $e) {
+                        // If parsing fails, fall through and attempt to send.
+                    }
+                }
+
+                $messagesQuery = ChatMessage::where('conversation_id', $conversation->id)
+                    ->orderBy('sent_at', 'asc')
+                    ->orderBy('id', 'asc');
+
+                if (!empty($lastSentMessageId)) {
+                    $messagesQuery->where('id', '>', $lastSentMessageId);
+                }
+
+                $messages = $messagesQuery->get();
+                if ($messages->isEmpty()) {
+                    return;
+                }
+
+                $payload = [
+                    'organization' => $organization,
+                    'conversation' => $conversation,
+                    'messages' => $messages,
+                    'user_info' => $userInfo,
+                    'location_info' => $locationInfo,
+                    'range_start' => $messages->first()->sent_at,
+                    'range_end' => $messages->last()->sent_at,
+                    'message_count' => $messages->count(),
+                    'interval_minutes' => $intervalMinutes
+                ];
+
+                Mail::to($emails)->send(new ChatInteractionDigestNotification($payload));
+
+                $metadata['email_last_sent_at'] = now()->toIso8601String();
+                $metadata['email_last_message_id'] = $messages->last()->id;
+                $conversation->metadata = $metadata;
+                $conversation->save();
+
                 return;
             }
 
