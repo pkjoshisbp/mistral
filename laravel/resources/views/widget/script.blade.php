@@ -28,6 +28,14 @@
             this.leadCaptured = this.checkLeadCaptured();
             this.userInfo = this.loadUserInfo();
             this.locationInfo = {};
+            this.ws = null;
+            this.wsReady = false;
+            this.wsConnecting = false;
+            this.wsReconnectAttempts = 0;
+            this.wsBusy = false;
+            this.wsStream = null;
+            this.wsPingTimer = null;
+            this.wsShouldReconnect = true;
             this.init();
             this.detectLocation();
             // ISSUE 5B FIX: Load previous messages after init
@@ -259,12 +267,9 @@
                     </div>
 
                     ${this.config.brandingEnabled && this.config.brandingBadge ? `
-                        <div class="ai-chat-badge" style="position:absolute; ${this.config.position.includes('bottom') ? 'bottom: -20px;' : 'top: -20px;'} ${this.config.position.includes('right') ? 'right: 0;' : 'left: 0;'} opacity: 0.6;">
-                            <a href="https://ai-chat.support" target="_blank" rel="nofollow noopener noreferrer" aria-label="Powered by AI Chat Support" style="display:inline-flex;align-items:center;text-decoration:none;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:#7a8594;">
-                                    <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/>
-                                    <path d="M10 17l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="white"/>
-                                </svg>
+                        <div class="ai-chat-badge" style="position:absolute; ${this.config.position.includes('bottom') ? 'bottom: -20px;' : 'top: -20px;'} ${this.config.position.includes('right') ? 'right: 0;' : 'left: 0;'} opacity: 0.7;">
+                            <a href="https://ai-chat.support" target="_blank" rel="nofollow noopener noreferrer" aria-label="Powered by ai chat" style="display:inline-flex;align-items:center;text-decoration:none; font-size:11px; color:#111; font-family: 'Segoe UI', Helvetica, Arial, sans-serif;">
+                                Powered by ai chat
                             </a>
                         </div>
                     ` : ''}
@@ -273,6 +278,11 @@
                     <div id="${windowId}" class="ai-chat-window" style="display: none;">
                         <!-- Header -->
                         <div class="ai-chat-header">
+                            ${this.config.showHeaderLogo && this.config.headerLogoUrl ? `
+                                <div class="ai-chat-logo">
+                                    <img src="${this.config.headerLogoUrl}" alt="${this.config.orgName} logo" onerror="this.style.display='none'" />
+                                </div>
+                            ` : ''}
                             <div class="ai-chat-header-info">
                                 <div class="ai-chat-title">${this.config.orgName}</div>
                                 <div class="ai-chat-status">
@@ -329,14 +339,11 @@
                             </button>
                         </div>
 
-                        <!-- Branding Footer - Logo Only (Shopify compliant) -->
+                        <!-- Branding Footer - Minimal text only -->
                         ${this.config.brandingEnabled ? `
-                        <div class="ai-chat-branding" style="padding:8px 14px; background:#f7f9fb; border-top:1px solid #e5e9ef; text-align:center; font-size:12px; color:#6b7280; opacity: 0.7;">
-                            <a href="https://ai-chat.support" target="_blank" rel="nofollow noopener noreferrer" aria-label="Powered by AI Chat Support" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:#6b7280;">
-                                    <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/>
-                                    <path d="M10 17l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="white"/>
-                                </svg>
+                        <div class="ai-chat-branding" style="padding:6px 12px; background:#ffffff; border-top:1px solid #f0f0f0; text-align:center; font-size:11px; color:#111;">
+                            <a href="https://ai-chat.support" target="_blank" rel="noopener noreferrer" aria-label="Powered by ai chat" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none; color:#111; font-family: 'Segoe UI', Helvetica, Arial, sans-serif;">
+                                Powered by ai chat
                             </a>
                         </div>
                         ` : ''}
@@ -994,7 +1001,7 @@
                 };
 
                 // Send analytics data
-                fetch('{{ config("app.url") }}/analytics/track', {
+                fetch('{{ config("app.url") }}/api/analytics/track', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1029,7 +1036,208 @@
             return patterns.some(p => t.includes(p));
         }
 
+        getWebSocketUrl() {
+            return null;
+        }
+
+        initWebSocket() {
+            const wsUrl = this.getWebSocketUrl();
+            if (!wsUrl || !('WebSocket' in window)) {
+                return;
+            }
+            this.openWebSocket();
+        }
+
+        openWebSocket() {
+            const wsUrl = this.getWebSocketUrl();
+            if (!wsUrl || this.wsReady || this.wsConnecting) {
+                return;
+            }
+
+            this.wsConnecting = true;
+            this.ws = new WebSocket(wsUrl);
+
+            this.ws.onopen = () => {
+                this.wsReady = true;
+                this.wsConnecting = false;
+                this.wsReconnectAttempts = 0;
+                console.info('[AI Chat] WebSocket connected');
+
+                if (this.wsPingTimer) {
+                    clearInterval(this.wsPingTimer);
+                }
+                this.wsPingTimer = setInterval(() => {
+                    if (this.wsReady && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        try {
+                            this.ws.send(JSON.stringify({ type: 'ping' }));
+                        } catch (e) {
+                            console.warn('[AI Chat] WebSocket ping failed:', e);
+                        }
+                    }
+                }, 25000);
+            };
+
+            this.ws.onmessage = (event) => {
+                this.handleWebSocketMessage(event);
+            };
+
+            this.ws.onerror = () => {
+                if (this.wsStream && this.wsStream.finished) {
+                    return;
+                }
+                this.wsReady = false;
+                this.wsConnecting = false;
+            };
+
+            this.ws.onclose = () => {
+                this.wsReady = false;
+                this.wsConnecting = false;
+                if (this.wsPingTimer) {
+                    clearInterval(this.wsPingTimer);
+                    this.wsPingTimer = null;
+                }
+                if (this.wsStream && !this.wsStream.finished) {
+                    this.cleanupWebSocketStream(false);
+                }
+                if (this.wsShouldReconnect) {
+                    const delay = Math.min(30000, 1000 * Math.pow(2, this.wsReconnectAttempts));
+                    this.wsReconnectAttempts += 1;
+                    setTimeout(() => this.openWebSocket(), delay);
+                }
+            };
+        }
+
+        handleWebSocketMessage(event) {
+            let payload = null;
+            try {
+                payload = JSON.parse(event.data);
+            } catch (e) {
+                return;
+            }
+
+            if (payload && payload.type === 'pong') {
+                return;
+            }
+
+            if (!this.wsStream) {
+                return;
+            }
+
+            const stream = this.wsStream;
+            if (payload && payload.error) {
+                this.cleanupWebSocketStream(false, payload.error);
+                return;
+            }
+
+            if (payload && payload.content) {
+                if (!stream.botMessageElement) {
+                    const messagesContainer = document.getElementById(this.ids.messages);
+                    if (!messagesContainer) {
+                        this.cleanupWebSocketStream(false);
+                        return;
+                    }
+
+                    this.removeTypingIndicator();
+                    stream.botMessageElement = document.createElement('div');
+                    stream.botMessageElement.className = 'ai-chat-message ai-chat-message-bot';
+                    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    stream.botMessageElement.innerHTML = `
+                        <div class="ai-chat-message-content"></div>
+                        <div class="ai-chat-message-time">${time}</div>
+                    `;
+                    messagesContainer.appendChild(stream.botMessageElement);
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    stream.contentEl = stream.botMessageElement.querySelector('.ai-chat-message-content');
+                    console.info('[AI Chat] WebSocket streaming started');
+                }
+
+                stream.hasContent = true;
+                stream.fullResponse += payload.content;
+                if (stream.contentEl) {
+                    stream.contentEl.innerHTML = this.linkify(stream.fullResponse);
+                }
+            }
+
+            if (payload && payload.done) {
+                this.cleanupWebSocketStream(true);
+            }
+        }
+
+        cleanupWebSocketStream(success, errorMessage = null) {
+            if (!this.wsStream) {
+                return;
+            }
+
+            const stream = this.wsStream;
+            stream.finished = true;
+            if (stream.firstChunkTimer) {
+                clearTimeout(stream.firstChunkTimer);
+            }
+
+            if (!stream.hasContent) {
+                if (stream.botMessageElement && stream.botMessageElement.parentNode) {
+                    stream.botMessageElement.parentNode.removeChild(stream.botMessageElement);
+                }
+                this.removeTypingIndicator();
+                const contactFallback = this.isContactQuery(stream.message) ? this.buildContactResponse() : '';
+                if (contactFallback) {
+                    this.addMessage(contactFallback, 'bot');
+                } else {
+                    this.addMessage(errorMessage ? 'Sorry, I encountered an error. Please try again.' : 'Sorry, I encountered an error. Please try again.', 'bot');
+                }
+                if (stream.resolve) {
+                    stream.resolve(false);
+                }
+            } else {
+                this.messages.push({ content: stream.fullResponse, sender: 'bot', timestamp: new Date() });
+                this.saveMessages();
+                if (stream.resolve) {
+                    stream.resolve(true);
+                }
+            }
+
+            this.wsBusy = false;
+            this.wsStream = null;
+        }
+
+        async sendWebSocketStream(requestBody, message) {
+            if (!this.wsReady || !this.ws || this.ws.readyState !== WebSocket.OPEN || this.wsBusy) {
+                return false;
+            }
+
+            this.wsBusy = true;
+            return await new Promise((resolve) => {
+                this.wsStream = {
+                    message,
+                    fullResponse: '',
+                    hasContent: false,
+                    finished: false,
+                    botMessageElement: null,
+                    contentEl: null,
+                    resolve,
+                    firstChunkTimer: setTimeout(() => {
+                        if (this.wsStream && !this.wsStream.hasContent && !this.wsStream.finished) {
+                            this.cleanupWebSocketStream(false);
+                        }
+                    }, 2500)
+                };
+
+                try {
+                    this.ws.send(JSON.stringify({
+                        ...requestBody,
+                        org_id: this.config.orgId
+                    }));
+                } catch (e) {
+                    this.cleanupWebSocketStream(false);
+                }
+            });
+        }
+
         async sendMessage() {
+            if (!this.leadCaptured) {
+                this.showLeadForm();
+                return;
+            }
             const input = document.getElementById(this.ids.input);
             if (!input) return;
             
@@ -1080,6 +1288,12 @@
                     requestBody.is_shopify = true;
                 }
 
+                // Try WebSocket first (fallback to SSE)
+                const wsSucceeded = await this.sendWebSocketStream(requestBody, message);
+                if (wsSucceeded) {
+                    return;
+                }
+
                 // Use fetch with streaming for real-time SSE responses
                 const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/chat/stream`, {
                     method: 'POST',
@@ -1121,21 +1335,10 @@
                     return;
                 }
 
-                // Remove typing indicator and prepare for streaming
-                this.removeTypingIndicator();
-                
-                // Create bot message element manually
-                const messagesContainer = document.getElementById(this.ids.messages);
-                const botMessageElement = document.createElement('div');
-                botMessageElement.className = 'ai-chat-message ai-chat-message-bot';
-                const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                botMessageElement.innerHTML = `
-                    <div class="ai-chat-message-content"></div>
-                    <div class="ai-chat-message-time">${time}</div>
-                `;
+                let botMessageElement = null;
+                let contentEl = null;
                 let firstTokenTimestampSet = false;
-                messagesContainer.appendChild(botMessageElement);
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                let firstChunkReceived = false;
 
                 // Read the stream
                 let fullResponse = '';
@@ -1170,10 +1373,7 @@
                         fullResponse = fallbackText.trim();
                     }
 
-                    // Remove the empty bot message element before adding fallback
-                    if (botMessageElement && botMessageElement.parentNode) {
-                        botMessageElement.parentNode.removeChild(botMessageElement);
-                    }
+                    this.removeTypingIndicator();
 
                     if (fullResponse.trim().length > 0) {
                         this.addMessage(fullResponse, 'bot');
@@ -1209,9 +1409,8 @@
                                 
                                 if (data.error) {
                                     if (!hasContent) {
-                                        // Remove the empty bot message element before adding error message
-                                        if (botMessageElement && botMessageElement.parentNode) {
-                                            botMessageElement.parentNode.removeChild(botMessageElement);
+                                        if (!firstChunkReceived) {
+                                            this.removeTypingIndicator();
                                         }
                                         const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
                                         if (contactFallback) {
@@ -1227,7 +1426,24 @@
                                 
                                 // Append content as it streams
                                 if (data.content) {
-                                    if (!firstTokenTimestampSet) {
+                                    if (!firstChunkReceived) {
+                                        firstChunkReceived = true;
+                                        this.removeTypingIndicator();
+
+                                        const messagesContainer = document.getElementById(this.ids.messages);
+                                        botMessageElement = document.createElement('div');
+                                        botMessageElement.className = 'ai-chat-message ai-chat-message-bot';
+                                        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                                        botMessageElement.innerHTML = `
+                                            <div class="ai-chat-message-content"></div>
+                                            <div class="ai-chat-message-time">${time}</div>
+                                        `;
+                                        messagesContainer.appendChild(botMessageElement);
+                                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                                        contentEl = botMessageElement.querySelector('.ai-chat-message-content');
+                                    }
+
+                                    if (!firstTokenTimestampSet && botMessageElement) {
                                         const firstTokenTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                                         const timeEl = botMessageElement.querySelector('.ai-chat-message-time');
                                         if (timeEl) {
@@ -1237,15 +1453,29 @@
                                     }
                                     fullResponse += data.content;
                                     hasContent = true;
-                                    const messageDiv = botMessageElement.querySelector('.ai-chat-message-content');
-                                    messageDiv.innerHTML = this.linkify(fullResponse);
-                                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                                    if (contentEl) {
+                                        contentEl.innerHTML = this.linkify(fullResponse);
+                                    }
+                                    if (botMessageElement && botMessageElement.parentNode) {
+                                        botMessageElement.parentNode.scrollTop = botMessageElement.parentNode.scrollHeight;
+                                    }
                                 }
                             } catch (err) {
                                 console.error('Stream parse error:', err, { line });
                             }
                         }
                     }
+                }
+
+                if (!hasContent) {
+                    this.removeTypingIndicator();
+                    const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
+                    if (contactFallback) {
+                        this.addMessage(contactFallback, 'bot');
+                    } else {
+                        this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                    }
+                    return;
                 }
 
                 if (fullResponse.trim().length > 0) {

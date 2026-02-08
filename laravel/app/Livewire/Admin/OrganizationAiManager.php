@@ -40,6 +40,10 @@ class OrganizationAiManager extends Component
     public $escalationNotifyEnabled = false;
     public $escalationNotifyEmails = '';
     public $businessHours = '';
+    public $businessHoursMode = 'selector';
+    public $businessHoursStartTime = '';
+    public $businessHoursEndTime = '';
+    public $businessHoursTimezone = 'IST';
     public $holidayDates = '';
     public $seasonalPromotions = '';
     public $responseTone = 'friendly';
@@ -47,6 +51,7 @@ class OrganizationAiManager extends Component
     public $verifiedOnlyMode = false;
     public $guardrailCategories = [];
     public $approvedSensitiveCategories = [];
+    public $pricingActionRequiresKeywords = false;
     public $intentKeywords = [
         'booking' => '',
         'pricing' => '',
@@ -78,6 +83,15 @@ class OrganizationAiManager extends Component
         'notifyChatEmailIntervalMinutes' => 'required|integer|min:1|max:120'
     ];
 
+    public function getBusinessHoursPreviewProperty(): string
+    {
+        if ($this->businessHoursMode === 'selector' && $this->businessHoursStartTime && $this->businessHoursEndTime) {
+            return $this->buildBusinessHoursString();
+        }
+
+        return trim((string) $this->businessHours);
+    }
+
     public function mount()
     {
         $this->organizations = Organization::orderBy('name')->get();
@@ -100,7 +114,7 @@ class OrganizationAiManager extends Component
         // Load organization-specific settings or fallback to global admin settings
         $this->aiBackendType = $settings['ai_backend_type'] ?? AdminSetting::get('ai_backend_type', 'ollama');
         $this->aiModelProvider = $settings['ai_model_provider'] ?? AdminSetting::get('ai_model_provider', 'llama');
-        $this->aiModel = $settings['ai_model'] ?? AdminSetting::get('ai_model', 'llama3.2:3b');
+        $this->aiModel = $settings['ai_model'] ?? AdminSetting::get('ai_model', 'llama3:8b-instruct-q5_K_M');
         $this->assistantDisplayName = $settings['assistant_display_name'] ?? 'AI Assistant';
 
         $this->orgType = $settings['org_type'] ?? null;
@@ -117,6 +131,7 @@ class OrganizationAiManager extends Component
         $this->escalationNotifyEnabled = (bool) ($settings['escalation_notify_enabled'] ?? false);
         $this->escalationNotifyEmails = $this->keywordsToString($settings['escalation_notify_emails'] ?? []);
         $this->businessHours = $settings['business_hours'] ?? '';
+        $this->syncBusinessHoursSelector();
         $this->holidayDates = $this->keywordsToString($settings['holiday_dates'] ?? []);
         $this->seasonalPromotions = $settings['seasonal_promotions'] ?? '';
         $this->responseTone = $settings['response_tone'] ?? 'friendly';
@@ -124,6 +139,7 @@ class OrganizationAiManager extends Component
         $this->verifiedOnlyMode = (bool) ($settings['verified_only_mode'] ?? false);
         $this->guardrailCategories = $settings['guardrail_categories'] ?? [];
         $this->approvedSensitiveCategories = $settings['approved_sensitive_categories'] ?? [];
+        $this->pricingActionRequiresKeywords = (bool) ($settings['pricing_action_requires_keywords'] ?? false);
         $storedKeywords = $settings['intent_keywords'] ?? [];
         $this->intentKeywords = [
             'booking' => $this->keywordsToString($storedKeywords['booking'] ?? []),
@@ -144,12 +160,140 @@ class OrganizationAiManager extends Component
         $this->intentLlmRepeatPenalty = (float) ($settings['intent_llm_repeat_penalty'] ?? AdminSetting::get('intent_llm_repeat_penalty', 1.05));
     }
 
+    private function syncBusinessHoursSelector(): void
+    {
+        $raw = trim((string) $this->businessHours);
+        if ($raw === '') {
+            $this->businessHoursMode = 'selector';
+            $this->businessHoursStartTime = '';
+            $this->businessHoursEndTime = '';
+            $this->businessHoursTimezone = $this->businessHoursTimezone ?: 'IST';
+            return;
+        }
+
+        $parsed = $this->parseBusinessHoursForSelector($raw);
+        if ($parsed) {
+            $this->businessHoursMode = 'selector';
+            $this->businessHoursStartTime = $parsed['start'];
+            $this->businessHoursEndTime = $parsed['end'];
+            $this->businessHoursTimezone = $parsed['timezone'];
+        } else {
+            $this->businessHoursMode = 'text';
+        }
+    }
+
+    private function parseBusinessHoursForSelector(string $raw): ?array
+    {
+        $line = trim(preg_split('/\r?\n|;/', $raw)[0] ?? '');
+        if ($line === '') {
+            return null;
+        }
+
+        if (!preg_match('/(\d{1,2}(?:[:\.]\d{2})?\s*(?:am|pm)?)[\s\-to]+(\d{1,2}(?:[:\.]\d{2})?\s*(?:am|pm)?)/i', $line, $match)) {
+            return null;
+        }
+
+        $start = $this->normalizeTo24Hour($match[1]);
+        $end = $this->normalizeTo24Hour($match[2]);
+        if (!$start || !$end) {
+            return null;
+        }
+
+        $timezone = $this->extractTimezoneAbbr($raw) ?: 'IST';
+
+        return [
+            'start' => $start,
+            'end' => $end,
+            'timezone' => $timezone,
+        ];
+    }
+
+    private function extractTimezoneAbbr(string $raw): ?string
+    {
+        $matches = [];
+        if (!preg_match_all('/\b([A-Z]{2,4})\b/', $raw, $matches)) {
+            return null;
+        }
+
+        $known = ['IST','UTC','GMT','EST','EDT','CST','CDT','MST','MDT','PST','PDT'];
+        foreach ($matches[1] as $abbr) {
+            $abbr = strtoupper($abbr);
+            if (in_array($abbr, $known, true)) {
+                return $abbr;
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeTo24Hour(string $time): ?string
+    {
+        $clean = strtolower(trim($time));
+        $clean = str_replace('.', ':', $clean);
+
+        $ampm = null;
+        if (preg_match('/(am|pm)$/', $clean, $m)) {
+            $ampm = $m[1];
+            $clean = trim(preg_replace('/(am|pm)$/', '', $clean));
+        }
+
+        if (!preg_match('/^(\d{1,2})(?::(\d{2}))?$/', $clean, $m)) {
+            return null;
+        }
+
+        $hour = (int) $m[1];
+        $minute = isset($m[2]) ? (int) $m[2] : 0;
+        if ($hour > 23) {
+            return null;
+        }
+        if ($minute > 59) {
+            $minute = 59;
+        }
+
+        if ($ampm) {
+            if ($hour === 12) {
+                $hour = $ampm === 'am' ? 0 : 12;
+            } elseif ($ampm === 'pm') {
+                $hour += 12;
+            }
+        }
+
+        return sprintf('%02d:%02d', $hour, $minute);
+    }
+
+    private function formatTo12Hour(string $time): string
+    {
+        if (!preg_match('/^(\d{2}):(\d{2})$/', $time, $m)) {
+            return $time;
+        }
+
+        $hour = (int) $m[1];
+        $minute = (int) $m[2];
+        $ampm = $hour >= 12 ? 'PM' : 'AM';
+        $hour = $hour % 12;
+        if ($hour === 0) {
+            $hour = 12;
+        }
+
+        return sprintf('%02d:%02d%s', $hour, $minute, $ampm);
+    }
+
+    private function buildBusinessHoursString(): string
+    {
+        $start = $this->formatTo12Hour($this->businessHoursStartTime);
+        $end = $this->formatTo12Hour($this->businessHoursEndTime);
+        $tz = trim((string) $this->businessHoursTimezone) ?: 'IST';
+
+        return trim("{$start}-{$end} {$tz}");
+    }
+
     public function loadAvailableModels()
     {
         // Define available models based on provider type
         $this->availableModels = [
             'ollama' => [
                 'llama' => [
+                    'llama3:8b-instruct-q5_K_M' => 'Llama 3 8B Instruct (Vast.ai)',
                     'llama3.2:3b' => 'Llama 3.2 3B (Fast)',
                     'llama3.2:1b' => 'Llama 3.2 1B (Fastest)', 
                     'llama3.1:8b' => 'Llama 3.1 8B (Balanced)',
@@ -206,7 +350,11 @@ class OrganizationAiManager extends Component
             $currentSettings['handoff_offline_message'] = trim((string) $this->handoffOfflineMessage) ?: null;
             $currentSettings['escalation_notify_enabled'] = (bool) $this->escalationNotifyEnabled;
             $currentSettings['escalation_notify_emails'] = $this->stringToKeywords($this->escalationNotifyEmails ?? '');
-            $currentSettings['business_hours'] = trim((string) $this->businessHours) ?: null;
+            if ($this->businessHoursMode === 'selector' && $this->businessHoursStartTime && $this->businessHoursEndTime) {
+                $currentSettings['business_hours'] = $this->buildBusinessHoursString();
+            } else {
+                $currentSettings['business_hours'] = trim((string) $this->businessHours) ?: null;
+            }
             $currentSettings['holiday_dates'] = $this->stringToKeywords($this->holidayDates ?? '');
             $currentSettings['seasonal_promotions'] = trim((string) $this->seasonalPromotions) ?: null;
             $currentSettings['response_tone'] = $this->responseTone;
@@ -214,6 +362,7 @@ class OrganizationAiManager extends Component
             $currentSettings['verified_only_mode'] = (bool) $this->verifiedOnlyMode;
             $currentSettings['guardrail_categories'] = array_values(array_unique($this->guardrailCategories ?? []));
             $currentSettings['approved_sensitive_categories'] = array_values(array_unique($this->approvedSensitiveCategories ?? []));
+            $currentSettings['pricing_action_requires_keywords'] = (bool) $this->pricingActionRequiresKeywords;
 
             $currentSettings['intent_keywords'] = [
                 'booking' => $this->stringToKeywords($this->intentKeywords['booking'] ?? ''),

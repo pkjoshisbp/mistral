@@ -38,6 +38,7 @@ AI_BACKEND_TYPE = os.getenv("AI_BACKEND_TYPE", "ollama")  # ollama or llamacpp
 OLLAMA_URL_LOCAL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")  # Local Ollama
 OLLAMA_URL_VASTAI = "http://127.0.0.1:11435"  # vast.ai via SSH tunnel
 OLLAMA_URL = OLLAMA_URL_LOCAL  # Default to local for embeddings, health checks, etc.
+LARAVEL_WIDGET_BASE_URL = os.getenv("LARAVEL_WIDGET_BASE_URL", "https://ai-chat.support")
 LLAMACPP_BINARY = os.getenv("LLAMACPP_BINARY", "/var/www/clients/client1/web64/web/llama.cpp/build/bin/llama-cli")
 LLAMACPP_SERVER_BINARY = os.getenv("LLAMACPP_SERVER_BINARY", "/var/www/clients/client1/web64/web/llama.cpp/build/bin/llama-server")
 LLAMACPP_SERVER_PORT = int(os.getenv("LLAMACPP_SERVER_PORT", "8112"))
@@ -557,6 +558,99 @@ async def ws_rewrite(ws: WebSocket):
         except Exception:
             pass
 
+@app.websocket("/ws/widget/chat")
+async def ws_widget_chat(ws: WebSocket):
+    await ws.accept()
+    client_host = getattr(ws.client, "host", "unknown") if ws.client else "unknown"
+    client_port = getattr(ws.client, "port", "unknown") if ws.client else "unknown"
+    logging.info("Widget WS connected", extra={"client": f"{client_host}:{client_port}"})
+    try:
+        while True:
+            try:
+                payload = await ws.receive_json()
+            except WebSocketDisconnect:
+                logging.info("Widget WS disconnected", extra={"client": f"{client_host}:{client_port}"})
+                break
+
+            if payload.get("type") == "ping":
+                await ws.send_text(json.dumps({"type": "pong"}))
+                continue
+
+            org_id = payload.get("org_id")
+            session_id = payload.get("session_id")
+            if not org_id:
+                await ws.send_text(json.dumps({"error": True, "message": "org_id is required"}))
+                continue
+
+            logging.info(
+                "Widget WS request received",
+                extra={
+                    "client": f"{client_host}:{client_port}",
+                    "org_id": org_id,
+                    "session_id": session_id,
+                },
+            )
+
+            url = f"{LARAVEL_WIDGET_BASE_URL.rstrip('/')}/widget/{org_id}/chat/stream"
+            headers = {"Accept": "text/event-stream"}
+
+            try:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                        logging.info(
+                            "Widget WS upstream response",
+                            extra={
+                                "org_id": org_id,
+                                "session_id": session_id,
+                                "status": resp.status_code,
+                            },
+                        )
+                        if resp.status_code == 429:
+                            body = await resp.aread()
+                            await ws.send_text(json.dumps({"error": True, "status": 429, "body": body.decode(errors="ignore")}))
+                            continue
+                        if resp.status_code != 200:
+                            body = await resp.aread()
+                            await ws.send_text(json.dumps({"error": True, "status": resp.status_code, "body": body.decode(errors="ignore")}))
+                            continue
+
+                        sent_chunks = 0
+                        first_chunk_sent = False
+                        async for line in resp.aiter_lines():
+                            if not line:
+                                continue
+                            if line.startswith("data: "):
+                                data = line[6:].strip()
+                                if data:
+                                    await ws.send_text(data)
+                                    sent_chunks += 1
+                                    if not first_chunk_sent:
+                                        first_chunk_sent = True
+                                        logging.info(
+                                            "Widget WS first chunk forwarded",
+                                            extra={
+                                                "org_id": org_id,
+                                                "session_id": session_id,
+                                            },
+                                        )
+                        logging.info(
+                            "Widget WS stream complete",
+                            extra={
+                                "org_id": org_id,
+                                "session_id": session_id,
+                                "chunks": sent_chunks,
+                            },
+                        )
+            except Exception as e:
+                logging.exception("Widget WS proxy error", extra={"org_id": org_id, "session_id": session_id})
+                await ws.send_text(json.dumps({"error": True, "message": f"Proxy error: {e}"}))
+    except Exception:
+        try:
+            logging.exception("Widget WS handler error", extra={"client": f"{client_host}:{client_port}"})
+            await ws.close()
+        except Exception:
+            pass
+
 @app.post("/qdrant/create_collection")
 async def create_collection(request: Request):
     data = await request.json()
@@ -945,7 +1039,8 @@ async def llm_chat(request: Request):
             is_vastai = url_to_try == OLLAMA_URL_VASTAI
             logging.warning(f"{'🚨 Vast.ai' if is_vastai else 'Local Ollama'} URL {url_to_try} failed: {str(e)}")
             if is_vastai:
-                logging.info(f"⚡ Falling back to local Ollama...")\n            continue  # Try next URL
+                logging.info("⚡ Falling back to local Ollama...")
+            continue  # Try next URL
     
     # If all Ollama URLs failed, try llama-server fallback
     # If all Ollama URLs failed, try llama-server fallback

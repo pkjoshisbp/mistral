@@ -1,4 +1,4 @@
-<div class="content-wrapper">
+<div>
     <!-- Content Header (Page header) -->
     <section class="content-header">
         <div class="container-fluid">
@@ -202,7 +202,7 @@
 
     <!-- Action Modal -->
     @if($showModal)
-        <div class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);" 
+        <div class="modal fade show action-modal" style="display: block; background-color: rgba(0,0,0,0.5);" 
              tabindex="-1" role="dialog">
             <div class="modal-dialog modal-xl" role="document">
                 <div class="modal-content">
@@ -520,6 +520,20 @@
         </div>
     @endif
     <style>
+.action-modal .modal-content {
+    max-height: 90vh;
+    overflow: hidden;
+}
+.action-modal .modal-body {
+    max-height: calc(90vh - 120px);
+    overflow-y: auto;
+}
+.action-modal .modal-footer {
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+    z-index: 2;
+}
 .btn-close-small {
     background: none;
     border: none;

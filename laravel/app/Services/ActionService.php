@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\OrganizationAction;
+use App\Models\Organization;
 use Illuminate\Support\Facades\Log;
 
 class ActionService
@@ -87,6 +88,11 @@ class ActionService
                 $parameters['query'] = $query;
             }
 
+            // Provide raw query for other action types (e.g., google_sheets) when missing
+            if (!array_key_exists('query', $parameters)) {
+                $parameters['query'] = $query;
+            }
+
             Log::info('Executing action', [
                 'action_id' => $bestAction['action']->id,
                 'action_name' => $bestAction['action']->name,
@@ -145,11 +151,19 @@ class ActionService
 
         $matches = [];
         $queryLower = strtolower($query);
+        $pricingRequiresKeywords = $this->shouldRequirePricingKeywords($organizationId);
+        $pricingKeywords = $this->getPricingKeywordsForOrganization($organizationId);
 
         // First try keyword-based matching (more reliable)
         foreach ($actions as $action) {
             // Skip if action type doesn't match intent (unless no specific types recommended)
             if (!empty($recommendedTypes) && !in_array($action->action_type, $recommendedTypes)) {
+                continue;
+            }
+
+            if ($pricingRequiresKeywords
+                && $action->action_type === 'pricing'
+                && !$this->queryHasPricingSignals($queryLower, $pricingKeywords)) {
                 continue;
             }
 
@@ -184,7 +198,36 @@ class ActionService
             }
         }
 
-        // If no keyword matches, try semantic similarity as fallback
+        // If no keyword matches, allow a safe pricing-intent fallback for a single pricing action
+        if (empty($matches)) {
+            $intent = $intentResult['intent'] ?? null;
+            $pricingActions = $actions->filter(function ($action) use ($recommendedTypes) {
+                if (!empty($recommendedTypes) && !in_array($action->action_type, $recommendedTypes)) {
+                    return false;
+                }
+                return in_array($action->action_type, ['pricing', 'cost', 'rates'], true);
+            })->values();
+
+            if ($intent === 'pricing'
+                && $this->queryHasPricingSignals($queryLower, $pricingKeywords)
+                && $pricingActions->count() === 1) {
+                $fallbackAction = $pricingActions->first();
+                $matches[] = [
+                    'action' => $fallbackAction,
+                    'score' => (float) ($fallbackAction->min_score_threshold ?? 0.7),
+                    'method' => 'intent_fallback',
+                    'matched_terms' => $pricingKeywords
+                ];
+
+                Log::info('Pricing intent fallback matched action', [
+                    'action_id' => $fallbackAction->id,
+                    'action_name' => $fallbackAction->name,
+                    'reason' => 'pricing intent with pricing keywords and single pricing action'
+                ]);
+            }
+        }
+
+        // If still no matches, try semantic similarity as fallback
         if (empty($matches)) {
             try {
                 $queryEmbedding = $this->aiAgent->embed($query);
@@ -193,6 +236,12 @@ class ActionService
                     foreach ($actions as $action) {
                         // Skip if action type doesn't match intent (unless no specific types recommended)
                         if (!empty($recommendedTypes) && !in_array($action->action_type, $recommendedTypes)) {
+                            continue;
+                        }
+
+                        if ($pricingRequiresKeywords
+                            && $action->action_type === 'pricing'
+                            && !$this->queryHasPricingSignals($queryLower, $pricingKeywords)) {
                             continue;
                         }
 
@@ -244,6 +293,52 @@ class ActionService
         ]);
 
         return $matches;
+    }
+
+    private function shouldRequirePricingKeywords(int $organizationId): bool
+    {
+        $org = Organization::find($organizationId);
+        if (!$org) {
+            return false;
+        }
+
+        $settings = $org->settings ?? [];
+        return (bool) ($settings['pricing_action_requires_keywords'] ?? false);
+    }
+
+    private function getPricingKeywordsForOrganization(int $organizationId): array
+    {
+        $defaults = [
+            'price', 'pricing', 'cost', 'fees', 'fee', 'quote', 'estimate', 'budget',
+            'charges', 'charge', 'rate', 'rates', 'plan', 'plans', 'package', 'packages',
+            'discount', 'offer', 'promo', 'promotion', 'deal', 'sale'
+        ];
+
+        $org = Organization::find($organizationId);
+        $settings = $org?->settings ?? [];
+        $custom = $settings['intent_keywords']['pricing'] ?? [];
+        if (is_string($custom)) {
+            $custom = array_filter(array_map('trim', preg_split('/[,\n]/', $custom)));
+        }
+        if (!is_array($custom)) {
+            $custom = [];
+        }
+
+        return array_values(array_unique(array_filter(array_merge($defaults, $custom))));
+    }
+
+    private function queryHasPricingSignals(string $queryLower, array $keywords): bool
+    {
+        foreach ($keywords as $kw) {
+            if ($kw === '') {
+                continue;
+            }
+            if (str_contains($queryLower, strtolower($kw))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

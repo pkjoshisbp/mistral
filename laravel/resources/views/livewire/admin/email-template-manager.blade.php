@@ -76,6 +76,11 @@
                                                         title="Preview Template">
                                                     <i class="fas fa-eye"></i>
                                                 </button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                        wire:click="duplicateTemplate({{ $template->id }})"
+                                                        title="Duplicate Template">
+                                                    <i class="fas fa-copy"></i>
+                                                </button>
                                                 <button type="button" class="btn btn-sm btn-outline-primary" 
                                                         wire:click="openModal({{ $template->id }})">
                                                     <i class="fas fa-edit"></i>
@@ -157,6 +162,16 @@
                                 <input type="text" class="form-control @error('subject') is-invalid @enderror" 
                                        wire:model="subject" placeholder="Enter email subject (use {variables} for dynamic content)">
                                 @error('subject') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                                <div class="mt-2">
+                                    <small class="text-muted d-block mb-1">Insert placeholder:</small>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        @foreach($commonPlaceholders as $label => $placeholder)
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" wire:click="insertSubjectPlaceholder('{{ $placeholder }}')">
+                                                {{ $placeholder }}
+                                            </button>
+                                        @endforeach
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="mb-3">
@@ -198,6 +213,16 @@
                                 <small class="form-text text-muted">
                                     Use HTML for formatting. Variables like {recipient_name} will be replaced with actual values.
                                 </small>
+                                <div class="mt-2">
+                                    <small class="text-muted d-block mb-1">Insert placeholder:</small>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        @foreach($commonPlaceholders as $label => $placeholder)
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" wire:click="insertPlaceholder('{{ $placeholder }}')">
+                                                {{ $placeholder }}
+                                            </button>
+                                        @endforeach
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="form-check mb-3">

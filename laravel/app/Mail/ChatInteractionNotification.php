@@ -32,7 +32,10 @@ class ChatInteractionNotification extends Mailable
             ->text('emails.chat-interaction-notification-text')
             ->with($this->payload);
 
-        if (!empty($orgEmail)) {
+        $replyTo = $this->payload['reply_to'] ?? null;
+        if (!empty($replyTo)) {
+            $mail->replyTo($replyTo, $orgName);
+        } elseif (!empty($orgEmail)) {
             $mail->replyTo($orgEmail, $orgName);
         }
 

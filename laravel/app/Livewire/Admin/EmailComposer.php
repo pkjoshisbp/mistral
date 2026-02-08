@@ -82,11 +82,16 @@ class EmailComposer extends Component
 
             foreach ($this->recipientList as $recipient) {
                 try {
-                    Mail::send([], [], function ($message) use ($recipient, $campaign) {
+                    $trackingToken = bin2hex(random_bytes(16));
+                    $trackedContent = $this->buildTrackedContent($campaign->content, $trackingToken);
+                    Mail::send([], [], function ($message) use ($recipient, $campaign, $trackedContent, $trackingToken) {
                         $message->to($recipient)
                                 ->subject($campaign->subject)
                                 ->from($campaign->sender_email, $campaign->sender_name)
-                                ->html($campaign->content);
+                                ->html($trackedContent);
+                        $message->getSymfonyMessage()
+                                ->getHeaders()
+                                ->addTextHeader('X-AICS-Tracking-Token', $trackingToken);
 
                         // Add BCC if specified
                         if (!empty($this->bccList)) {
@@ -94,6 +99,17 @@ class EmailComposer extends Component
                         }
                     });
                     
+                    $campaign->recipients()->create([
+                        'organization_id' => null,
+                        'recipient_email' => $recipient,
+                        'variables' => [],
+                        'status' => 'sent',
+                        'sent_at' => now(),
+                        'tracking_token' => $trackingToken,
+                        'resend_count' => 0,
+                        'last_sent_at' => now(),
+                        'next_resend_at' => now()->addDays(7),
+                    ]);
                     $sentCount++;
                 } catch (\Exception $e) {
                     $failedCount++;
@@ -115,6 +131,45 @@ class EmailComposer extends Component
         } catch (\Exception $e) {
             session()->flash('error', 'Failed to send email: ' . $e->getMessage());
         }
+    }
+
+    protected function buildTrackedContent(string $content, string $token): string
+    {
+        $content = $this->applyEmailTypography($content);
+        $baseUrl = rtrim(config('app.url'), '/');
+        $pixel = '<img src="' . $baseUrl . '/email/open/' . $token . '.png" width="1" height="1" style="display:none" alt="" />';
+
+        if (stripos($content, '</body>') !== false) {
+            return preg_replace('/<\/body>/i', $pixel . '</body>', $content, 1);
+        }
+
+        return $content . $pixel;
+    }
+
+    protected function applyEmailTypography(string $content): string
+    {
+        $fontFamily = 'Segoe UI, Helvetica, Arial, sans-serif';
+        $baseStyle = 'font-family: ' . $fontFamily . '; font-size: 16px; line-height: 1.6;';
+
+        if (preg_match('/font-family:/i', $content)) {
+            $content = preg_replace(
+                '/font-family:\s*[^;"\']*arial[^;"\']*;?/i',
+                'font-family: ' . $fontFamily . '; font-size: 16px; line-height: 1.6;',
+                $content
+            );
+        } else {
+            $content = '<div style="' . $baseStyle . '">' . $content . '</div>';
+        }
+
+        $content = preg_replace_callback('/<body([^>]*)>/i', function ($m) use ($baseStyle) {
+            $attrs = $m[1] ?? '';
+            if (stripos($attrs, 'style=') !== false) {
+                return preg_replace('/style=("|\')(.*?)\1/i', 'style="$2 ' . $baseStyle . '"', $m[0], 1);
+            }
+            return '<body' . $attrs . ' style="' . $baseStyle . '">';
+        }, $content);
+
+        return $content;
     }
 
     private function resetForm()

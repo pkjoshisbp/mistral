@@ -73,7 +73,7 @@
                                                 <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-toggle="dropdown">
                                                     Assign
                                                 </button>
-                                                <div class="dropdown-menu">
+                                                <div class="dropdown-menu user-org-dropdown-menu">
                                                     @foreach($organizations as $org)
                                                         <a class="dropdown-item" href="#" 
                                                            wire:click="assignOrganization({{ $user->id }}, {{ $org->id }})">
@@ -185,4 +185,12 @@
             </div>
         </div>
     @endif
+
+    <style>
+        .user-org-dropdown-menu {
+            max-height: 260px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+    </style>
 </div>

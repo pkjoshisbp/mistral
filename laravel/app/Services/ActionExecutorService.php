@@ -383,24 +383,112 @@ class ActionExecutorService
         $config = $action->getSourceConfig();
         
         try {
-            $client = new GoogleClient();
-            $client->setApplicationName('AI Chat Assistant');
+            $spreadsheetId = $config['spreadsheet_id'] ?? null;
+            if (!$spreadsheetId) {
+                return [
+                    'success' => false,
+                    'error' => 'Google Sheets spreadsheet_id is missing'
+                ];
+            }
+
+            $gid = $config['gid'] ?? null;
+            if (!$gid && is_string($spreadsheetId)) {
+                if (preg_match('/[#&?]gid=(\d+)/', $spreadsheetId, $gidMatches)) {
+                    $gid = $gidMatches[1];
+                }
+            }
+
+            if (str_contains($spreadsheetId, 'docs.google.com/spreadsheets')) {
+                if (preg_match('~/spreadsheets/d/([a-zA-Z0-9-_]+)~', $spreadsheetId, $matches)) {
+                    $spreadsheetId = $matches[1];
+                }
+            }
+
+            $hasGoogleClient = class_exists(GoogleClient::class);
+            $client = null;
+            if ($hasGoogleClient) {
+                $client = new GoogleClient();
+                $client->setApplicationName('AI Chat Assistant');
+            }
             
             // Set up authentication (service account or API key)
             if (isset($config['service_account_path'])) {
+                if (!$client) {
+                    return [
+                        'success' => false,
+                        'error' => 'Google API client not installed. Install google/apiclient to use service account authentication.'
+                    ];
+                }
                 $client->setAuthConfig($config['service_account_path']);
                 $client->setScopes([GoogleSheets::SPREADSHEETS_READONLY]);
             } elseif (isset($config['api_key'])) {
+                if (!$client) {
+                    return [
+                        'success' => false,
+                        'error' => 'Google API client not installed. Install google/apiclient to use API key authentication.'
+                    ];
+                }
                 $client->setDeveloperKey($config['api_key']);
             } else {
+                $gid = $gid ?? 0;
+                $csvUrl = "https://docs.google.com/spreadsheets/d/{$spreadsheetId}/export?format=csv&gid={$gid}";
+
+                $csvResponse = Http::timeout(20)->get($csvUrl);
+                if (!$csvResponse->ok()) {
+                    return [
+                        'success' => false,
+                        'error' => 'Google Sheets authentication not configured and public CSV access failed (status: ' . $csvResponse->status() . ')'
+                    ];
+                }
+
+                $csvBody = trim($csvResponse->body());
+                if ($csvBody === '') {
+                    return [
+                        'success' => true,
+                        'data' => [],
+                        'source' => 'google_sheets',
+                        'spreadsheet_id' => $spreadsheetId,
+                        'total_rows' => 0
+                    ];
+                }
+
+                $rows = array_map('str_getcsv', preg_split('/\r\n|\n|\r/', $csvBody));
+                $hasHeader = $config['has_header'] ?? true;
+                $results = [];
+
+                if ($hasHeader && !empty($rows)) {
+                    $headers = array_shift($rows);
+                    foreach ($rows as $row) {
+                        if (!empty(array_filter($row))) {
+                            while (count($row) < count($headers)) {
+                                $row[] = '';
+                            }
+                            $results[] = array_combine($headers, array_slice($row, 0, count($headers)));
+                        }
+                    }
+                } else {
+                    $results = array_filter($rows, function ($row) {
+                        return !empty(array_filter($row));
+                    });
+                }
+
+                if (($action->action_type ?? null) === 'pricing' && !empty($params['query'])) {
+                    $filtered = $this->filterRowsByQuery($results, (string) $params['query']);
+                    if (!empty($filtered)) {
+                        $results = $filtered;
+                    }
+                }
+
                 return [
-                    'success' => false,
-                    'error' => 'Google Sheets authentication not configured'
+                    'success' => true,
+                    'data' => array_values($results),
+                    'source' => 'google_sheets',
+                    'spreadsheet_id' => $spreadsheetId,
+                    'total_rows' => count($results)
                 ];
             }
 
             $service = new GoogleSheets($client);
-            $spreadsheetId = $config['spreadsheet_id'];
             $range = $config['range'] ?? 'A:Z';
 
             $response = $service->spreadsheets_values->get($spreadsheetId, $range);
@@ -434,6 +522,13 @@ class ActionExecutorService
                 });
             }
 
+            if (($action->action_type ?? null) === 'pricing' && !empty($params['query'])) {
+                $filtered = $this->filterRowsByQuery($results, (string) $params['query']);
+                if (!empty($filtered)) {
+                    $results = $filtered;
+                }
+            }
+
             return [
                 'success' => true,
                 'data' => $results,
@@ -442,7 +537,7 @@ class ActionExecutorService
                 'total_rows' => count($results)
             ];
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return [
                 'success' => false,
                 'error' => 'Google Sheets access failed: ' . $e->getMessage()
@@ -539,6 +634,47 @@ class ActionExecutorService
     private function getCacheKey(OrganizationAction $action, array $params): string
     {
         return 'action_' . $action->id . '_' . md5(serialize($params));
+    }
+
+    private function filterRowsByQuery(array $rows, string $query): array
+    {
+        $keywords = $this->extractQueryKeywords($query);
+        if (empty($keywords) || empty($rows)) {
+            return $rows;
+        }
+
+        $filtered = [];
+        foreach ($rows as $row) {
+            $haystack = is_array($row)
+                ? strtolower(implode(' ', array_map('strval', $row)))
+                : strtolower((string) $row);
+
+            foreach ($keywords as $kw) {
+                if ($kw !== '' && str_contains($haystack, $kw)) {
+                    $filtered[] = $row;
+                    break;
+                }
+            }
+        }
+
+        return $filtered;
+    }
+
+    private function extractQueryKeywords(string $query): array
+    {
+        $stop = [
+            'a','an','the','and','or','but','if','then','else','when','where','how','what','which','who','whom','why',
+            'is','are','was','were','be','been','being','do','does','did','can','could','should','would','may','might',
+            'i','me','my','we','our','you','your','they','their','it','this','that','these','those','please','send','give',
+            'price','pricing','cost','quote','estimate','breakdown','details','range','about'
+        ];
+
+        $tokens = preg_split('/[^a-zA-Z0-9]+/', strtolower($query));
+        $tokens = array_filter($tokens, function ($t) use ($stop) {
+            return $t !== '' && strlen($t) > 2 && !in_array($t, $stop, true);
+        });
+
+        return array_values(array_unique($tokens));
     }
 
     /**

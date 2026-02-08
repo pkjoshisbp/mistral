@@ -1,4 +1,4 @@
-<div class="content-wrapper">
+<div>
     <!-- Content Header -->
     <section class="content-header">
         <div class="container-fluid">

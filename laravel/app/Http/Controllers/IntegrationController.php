@@ -81,13 +81,53 @@ class IntegrationController extends Controller
 
         // Create organization and integration
         $orgName = $request->input('site_name', parse_url($pending->site, PHP_URL_HOST));
-        
-        // Check if organization already exists with same website
-        $existingOrg = Organization::where('website', $pending->site)->first();
-        
-        if ($existingOrg) {
-            // Use existing organization
-            $organization = $existingOrg;
+
+        $organization = null;
+
+        $existingIntegration = Integration::where('provider', $pending->provider)
+            ->where('shop', $pending->site)
+            ->first();
+        if ($existingIntegration && $existingIntegration->organization) {
+            $organization = $existingIntegration->organization;
+            Log::info('Using existing organization from integration', [
+                'existing_org_id' => $organization->id,
+                'website' => $pending->site,
+                'provider' => $pending->provider
+            ]);
+        }
+
+        if (!$organization) {
+            $organization = Organization::where('website', $pending->site)->first();
+        }
+
+        if (!$organization && $request->filled('admin_email')) {
+            $organization = Organization::where('contact_email', $request->input('admin_email'))->first();
+        }
+
+        if (!$organization && $request->filled('admin_email')) {
+            $organization = Organization::whereHas('users', function ($q) use ($request) {
+                $q->where('email', $request->input('admin_email'));
+            })->first();
+        }
+
+        if ($organization) {
+            $updates = [];
+            if (!$organization->website) {
+                $updates['website'] = $pending->site;
+            }
+            if (!$organization->contact_email && $request->filled('admin_email')) {
+                $updates['contact_email'] = $request->input('admin_email');
+            }
+            if (!$organization->contact_phone && $request->filled('phone')) {
+                $updates['contact_phone'] = $request->input('phone');
+            }
+            if (!$organization->description && $request->filled('description')) {
+                $updates['description'] = $request->input('description');
+            }
+            if (!empty($updates)) {
+                $organization->update($updates);
+            }
+
             Log::info('Using existing organization for WordPress integration', [
                 'existing_org_id' => $organization->id,
                 'website' => $pending->site
@@ -95,17 +135,17 @@ class IntegrationController extends Controller
         } else {
             // Create new organization
             $slug = Str::slug($orgName . '-' . Str::random(6));
-            
+
             $organization = Organization::create([
                 'name' => $orgName,
                 'slug' => $slug,
                 'website' => $pending->site,
                 'contact_email' => $request->input('admin_email'),
-                'phone' => $request->input('phone', ''),
+                'contact_phone' => $request->input('phone', ''),
                 'description' => $request->input('description', "WordPress/WooCommerce site integrated via plugin"),
                 'token_balance' => 20000 // Initial 20K tokens for new organizations
             ]);
-            
+
             Log::info('Created new organization for WordPress integration', [
                 'org_id' => $organization->id,
                 'website' => $pending->site

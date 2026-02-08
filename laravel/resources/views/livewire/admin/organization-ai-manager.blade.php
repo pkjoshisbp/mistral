@@ -141,6 +141,25 @@
                                                 <small class="form-text text-muted">Shown to users instead of the generic 'AI Assistant' across chat widgets and messaging. Leave blank to use default.</small>
                                             </div>
 
+                                            <!-- Action Guardrails -->
+                                            <div class="card mb-3">
+                                                <div class="card-header">
+                                                    <strong>
+                                                        <i class="fas fa-shield-alt me-1"></i>
+                                                        Action Guardrails
+                                                    </strong>
+                                                </div>
+                                                <div class="card-body">
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="checkbox" wire:model="pricingActionRequiresKeywords" id="pricingActionRequiresKeywordsTop">
+                                                        <label class="form-check-label fw-bold" for="pricingActionRequiresKeywordsTop">
+                                                            Require pricing keywords for pricing actions
+                                                        </label>
+                                                    </div>
+                                                    <small class="text-muted">When enabled, pricing actions only run if the user’s message contains pricing words like price, cost, quote, budget, etc.</small>
+                                                </div>
+                                            </div>
+
                                             <!-- Organization Type & Intent Keywords -->
                                             <div class="card mb-3">
                                                 <div class="card-header">
@@ -191,6 +210,15 @@
                                                             <label class="form-label fw-bold">Pricing Keywords</label>
                                                             <small class="text-muted d-block mb-1">Costs, fees, discounts, quotes.</small>
                                                             <textarea wire:model.defer="intentKeywords.pricing" class="form-control" rows="2" placeholder="price, fees, cost, discount"></textarea>
+                                                        </div>
+                                                        <div class="col-md-12 mb-3">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" wire:model="pricingActionRequiresKeywords" id="pricingActionRequiresKeywords">
+                                                                <label class="form-check-label fw-bold" for="pricingActionRequiresKeywords">
+                                                                    Require pricing keywords for pricing actions
+                                                                </label>
+                                                            </div>
+                                                            <small class="text-muted">When enabled, pricing actions only run if the user’s message contains pricing words like price, cost, quote, budget, etc.</small>
                                                         </div>
                                                         <div class="col-md-6 mb-3">
                                                             <label class="form-label fw-bold">Realtime Data Keywords</label>
@@ -318,8 +346,44 @@
                                                 </div>
                                                 <div class="card-body">
                                                     <div class="mb-2">
+                                                        <label class="form-label fw-bold">Business Hours Input Mode</label>
+                                                        <select wire:model.defer="businessHoursMode" class="form-select">
+                                                            <option value="selector">Use time selector (recommended)</option>
+                                                            <option value="text">Custom text</option>
+                                                        </select>
+                                                    </div>
+                                                    @if($businessHoursMode === 'selector')
+                                                        <div class="row g-2 mb-2">
+                                                            <div class="col-md-4">
+                                                                <label class="form-label fw-bold">Start Time</label>
+                                                                <input type="time" wire:model.defer="businessHoursStartTime" class="form-control">
+                                                            </div>
+                                                            <div class="col-md-4">
+                                                                <label class="form-label fw-bold">End Time</label>
+                                                                <input type="time" wire:model.defer="businessHoursEndTime" class="form-control">
+                                                            </div>
+                                                            <div class="col-md-4">
+                                                                <label class="form-label fw-bold">Timezone</label>
+                                                                <select wire:model.defer="businessHoursTimezone" class="form-select">
+                                                                    <option value="IST">IST (Asia/Kolkata)</option>
+                                                                    <option value="UTC">UTC</option>
+                                                                    <option value="GMT">GMT</option>
+                                                                    <option value="EST">EST</option>
+                                                                    <option value="EDT">EDT</option>
+                                                                    <option value="CST">CST</option>
+                                                                    <option value="CDT">CDT</option>
+                                                                    <option value="MST">MST</option>
+                                                                    <option value="MDT">MDT</option>
+                                                                    <option value="PST">PST</option>
+                                                                    <option value="PDT">PDT</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <small class="text-muted d-block">Saved format: {{ $this->businessHoursPreview }}</small>
+                                                    @endif
+                                                    <div class="mb-2">
                                                         <label class="form-label fw-bold">Business Hours</label>
-                                                        <textarea wire:model.defer="businessHours" class="form-control" rows="2" placeholder="Mon-Fri: 9:00 AM - 6:00 PM; Sat: 10:00 AM - 4:00 PM"></textarea>
+                                                        <textarea wire:model.defer="businessHours" class="form-control" rows="2" placeholder="Mon-Fri: 9:00 AM - 6:00 PM; Sat: 10:00 AM - 4:00 PM" @if($businessHoursMode === 'selector') disabled @endif></textarea>
                                                         <small class="text-muted">Used for time-aware answers (open/closed questions). You can append a timezone (e.g., "IST" or "UTC+05:30").</small>
                                                     </div>
                                                     <div class="mb-2">

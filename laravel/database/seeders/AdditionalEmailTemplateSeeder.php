@@ -28,7 +28,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Educational institutions worldwide are revolutionizing student support with AI-powered chatbots. <strong>AI Chat Support</strong> helps schools, colleges, and universities provide 24/7 student assistance while reducing administrative workload.</p>
     
     <div style="background: #f0f9ff; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #1e40af;">
-        <h3 style="color: #1e40af; margin-top: 0;">🎓 Transform Your Student Services:</h3>
+        <h3 style="color: #1e40af; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Transform Your Student Services:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>Admission Support:</strong> Guide prospective students through applications</li>
             <li><strong>Course Information:</strong> Instant access to schedules and requirements</li>
@@ -39,7 +39,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #ecfdf5; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #059669; margin-top: 0;">📊 Real Results from Educational Institutions:</h4>
+        <h4 style="color: #059669; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-metrics.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Real Results from Educational Institutions:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>50% reduction in administrative calls</li>
             <li>85% student satisfaction with instant responses</li>
@@ -55,9 +55,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to enhance your student support services? Let\'s discuss how AI Chat Support can be customized for {institution_name}\'s specific needs.</p>
     
     <p><strong>Schedule a free consultation:</strong><br>
-    📧 Email: demo@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: demo@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Best regards,<br>
     {sender_name}<br>
@@ -88,7 +88,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Healthcare providers are transforming patient experiences with AI-powered support systems. <strong>AI Chat Support</strong> helps hospitals deliver exceptional patient care while reducing administrative burden on your staff.</p>
     
     <div style="background: #fef2f2; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #dc2626;">
-        <h3 style="color: #dc2626; margin-top: 0;">🏥 Enhance Patient Care:</h3>
+        <h3 style="color: #dc2626; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Enhance Patient Care:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>24/7 Patient Support:</strong> Instant responses to common inquiries</li>
             <li><strong>Appointment Scheduling:</strong> Automated booking and reminders</li>
@@ -99,7 +99,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #f0fdf4; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #059669; margin-top: 0;">📈 Proven Healthcare Results:</h4>
+        <h4 style="color: #059669; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-metrics.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Proven Healthcare Results:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>40% reduction in phone call volume</li>
             <li>60% faster response times for patient inquiries</li>
@@ -115,9 +115,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to improve patient care while reducing administrative costs? Let\'s explore how AI Chat Support can be tailored for {hospital_name}\'s unique requirements.</p>
     
     <p><strong>Get started today:</strong><br>
-    📧 Email: healthcare@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: healthcare@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Best regards,<br>
     {sender_name}<br>
@@ -148,7 +148,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Non-profit organizations are maximizing their impact with AI-powered supporter engagement. <strong>AI Chat Support</strong> helps NGOs connect with donors, volunteers, and beneficiaries more effectively while optimizing limited resources.</p>
     
     <div style="background: #f0fdf4; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #059669;">
-        <h3 style="color: #059669; margin-top: 0;">🤝 Strengthen Community Connections:</h3>
+        <h3 style="color: #059669; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Strengthen Community Connections:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>Donor Support:</strong> Instant donation assistance and impact updates</li>
             <li><strong>Volunteer Coordination:</strong> Streamline recruitment and scheduling</li>
@@ -159,7 +159,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #fffbeb; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #d97706; margin-top: 0;">💡 Special Benefits for NGOs:</h4>
+        <h4 style="color: #d97706; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Special Benefits for NGOs:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>Maximize volunteer engagement with 24/7 availability</li>
             <li>Reduce administrative costs and redirect to programs</li>
@@ -169,7 +169,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #dbeafe; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
-        <p style="margin: 0; color: #1e40af; font-weight: bold;">🎁 Special NGO Pricing Available</p>
+        <p style="margin: 0; color: #1e40af; font-weight: bold;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Special NGO Pricing Available</p>
         <p style="margin: 5px 0 0 0; color: #374151; font-size: 14px;">Discounted rates for registered non-profit organizations</p>
     </div>
     
@@ -180,9 +180,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to amplify your mission\'s impact? Let\'s discuss how AI Chat Support can help {organization_name} engage more supporters and serve your community better.</p>
     
     <p><strong>Connect with us:</strong><br>
-    📧 Email: nonprofit@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: nonprofit@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Together for impact,<br>
     {sender_name}<br>
@@ -213,7 +213,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Automotive dealerships are accelerating sales with AI-powered customer engagement. <strong>AI Chat Support</strong> helps car dealers capture leads, qualify prospects, and close more deals by providing instant vehicle information and scheduling support.</p>
     
     <div style="background: #fef2f2; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #dc2626;">
-        <h3 style="color: #dc2626; margin-top: 0;">🚗 Drive More Sales:</h3>
+        <h3 style="color: #dc2626; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Drive More Sales:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>Vehicle Information:</strong> Instant specs, pricing, and availability</li>
             <li><strong>Lead Qualification:</strong> Identify serious buyers automatically</li>
@@ -224,7 +224,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #f0fdf4; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #059669; margin-top: 0;">🏆 Automotive Success Metrics:</h4>
+        <h4 style="color: #059669; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-metrics.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Automotive Success Metrics:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>65% increase in qualified leads</li>
             <li>40% more test drive appointments</li>
@@ -235,7 +235,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #fffbeb; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
-        <p style="margin: 0; color: #d97706; font-weight: bold;">🎯 Never Miss a Lead Again</p>
+        <p style="margin: 0; color: #d97706; font-weight: bold;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Never Miss a Lead Again</p>
         <p style="margin: 5px 0 0 0; color: #374151; font-size: 14px;">Capture prospects outside business hours and weekend shoppers</p>
     </div>
     
@@ -246,9 +246,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to accelerate your sales performance? Let\'s explore how AI Chat Support can help {dealership_name} capture more leads and close more deals.</p>
     
     <p><strong>Schedule your demo:</strong><br>
-    📧 Email: automotive@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: automotive@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Drive forward,<br>
     {sender_name}<br>
@@ -279,7 +279,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>E-commerce retailers are boosting conversions with AI-powered shopping assistants. <strong>AI Chat Support</strong> helps online stores reduce cart abandonment, increase average order values, and provide exceptional customer service that drives repeat purchases.</p>
     
     <div style="background: #faf5ff; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #7c3aed;">
-        <h3 style="color: #7c3aed; margin-top: 0;">🛒 Optimize Your Online Store:</h3>
+        <h3 style="color: #7c3aed; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Optimize Your Online Store:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>Smart Product Discovery:</strong> Help customers find perfect products</li>
             <li><strong>Cart Recovery:</strong> Reduce abandonment with instant assistance</li>
@@ -290,7 +290,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #ecfdf5; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #059669; margin-top: 0;">📊 E-commerce Performance Boost:</h4>
+        <h4 style="color: #059669; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-metrics.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">E-commerce Performance Boost:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>35% increase in conversion rates</li>
             <li>40% decrease in cart abandonment</li>
@@ -301,7 +301,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #fef3c7; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
-        <p style="margin: 0; color: #d97706; font-weight: bold;">⚡ Quick Implementation</p>
+        <p style="margin: 0; color: #d97706; font-weight: bold;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Quick Implementation</p>
         <p style="margin: 5px 0 0 0; color: #374151; font-size: 14px;">Integrate with Shopify, WooCommerce, Magento, and more</p>
     </div>
     
@@ -312,9 +312,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to transform your online shopping experience? Let\'s show you how AI Chat Support can help {store_name} increase sales and customer satisfaction.</p>
     
     <p><strong>Get started now:</strong><br>
-    📧 Email: ecommerce@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: ecommerce@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Happy selling,<br>
     {sender_name}<br>
@@ -345,7 +345,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Manufacturing companies are enhancing B2B customer relationships with AI-powered support systems. <strong>AI Chat Support</strong> helps manufacturers provide instant technical assistance, order support, and product information to business clients worldwide.</p>
     
     <div style="background: #f9fafb; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #374151;">
-        <h3 style="color: #374151; margin-top: 0;">🏭 Manufacturing Excellence:</h3>
+        <h3 style="color: #374151; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Manufacturing Excellence:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>Technical Documentation:</strong> Instant access to specs and manuals</li>
             <li><strong>Order Management:</strong> Status updates and delivery tracking</li>
@@ -356,7 +356,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #dbeafe; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #1e40af; margin-top: 0;">🎯 B2B Benefits:</h4>
+        <h4 style="color: #1e40af; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">B2B Benefits:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>Serve global clients across all time zones</li>
             <li>Reduce technical support response times</li>
@@ -372,9 +372,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to enhance your B2B customer relationships? Let\'s explore how AI Chat Support can help {company_name} serve clients more efficiently.</p>
     
     <p><strong>Connect with us:</strong><br>
-    📧 Email: manufacturing@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: manufacturing@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Best regards,<br>
     {sender_name}<br>
@@ -405,7 +405,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Legal firms are modernizing client services with AI-powered support systems. <strong>AI Chat Support</strong> helps law practices streamline client intake, provide instant case information, and deliver exceptional client service while maintaining confidentiality and professionalism.</p>
     
     <div style="background: #f9fafb; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #1f2937;">
-        <h3 style="color: #1f2937; margin-top: 0;">⚖️ Legal Practice Enhancement:</h3>
+        <h3 style="color: #1f2937; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Legal Practice Enhancement:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>Client Intake:</strong> Automate initial consultations and screening</li>
             <li><strong>Case Updates:</strong> Provide secure status information</li>
@@ -416,7 +416,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #fef2f2; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #dc2626; margin-top: 0;">🔒 Security & Compliance:</h4>
+        <h4 style="color: #dc2626; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Security & Compliance:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>Attorney-client privilege protection</li>
             <li>Secure encrypted communications</li>
@@ -432,9 +432,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to enhance your legal practice\'s client services? Let\'s discuss how AI Chat Support can help {firm_name} improve client satisfaction while maintaining the highest professional standards.</p>
     
     <p><strong>Schedule consultation:</strong><br>
-    📧 Email: legal@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: legal@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Respectfully,<br>
     {sender_name}<br>
@@ -465,7 +465,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Hotels worldwide are revolutionizing guest services with AI-powered concierge assistants. <strong>AI Chat Support</strong> helps hotels provide exceptional 24/7 guest support while reducing front desk workload and increasing guest satisfaction.</p>
     
     <div style="background: #fffbeb; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #d97706;">
-        <h3 style="color: #d97706; margin-top: 0;">🏨 Transform Guest Services:</h3>
+        <h3 style="color: #d97706; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Transform Guest Services:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>Room Reservations:</strong> Instant booking and availability checks</li>
             <li><strong>Concierge Services:</strong> Local recommendations and directions</li>
@@ -476,7 +476,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #f0fdf4; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #059669; margin-top: 0;">📈 Hospitality Success Metrics:</h4>
+        <h4 style="color: #059669; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-metrics.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Hospitality Success Metrics:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>45% increase in guest satisfaction scores</li>
             <li>60% reduction in front desk call volume</li>
@@ -487,7 +487,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #dbeafe; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
-        <p style="margin: 0; color: #1e40af; font-weight: bold;">🌟 Perfect for Resort Hotels & Boutique Properties</p>
+        <p style="margin: 0; color: #1e40af; font-weight: bold;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Perfect for Resort Hotels & Boutique Properties</p>
         <p style="margin: 5px 0 0 0; color: #374151; font-size: 14px;">Enhance guest experience from check-in to check-out</p>
     </div>
     
@@ -498,9 +498,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to enhance your guest experience? Let\'s explore how AI Chat Support can help {hotel_name} deliver world-class hospitality services.</p>
     
     <p><strong>Book a demo today:</strong><br>
-    📧 Email: hospitality@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: hospitality@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Best regards,<br>
     {sender_name}<br>
@@ -531,7 +531,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Real estate agencies are accelerating sales with AI-powered property assistants. <strong>AI Chat Support</strong> helps real estate professionals capture leads, qualify prospects, and provide instant property information 24/7.</p>
     
     <div style="background: #f0fdf4; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #059669;">
-        <h3 style="color: #059669; margin-top: 0;">🏠 Boost Property Sales:</h3>
+        <h3 style="color: #059669; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Boost Property Sales:</h3>
         <ul style="color: #374151; margin: 0;">
             <li><strong>Property Search:</strong> Instant listings based on buyer criteria</li>
             <li><strong>Viewing Appointments:</strong> Schedule showings automatically</li>
@@ -542,7 +542,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #dbeafe; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h4 style="color: #1e40af; margin-top: 0;">🏆 Real Estate Success Results:</h4>
+        <h4 style="color: #1e40af; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-metrics.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Real Estate Success Results:</h4>
         <ul style="color: #374151; margin: 0;">
             <li>70% increase in qualified leads</li>
             <li>45% more property viewings scheduled</li>
@@ -553,7 +553,7 @@ class AdditionalEmailTemplateSeeder extends Seeder
     </div>
     
     <div style="background: #fef3c7; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
-        <p style="margin: 0; color: #d97706; font-weight: bold;">💰 Perfect for Residential & Commercial Properties</p>
+        <p style="margin: 0; color: #d97706; font-weight: bold;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Perfect for Residential & Commercial Properties</p>
         <p style="margin: 5px 0 0 0; color: #374151; font-size: 14px;">Capture leads outside business hours and weekend shoppers</p>
     </div>
     
@@ -564,9 +564,9 @@ class AdditionalEmailTemplateSeeder extends Seeder
     <p>Ready to accelerate your property sales? Let\'s show you how AI Chat Support can help {agency_name} convert more leads and close more deals.</p>
     
     <p><strong>Schedule your consultation:</strong><br>
-    📧 Email: realestate@ai-chat.support<br>
-    🌐 Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
-    📞 Call: {contact_phone}</p>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: realestate@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Website: <a href="https://ai-chat.support">ai-chat.support</a><br>
+    <img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Call: {contact_phone}</p>
     
     <p>Building success together,<br>
     {sender_name}<br>
@@ -581,6 +581,43 @@ class AdditionalEmailTemplateSeeder extends Seeder
                 'industry_type' => 'realestate',
                 'variables' => ['agency_name', 'contact_name', 'sender_name', 'contact_phone'],
                 'description' => 'Outreach template for real estate agencies focusing on lead generation and property sales'
+            ],
+            [
+                'name' => 'Ecommerce2 - Amazon Store Outreach',
+                'subject' => 'Quick question about your store',
+                'content' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #111;">
+    <p>Hi {owner_name},</p>
+
+    <p>I was browsing your Amazon store and then checked your website at jagatpharma.com. I noticed you don’t currently have an AI chat assistant on your site.</p>
+
+    <p>Many eCommerce businesses we work with lose potential sales when customers visit at night, have product questions, or abandon carts without talking to anyone.</p>
+
+    <p>We built AI Chat Support to help with exactly this. It can:</p>
+
+    <ul style="padding-left: 18px;">
+        <li><img src="https://ai-chat.support/images/email/icon-feature.png" width="14" height="14" style="vertical-align: -2px; margin-right: 6px;" alt="">Answer product questions instantly</li>
+        <li><img src="https://ai-chat.support/images/email/icon-feature.png" width="14" height="14" style="vertical-align: -2px; margin-right: 6px;" alt="">Guide customers toward the right items</li>
+        <li><img src="https://ai-chat.support/images/email/icon-feature.png" width="14" height="14" style="vertical-align: -2px; margin-right: 6px;" alt="">Recover abandoned carts</li>
+        <li><img src="https://ai-chat.support/images/email/icon-feature.png" width="14" height="14" style="vertical-align: -2px; margin-right: 6px;" alt="">Track orders in real time</li>
+        <li><img src="https://ai-chat.support/images/email/icon-feature.png" width="14" height="14" style="vertical-align: -2px; margin-right: 6px;" alt="">Capture leads when your team is offline</li>
+    </ul>
+
+    <p>You don’t need to change your website or hire staff — it’s just a small widget that works automatically.</p>
+
+    <p>If you’re open to it, I can add a free demo to your site in 10 minutes so you can see how it feels in action. No cost, no commitment.</p>
+
+    <p>Would you like me to show you?</p>
+
+    <p>Best,<br>
+    AI Chat Support Team<br>
+    <img src="https://ai-chat.support/images/email/icon-mail.png" width="14" height="14" style="vertical-align: -2px; margin-right: 6px;" alt=""> demo@ai-chat.support<br>
+    <img src="https://ai-chat.support/images/email/icon-globe.png" width="14" height="14" style="vertical-align: -2px; margin-right: 6px;" alt=""> <a href="https://ai-chat.support">https://ai-chat.support</a></p>
+
+    <p><img src="https://ai-chat.support/images/email/icon-phone.png" width="14" height="14" style="vertical-align: -2px; margin-right: 6px;" alt=""> +91 9937253528</p>
+</div>',
+                'industry_type' => 'ecommerce',
+                'variables' => ['owner_name'],
+                'description' => 'Plain outreach template for Amazon store owners with AI chat assistant pitch'
             ],
         ];
 

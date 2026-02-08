@@ -82,7 +82,7 @@
                                                     <span class="text-muted ms-2">{{ $time }}</span>
                                                 </div>
                                                 <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
-                                                    {!! $message->message_html !!}
+                                                    {!! preg_replace('/(<br\s*\/?\s*>\s*){2,}/i', '<br>', $message->message_html) !!}
                                                 </div>
                                             </div>
                                         @endforeach
@@ -110,9 +110,32 @@
         </div>
     </section>
     <style>
+    .chat-messages > div {
+        margin-bottom: 0.5rem !important;
+    }
+    .chat-messages .mb-3 { margin-bottom: 0.4rem !important; }
+    .chat-messages .mb-1 { margin-bottom: 0.15rem !important; }
+    .chat-messages .small {
+        margin-bottom: 2px !important;
+    }
 .chat-messages .message-content {
     word-break: break-word;
-    white-space: pre-wrap;
+    white-space: normal;
+        line-height: 1.25;
+    padding: 4px 8px !important;
+}
+.chat-messages .message-content p,
+.chat-messages .message-content ul,
+.chat-messages .message-content ol {
+    margin: 0 0 4px 0 !important;
+}
+.chat-messages .message-content p:last-child,
+.chat-messages .message-content ul:last-child,
+.chat-messages .message-content ol:last-child {
+    margin-bottom: 0 !important;
+}
+.chat-messages .message-content li {
+    margin-bottom: 2px !important;
 }
 .chat-messages .message-content a {
     color: #0d6efd;

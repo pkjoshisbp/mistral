@@ -36,6 +36,10 @@ Route::get('/contact', function () {
 
 Route::get('/integrations', \App\Livewire\Public\Integrations::class)->name('integrations');
 
+Route::get('/escalations/quick/{conversation}/{token}', \App\Livewire\Public\EscalationMagicConsole::class)
+    ->name('escalations.magic')
+    ->middleware('signed');
+
 Route::get('/download/wordpress-plugin', function () {
     $filePath = base_path('../plugins/wordpress/ai-chat-support-v1.0.1.zip');
     
@@ -470,6 +474,9 @@ Route::get('/blog', function () {
 
 Route::get('/blog/{blog:slug}', function (Blog $blog) {
     // Get related posts (exclude current post)
+// Email tracking (public)
+Route::get('/email/open/{token}.png', [\App\Http\Controllers\EmailTrackingController::class, 'open'])->name('email.open');
+Route::post('/email/webhooks/{provider}', [\App\Http\Controllers\EmailWebhookController::class, 'handle'])->name('email.webhook');
     $relatedPosts = Blog::published()
         ->where('id', '!=', $blog->id)
         ->inRandomOrder()
@@ -742,9 +749,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/content', function () {
             return view('customer.content');
         })->name('content');
-        Route::get('/analytics', function () {
-            return view('customer.analytics');
-        })->name('analytics');
+        Route::get('/analytics', \App\Livewire\Customer\AnalyticsDashboard::class)->name('analytics');
         Route::get('/settings', function () {
             return view('customer.settings');
         })->name('settings');

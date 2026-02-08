@@ -109,6 +109,16 @@
                             Show small branding badge near launcher
                         </label>
                     </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="branding_text_enabled" wire:model="settings.branding_text_enabled">
+                        <label class="form-check-label" for="branding_text_enabled">
+                            Show branding text after logo
+                        </label>
+                    </div>
+                    <div class="form-group mb-2">
+                        <label for="branding_text">Branding text</label>
+                        <input type="text" id="branding_text" class="form-control" wire:model="settings.branding_text" placeholder="AI Chat Support">
+                    </div>
                     <div class="form-check mb-3">
                         <input class="form-check-input" type="checkbox" id="branding_follow" wire:model="settings.branding_follow">
                         <label class="form-check-label" for="branding_follow">

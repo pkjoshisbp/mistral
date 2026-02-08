@@ -14,6 +14,19 @@ class EmailCampaignRecipient extends Model
         'email_campaign_id',
         'organization_id',
         'recipient_email',
+        'tracking_token',
+        'message_id',
+        'provider',
+        'delivery_status',
+        'delivered_at',
+        'opened_at',
+        'last_opened_at',
+        'open_count',
+        'resend_count',
+        'last_sent_at',
+        'next_resend_at',
+        'last_event',
+        'last_event_at',
         'variables',
         'status',
         'sent_at',
@@ -23,6 +36,12 @@ class EmailCampaignRecipient extends Model
     protected $casts = [
         'variables' => 'array',
         'sent_at' => 'datetime',
+        'delivered_at' => 'datetime',
+        'opened_at' => 'datetime',
+        'last_opened_at' => 'datetime',
+        'last_event_at' => 'datetime',
+        'last_sent_at' => 'datetime',
+        'next_resend_at' => 'datetime',
     ];
 
     public function campaign(): BelongsTo

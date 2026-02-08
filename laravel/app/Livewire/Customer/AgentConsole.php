@@ -7,6 +7,7 @@ use Livewire\WithPagination;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Carbon;
 
 class AgentConsole extends Component
 {
@@ -16,6 +17,8 @@ class AgentConsole extends Component
     public $activeTab = 'escalated';
     public $showDetails = [];
     public $replyMessage = [];
+    public ?string $lastAlertAt = null;
+    public int $lastAlertConversationId = 0;
 
     protected $queryString = [
         'search' => ['except' => ''],
@@ -24,6 +27,44 @@ class AgentConsole extends Component
 
     public function updatingSearch() { $this->resetPage(); }
     public function updatingActiveTab() { $this->resetPage(); }
+
+    public function mount()
+    {
+        $this->lastAlertAt = now()->toIso8601String();
+    }
+
+    public function checkForNewChats()
+    {
+        $org = Auth::user()->primaryOrganization();
+        if (!$org) {
+            return;
+        }
+
+        $lastAt = $this->lastAlertAt ? Carbon::parse($this->lastAlertAt) : now();
+
+        $latest = ChatConversation::where('organization_id', $org->id)
+            ->where('agent_status', 'escalation_requested')
+            ->whereNotNull('last_activity_at')
+            ->where('last_activity_at', '>', $lastAt)
+            ->orderByDesc('last_activity_at')
+            ->first();
+
+        if (!$latest) {
+            return;
+        }
+
+        $this->lastAlertAt = $latest->last_activity_at?->toIso8601String();
+        $this->lastAlertConversationId = (int) $latest->id;
+
+        $this->dispatch('livechat-notify', [
+            'conversation_id' => $latest->id,
+            'session_id' => $latest->conversation_id,
+            'visitor_name' => $latest->visitor_name ?? 'Anonymous',
+            'visitor_email' => $latest->visitor_email ?? null,
+            'last_activity_at' => $latest->last_activity_at?->toIso8601String(),
+            'link' => url('/customer/live-chats') . '?activeTab=escalated',
+        ]);
+    }
 
     public function toggleDetails($id)
     {
@@ -194,6 +235,7 @@ class AgentConsole extends Component
             return view('livewire.customer.agent-console', [
                 'conversations' => collect([]),
                 'counts' => ['escalated' => 0, 'active' => 0, 'ai' => 0, 'closed' => 0],
+                'orgTimezone' => config('app.timezone', 'UTC'),
             ])->layout('layouts.customer');
         }
 
@@ -228,6 +270,7 @@ class AgentConsole extends Component
         return view('livewire.customer.agent-console', [
             'conversations' => $conversations,
             'counts' => $counts,
+            'orgTimezone' => $org->timezone ?: config('app.timezone', 'UTC'),
         ])->layout('layouts.customer');
     }
 }

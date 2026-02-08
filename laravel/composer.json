@@ -9,6 +9,7 @@
         "barryvdh/laravel-dompdf": "*",
         "doctrine/dbal": "^3.5.1",
         "geoip2/geoip2": "^3.2",
+        "google/apiclient": "^2.15",
         "guzzlehttp/guzzle": "^7.2",
         "laravel/framework": "^10.10",
         "laravel/sanctum": "^3.3",

@@ -1,0 +1,330 @@
+[
+  {
+    "question": "What is Vedic Group of Institutions?",
+    "answer": "We at Vedic Group of Institutions are an education group founded in 2008 and managed by The Vedic Educational Trust. We operate campuses in Odisha and Chhattisgarh, provide education from Playgroup/Kindergarten through Class XII, and also offer graduate programs.",
+    "category": "About Vedic Group",
+    "keywords": ["Vedic Group", "founded 2008", "Vedic Educational Trust", "about"],
+    "sort_order": 1,
+    "is_active": true
+  },
+  {
+    "question": "Which campuses are part of the Vedic Group?",
+    "answer": "We list campuses in Sambalpur, Raigarh, Bargarh, and Raipur on our About page. For the most current campus list and programs, please contact the relevant campus directly.",
+    "category": "About Vedic Group",
+    "keywords": ["campuses", "Sambalpur", "Raigarh", "Bargarh", "Raipur"],
+    "sort_order": 2,
+    "is_active": true
+  },
+  {
+    "question": "Is Vedic Group ISO certified?",
+    "answer": "Yes, we are ISO 9001:2015 certified.",
+    "category": "About Vedic Group",
+    "keywords": ["ISO 9001:2015", "certified", "quality"],
+    "sort_order": 3,
+    "is_active": true
+  },
+  {
+    "question": "What academic levels and programs are offered by Vedic Group?",
+    "answer": "We offer education from Playgroup/Kindergarten to Class XII, along with graduate programs in Arts, Science, Commerce, B.Ed., and Pharmacy.",
+    "category": "Academics & Programs",
+    "keywords": ["Playgroup", "Kindergarten", "Class XII", "Arts", "Science", "Commerce", "B.Ed", "Pharmacy"],
+    "sort_order": 4,
+    "is_active": true
+  },
+  {
+    "question": "Does Vedic integrate robotics or coding in the curriculum?",
+    "answer": "Yes, we integrate Robotics and Coding in our curriculum, aligned with international standards.",
+    "category": "Academics & Programs",
+    "keywords": ["robotics", "coding", "curriculum", "AI"],
+    "sort_order": 5,
+    "is_active": true
+  },
+  {
+    "question": "What partnerships or enrichment programs are mentioned?",
+    "answer": "We collaborate with partners such as Crickingdom Cricket Academy by Rohit Sharma, School Cinema, and XSEED.",
+    "category": "Academics & Programs",
+    "keywords": ["Crickingdom", "School Cinema", "XSEED", "collaboration"],
+    "sort_order": 6,
+    "is_active": true
+  },
+  {
+    "question": "Where can I find admission information?",
+    "answer": "We publish admission details on campus-specific pages (Sambalpur, Raigarh, etc.). If details are not listed for your level, please contact the campus directly or use the online admission forms linked on our website.",
+    "category": "Admissions",
+    "keywords": ["admission", "apply", "form", "process"],
+    "sort_order": 7,
+    "is_active": true
+  },
+  {
+    "question": "Is there an online admission form?",
+    "answer": "Yes, we provide online admission forms (Google Forms) for school admissions and an Online Admission Inquiry form for the Degree College.",
+    "category": "Admissions",
+    "keywords": ["online admission", "Google Form", "inquiry form"],
+    "sort_order": 8,
+    "is_active": true
+  },
+  {
+    "question": "How does +3 (degree) admission work?",
+    "answer": "Our Degree College admission process follows SAMS/DHE Odisha guidelines and is typically published after +2 results through an Online CAF (Common Application Form).",
+    "category": "Admissions",
+    "keywords": ["+3 admission", "degree college", "SAMS", "DHE", "Online CAF"],
+    "sort_order": 9,
+    "is_active": true
+  },
+  {
+    "question": "What documents are required for admission?",
+    "answer": "We do not list document requirements on the public pages. Please contact the campus for the current checklist.",
+    "category": "Admissions",
+    "keywords": ["documents", "requirements", "admission documents"],
+    "sort_order": 10,
+    "is_active": true
+  },
+  {
+    "question": "What are the admission fees?",
+    "answer": "We do not list fee details on the public pages. Please contact the campus admissions office for the latest fee structure.",
+    "category": "Admissions",
+    "keywords": ["fees", "fee structure", "tuition"],
+    "sort_order": 11,
+    "is_active": true
+  },
+  {
+    "question": "Is there an age criteria for admission?",
+    "answer": "We do not list age criteria on the public pages. Please contact the campus admissions office.",
+    "category": "Admissions",
+    "keywords": ["age criteria", "eligibility", "admission age"],
+    "sort_order": 12,
+    "is_active": true
+  },
+  {
+    "question": "What undergraduate programs are offered at Vedic Degree College?",
+    "answer": "We offer undergraduate (+3) courses in Arts, Science, and Commerce at our Degree College as per SAMS Odisha provisions and are affiliated to Sambalpur University.",
+    "category": "Academics & Programs",
+    "keywords": ["+3", "Arts", "Science", "Commerce", "Sambalpur University"],
+    "sort_order": 13,
+    "is_active": true
+  },
+  {
+    "question": "Is B.Ed. offered?",
+    "answer": "Yes, we offer B.Ed. as part of our graduate programs.",
+    "category": "Academics & Programs",
+    "keywords": ["B.Ed", "teacher education"],
+    "sort_order": 14,
+    "is_active": true
+  },
+  {
+    "question": "Does Vedic offer Pharmacy?",
+    "answer": "Yes, we offer Pharmacy as part of our graduate programs.",
+    "category": "Academics & Programs",
+    "keywords": ["Pharmacy", "graduate program"],
+    "sort_order": 15,
+    "is_active": true
+  },
+  {
+    "question": "Are hostel facilities available?",
+    "answer": "Yes, we provide well-equipped boys’ and girls’ hostels. Our Degree College also mentions hostel facilities.",
+    "category": "Facilities & Student Life",
+    "keywords": ["hostel", "boys hostel", "girls hostel", "accommodation"],
+    "sort_order": 16,
+    "is_active": true
+  },
+  {
+    "question": "What campus facilities are mentioned?",
+    "answer": "We offer academic blocks, administrative offices, science and computer labs, playgrounds, basketball courts, indoor game zones, canteens, and an amusement park for children.",
+    "category": "Facilities & Student Life",
+    "keywords": ["labs", "playground", "basketball", "indoor games", "canteen", "amusement park"],
+    "sort_order": 17,
+    "is_active": true
+  },
+  {
+    "question": "Is medical assistance available?",
+    "answer": "Yes, we provide round-the-clock medical assistance with a dedicated team of doctors and nurses.",
+    "category": "Facilities & Student Life",
+    "keywords": ["medical", "health", "doctors", "nurses"],
+    "sort_order": 18,
+    "is_active": true
+  },
+  {
+    "question": "Do students participate in MUN or TEDx?",
+    "answer": "Yes, we run TEDx Talks and Model United Nations (MUN) initiatives.",
+    "category": "Facilities & Student Life",
+    "keywords": ["TEDx", "MUN", "Model United Nations", "leadership"],
+    "sort_order": 19,
+    "is_active": true
+  },
+  {
+    "question": "Does Vedic have a mobile app for parents?",
+    "answer": "Yes, we provide the VEDIC Mobile App for parent communication and student updates.",
+    "category": "Mobile App",
+    "keywords": ["mobile app", "parent app", "VEDIC app"],
+    "sort_order": 20,
+    "is_active": true
+  },
+  {
+    "question": "What can parents do in the VEDIC Mobile App?",
+    "answer": "Our app provides access to classwork/homework, academic performance, behavior notifications, circulars/calendar, event photos, canteen menus, library book status, online exams/learning, results, direct queries to school authorities, and lesson plans/exam schedules.",
+    "category": "Mobile App",
+    "keywords": ["homework", "performance", "notifications", "calendar", "canteen", "library", "online exam", "results", "lesson plan"],
+    "sort_order": 21,
+    "is_active": true
+  },
+  {
+    "question": "Where can I download the app?",
+    "answer": "We link to the Google Play and Apple App Store listings for the Vidyalaya app used by Vedic.",
+    "category": "Mobile App",
+    "keywords": ["Google Play", "App Store", "Vidyalaya"],
+    "sort_order": 22,
+    "is_active": true
+  },
+  {
+    "question": "Does Vedic publish student results?",
+    "answer": "Yes, our campus pages show result highlights and top performers for different years/streams.",
+    "category": "Results & Achievements",
+    "keywords": ["results", "CBSE results", "annual results"],
+    "sort_order": 23,
+    "is_active": true
+  },
+  {
+    "question": "What awards or recognitions are mentioned?",
+    "answer": "We have received awards such as ASSOCHAM Edushine Excellence Award, National Excellence Award, Indian Achievers Award, and recognition as No. 1 School in Sambalpur.",
+    "category": "Results & Achievements",
+    "keywords": ["awards", "ASSOCHAM", "National Excellence", "Indian Achievers"],
+    "sort_order": 24,
+    "is_active": true
+  },
+  {
+    "question": "How can I contact Vedic International School, Sambalpur?",
+    "answer": "You can reach us at info@vedic.ac.in, vice-principal@vedic.ac.in, principal@vedic.ac.in, or call 9124612340 / 9124312340.",
+    "category": "Contact & Locations",
+    "keywords": ["VIS Sambalpur", "contact", "phone", "email"],
+    "sort_order": 25,
+    "is_active": true
+  },
+  {
+    "question": "How can I contact Vedic International School, Raigarh?",
+    "answer": "You can reach us at info@vedic.ac.in or call 8093212340 / 8093312340.",
+    "category": "Contact & Locations",
+    "keywords": ["VIS Raigarh", "contact", "phone", "email"],
+    "sort_order": 26,
+    "is_active": true
+  },
+  {
+    "question": "How can I contact Vedic Higher Secondary School, Sambalpur?",
+    "answer": "You can reach us at jrcoordinator@vedic.ac.in, principal.junior@vedic.ac.in, or call 9778412340 / 7735212340.",
+    "category": "Contact & Locations",
+    "keywords": ["VHS Sambalpur", "contact", "phone", "email"],
+    "sort_order": 27,
+    "is_active": true
+  },
+  {
+    "question": "How can I contact Vedic Degree College, Sambalpur?",
+    "answer": "You can reach us at principal.degree@vedic.ac.in or call 9861202552 / 9124612340.",
+    "category": "Contact & Locations",
+    "keywords": ["Vedic Degree College", "contact", "phone", "email"],
+    "sort_order": 28,
+    "is_active": true
+  },
+  {
+    "question": "How can I contact Vedic Higher Secondary School, Bargarh?",
+    "answer": "You can reach us at info@vedic.ac.in or call 8117812340.",
+    "category": "Contact & Locations",
+    "keywords": ["VHS Bargarh", "contact", "phone", "email"],
+    "sort_order": 29,
+    "is_active": true
+  },
+  {
+    "question": "What are the campus addresses?",
+    "answer": "Our addresses are: Sambalpur - State Highway 10, Sambalpur–Jharsuguda Rd, Ajit-pur-Sason, Sambalpur, Odisha 768200. Raigarh - National Highway 216, Industrial Area, Patelpali, Raigarh, Chhattisgarh 496001. Bargarh - Plot No. 2901, Gangadhar Nagar Chowk, near Milan Mandap, Govindpali, Bargarh, Odisha 768028.",
+    "category": "Contact & Locations",
+    "keywords": ["address", "Sambalpur", "Raigarh", "Bargarh"],
+    "sort_order": 30,
+    "is_active": true
+  },
+  {
+    "question": "Is there a toll-free number?",
+    "answer": "Our toll-free number listed on some campus pages is 1800 4198 404.",
+    "category": "Contact & Locations",
+    "keywords": ["toll-free", "1800 4198 404"],
+    "sort_order": 31,
+    "is_active": true
+  },
+  {
+    "question": "Are there different schools under Vedic Group?",
+    "answer": "Yes, we have Vedic International School (Sambalpur and Raigarh), Vedic Higher Secondary School (Sambalpur), and Vedic Degree College (Sambalpur), among others.",
+    "category": "Admissions",
+    "keywords": ["Vedic International School", "Vedic Higher Secondary", "Vedic Degree College"],
+    "sort_order": 32,
+    "is_active": true
+  },
+  {
+    "question": "Do you have coaching or special programs like MUN or TEDx?",
+    "answer": "We host TEDx Talks and Model United Nations (MUN) initiatives to build leadership and global exposure.",
+    "category": "Student Life",
+    "keywords": ["MUN", "TEDx", "leadership"],
+    "sort_order": 33,
+    "is_active": true
+  },
+  {
+    "question": "Do you offer sports and extracurricular activities?",
+    "answer": "Yes, we provide playgrounds, basketball courts, indoor games, and co-curricular initiatives like MUN and TEDx. We also share news and event updates on our site.",
+    "category": "Student Life",
+    "keywords": ["sports", "extracurricular", "basketball", "indoor games", "events"],
+    "sort_order": 34,
+    "is_active": true
+  },
+  {
+    "question": "How can teachers or staff apply for jobs?",
+    "answer": "We do not list job/appointment details on the public pages. Please contact the campus via the provided emails/phone numbers to inquire about openings.",
+    "category": "Careers",
+    "keywords": ["careers", "jobs", "teacher", "staff", "appointment"],
+    "sort_order": 35,
+    "is_active": true
+  },
+  {
+    "question": "Is there a privacy policy?",
+    "answer": "Yes, we publish our Privacy and Cookie Policy on the Vedic website.",
+    "category": "Privacy",
+    "keywords": ["privacy", "cookie policy", "data"],
+    "sort_order": 36,
+    "is_active": true
+  },
+  {
+    "question": "How does Vedic use website information?",
+    "answer": "Our Privacy Policy explains that we use information to operate and improve the website, communicate with users, and for analytics and security, among other purposes.",
+    "category": "Privacy",
+    "keywords": ["privacy policy", "data use", "analytics"],
+    "sort_order": 37,
+    "is_active": true
+  },
+  {
+    "question": "What are the school timings?",
+    "answer": "We do not list timings on the public pages. Please contact the campus directly.",
+    "category": "General",
+    "keywords": ["timings", "school hours", "office hours"],
+    "sort_order": 38,
+    "is_active": true
+  },
+  {
+    "question": "Do you provide transport (bus) services?",
+    "answer": "We do not list transport details on the public pages. Please contact the campus directly.",
+    "category": "General",
+    "keywords": ["transport", "bus", "pickup"],
+    "sort_order": 39,
+    "is_active": true
+  },
+  {
+    "question": "Is there a uniform or book list?",
+    "answer": "We do not list uniform and book list details on the public pages. Please contact the campus directly.",
+    "category": "General",
+    "keywords": ["uniform", "books", "supplies"],
+    "sort_order": 40,
+    "is_active": true
+  },
+  {
+    "question": "Do you offer scholarships?",
+    "answer": "We do not list scholarship details on the public pages. Please contact the campus directly.",
+    "category": "General",
+    "keywords": ["scholarship", "financial aid"],
+    "sort_order": 41,
+    "is_active": true
+  }
+]

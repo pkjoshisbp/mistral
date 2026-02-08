@@ -19,6 +19,7 @@
                             <select class="form-control" wire:model.live="statusFilter">
                                 <option value="">All Statuses</option>
                                 <option value="draft">Draft</option>
+                                <option value="scheduled">Scheduled</option>
                                 <option value="sending">Sending</option>
                                 <option value="sent">Sent</option>
                                 <option value="failed">Failed</option>
@@ -43,7 +44,8 @@
                                     <th>Recipients</th>
                                     <th>Status</th>
                                     <th>Success Rate</th>
-                                    <th>Sent Date</th>
+                                    <th>Engagement</th>
+                                    <th>Send Time</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -64,6 +66,8 @@
                                         <td>
                                             @if($campaign->status === 'draft')
                                                 <span class="badge bg-secondary">Draft</span>
+                                            @elseif($campaign->status === 'scheduled')
+                                                <span class="badge bg-info">Scheduled</span>
                                             @elseif($campaign->status === 'sending')
                                                 <span class="badge bg-warning">Sending</span>
                                             @elseif($campaign->status === 'sent')
@@ -90,9 +94,20 @@
                                             @endif
                                         </td>
                                         <td>
-                                            {{ $campaign->sent_at ? $campaign->sent_at->format('M d, Y H:i') : 'Not sent' }}
+                                            <div class="small text-muted">Delivered: {{ $campaign->delivered_count ?? 0 }}</div>
+                                            <div class="small text-muted">Opened: {{ $campaign->opened_count ?? 0 }}</div>
                                         </td>
                                         <td>
+                                            @if($campaign->status === 'scheduled')
+                                                {{ $campaign->scheduled_at ? $campaign->scheduled_at->format('M d, Y H:i') : 'Not scheduled' }}
+                                            @else
+                                                {{ $campaign->sent_at ? $campaign->sent_at->format('M d, Y H:i') : 'Not sent' }}
+                                            @endif
+                                        </td>
+                                        <td>
+                                            <button type="button" class="btn btn-sm btn-outline-primary me-1" wire:click="reuseCampaign({{ $campaign->id }})">
+                                                <i class="fas fa-redo"></i>
+                                            </button>
                                             <button type="button" class="btn btn-sm btn-outline-danger" 
                                                     wire:click="deleteCampaign({{ $campaign->id }})"
                                                     onclick="return confirm('Are you sure you want to delete this campaign?')">
@@ -102,7 +117,7 @@
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="7" class="text-center py-4">
+                                        <td colspan="8" class="text-center py-4">
                                             <div class="text-muted">
                                                 <i class="fas fa-paper-plane fa-3x mb-3"></i>
                                                 <p>No email campaigns found</p>
@@ -179,6 +194,24 @@
                                 </div>
                                 <input type="hidden" wire:model="sender_name">
                                 <input type="hidden" wire:model="sender_phone">
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-check mb-3">
+                                        <input class="form-check-input" type="checkbox" id="scheduleEnabled" wire:model="scheduleEnabled">
+                                        <label class="form-check-label" for="scheduleEnabled">Schedule send</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-8">
+                                    <div class="mb-3">
+                                        <label class="form-label">Scheduled Date/Time</label>
+                                        <input type="datetime-local" class="form-control @error('scheduled_at') is-invalid @enderror" 
+                                               wire:model="scheduled_at" @if(!$scheduleEnabled) disabled @endif>
+                                        @error('scheduled_at') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                                        <small class="text-muted">Uses server timezone ({{ config('app.timezone') }})</small>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="mb-3">

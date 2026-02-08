@@ -39,6 +39,8 @@ class WidgetManager extends Component
             'branding_enabled' => true,
             'branding_badge' => false,
             'branding_follow' => true,
+            'branding_text_enabled' => true,
+            'branding_text' => 'AI Chat Support',
             'chat_history_ttl_hours' => 24,
         ];
     }

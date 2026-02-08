@@ -163,16 +163,5 @@
         })();
     </script>
     
-    <!-- AI Chat Widget -->
-    <script>
-        (function() {
-            // Widget for main platform website
-            const orgSlug = 'platform';
-            const script = document.createElement('script');
-            script.src = `{{ config('app.url') }}/widget/${orgSlug}/script.js`;
-            script.async = true;
-            document.head.appendChild(script);
-        })();
-    </script>
 </body>
 </html>

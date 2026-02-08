@@ -32,10 +32,7 @@ class ChatInteractionDigestNotification extends Mailable
             ->text('emails.chat-interaction-digest-notification-text')
             ->with($this->payload);
 
-        $orgEmail = $this->payload['organization']->contact_email ?? null;
-        if (!empty($orgEmail)) {
-            $mail->replyTo($orgEmail, $orgName);
-        }
+
 
         $mail->withSymfonyMessage(function ($message) use ($fromAddress) {
             $headers = $message->getHeaders();

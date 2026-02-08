@@ -82,10 +82,13 @@
                         </thead>
                         <tbody>
                             @foreach($conversations as $conversation)
+                                @php
+                                    $tz = $conversation->organization->timezone ?? config('app.timezone', 'UTC');
+                                @endphp
                                 <tr>
                                     <td>
-                                        <div class="fw-bold">{{ $conversation->created_at->format('M d, Y') }}</div>
-                                        <small class="text-muted">{{ $conversation->created_at->format('h:i A') }}</small>
+                                        <div class="fw-bold">{{ $conversation->created_at->timezone($tz)->format('M d, Y') }}</div>
+                                        <small class="text-muted">{{ $conversation->created_at->timezone($tz)->format('h:i A') }}</small>
                                     </td>
                                     <td>
                                         <div class="fw-bold">{{ $conversation->visitor_name ?? 'Anonymous' }}</div>
@@ -133,7 +136,8 @@
                                                     @php
                                                         $isUser = ($message->sender_type === 'user');
                                                         $sender = method_exists($message, 'getSenderDisplayName') ? $message->getSenderDisplayName() : ($message->sender_name ?? ucfirst($message->sender_type ?? 'System'));
-                                                        $time = ($message->sent_at ?? $message->created_at)->format('H:i');
+                                                        $sentAt = $message->sent_at ?? $message->created_at;
+                                                        $time = $sentAt ? $sentAt->timezone($tz)->format('H:i') : '';
                                                     @endphp
                                                     <div class="mb-3">
                                                         <div class="small mb-1">

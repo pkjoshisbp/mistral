@@ -17,4 +17,8 @@ Conversation Summary:
 Reply to this email or send context to: {{ $reply_to }}
 @endif
 
+@if(!empty($magic_link))
+Secure escalation link (valid for {{ $magic_link_ttl_minutes ?? 30 }} minutes): {{ $magic_link }}
+@endif
+
 Open Live Chats console: {{ $console_url }}

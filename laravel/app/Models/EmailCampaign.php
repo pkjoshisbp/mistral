@@ -19,6 +19,7 @@ class EmailCampaign extends Model
         'bcc_recipients',
         'sender_email',
         'sender_name',
+        'scheduled_at',
         'status',
         'total_recipients',
         'sent_count',
@@ -30,6 +31,7 @@ class EmailCampaign extends Model
     protected $casts = [
         'recipients' => 'array',
         'bcc_recipients' => 'array',
+        'scheduled_at' => 'datetime',
         'sent_at' => 'datetime',
         'total_recipients' => 'integer',
         'sent_count' => 'integer',

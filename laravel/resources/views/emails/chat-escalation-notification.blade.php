@@ -23,6 +23,13 @@
         </p>
     @endif
 
+    @if(!empty($magic_link))
+        <p style="margin: 12px 0 0 0; font-size: 12px; color: #666;">
+            Secure escalation link (valid for {{ $magic_link_ttl_minutes ?? 30 }} minutes):
+            <a href="{{ $magic_link }}" target="_blank" rel="noopener noreferrer">Open Escalation Console</a>
+        </p>
+    @endif
+
     <p style="margin: 12px 0 0 0; font-size: 12px; color: #888;">
         Open the Live Chats console to respond.
         <a href="{{ $console_url }}" target="_blank" rel="noopener noreferrer">{{ $console_url }}</a>

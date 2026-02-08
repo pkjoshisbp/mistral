@@ -12,7 +12,22 @@ class MailgunInboundController extends Controller
 {
     public function handle(Request $request)
     {
+        Log::info('Mailgun inbound webhook received', [
+            'recipient' => $request->input('recipient'),
+            'subject' => $request->input('subject'),
+            'sender' => $request->input('sender'),
+            'from' => $request->input('from'),
+            'has_stripped_text' => $request->filled('stripped-text'),
+            'has_body_plain' => $request->filled('body-plain'),
+            'content_length' => strlen((string) ($request->input('stripped-text') ?: $request->input('body-plain'))),
+        ]);
+
         if (!$this->isValidSignature($request)) {
+            Log::warning('Mailgun inbound invalid signature', [
+                'timestamp' => $request->input('timestamp'),
+                'token' => $request->input('token'),
+                'signature' => $request->input('signature'),
+            ]);
             return response()->json(['status' => 'invalid_signature'], 403);
         }
 
@@ -24,6 +39,11 @@ class MailgunInboundController extends Controller
         $message = trim($message);
 
         if ($message === '') {
+            Log::warning('Mailgun inbound empty message', [
+                'recipient' => $recipient,
+                'subject' => $subject,
+                'from' => $from,
+            ]);
             return response()->json(['status' => 'empty_message'], 200);
         }
 
@@ -63,6 +83,12 @@ class MailgunInboundController extends Controller
             'assigned_agent_id' => $conversation->assigned_agent_id,
             'agent_last_active_at' => now(),
             'last_activity_at' => now(),
+        ]);
+
+        Log::info('Mailgun inbound message stored', [
+            'conversation_id' => $conversation->conversation_id,
+            'chat_id' => $conversation->id,
+            'sender' => $senderName,
         ]);
 
         return response()->json(['status' => 'ok'], 200);

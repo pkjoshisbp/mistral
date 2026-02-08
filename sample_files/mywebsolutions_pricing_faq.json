@@ -1,0 +1,62 @@
+[
+  {
+    "question": "How much does a website cost?",
+    "answer": "Website cost usually ranges from ₹10,000 to ₹2,00,000 depending on pages, design, and features. If you want, I can estimate it in 2–3 quick questions.",
+    "keywords": ["website cost", "website pricing", "price", "web design"],
+    "category": "Pricing"
+  },
+  {
+    "question": "Do you build WordPress websites?",
+    "answer": "Yes. We commonly build WordPress sites for business and lead generation. If you share your requirements, we can suggest the best approach and estimate.",
+    "keywords": ["wordpress", "cms", "website"],
+    "category": "Services"
+  },
+  {
+    "question": "Do you build eCommerce websites?",
+    "answer": "Yes, we build eCommerce websites. Pricing depends on product count, payment gateways, and integrations. We can share a quick estimate after a few details.",
+    "keywords": ["ecommerce", "online store", "shop", "woocommerce"],
+    "category": "Services"
+  },
+  {
+    "question": "Do you build web apps or custom systems?",
+    "answer": "Yes, we build custom web apps. These are scoped after understanding the workflow, roles, and integrations. We can set up a quick call to discuss.",
+    "keywords": ["web app", "custom system", "dashboard", "roles"],
+    "category": "Services"
+  },
+  {
+    "question": "What does a lead generation website cost?",
+    "answer": "Lead‑generation websites are usually ₹15,000–₹40,000 depending on design and integrations. Want a quick estimate?",
+    "keywords": ["lead generation", "landing page", "contact form"],
+    "category": "Pricing"
+  },
+  {
+    "question": "Do you offer SEO services?",
+    "answer": "We can provide SEO as part of a website project or as a separate service. Share your goals and we’ll suggest the right package.",
+    "keywords": ["seo", "search engine optimization", "ranking"],
+    "category": "Services"
+  },
+  {
+    "question": "Do you create mobile apps?",
+    "answer": "Yes, we develop mobile apps. Pricing depends on features, platforms, and integrations. We can estimate after a brief requirement discussion.",
+    "keywords": ["mobile app", "android", "ios"],
+    "category": "Services"
+  },
+  {
+    "question": "How do you estimate project pricing?",
+    "answer": "We use a short, step‑by‑step set of questions to understand goals, features, and timeline, then provide a clear range.",
+    "keywords": ["estimate", "pricing process", "quote"],
+    "category": "Pricing"
+  },
+  {
+    "question": "Can I get a quote quickly?",
+    "answer": "Yes. Share your project type (business site, eCommerce, or web app) and any must‑have features. We’ll provide a quick range.",
+    "keywords": ["quote", "estimate", "budget"],
+    "category": "Pricing"
+  },
+  {
+    "question": "Do you provide AI chat solutions?",
+    "answer": "Yes. We offer AI‑based chat solutions that can integrate with web and mobile platforms. We can share options based on your needs.",
+    "keywords": ["ai chat", "chatbot", "realtime chat", "ai assistant"],
+    "category": "Services"
+  }
+]

@@ -250,10 +250,16 @@ class IntentDetectionService
             
             if ($response && isset($response['message']['content'])) {
                 $content = trim($response['message']['content']);
+                $content = trim($content, "\n\r\t \"");
                 $result = json_decode($content, true);
                 
                 if (json_last_error() === JSON_ERROR_NONE && is_array($result)) {
                     return array_merge($result, ['method' => 'llm_based']);
+                }
+
+                $parsed = $this->parseLooseIntentResponse($content);
+                if ($parsed) {
+                    return array_merge($parsed, ['method' => 'llm_based']);
                 }
             }
 
@@ -265,6 +271,49 @@ class IntentDetectionService
         }
 
         return null;
+    }
+
+    private function parseLooseIntentResponse(string $content): ?array
+    {
+        $allowedIntents = ['booking', 'pricing', 'realtime_data', 'lookup', 'static_info'];
+
+        $intent = null;
+        if (preg_match('/intent\s*[:=]\s*([a-z_]+)/i', $content, $match)) {
+            $intent = strtolower($match[1]);
+        }
+        if (!$intent || !in_array($intent, $allowedIntents, true)) {
+            return null;
+        }
+
+        $confidence = null;
+        if (preg_match('/confidence\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)/i', $content, $match)) {
+            $confidence = (float) $match[1];
+            if ($confidence > 1) {
+                $confidence = $confidence / 100.0;
+            }
+            $confidence = max(0.0, min(1.0, $confidence));
+        }
+
+        $actionNeeded = null;
+        if (preg_match('/action\s*needed\s*[:=]\s*(true|false)/i', $content, $match)) {
+            $actionNeeded = strtolower($match[1]) === 'true';
+        }
+
+        if ($actionNeeded === null) {
+            $actionNeeded = in_array($intent, ['booking', 'realtime_data', 'lookup', 'pricing'], true);
+        }
+
+        $reasoning = null;
+        if (preg_match('/reasoning\s*[:=]\s*([^\n\r\}]+)/i', $content, $match)) {
+            $reasoning = trim($match[1]);
+        }
+
+        return [
+            'intent' => $intent,
+            'confidence' => $confidence ?? 0.6,
+            'action_needed' => $actionNeeded,
+            'reasoning' => $reasoning ?? 'llm_loose_parse',
+        ];
     }
 
     /**

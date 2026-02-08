@@ -13,16 +13,62 @@ class AnalyticsTrackingController extends Controller
     public function track(Request $request)
     {
         try {
-            $validated = $request->validate([
+            $input = $request->all();
+            if (!isset($input['organization_id']) && isset($input['org_id'])) {
+                $input['organization_id'] = $input['org_id'];
+            }
+            if (!isset($input['organization_id']) && isset($input['org_slug'])) {
+                $org = Organization::where('slug', $input['org_slug'])->first();
+                if ($org) {
+                    $input['organization_id'] = $org->id;
+                }
+            }
+            if (isset($input['organization_id']) && !is_numeric($input['organization_id'])) {
+                $org = Organization::where('slug', $input['organization_id'])->first();
+                if ($org) {
+                    $input['organization_id'] = $org->id;
+                }
+            }
+            if (!isset($input['page_url'])) {
+                $input['page_url'] = $request->header('referer') ?? config('app.url');
+            }
+            if (!isset($input['timestamp'])) {
+                $input['timestamp'] = now()->toISOString();
+            }
+            if (!isset($input['time_on_page']) || !is_numeric($input['time_on_page'])) {
+                $input['time_on_page'] = 0;
+            }
+
+            if (isset($input['event_data']) && is_string($input['event_data'])) {
+                $decoded = json_decode($input['event_data'], true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $input['event_data'] = $decoded;
+                } else {
+                    $input['event_data'] = ['raw' => $input['event_data']];
+                }
+            }
+
+            $validator = validator($input, [
                 'organization_id' => 'required|exists:organizations,id',
-                'event_type' => 'required|string|in:page_view,widget_open,chat_message,widget_close,unanswered_question',
-                'page_url' => 'required|url',
+                'event_type' => 'required|string|in:page_view,widget_open,chat_message,widget_close,unanswered_question,widget_expand,widget_minimize,widget_load',
+                'page_url' => 'nullable|string',
                 'page_title' => 'nullable|string',
                 'referrer' => 'nullable|string',
                 'user_agent' => 'nullable|string',
                 'event_data' => 'nullable|array',
-                'timestamp' => 'required|date'
+                'timestamp' => 'required|date',
+                'time_on_page' => 'nullable|numeric|min:0'
             ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $validated = $validator->validated();
 
             // Generate or get visitor ID from session/cookie
             $visitorId = $this->getVisitorId($request);
@@ -38,16 +84,16 @@ class AnalyticsTrackingController extends Controller
                 'visitor_id' => $visitorId,
                 'session_id' => $sessionId,
                 'event_type' => $validated['event_type'],
-                'page_url' => $validated['page_url'],
+                'page_url' => $validated['page_url'] ?? config('app.url'),
                 'page_title' => $validated['page_title'] ?? '',
                 'referrer' => $validated['referrer'] ?? '',
-                'user_agent' => $validated['user_agent'] ?? '',
+                'user_agent' => $validated['user_agent'] ?? $request->userAgent() ?? '',
                 'ip_address' => $ipAddress,
                 'country' => $locationData['country'] ?? null,
                 'region' => $locationData['region'] ?? null,
                 'city' => $locationData['city'] ?? null,
                 'event_data' => $validated['event_data'] ?? null,
-                'time_on_page' => $this->calculateTimeOnPage($request),
+                'time_on_page' => (int) ($validated['time_on_page'] ?? 0),
                 'created_at' => $validated['timestamp']
             ]);
 

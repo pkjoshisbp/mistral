@@ -1,0 +1,8 @@
+service_type,package_name,price_min,price_max,currency,estimated_timeline,inclusions,notes,booking_link
+website,Starter Business Site,10000,25000,INR,1-2 weeks,"Up to 5 pages, responsive design, contact form",,""
+website,Business Plus,25000,70000,INR,2-4 weeks,"10-20 pages, custom design, basic SEO",,""
+ecommerce,Starter Store,30000,80000,INR,2-5 weeks,"Up to 50 products, payment gateway, order management",,""
+ecommerce,Advanced Store,80000,200000,INR,4-8 weeks,"Multi‑category, shipping rules, integrations",,""
+web_app,Custom Web App,70000,500000,INR,4-12 weeks,"Custom workflows, roles, dashboards",,""
+seo,SEO Package,5000,25000,INR,Monthly,"On‑page SEO, basic content recommendations",,""
+mobile_app,Mobile App MVP,80000,400000,INR,6-12 weeks,"Single platform, core features",,""

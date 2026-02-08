@@ -4,6 +4,7 @@ namespace App\Livewire\Admin;
 
 use App\Models\EmailTemplate;
 use App\Models\EmailCampaign;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Mail;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -26,6 +27,8 @@ class EmailCampaignManager extends Component
     public $sender_phone = '';
     public $recipients = '';
     public $bcc_recipients = '';
+    public $scheduleEnabled = false;
+    public $scheduled_at = null;
     
     // Template variables
     public $templateVariables = [];
@@ -39,6 +42,7 @@ class EmailCampaignManager extends Component
     public $bccList = [];
     public $recipientRows = []; // array: [email, include, variables=>[]]
     public $availableVariables = [];
+    public $reuseCampaignId = null;
     
     public $search = '';
     public $statusFilter = '';
@@ -109,6 +113,10 @@ class EmailCampaignManager extends Component
     {
         $campaigns = EmailCampaign::query()
             ->with(['template', 'creator'])
+            ->withCount([
+                'recipients as opened_count' => fn($q) => $q->whereNotNull('opened_at'),
+                'recipients as delivered_count' => fn($q) => $q->whereNotNull('delivered_at'),
+            ])
             ->when($this->search, function ($query) {
                 $query->where('name', 'like', '%' . $this->search . '%')
                       ->orWhere('subject', 'like', '%' . $this->search . '%');
@@ -131,6 +139,44 @@ class EmailCampaignManager extends Component
     {
         $this->resetInputs();
         $this->step = 1;
+        $this->showModal = true;
+    }
+
+    public function reuseCampaign($campaignId)
+    {
+        $campaign = EmailCampaign::find($campaignId);
+        if (!$campaign) return;
+
+        $this->resetInputs();
+        $this->reuseCampaignId = $campaign->id;
+        $this->name = $campaign->name . ' (Resend)';
+        $this->subject = $campaign->subject;
+        $this->content = $campaign->content;
+        $this->template_id = $campaign->template_id;
+        $this->sender_email = $campaign->sender_email;
+        $this->sender_name = $campaign->sender_name;
+        $this->bcc_recipients = is_array($campaign->bcc_recipients) ? implode(', ', $campaign->bcc_recipients) : '';
+        $this->scheduleEnabled = false;
+        $this->scheduled_at = null;
+
+        if ($this->template_id) {
+            $this->selectTemplate();
+        }
+
+        $recipientRows = $campaign->recipients()->get();
+        $this->recipientRows = $recipientRows->map(function ($rec) {
+            return [
+                'email' => $rec->recipient_email,
+                'include' => true,
+                'variables' => array_merge(
+                    ['sender_name'=>'AI Chat Support','contact_phone'=>'+91 9937253528','sender_phone'=>'+91 9937253528'],
+                    $rec->variables ?? []
+                ),
+            ];
+        })->toArray();
+
+        $this->step = 2;
+        $this->updatePreview();
         $this->showModal = true;
     }
 
@@ -213,6 +259,45 @@ class EmailCampaignManager extends Component
             return $variables[$key] ?? $this->variableValues[$key] ?? $m[0];
         }, $this->subject);
     }
+
+    protected function buildTrackedContent(string $content, string $token): string
+    {
+        $content = $this->applyEmailTypography($content);
+        $baseUrl = rtrim(config('app.url'), '/');
+        $pixel = '<img src="' . $baseUrl . '/email/open/' . $token . '.png" width="1" height="1" style="display:none" alt="" />';
+
+        if (stripos($content, '</body>') !== false) {
+            return preg_replace('/<\/body>/i', $pixel . '</body>', $content, 1);
+        }
+
+        return $content . $pixel;
+    }
+
+    protected function applyEmailTypography(string $content): string
+    {
+        $fontFamily = 'Segoe UI, Helvetica, Arial, sans-serif';
+        $baseStyle = 'font-family: ' . $fontFamily . '; font-size: 16px; line-height: 1.6;';
+
+        if (preg_match('/font-family:/i', $content)) {
+            $content = preg_replace(
+                '/font-family:\s*[^;"\']*arial[^;"\']*;?/i',
+                'font-family: ' . $fontFamily . '; font-size: 16px; line-height: 1.6;',
+                $content
+            );
+        } else {
+            $content = '<div style="' . $baseStyle . '">' . $content . '</div>';
+        }
+
+        $content = preg_replace_callback('/<body([^>]*)>/i', function ($m) use ($baseStyle) {
+            $attrs = $m[1] ?? '';
+            if (stripos($attrs, 'style=') !== false) {
+                return preg_replace('/style=("|\')(.*?)\1/i', 'style="$2 ' . $baseStyle . '"', $m[0], 1);
+            }
+            return '<body' . $attrs . ' style="' . $baseStyle . '">';
+        }, $content);
+
+        return $content;
+    }
     // Removed organization-based advanced selection; using direct recipient rows now
 
     public function sendCampaign()
@@ -224,6 +309,19 @@ class EmailCampaignManager extends Component
                 return;
             }
 
+            if ($this->scheduleEnabled) {
+                if (!$this->scheduled_at) {
+                    $this->addError('scheduled_at', 'Please select a scheduled date/time.');
+                    return;
+                }
+
+                $scheduledAt = Carbon::parse($this->scheduled_at, config('app.timezone'));
+                if ($scheduledAt->lessThanOrEqualTo(now())) {
+                    $this->addError('scheduled_at', 'Scheduled time must be in the future.');
+                    return;
+                }
+            }
+
             // Enforce mandatory BCC before sending
             if (!in_array('pkjoshi.sbp@gmail.com', $this->bccList)) {
                 $this->bccList[] = 'pkjoshi.sbp@gmail.com';
@@ -233,16 +331,35 @@ class EmailCampaignManager extends Component
             $campaign = EmailCampaign::create([
                 'name' => $this->name,
                 'subject' => $this->subject,
-                'content' => $this->previewContent, // representative or simple mode content
+                'content' => $this->content,
                 'template_id' => $this->template_id ?: null,
                 'recipients' => $this->recipientList,
                 'bcc_recipients' => $this->bccList,
                 'sender_email' => $this->sender_email,
                 'sender_name' => $this->sender_name,
-                'status' => 'sending',
+                'scheduled_at' => $this->scheduleEnabled ? Carbon::parse($this->scheduled_at, config('app.timezone')) : null,
+                'status' => $this->scheduleEnabled ? 'scheduled' : 'sending',
                 'total_recipients' => count($this->recipientList),
                 'created_by' => auth()->id(),
             ]);
+
+            if ($this->scheduleEnabled) {
+                foreach ($this->recipientRows as $row) {
+                    if (empty($row['include']) || empty($row['email'])) continue;
+                    $campaign->recipients()->create([
+                        'organization_id' => null,
+                        'recipient_email' => $row['email'],
+                        'variables' => $row['variables'],
+                        'status' => 'pending',
+                        'tracking_token' => bin2hex(random_bytes(16)),
+                        'resend_count' => 0,
+                    ]);
+                }
+
+                session()->flash('success', 'Campaign scheduled successfully.');
+                $this->closeModal();
+                return;
+            }
 
             $sentCount = 0; $failedCount = 0;
             foreach ($this->recipientRows as $row) {
@@ -253,17 +370,30 @@ class EmailCampaignManager extends Component
                         'organization_id' => null,
                         'recipient_email' => $row['email'],
                         'variables' => $row['variables'],
-                        'status' => 'pending'
+                        'status' => 'pending',
+                        'tracking_token' => bin2hex(random_bytes(16)),
+                        'resend_count' => 0,
+                        'last_sent_at' => now(),
+                        'next_resend_at' => now()->addDays(7),
                     ]);
                     $personalSubject = $this->buildPersonalizedSubject($row['variables']);
-                    Mail::send([], [], function ($message) use ($row, $campaign, $personalContent, $personalSubject) {
+                        $trackedContent = $this->buildTrackedContent($personalContent, $recModel->tracking_token);
+                        Mail::send([], [], function ($message) use ($row, $campaign, $trackedContent, $personalSubject, $recModel) {
                         $message->to($row['email'])
-                                ->subject($personalSubject)
-                                ->from($campaign->sender_email, $campaign->sender_name)
-                                ->html($personalContent);
+                            ->subject($personalSubject)
+                            ->from($campaign->sender_email, $campaign->sender_name)
+                            ->html($trackedContent);
+                        $message->getSymfonyMessage()
+                            ->getHeaders()
+                            ->addTextHeader('X-AICS-Tracking-Token', $recModel->tracking_token);
                         if (!empty($this->bccList)) { $message->bcc($this->bccList); }
                     });
-                    $recModel->update(['status'=>'sent','sent_at'=>now()]);
+                    $recModel->update([
+                        'status'=>'sent',
+                        'sent_at'=>now(),
+                        'last_event' => 'sent',
+                        'last_event_at' => now(),
+                    ]);
                     $sentCount++;
                 } catch (\Exception $e) {
                     $failedCount++;
@@ -308,6 +438,8 @@ class EmailCampaignManager extends Component
         $this->template_id = '';
         $this->recipients = '';
         $this->bcc_recipients = '';
+        $this->scheduleEnabled = false;
+        $this->scheduled_at = null;
         $this->templateVariables = [];
         $this->variableValues = [
             'sender_name' => 'AI Chat Support',

@@ -28,6 +28,8 @@
 
 /* Header */
 .ai-chat-header { background:{{ $theme['primaryColor'] }} !important; color:#fff !important; padding:calc(18px + env(safe-area-inset-top)) 22px 18px 22px !important; display:flex !important; align-items:center !important; gap:14px !important; box-shadow:0 2px 4px rgba(0,0,0,.12) !important; }
+.ai-chat-logo { width:36px !important; height:36px !important; border-radius:10px !important; background:rgba(255,255,255,.18) !important; display:flex !important; align-items:center !important; justify-content:center !important; overflow:hidden !important; flex-shrink:0 !important; }
+.ai-chat-logo img { width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
 .ai-chat-header-info { flex:1 !important; min-width:0 !important; }
 .ai-chat-header-actions { display:flex !important; gap:8px !important; }
 .ai-chat-title { font-size:15px !important; font-weight:600 !important; letter-spacing:.2px !important; margin:0 0 4px 0 !important; }
@@ -102,4 +104,9 @@
 
 /* Branding footer */
 .ai-chat-branding a { color: {{ $theme['primaryColor'] }} !important; }
+    .ai-chat-branding img {
+        height: 16px;
+        width: auto;
+        display: block;
+    }
 

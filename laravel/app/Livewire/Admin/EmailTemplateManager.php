@@ -24,6 +24,7 @@ class EmailTemplateManager extends Component
     public $variableInput = '';
     public $search = '';
     public $industryFilter = '';
+    public $commonPlaceholders = [];
 
     protected $rules = [
         'name' => 'required|string|max:255',
@@ -39,6 +40,16 @@ class EmailTemplateManager extends Component
     public function mount()
     {
         $this->resetInputs();
+        $this->commonPlaceholders = [
+            'owner_name' => '{owner_name}',
+            'recipient_name' => '{recipient_name}',
+            'company_name' => '{company_name}',
+            'store_name' => '{store_name}',
+            'website_url' => '{website_url}',
+            'contact_email' => '{contact_email}',
+            'phone_number' => '{phone_number}',
+            'support_phone' => '{support_phone}',
+        ];
     }
 
     public function render()
@@ -61,6 +72,16 @@ class EmailTemplateManager extends Component
             'templates' => $templates,
             'industries' => $industries
         ])->layout('layouts.admin');
+    }
+
+    public function updatedIndustryFilter()
+    {
+        $this->resetPage();
+    }
+
+    public function updatedSearch()
+    {
+        $this->resetPage();
     }
 
     public function openModal($templateId = null)
@@ -102,6 +123,16 @@ class EmailTemplateManager extends Component
         $this->variables = array_values($this->variables);
     }
 
+    public function insertPlaceholder(string $placeholder)
+    {
+        $this->content = rtrim((string)$this->content) . ' ' . $placeholder;
+    }
+
+    public function insertSubjectPlaceholder(string $placeholder)
+    {
+        $this->subject = rtrim((string)$this->subject) . ' ' . $placeholder;
+    }
+
     public function save()
     {
         $this->validate();
@@ -135,6 +166,19 @@ class EmailTemplateManager extends Component
             $template->delete();
             session()->flash('success', 'Email template deleted successfully!');
         }
+    }
+
+    public function duplicateTemplate($templateId)
+    {
+        $template = EmailTemplate::find($templateId);
+        if (!$template) return;
+
+        $newTemplate = $template->replicate(['created_at', 'updated_at']);
+        $newTemplate->name = $template->name . ' (Copy)';
+        $newTemplate->created_by = auth()->id();
+        $newTemplate->save();
+
+        session()->flash('success', 'Email template duplicated successfully!');
     }
 
     public function toggleStatus($templateId)

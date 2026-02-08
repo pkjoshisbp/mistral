@@ -156,7 +156,7 @@
                                                                         <span class="text-muted ms-2">{{ ($message->sent_at ?? $message->created_at)->format('h:i A') }}</span>
                                                                     </div>
                                                                     <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
-                                                                        {!! $message->message_html !!}
+                                                                        {!! preg_replace('/(<br\s*\/?\s*>\s*){2,}/i', '<br>', $message->message_html) !!}
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -206,9 +206,37 @@
     
 
 <style>
+.chat-messages {
+    background: #f8f9fa;
+    border-radius: 0.25rem;
+    padding: 0.75rem !important;
+}
+.chat-messages .message {
+    margin-bottom: 0.5rem !important;
+}
+.chat-messages .mb-3 { margin-bottom: 0.4rem !important; }
+.chat-messages .mb-1 { margin-bottom: 0.15rem !important; }
+.chat-messages .small {
+    margin-bottom: 2px !important;
+}
 .message-content {
     word-break: break-word;
-    white-space: pre-wrap;
+    white-space: normal;
+    line-height: 1.25;
+    padding: 4px 8px !important;
+}
+.message-content p,
+.message-content ul,
+.message-content ol {
+    margin: 0 0 4px 0 !important;
+}
+.message-content p:last-child,
+.message-content ul:last-child,
+.message-content ol:last-child {
+    margin-bottom: 0 !important;
+}
+.message-content li {
+    margin-bottom: 2px !important;
 }
 
 .message-content a {
@@ -221,9 +249,5 @@
     color: #e5f0ff;
 }
 
-.chat-messages {
-    background: #f8f9fa;
-    border-radius: 0.25rem;
-}
 </style>
 </div>

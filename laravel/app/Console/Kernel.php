@@ -10,6 +10,8 @@ class Kernel extends ConsoleKernel
     protected $commands = [
         \App\Console\Commands\ResyncFaqsToQdrant::class,
         \App\Console\Commands\PaypalCaptureOrder::class,
+        \App\Console\Commands\ResendUnopenedEmails::class,
+        \App\Console\Commands\SendScheduledEmailCampaigns::class,
     ];
 
     /**
@@ -17,7 +19,8 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // $schedule->command('inspire')->hourly();
+        $schedule->command('email:resend-unopened')->hourly();
+        $schedule->command('email:send-scheduled')->everyMinute();
     }
 
     /**

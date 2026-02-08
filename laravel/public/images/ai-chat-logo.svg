@@ -1,0 +1,23 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI Chat Support">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#0EA5E9"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="48" fill="url(#bg)"/>
+  <g transform="translate(48 56)">
+    <rect x="0" y="0" width="160" height="112" rx="28" fill="white"/>
+    <path d="M32 112 L32 146 L66 112" fill="white"/>
+    <circle cx="54" cy="56" r="10" fill="#0EA5E9"/>
+    <circle cx="80" cy="56" r="10" fill="#6366F1"/>
+    <circle cx="106" cy="56" r="10" fill="#0EA5E9"/>
+  </g>
+  <circle cx="196" cy="62" r="26" fill="white"/>
+  <path d="M188 62h16M196 54v16" stroke="#0EA5E9" stroke-width="6" stroke-linecap="round"/>
+  <rect x="16" y="16" width="224" height="110" rx="48" fill="url(#glow)"/>
+</svg>

@@ -1,4 +1,4 @@
-<div>
+<div wire:poll.10s="checkForNewChats">
     @if (session()->has('success'))
         <div class="alert alert-success alert-dismissible fade show" role="alert">
             {{ session('success') }}
@@ -13,11 +13,19 @@
     @endif
 
     <div class="card mb-3">
-        <div class="card-header">
-            <h3 class="card-title">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h3 class="card-title mb-0">
                 <i class="fas fa-headset me-1"></i>
                 Live Chats
             </h3>
+            <div class="btn-group">
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="window.enableLiveChatAlerts && window.enableLiveChatAlerts()">
+                    <i class="fas fa-bell"></i> Enable alerts
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="window.testLiveChatAlert && window.testLiveChatAlert()">
+                    <i class="fas fa-volume-up"></i> Test
+                </button>
+            </div>
         </div>
         <div class="card-body">
             <div class="row g-3 align-items-end">
@@ -73,10 +81,13 @@
                         </thead>
                         <tbody>
                             @foreach($conversations as $conversation)
+                                @php
+                                    $tz = $orgTimezone ?? config('app.timezone', 'UTC');
+                                @endphp
                                 <tr>
                                     <td>
-                                        <div class="fw-bold">{{ $conversation->created_at->format('M d, Y') }}</div>
-                                        <small class="text-muted">{{ $conversation->created_at->format('h:i A') }}</small>
+                                        <div class="fw-bold">{{ $conversation->created_at->timezone($tz)->format('M d, Y') }}</div>
+                                        <small class="text-muted">{{ $conversation->created_at->timezone($tz)->format('h:i A') }}</small>
                                     </td>
                                     <td>
                                         <div class="fw-bold">{{ $conversation->visitor_name ?? 'Anonymous' }}</div>
@@ -124,7 +135,8 @@
                                                     @php
                                                         $isUser = ($message->sender_type === 'user');
                                                         $sender = method_exists($message, 'getSenderDisplayName') ? $message->getSenderDisplayName() : ($message->sender_name ?? ucfirst($message->sender_type ?? 'System'));
-                                                        $time = ($message->sent_at ?? $message->created_at)->format('H:i');
+                                                        $sentAt = $message->sent_at ?? $message->created_at;
+                                                        $time = $sentAt ? $sentAt->timezone($tz)->format('H:i') : '';
                                                     @endphp
                                                     <div class="mb-3">
                                                         <div class="small mb-1">
@@ -166,3 +178,86 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('livewire:init', () => {
+    const storageKey = 'livechat_alerts_enabled';
+    let audioCtx = null;
+
+    const ensureAudio = async () => {
+        if (!audioCtx) {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return null;
+            audioCtx = new Ctx();
+        }
+        if (audioCtx.state === 'suspended') {
+            try { await audioCtx.resume(); } catch (e) {}
+        }
+        return audioCtx;
+    };
+
+    const playBeep = async () => {
+        if (localStorage.getItem(storageKey) !== '1') return;
+        const ctx = await ensureAudio();
+        if (!ctx) return;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = 880;
+        g.gain.value = 0.06;
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start();
+        setTimeout(() => { o.stop(); }, 180);
+    };
+
+    window.enableLiveChatAlerts = async () => {
+        if (!('Notification' in window)) {
+            alert('This browser does not support notifications.');
+            return;
+        }
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+            localStorage.setItem(storageKey, '1');
+            await ensureAudio();
+            new Notification('Live chat alerts enabled', { body: 'You will be notified about new escalations.' });
+        } else {
+            localStorage.removeItem(storageKey);
+        }
+    };
+
+    window.testLiveChatAlert = async () => {
+        if (!('Notification' in window)) return;
+        const permission = Notification.permission === 'granted'
+            ? 'granted'
+            : await Notification.requestPermission();
+        if (permission === 'granted') {
+            localStorage.setItem(storageKey, '1');
+            new Notification('Test alert', { body: 'This is a sample notification.' });
+            playBeep();
+        }
+    };
+
+    Livewire.on('livechat-notify', (payload) => {
+        if (!payload) return;
+        const title = 'New live chat escalation';
+        const name = payload.visitor_name || 'Anonymous';
+        const body = payload.visitor_email ? `${name} (${payload.visitor_email})` : name;
+
+        if ('Notification' in window && Notification.permission === 'granted') {
+            const notification = new Notification(title, {
+                body,
+                tag: `livechat-${payload.conversation_id || ''}`,
+                data: payload,
+            });
+            notification.onclick = () => {
+                if (payload.link) {
+                    window.open(payload.link, '_blank');
+                }
+            };
+        }
+
+        playBeep();
+    });
+});
+</script>

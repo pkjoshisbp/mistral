@@ -122,8 +122,13 @@ class AiAgentService
     {
         if ($organizationId && class_exists(\App\Models\Organization::class)) {
             $organization = \App\Models\Organization::find($organizationId);
-            if ($organization && $organization->settings && isset($organization->settings['openai_model'])) {
-                return $organization->settings['openai_model'];
+            if ($organization && $organization->settings) {
+                if (isset($organization->settings['openai_model'])) {
+                    return $organization->settings['openai_model'];
+                }
+                if (isset($organization->settings['ai_model'])) {
+                    return $organization->settings['ai_model'];
+                }
             }
         }
         
@@ -155,6 +160,9 @@ class AiAgentService
                     // Check organization-specific llama model
                     if (isset($organization->settings['llama_model'])) {
                         return $organization->settings['llama_model'];
+                    }
+                    if (isset($organization->settings['ai_model'])) {
+                        return $organization->settings['ai_model'];
                     }
                 }
             }
@@ -1524,8 +1532,17 @@ Rules:
             if (!$userId && $organizationId) {
                 $organization = \App\Models\Organization::find($organizationId);
                 if ($organization) {
-                    // Get the first user associated with this organization
-                    $firstUser = $organization->users()->first();
+                    // Prefer admin user, then legacy org user, then first linked user
+                    $firstUser = $organization->users()->where('role', 'admin')->first();
+                    if (!$firstUser) {
+                        $firstUser = $organization->legacyUsers()->where('role', 'admin')->first();
+                    }
+                    if (!$firstUser) {
+                        $firstUser = $organization->legacyUsers()->first();
+                    }
+                    if (!$firstUser) {
+                        $firstUser = $organization->users()->first();
+                    }
                     if ($firstUser) {
                         $userId = $firstUser->id;
                         $subscription = $firstUser->activeSubscription;

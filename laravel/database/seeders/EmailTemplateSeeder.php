@@ -60,7 +60,7 @@ class EmailTemplateSeeder extends Seeder
                 'subject' => 'Introducing {product_name} - Revolutionary Innovation from {company_name}',
                 'content' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 20px; text-align: center;">
-        <h1 style="margin: 0; font-size: 28px;">🚀 {product_name} is Here!</h1>
+        <h1 style="margin: 0; font-size: 28px;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="20" height="20" style="vertical-align: -3px; margin-right: 8px;" alt="">{product_name} is Here!</h1>
         <p style="margin: 10px 0 0 0; font-size: 18px;">The future of {industry_focus} starts now</p>
     </div>
     
@@ -103,7 +103,7 @@ class EmailTemplateSeeder extends Seeder
             // Retail Templates
             [
                 'name' => 'Seasonal Sale Promotion',
-                'subject' => '🔥 {sale_percentage}% OFF Everything - {sale_name} at {company_name}',
+                'subject' => 'Save {sale_percentage}% OFF Everything - {sale_name} at {company_name}',
                 'content' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
     <div style="background: #dc3545; color: white; text-align: center; padding: 20px;">
         <h1 style="margin: 0; font-size: 32px;">{sale_name}</h1>
@@ -112,12 +112,12 @@ class EmailTemplateSeeder extends Seeder
     </div>
     
     <div style="padding: 30px 20px;">
-        <h2 style="color: #333;">Hi {recipient_name}! 👋</h2>
+        <h2 style="color: #333;">Hi {recipient_name}! <img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-left: 6px;" alt=""></h2>
         
         <p>Our biggest sale of the season is here! Don\'t miss out on incredible savings across our entire collection.</p>
         
         <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 5px; margin: 20px 0;">
-            <h3 style="color: #856404; margin-top: 0;">🎯 Sale Highlights:</h3>
+            <h3 style="color: #856404; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-highlight.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Sale Highlights:</h3>
             <ul style="color: #856404;">
                 <li><strong>{category_1}:</strong> Up to {category_1_discount}% off</li>
                 <li><strong>{category_2}:</strong> Up to {category_2_discount}% off</li>
@@ -153,7 +153,7 @@ class EmailTemplateSeeder extends Seeder
                 'subject' => 'Welcome to {company_name} - We\'re excited to have you!',
                 'content' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
     <div style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; text-align: center; padding: 40px 20px;">
-        <h1 style="margin: 0; font-size: 28px;">Welcome to {company_name}! 🎉</h1>
+        <h1 style="margin: 0; font-size: 28px;">Welcome to {company_name}! <img src="https://ai-chat.support/images/email/icon-highlight.png" width="20" height="20" style="vertical-align: -3px; margin-left: 8px;" alt=""></h1>
         <p style="margin: 15px 0 0 0; font-size: 16px;">We\'re thrilled to have you join our community</p>
     </div>
     
@@ -163,7 +163,7 @@ class EmailTemplateSeeder extends Seeder
         <p>Welcome to the {company_name} family! We\'re excited to begin this journey with you and help you {primary_benefit}.</p>
         
         <div style="background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0;">
-            <h3 style="color: #495057; margin-top: 0;">🚀 Getting Started:</h3>
+            <h3 style="color: #495057; margin-top: 0;"><img src="https://ai-chat.support/images/email/icon-feature.png" width="18" height="18" style="vertical-align: -3px; margin-right: 6px;" alt="">Getting Started:</h3>
             <ol style="color: #6c757d;">
                 <li><strong>Access your account:</strong> {login_url}</li>
                 <li><strong>Complete your profile:</strong> Add your preferences</li>
@@ -174,10 +174,10 @@ class EmailTemplateSeeder extends Seeder
         
         <p><strong>Need help getting started?</strong> Our support team is here for you:</p>
         <ul>
-            <li>📧 Email: {support_email}</li>
-            <li>📞 Phone: {support_phone}</li>
-            <li>💬 Live Chat: Available on our website</li>
-            <li>📚 Help Center: {help_center_url}</li>
+            <li><img src="https://ai-chat.support/images/email/icon-mail.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Email: {support_email}</li>
+            <li><img src="https://ai-chat.support/images/email/icon-phone.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Phone: {support_phone}</li>
+            <li><img src="https://ai-chat.support/images/email/icon-chat.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Live Chat: Available on our website</li>
+            <li><img src="https://ai-chat.support/images/email/icon-book.png" width="16" height="16" style="vertical-align: -3px; margin-right: 6px;" alt="">Help Center: {help_center_url}</li>
         </ul>
         
         <div style="text-align: center; margin: 30px 0;">

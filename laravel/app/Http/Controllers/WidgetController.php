@@ -18,6 +18,7 @@ use App\Services\AiAgentService;
 use App\Services\LocationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use App\Mail\ChatEscalationNotification;
 use App\Mail\ChatInteractionDigestNotification;
 use Illuminate\Support\Str;
@@ -65,6 +66,10 @@ class WidgetController
             'contactEmail' => $organization->contact_email ?? null,
             'contactPhone' => $organization->contact_phone ?? null,
             'apiUrl' => config('app.url'),
+            'headerLogoUrl' => $settings['widget_header_logo_url'] ?? null,
+            'showHeaderLogo' => (bool)($settings['show_header_logo'] ?? false),
+            'brandingLogoUrl' => $settings['branding_logo_url'] ?? (rtrim(config('app.url'), '/') . '/images/ai-chat-logo.svg'),
+            'wsUrl' => env('WIDGET_WS_URL') ?: null,
             'scriptVersion' => $scriptVersion,
             'theme' => $settings['widget_theme'] ?? 'default',
             'position' => $settings['widget_position'] ?? 'bottom-right',
@@ -78,17 +83,21 @@ class WidgetController
             'brandingEnabled' => array_key_exists('branding_enabled', $settings) ? (bool)$settings['branding_enabled'] : true,
             'brandingFollow' => array_key_exists('branding_follow', $settings) ? (bool)$settings['branding_follow'] : true,
             'brandingBadge' => (bool)($settings['branding_badge'] ?? false),
+            'brandingTextEnabled' => array_key_exists('branding_text_enabled', $settings) ? (bool)$settings['branding_text_enabled'] : true,
+            'brandingText' => trim((string)($settings['branding_text'] ?? 'AI Chat Support')) ?: 'AI Chat Support',
             // Shopify integration flag
             'isShopify' => $hasShopifyIntegration,
         ];
 
         $script = view('widget.script', compact('widgetConfig'))->render();
 
-        Log::info('Serving widget script', [
-            'org_id' => $orgId,
-            'org_slug' => $organization->slug,
-            'version' => $scriptVersion
-        ]);
+        if (env('WIDGET_LOG_REQUESTS', false)) {
+            Log::info('Serving widget script', [
+                'org_id' => $orgId,
+                'org_slug' => $organization->slug,
+                'version' => $scriptVersion
+            ]);
+        }
 
         return response($script)
             ->header('Content-Type', 'application/javascript')
@@ -196,6 +205,7 @@ class WidgetController
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+
             if ($existingConversation && in_array($existingConversation->agent_status, ['agent_assigned', 'agent_active'], true)) {
                 $handoffText = 'A human agent is reviewing your message and will reply shortly.';
 
@@ -255,6 +265,58 @@ class WidgetController
                 ->where('organization_id', $organization->id)
                 ->first();
             $previousContextPayloads = $existingConversation->metadata['last_context_payloads'] ?? [];
+
+            if ($this->isNumericOnlyMessage($message) && !$this->shouldBypassNumericGuard($existingConversation)) {
+                $clarifyResponse = $this->buildClarifyNumberResponse();
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $clarifyResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+
+                if ($this->isUnansweredResponse($clarifyResponse)) {
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $clarifyResponse,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+                }
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $clarifyResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                return response()->json([
+                    'response' => $clarifyResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
 
             $isAffirmativeFollowUp = $this->isAffirmativeFollowUp($message);
 
@@ -525,7 +587,7 @@ class WidgetController
                 $pricingContext = $this->buildPricingContext($organization);
                 if ($pricingContext !== '') {
                     $context .= ($context !== '' ? "\n\n" : '') . $pricingContext;
-                } elseif ($this->shouldUsePricingFallback($context, $shopifyContext)) {
+                } elseif ($this->shouldUsePricingFallback($context, $shopifyContext, $message)) {
                     Log::info('Pricing context missing - returning pricing fallback response', [
                         'org_id' => $organization->id,
                         'org_slug' => $organization->slug,
@@ -608,6 +670,40 @@ class WidgetController
 
             $isContactQuery = $this->isContactQuery($message);
 
+            if ($this->isCallbackRequest($message)) {
+                $userPhone = $allUserInfo['phone'] ?? $allUserInfo['contact_phone'] ?? null;
+                if (!$userPhone) {
+                    $userPhone = $this->extractPhoneFromMessage($message);
+                }
+
+                $callbackResponse = $this->buildCallbackResponse($userPhone, $orgEmail, $orgPhone, $orgWebsite);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $callbackResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+
+                return response()->json([
+                    'response' => $callbackResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             if ($isContactQuery) {
                 $contactResponse = $this->buildContactResponse($orgEmail, $orgPhone, $orgWebsite);
 
@@ -632,6 +728,180 @@ class WidgetController
 
                 return response()->json([
                     'response' => $contactResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults);
+            if ($exactFaqMatch && !$hasShopifyData) {
+                Log::info('Widget exact FAQ match response', [
+                    'org_id' => $organization->id,
+                    'session_id' => $sessionId,
+                    'score' => $exactFaqMatch['score'] ?? null,
+                    'title' => $exactFaqMatch['payload']['title'] ?? null,
+                    'item_id' => $exactFaqMatch['payload']['item_id'] ?? null,
+                ]);
+
+                $directResponse = $exactFaqMatch['response'];
+                $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
+                $paraphrasedResponse = null;
+
+                try {
+                    $paraphrasePrompt = "You are {$assistantName} for {$organization->name}. "
+                        . "Tone: {$responseTone}. Language: {$responseLanguage}. "
+                        . "Rewrite the following FAQ answer in 1-2 concise sentences. "
+                        . "Use first-person plural (we/our). Do not add new information. "
+                        . "If the answer includes contact details, keep them. "
+                        . "Answer only with the rewritten response.\n\n"
+                        . "FAQ Answer: \"{$directResponse}\"";
+
+                    $paraphraseMessages = [
+                        ['role' => 'system', 'content' => $paraphrasePrompt],
+                        ['role' => 'user', 'content' => $message]
+                    ];
+
+                    $paraphraseOptions = ['num_predict' => 120, 'temperature' => 0.4];
+                    $paraphraseModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                    $paraphraseResponse = $this->aiAgentService->llmChat(
+                        $paraphraseMessages,
+                        $paraphraseModel,
+                        null,
+                        $organization->id,
+                        $paraphraseOptions
+                    );
+
+                    if ($paraphraseResponse && isset($paraphraseResponse['message']['content'])) {
+                        $paraphrasedResponse = trim($paraphraseResponse['message']['content']);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Widget FAQ paraphrase failed', [
+                        'org_id' => $organization->id,
+                        'session_id' => $sessionId,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+
+                $finalFaqResponse = $paraphrasedResponse ?: $directResponse;
+                if (!$paraphrasedResponse) {
+                    $tokenMessages = [
+                        ['role' => 'user', 'content' => $message],
+                    ];
+                    $this->aiAgentService->logWidgetTokenUsage(
+                        $organization->id,
+                        $tokenMessages,
+                        $finalFaqResponse,
+                        'faq_direct'
+                    );
+                }
+
+                Log::info('Widget direct FAQ response sent', [
+                    'org_id' => $organization->id,
+                    'session_id' => $sessionId,
+                    'paraphrased' => (bool) $paraphrasedResponse,
+                    'response_preview' => substr((string) $finalFaqResponse, 0, 300) . '...',
+                ]);
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $finalFaqResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+
+                if ($this->isUnansweredResponse($finalFaqResponse)) {
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $finalFaqResponse,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+                }
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $finalFaqResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                return response()->json([
+                    'response' => $finalFaqResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            if ($this->isVeryShortQuery($message)
+                && trim((string) $context) === ''
+                && empty($shopifyContext)
+                && !$this->isContactQuery($message)) {
+                $shortResponse = $this->isPromoQuery($message)
+                    ? $this->buildPromoUnavailableResponse()
+                    : $this->buildClarifyResponse();
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $shortResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+
+                if ($this->isUnansweredResponse($shortResponse)) {
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $shortResponse,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+                }
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $shortResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                return response()->json([
+                    'response' => $shortResponse,
                     'session_id' => $sessionId,
                     'timestamp' => now()->toISOString()
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
@@ -697,6 +967,12 @@ class WidgetController
 
             // Get AI response using llmChat for better token tracking
             $messages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message);
+            Log::info('Widget LLM context prepared', [
+                'org_id' => $orgId,
+                'session_id' => $sessionId,
+                'system_prompt_preview' => substr((string) $systemPrompt, 0, 600) . '...',
+                'context_length' => strlen((string) $finalContext),
+            ]);
             
             // Use organization-specific AI provider and model
             $maxTokens = 120;
@@ -760,6 +1036,19 @@ class WidgetController
                 ]);
             }
 
+            $hallucinationBlocked = false;
+            if ($this->shouldBlockRoleQueryWithoutContext($message, $finalContext ?? '')) {
+                $responseText = $this->getRoleInfoUnavailableResponse();
+                $hallucinationBlocked = true;
+            } else {
+                [$responseText, $hallucinationBlocked] = $this->enforceContextOnlyAnswer(
+                    $message,
+                    $finalContext ?? '',
+                    $responseText,
+                    $organization
+                );
+            }
+
             // Detailed logging for debugging
             Log::info('Widget AI Response Debug', [
                 'org_id' => $orgId,
@@ -783,12 +1072,12 @@ class WidgetController
                 }
             }
 
-            $suggestion = $this->buildProactiveSuggestion($intentResult);
+            $suggestion = $hallucinationBlocked ? '' : $this->buildProactiveSuggestion($intentResult);
             if ($suggestion !== '') {
                 $responseText = trim($responseText) . "\n\n" . $suggestion;
             }
 
-            $followUp = $this->buildFollowUpPrompt($intentResult);
+            $followUp = $hallucinationBlocked ? '' : $this->buildFollowUpPrompt($intentResult);
             if ($followUp !== '') {
                 $responseText = trim($responseText) . "\n\n" . $followUp;
             }
@@ -902,6 +1191,67 @@ class WidgetController
             ->where('organization_id', $organization->id)
             ->first();
 
+        if ($this->isNumericOnlyMessage($message) && !$this->shouldBypassNumericGuard($existingConversation)) {
+            $clarifyResponse = $this->buildClarifyNumberResponse();
+
+            $conversation = $this->saveConversationToDatabase(
+                $organization,
+                $sessionId,
+                $message,
+                $clarifyResponse,
+                $allUserInfo,
+                compact('country', 'region', 'location'),
+                null
+            );
+
+            $this->logIntentAnalytics(
+                $organization->id,
+                $sessionId,
+                null,
+                $request,
+                compact('country', 'region', 'location'),
+                $sessionMetadata
+            );
+
+            if ($this->isUnansweredResponse($clarifyResponse)) {
+                $this->logUnansweredQuestion(
+                    $organization->id,
+                    $sessionId,
+                    $message,
+                    $clarifyResponse,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+            }
+
+            if ($conversation) {
+                $this->handleEscalationIfNeeded(
+                    $conversation,
+                    $message,
+                    $clarifyResponse,
+                    null,
+                    $request,
+                    $sessionMetadata
+                );
+            }
+
+            return response()->stream(function () use ($clarifyResponse) {
+                $this->initStreamOutput();
+                echo "data: " . json_encode(['content' => $clarifyResponse, 'done' => true]) . "\n\n";
+                $this->streamFlush();
+            }, 200, [
+                'Content-Type' => 'text/event-stream',
+                'Cache-Control' => 'no-cache',
+                'X-Accel-Buffering' => 'no',
+                'X-Robots-Tag' => 'noindex, nofollow'
+            ]);
+        }
+
+        $existingConversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organization->id)
+            ->first();
+
         if ($existingConversation && in_array($existingConversation->agent_status, ['agent_assigned', 'agent_active'], true)) {
             $handoffText = 'A human agent is reviewing your message and will reply shortly.';
             $conversation = $this->saveConversationToDatabase(
@@ -922,9 +1272,59 @@ class WidgetController
             }
 
             return response()->stream(function () use ($handoffText) {
+                $this->initStreamOutput();
                 echo "data: " . json_encode(['content' => $handoffText, 'done' => true]) . "\n\n";
-                ob_flush();
-                flush();
+                $this->streamFlush();
+            }, 200, [
+                'Content-Type' => 'text/event-stream',
+                'Cache-Control' => 'no-cache',
+                'X-Accel-Buffering' => 'no',
+                'X-Robots-Tag' => 'noindex, nofollow'
+            ]);
+        }
+
+        $humanRequestReason = $this->getEscalationReason($message, '', null);
+        if ($humanRequestReason === 'user_requested_human') {
+            $handoffText = $this->buildHandoffMessage($organization);
+            if ($handoffText === '') {
+                $handoffText = 'A human agent will review your message and reply as soon as possible.';
+            }
+
+            $conversation = $this->saveConversationToDatabase(
+                $organization,
+                $sessionId,
+                $message,
+                $handoffText,
+                $allUserInfo,
+                compact('country', 'region', 'location'),
+                null
+            );
+
+            $this->logIntentAnalytics(
+                $organization->id,
+                $sessionId,
+                null,
+                $request,
+                compact('country', 'region', 'location'),
+                $sessionMetadata
+            );
+
+            if ($conversation) {
+                $this->handleEscalationIfNeeded(
+                    $conversation,
+                    $message,
+                    $handoffText,
+                    null,
+                    $request,
+                    $sessionMetadata,
+                    $humanRequestReason
+                );
+            }
+
+            return response()->stream(function () use ($handoffText) {
+                $this->initStreamOutput();
+                echo "data: " . json_encode(['content' => $handoffText, 'done' => true]) . "\n\n";
+                $this->streamFlush();
             }, 200, [
                 'Content-Type' => 'text/event-stream',
                 'Cache-Control' => 'no-cache',
@@ -967,9 +1367,9 @@ class WidgetController
             }
 
             return response()->stream(function () use ($safeResponse) {
+                $this->initStreamOutput();
                 echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
-                ob_flush();
-                flush();
+                $this->streamFlush();
             }, 200, [
                 'Content-Type' => 'text/event-stream',
                 'Cache-Control' => 'no-cache',
@@ -979,13 +1379,22 @@ class WidgetController
         }
 
         return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage) {
+            $this->initStreamOutput();
             try {
                 // Build context (simplified version - you can reuse logic from chat())
                 $aiService = app(AiAgentService::class);
                 $actionService = app(\App\Services\ActionService::class);
+
+                $actionQuery = $message;
+                if ($this->isPricingFollowUp($message)) {
+                    $previousMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
+                    if ($previousMessage) {
+                        $actionQuery = trim($previousMessage . ' ' . $message);
+                    }
+                }
                 
                 // Check if any action should be executed
-                $actionResult = $actionService->processQuery($message, $organization->id);
+                $actionResult = $actionService->processQuery($actionQuery, $organization->id);
                 $intentResult = $actionResult['intent'] ?? null;
 
                 // Update lead with intent/priority if lead info is provided
@@ -1002,6 +1411,7 @@ class WidgetController
                 $context = '';
                 $liveData = null;
                 $isPricingIntent = ($intentResult['intent'] ?? null) === 'pricing';
+                $searchResults = null;
                 
                 // If action was executed, include the live data
                 if ($actionResult['type'] === 'action_executed' && isset($actionResult['result']['success']) && $actionResult['result']['success']) {
@@ -1045,7 +1455,7 @@ class WidgetController
                     $pricingContext = $this->buildPricingContext($organization);
                     if ($pricingContext !== '') {
                         $context .= "\n\n" . $pricingContext;
-                    } elseif ($this->shouldUsePricingFallback($context, null)) {
+                    } elseif ($this->shouldUsePricingFallback($context, null, $message)) {
                         Log::info('Pricing context missing - returning pricing fallback response (stream)', [
                             'org_id' => $organization->id,
                             'org_slug' => $organization->slug,
@@ -1054,8 +1464,7 @@ class WidgetController
 
                         $safeResponse = $this->buildPricingUnavailableResponse($organization);
                         echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
-                        ob_flush();
-                        flush();
+                        $this->streamFlush();
 
                         $conversation = $this->saveConversationToDatabase(
                             $organization,
@@ -1111,8 +1520,7 @@ class WidgetController
                 if ($verifiedOnly && !$liveData && trim($context) === '') {
                     $safeResponse = $this->buildVerifiedOnlyResponse($organization);
                     echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
-                    ob_flush();
-                    flush();
+                    $this->streamFlush();
 
                     $conversation = $this->saveConversationToDatabase(
                         $organization,
@@ -1159,9 +1567,226 @@ class WidgetController
                     return;
                 }
 
+                $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults);
+                if ($exactFaqMatch && !$liveData) {
+                    $directResponse = $exactFaqMatch['response'];
+                    Log::info('Widget stream exact FAQ match response', [
+                        'org_id' => $organization->id,
+                        'session_id' => $sessionId,
+                        'score' => $exactFaqMatch['score'] ?? null,
+                        'title' => $exactFaqMatch['payload']['title'] ?? null,
+                    ]);
+
+                    $tokenMessages = [
+                        ['role' => 'user', 'content' => $message],
+                    ];
+                    $this->aiAgentService->logWidgetTokenUsage(
+                        $organization->id,
+                        $tokenMessages,
+                        $directResponse,
+                        'llm_chat_stream'
+                    );
+
+                    echo "data: " . json_encode(['content' => $directResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $directResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($directResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $directResponse,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $directResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
+                }
+
+                if ($this->shouldBlockRoleQueryWithoutContext($message, $context)) {
+                    $safeResponse = $this->getRoleInfoUnavailableResponse();
+                    echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $safeResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($safeResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $safeResponse,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $safeResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
+                }
+
+                if ($this->isVeryShortQuery($message)
+                    && trim((string) $context) === ''
+                    && !$liveData
+                    && !$this->isContactQuery($message)) {
+                    $shortResponse = $this->isPromoQuery($message)
+                        ? $this->buildPromoUnavailableResponse()
+                        : $this->buildClarifyResponse();
+
+                    echo "data: " . json_encode(['content' => $shortResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $shortResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($shortResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $shortResponse,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $shortResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
+                }
+
                 $orgWebsite = $organization->website ?: config('app.url');
                 $orgEmail = $organization->contact_email ?? null;
                 $orgPhone = $organization->contact_phone ?? null;
+
+                if ($this->isCallbackRequest($message)) {
+                    $userPhone = $allUserInfo['phone'] ?? $allUserInfo['contact_phone'] ?? null;
+                    if (!$userPhone) {
+                        $userPhone = $this->extractPhoneFromMessage($message);
+                    }
+
+                    $callbackResponse = $this->buildCallbackResponse($userPhone, $orgEmail, $orgPhone, $orgWebsite);
+                    echo "data: " . json_encode(['content' => $callbackResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $callbackResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $callbackResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
+                }
 
                 $contactQuickResponse = $this->isContactQuery($message)
                     ? $this->buildContactResponse($orgEmail, $orgPhone, $orgWebsite)
@@ -1193,7 +1818,8 @@ class WidgetController
                 }
 
                 $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message);
-                $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage);
+                $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage) || $aiProvider === 'openai';
                 $maxTokens = $contactQuickResponse ? 60 : 140;
                 if (!$contactQuickResponse && (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
                     || strlen($message) > 120
@@ -1204,8 +1830,7 @@ class WidgetController
                 if ($contactQuickResponse) {
                     $fullResponse = $contactQuickResponse;
                     echo "data: " . json_encode(['content' => $fullResponse, 'done' => true]) . "\n\n";
-                    ob_flush();
-                    flush();
+                    $this->streamFlush();
                 } else {
 
                 if ($useOpenAiFallback) {
@@ -1215,8 +1840,7 @@ class WidgetController
 
                     if (trim($fullResponse) !== '') {
                         echo "data: " . json_encode(['content' => $fullResponse, 'done' => true]) . "\n\n";
-                        ob_flush();
-                        flush();
+                        $this->streamFlush();
                     } else {
                         $useOpenAiFallback = false;
                     }
@@ -1228,7 +1852,7 @@ class WidgetController
                     Log::info('Starting LLM response generation', ['model' => 'llama3:8b-instruct-q5_K_M', 'use_vastai' => true]);
                     
                     $fastApiUrl = config('services.ai_agent.url');
-                    $model = 'llama3:8b-instruct-q5_K_M';  // Use Vast.ai model
+                    $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
                     
                     $fullResponse = '';
                     $sseBuffer = '';
@@ -1274,8 +1898,7 @@ class WidgetController
                             }
 
                             echo $data;
-                            ob_flush();
-                            flush();
+                            $this->streamFlush();
                             return strlen($data);
                         }
                     ]);
@@ -1302,22 +1925,31 @@ class WidgetController
                 }
 
                 $finalResponse = trim($fullResponse);
+                $hallucinationBlocked = false;
+                [$finalResponse, $hallucinationBlocked] = $this->enforceContextOnlyAnswer(
+                    $message,
+                    $context ?? '',
+                    $finalResponse,
+                    $organization
+                );
                 $escalationReason = $this->getEscalationReason($message, $finalResponse, $intentResult);
                 $postfixParts = [];
 
-                if ($escalationReason) {
+                if ($hallucinationBlocked) {
+                    $postfixParts = [];
+                } elseif ($escalationReason) {
                     $handoffMessage = $this->buildHandoffMessage($organization);
                     if ($handoffMessage !== '') {
                         $postfixParts[] = $handoffMessage;
                     }
                 }
 
-                $suggestion = $this->buildProactiveSuggestion($intentResult);
+                $suggestion = $hallucinationBlocked ? '' : $this->buildProactiveSuggestion($intentResult);
                 if ($suggestion !== '') {
                     $postfixParts[] = $suggestion;
                 }
 
-                $followUp = $this->buildFollowUpPrompt($intentResult);
+                $followUp = $hallucinationBlocked ? '' : $this->buildFollowUpPrompt($intentResult);
                 if ($followUp !== '') {
                     $postfixParts[] = $followUp;
                 }
@@ -1325,8 +1957,7 @@ class WidgetController
                 if (!empty($postfixParts)) {
                     $suffix = "\n\n" . implode("\n\n", $postfixParts);
                     echo "data: " . json_encode(['content' => $suffix, 'done' => true]) . "\n\n";
-                    ob_flush();
-                    flush();
+                    $this->streamFlush();
                     $finalResponse = trim($finalResponse) . $suffix;
                 }
 
@@ -1397,8 +2028,7 @@ class WidgetController
                 
             } catch (\Exception $e) {
                 echo "data: " . json_encode(['error' => $e->getMessage(), 'done' => true]) . "\n\n";
-                ob_flush();
-                flush();
+                $this->streamFlush();
             }
         }, 200, [
             'Content-Type' => 'text/event-stream',
@@ -1406,6 +2036,25 @@ class WidgetController
             'X-Accel-Buffering' => 'no',
             'X-Robots-Tag' => 'noindex, nofollow'
         ]);
+    }
+
+    private function initStreamOutput(): void
+    {
+        @ini_set('zlib.output_compression', '0');
+        @ini_set('output_buffering', '0');
+        @ini_set('implicit_flush', '1');
+        while (ob_get_level() > 0) {
+            @ob_end_flush();
+        }
+        @ob_implicit_flush(true);
+    }
+
+    private function streamFlush(): void
+    {
+        if (ob_get_level() > 0) {
+            @ob_flush();
+        }
+        @flush();
     }
 
     private function upsertWidgetLead(int $organizationId, string $sessionId, array $userInfo, array $locationInfo, ?array $intentResult, ?string $message, ?array $sessionMetadata = null): void
@@ -1610,80 +2259,117 @@ class WidgetController
 
     private function handleEscalationIfNeeded(ChatConversation $conversation, string $userMessage, string $responseText, ?array $intentResult, Request $request, ?array $sessionMetadata = null, ?string $precomputedReason = null): void
     {
-        if ($conversation->status === 'needs_handoff' || $conversation->agent_status === 'escalation_requested') {
-            return;
-        }
-
-        $reason = $precomputedReason ?: $this->getEscalationReason($userMessage, $responseText, $intentResult);
+        $alreadyEscalated = ($conversation->status === 'needs_handoff' || $conversation->agent_status === 'escalation_requested');
+        $meta = is_array($conversation->metadata) ? $conversation->metadata : [];
+        $existingEscalation = $meta['escalation'] ?? [];
+        $reason = $precomputedReason
+            ?: ($existingEscalation['reason'] ?? $this->getEscalationReason($userMessage, $responseText, $intentResult));
         if (!$reason) {
             return;
         }
 
-        $meta = $conversation->metadata ?? [];
         $meta['escalation'] = [
             'reason' => $reason,
-            'intent' => $intentResult['intent'] ?? null,
-            'confidence' => $intentResult['confidence'] ?? null,
-            'triggered_at' => now()->toISOString(),
+            'intent' => $intentResult['intent'] ?? ($existingEscalation['intent'] ?? null),
+            'confidence' => $intentResult['confidence'] ?? ($existingEscalation['confidence'] ?? null),
+            'triggered_at' => $existingEscalation['triggered_at'] ?? now()->toISOString(),
         ];
 
-        $conversation->update([
-            'status' => 'needs_handoff',
-            'agent_status' => 'escalation_requested',
-            'escalated_at' => now(),
-            'metadata' => $meta,
-            'last_activity_at' => now()
-        ]);
+        if (!$alreadyEscalated) {
+            $conversation->update([
+                'status' => 'needs_handoff',
+                'agent_status' => 'escalation_requested',
+                'escalated_at' => now(),
+                'metadata' => $meta,
+                'last_activity_at' => now()
+            ]);
+        } else {
+            $conversation->update([
+                'metadata' => $meta,
+                'last_activity_at' => now()
+            ]);
+        }
 
-        $this->sendEscalationNotification($conversation, $reason);
+        $emailSentAt = $meta['escalation_email_last_sent_at'] ?? null;
+        if (!$emailSentAt) {
+            Log::info('Escalation email sending', [
+                'conversation_id' => $conversation->conversation_id,
+                'org_id' => $conversation->organization_id,
+                'reason' => $reason,
+            ]);
+            $sent = $this->sendEscalationNotification($conversation, $reason);
+            if ($sent) {
+                $conversation->refresh();
+                $latestMeta = is_array($conversation->metadata) ? $conversation->metadata : [];
+                $meta = array_merge($latestMeta, $meta);
+                $meta['escalation_email_last_sent_at'] = now()->toIso8601String();
+                $conversation->update([
+                    'metadata' => $meta,
+                    'last_activity_at' => now()
+                ]);
+            } else {
+                Log::warning('Escalation email not sent', [
+                    'conversation_id' => $conversation->conversation_id,
+                    'org_id' => $conversation->organization_id,
+                ]);
+            }
+        } else {
+            Log::info('Escalation email skipped (already sent)', [
+                'conversation_id' => $conversation->conversation_id,
+                'org_id' => $conversation->organization_id,
+                'last_sent_at' => $emailSentAt,
+            ]);
+        }
 
-        if (empty($conversation->summary)) {
+        if (!$alreadyEscalated && empty($conversation->summary)) {
             $summary = $this->buildConversationSummary($conversation);
             if ($summary !== '') {
                 $conversation->update(['summary' => $summary]);
             }
         }
 
-        try {
-            Analytics::create([
-                'organization_id' => $conversation->organization_id,
-                'visitor_id' => $conversation->visitor_id ?? $conversation->conversation_id,
-                'session_id' => $conversation->conversation_id,
-                'event_type' => 'human_escalation',
-                'page_url' => $sessionMetadata['page_url'] ?? config('app.url'),
-                'page_title' => $sessionMetadata['page_title'] ?? '',
-                'referrer' => $sessionMetadata['referrer'] ?? '',
-                'user_agent' => $request->userAgent(),
-                'ip_address' => $request->ip(),
-                'country' => $conversation->visitor_country,
-                'region' => $conversation->visitor_region,
-                'city' => $conversation->visitor_location,
-                'event_data' => [
-                    'reason' => $reason,
-                    'intent' => $intentResult['intent'] ?? null,
-                    'confidence' => $intentResult['confidence'] ?? null,
-                ],
-            ]);
-        } catch (\Throwable $t) {
-            Log::warning('Escalation analytics log failed', [
-                'org_id' => $conversation->organization_id,
-                'error' => $t->getMessage()
-            ]);
+        if (!$alreadyEscalated) {
+            try {
+                Analytics::create([
+                    'organization_id' => $conversation->organization_id,
+                    'visitor_id' => $conversation->visitor_id ?? $conversation->conversation_id,
+                    'session_id' => $conversation->conversation_id,
+                    'event_type' => 'human_escalation',
+                    'page_url' => $sessionMetadata['page_url'] ?? config('app.url'),
+                    'page_title' => $sessionMetadata['page_title'] ?? '',
+                    'referrer' => $sessionMetadata['referrer'] ?? '',
+                    'user_agent' => $request->userAgent(),
+                    'ip_address' => $request->ip(),
+                    'country' => $conversation->visitor_country,
+                    'region' => $conversation->visitor_region,
+                    'city' => $conversation->visitor_location,
+                    'event_data' => [
+                        'reason' => $reason,
+                        'intent' => $intentResult['intent'] ?? null,
+                        'confidence' => $intentResult['confidence'] ?? null,
+                    ],
+                ]);
+            } catch (\Throwable $t) {
+                Log::warning('Escalation analytics log failed', [
+                    'org_id' => $conversation->organization_id,
+                    'error' => $t->getMessage()
+                ]);
+            }
         }
     }
 
-    private function sendEscalationNotification(ChatConversation $conversation, string $reason): void
+    private function sendEscalationNotification(ChatConversation $conversation, string $reason): bool
     {
         try {
             $organization = $conversation->organization ?? Organization::find($conversation->organization_id);
             if (!$organization) {
-                return;
+                return false;
             }
 
             $settings = $organization->settings ?? [];
             $enabled = (bool) ($settings['escalation_notify_enabled'] ?? false);
             if (!$enabled) {
-                return;
+                return false;
             }
 
             $emails = $settings['escalation_notify_emails'] ?? [];
@@ -1692,13 +2378,30 @@ class WidgetController
             }
             $emails = array_values(array_filter(array_map('trim', (array) $emails)));
             if (empty($emails)) {
-                return;
+                return false;
             }
 
             $summary = $conversation->summary ?: $this->buildConversationSummary($conversation);
             $consoleUrl = rtrim(config('app.url'), '/') . '/customer/live-chats';
-            $mailgunDomain = env('MAILGUN_DOMAIN');
+            $mailgunDomain = config('services.mailgun.domain');
+            if (!$mailgunDomain) {
+                $fromAddress = config('mail.from.address');
+                if (is_string($fromAddress) && str_contains($fromAddress, '@')) {
+                    $mailgunDomain = substr(strrchr($fromAddress, '@'), 1) ?: null;
+                }
+            }
             $replyTo = $mailgunDomain ? ('ai-chat-support+' . $conversation->conversation_id . '@' . $mailgunDomain) : null;
+
+            if (!$replyTo) {
+                Log::warning('Escalation email reply-to missing mailgun domain', [
+                    'conversation_id' => $conversation->conversation_id,
+                    'org_id' => $organization->id,
+                ]);
+            }
+
+            $magicLinkData = $this->buildEscalationMagicLink($conversation);
+            $magicLinkUrl = $magicLinkData['url'] ?? null;
+            $magicLinkTtl = $magicLinkData['ttl_minutes'] ?? null;
 
             $payload = [
                 'organization' => $organization,
@@ -1707,15 +2410,56 @@ class WidgetController
                 'summary' => $summary,
                 'console_url' => $consoleUrl,
                 'reply_to' => $replyTo,
+                'magic_link' => $magicLinkUrl,
+                'magic_link_ttl_minutes' => $magicLinkTtl,
             ];
 
             Mail::to($emails)->send(new ChatEscalationNotification($payload));
+            return true;
         } catch (\Throwable $e) {
             Log::warning('Escalation email notification failed', [
                 'conversation_id' => $conversation->id ?? null,
                 'error' => $e->getMessage()
             ]);
         }
+
+        return false;
+    }
+
+    private function buildEscalationMagicLink(ChatConversation $conversation): ?array
+    {
+        try {
+            $ttlMinutes = 30;
+            $token = Str::random(40);
+            $expiresAt = now()->addMinutes($ttlMinutes);
+
+            $meta = $conversation->metadata ?? [];
+            $meta['escalation_magic'] = [
+                'token_hash' => hash('sha256', $token),
+                'created_at' => now()->toIso8601String(),
+                'expires_at' => $expiresAt->toIso8601String(),
+                'last_used_at' => $meta['escalation_magic']['last_used_at'] ?? null,
+            ];
+            $conversation->metadata = $meta;
+            $conversation->save();
+
+            $url = URL::temporarySignedRoute('escalations.magic', $expiresAt, [
+                'conversation' => $conversation->id,
+                'token' => $token,
+            ]);
+
+            return [
+                'url' => $url,
+                'ttl_minutes' => $ttlMinutes,
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('Escalation magic link generation failed', [
+                'conversation_id' => $conversation->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
     }
 
     private function getEscalationReason(string $userMessage, string $responseText, ?array $intentResult): ?string
@@ -1771,18 +2515,23 @@ class WidgetController
         }
 
         $isWithinHours = $this->isWithinBusinessHours($organization);
+        $hasOnlineAgent = $this->hasOnlineAgent($organization->id);
         $agentsOnline = true;
+
         if ($availability === 'offline') {
             $agentsOnline = false;
-        } elseif ($availability === 'auto' && $isWithinHours === false) {
-            $agentsOnline = false;
+        } elseif ($availability === 'auto') {
+            $agentsOnline = $isWithinHours;
         }
 
         if ($agentsOnline) {
+            $base = $hasOnlineAgent
+                ? 'A human agent is online and will join shortly.'
+                : 'We are connecting you to a human agent now. Please stay online.';
             if (empty($channels)) {
-                return '';
+                return $base;
             }
-            return "If you'd like to speak with a human, you can reach us via " . implode(' | ', $channels) . ".";
+            return $base . ' You can also reach us via ' . implode(' | ', $channels) . '.';
         }
 
         $base = $offlineMessage !== ''
@@ -1794,6 +2543,17 @@ class WidgetController
         }
 
         return $base . ' ' . implode(' | ', $channels) . '.';
+    }
+
+    private function hasOnlineAgent(int $organizationId): bool
+    {
+        $windowMinutes = 5;
+
+        return ChatConversation::where('organization_id', $organizationId)
+            ->whereIn('agent_status', ['agent_active', 'agent_assigned'])
+            ->whereNotNull('agent_last_active_at')
+            ->where('agent_last_active_at', '>=', now()->subMinutes($windowMinutes))
+            ->exists();
     }
 
     private function buildConversationSummary(ChatConversation $conversation): string
@@ -1836,7 +2596,16 @@ class WidgetController
 
     private function isContactQuery(string $message): bool
     {
-        return (bool) preg_match('/\b(contact|reach|email|phone|call|support|help|helpline|customer care|whatsapp|address|location)\b/i', $message);
+        $message = mb_strtolower($message);
+
+        // Strong contact intent keywords
+        if (preg_match('/\b(contact|reach|email|phone|call|whatsapp|address|location|customer care|helpline)\b/i', $message)) {
+            return true;
+        }
+
+        // Avoid false positives like "AI Chat Support" by requiring context around support/help
+        return (bool) preg_match('/\b(support|help)\b\s*(team|desk|email|phone|number|contact|line|center|centre)\b/i', $message)
+            || (bool) preg_match('/\b(contact|reach|email|phone|call)\b\s*(support|help)\b/i', $message);
     }
 
     private function buildContactResponse(?string $email, ?string $phone, string $website): string
@@ -1851,6 +2620,55 @@ class WidgetController
         $parts[] = "Website: {$website}";
 
         return 'You can reach us at ' . implode(' | ', $parts) . '.';
+    }
+
+    private function getExactFaqMatchResponse(?array $searchResults): ?array
+    {
+        if (!$searchResults || empty($searchResults['results']) || !is_array($searchResults['results'])) {
+            return null;
+        }
+
+        $threshold = 0.82;
+        $best = null;
+
+        foreach ($searchResults['results'] as $result) {
+            $payload = $result['payload'] ?? [];
+            $dataType = $payload['data_type'] ?? '';
+            if (!in_array($dataType, ['faq', 'info'], true)) {
+                continue;
+            }
+
+            $score = (float) ($result['score'] ?? 0);
+            if ($score < $threshold) {
+                continue;
+            }
+
+            if (!$best || $score > ($best['score'] ?? 0)) {
+                $best = [
+                    'score' => $score,
+                    'payload' => $payload,
+                ];
+            }
+        }
+
+        if (!$best) {
+            return null;
+        }
+
+        $payload = $best['payload'] ?? [];
+        $content = $payload['content'] ?? ($payload['title'] ?? '');
+        $response = $this->htmlToPlainWithLinks((string) $content);
+        $response = trim($response);
+
+        if ($response === '') {
+            return null;
+        }
+
+        return [
+            'response' => $response,
+            'score' => $best['score'],
+            'payload' => $payload,
+        ];
     }
 
     private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message): array
@@ -2043,8 +2861,13 @@ class WidgetController
         return implode("\n", $lines);
     }
 
-    private function shouldUsePricingFallback(string $context, ?string $shopifyContext): bool
+    private function shouldUsePricingFallback(string $context, ?string $shopifyContext, string $query): bool
     {
+        $query = strtolower(trim($query));
+        if (!preg_match('/\b(price|pricing|cost|fee|fees|charge|rate|how much|tuition|payment|bill|invoice|expense|\$|₹|€|£)\b/i', $query)) {
+            return false;
+        }
+
         $combined = trim($context . "\n" . ($shopifyContext ?? ''));
         if ($combined === '') {
             return true;
@@ -2185,7 +3008,7 @@ class WidgetController
                 continue;
             }
 
-            if (!preg_match('/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)[\s\-to]+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i', $line, $match)) {
+            if (!preg_match('/(\d{1,2}(?:[:\.]\d{2})?\s*(?:am|pm)?)[\s\-to]+(\d{1,2}(?:[:\.]\d{2})?\s*(?:am|pm)?)/i', $line, $match)) {
                 continue;
             }
 
@@ -2285,9 +3108,13 @@ class WidgetController
         $clean = strtolower(trim($time));
         $ampm = null;
 
-        if (preg_match('/\b(am|pm)\b/', $clean, $match)) {
+        if (preg_match('/\d{1,2}\.\d{2}/', $clean)) {
+            $clean = str_replace('.', ':', $clean);
+        }
+
+        if (preg_match('/(am|pm)$/', $clean, $match)) {
             $ampm = $match[1];
-            $clean = trim(preg_replace('/\b(am|pm)\b/', '', $clean));
+            $clean = trim(preg_replace('/(am|pm)$/', '', $clean));
         }
 
         if (!preg_match('/^(\d{1,2})(?::(\d{2}))?$/', $clean, $match)) {
@@ -2297,8 +3124,11 @@ class WidgetController
         $hour = (int) $match[1];
         $minute = isset($match[2]) ? (int) $match[2] : 0;
 
-        if ($hour > 23 || $minute > 59) {
+        if ($hour > 23) {
             return null;
+        }
+        if ($minute > 59) {
+            $minute = 59;
         }
 
         if ($ampm) {
@@ -2380,11 +3210,15 @@ class WidgetController
             return [$display, $tz];
         }
 
-        if (preg_match('/\b([A-Z]{2,4})\b/', $clean, $m)) {
-            $abbr = strtoupper($m[1]);
-            if (isset($timezoneMap[$abbr])) {
-                $display = trim(preg_replace('/\b' . preg_quote($abbr, '/') . '\b/', '', $clean));
-                return [$display, $timezoneMap[$abbr]];
+        if (preg_match_all('/\b([A-Z]{2,4})\b/', $clean, $matches)) {
+            $abbrs = $matches[1] ?? [];
+            $abbrs = array_values(array_filter(array_map('strtoupper', $abbrs)));
+            $abbrs = array_filter($abbrs, fn ($abbr) => !in_array($abbr, ['AM', 'PM'], true));
+            foreach ($abbrs as $abbr) {
+                if (isset($timezoneMap[$abbr])) {
+                    $display = trim(preg_replace('/\b' . preg_quote($abbr, '/') . '\b/', '', $clean));
+                    return [$display, $timezoneMap[$abbr]];
+                }
             }
         }
 
@@ -2605,6 +3439,176 @@ class WidgetController
         }
 
         return '';
+    }
+    
+    private function enforceContextOnlyAnswer(string $message, string $context, string $response, $organization): array
+    {
+        $roleTerms = '(chairman|chairperson|founder|principal|director|ceo|cfo|coo|md|president|owner|head|manager|trustee|secretary)';
+        $needsGrounding = (bool) preg_match('/\bwho\s+is\b/i', $message)
+            || (bool) preg_match('/\b' . $roleTerms . '\b/i', $message);
+
+        if (!$needsGrounding) {
+            return [$response, false];
+        }
+
+        $hasContext = trim($context) !== '';
+        $contextHasRole = $hasContext && (bool) preg_match('/\b' . $roleTerms . '\b/i', $context);
+
+        if (!$hasContext || !$contextHasRole) {
+            if (preg_match('/\b(don\'t have|do not have|not available|not in our|no information)\b/i', $response)) {
+                return [$response, false];
+            }
+
+            Log::warning('Widget response blocked by context guard', [
+                'org_id' => $organization->id ?? null,
+                'org_slug' => $organization->slug ?? null,
+                'message' => $message,
+                'context_length' => strlen($context),
+            ]);
+
+            $fallback = 'We don\'t have that information in our knowledge base yet. Could you share the detail you need?';
+            return [$fallback, true];
+        }
+
+        return [$response, false];
+    }
+
+    private function shouldBlockRoleQueryWithoutContext(string $message, string $context): bool
+    {
+        $roleTerms = '(chairman|chairperson|founder|principal|director|ceo|cfo|coo|md|president|owner|head|manager|trustee|secretary)';
+        $needsGrounding = (bool) preg_match('/\bwho\s+is\b/i', $message)
+            || (bool) preg_match('/\b' . $roleTerms . '\b/i', $message)
+            || (bool) preg_match('/\b(founder|owner|director|ceo|chairman)\s+(name|named|person)\b/i', $message);
+
+        if (!$needsGrounding) {
+            return false;
+        }
+
+        $contextText = trim((string) $context);
+        if ($contextText === '') {
+            return true;
+        }
+
+        $hasRole = (bool) preg_match('/\b' . $roleTerms . '\b/i', $contextText);
+        $hasName = (bool) preg_match('/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b/', $contextText);
+
+        return !($hasRole && $hasName);
+    }
+
+    private function getRoleInfoUnavailableResponse(): string
+    {
+        return "We don't have that information in our knowledge base yet. Could you share the detail you need?";
+    }
+
+    private function isNumericOnlyMessage(?string $message): bool
+    {
+        if (!is_string($message)) {
+            return false;
+        }
+
+        $trimmed = trim($message);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/^\d{5,}$/', str_replace(' ', '', $trimmed));
+    }
+
+    private function buildClarifyResponse(): string
+    {
+        return "I didn't understand that. Could you please share a bit more detail?";
+    }
+
+    private function buildClarifyNumberResponse(): string
+    {
+        return "I didn't understand that. Could you please rephrase or share what that number is about?";
+    }
+
+    private function isVeryShortQuery(?string $message): bool
+    {
+        if (!is_string($message)) {
+            return false;
+        }
+
+        $trimmed = trim($message);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        $wordCount = str_word_count($trimmed);
+        if ($wordCount <= 1) {
+            return true;
+        }
+
+        return $wordCount <= 2 && mb_strlen($trimmed) <= 12;
+    }
+
+    private function isPromoQuery(string $message): bool
+    {
+        return (bool) preg_match('/\b(promo|promotion|discount|offer|coupon|deal|sale|special)\b/i', $message);
+    }
+
+    private function buildPromoUnavailableResponse(): string
+    {
+        return "We don't have any promotions or discount details listed right now. Could you share what you're looking for?";
+    }
+
+    private function isCallbackRequest(string $message): bool
+    {
+        return (bool) preg_match('/\b(call\s*back|callback|call\s*me|ring\s*me|please\s*call|phone\s*me|contact\s*me)\b/i', $message);
+    }
+
+    private function extractPhoneFromMessage(string $message): ?string
+    {
+        $normalized = preg_replace('/[^0-9+]/', ' ', $message);
+        if (!$normalized) {
+            return null;
+        }
+
+        if (preg_match('/\+?\d[\d\s-]{7,}/', $normalized, $m)) {
+            return trim(preg_replace('/\s+/', ' ', $m[0]));
+        }
+
+        return null;
+    }
+
+    private function buildCallbackResponse(?string $userPhone, ?string $orgEmail, ?string $orgPhone, string $orgWebsite): string
+    {
+        $response = 'Thanks! I will pass your request to our team to arrange a call.';
+        if ($userPhone) {
+            $response .= " I have your number as {$userPhone}.";
+        }
+
+        $response .= " If it’s urgent, you can reach us at Email: {$orgEmail}";
+        if ($orgPhone) {
+            $response .= " | Phone: {$orgPhone}";
+        }
+        $response .= " | Website: {$orgWebsite}.";
+
+        return $response;
+    }
+
+    private function shouldBypassNumericGuard(?ChatConversation $conversation): bool
+    {
+        if (!$conversation) {
+            return false;
+        }
+
+        $lastAssistant = $conversation->messages()
+            ->whereIn('sender_type', ['ai', 'agent'])
+            ->latest('sent_at')
+            ->first();
+
+        if (!$lastAssistant || !is_string($lastAssistant->message)) {
+            return false;
+        }
+
+        $text = strtolower($lastAssistant->message);
+
+        return (bool) preg_match(
+            '/\b(phone|mobile|contact\s*number|number|otp|one\s*time\s*password|code|pin|zip|postal|pincode|id\s*number|student\s*id|admission\s*number|order\s*number|reference\s*number|ticket\s*number)\b/i',
+            $text
+        );
     }
 
     private function notifyLeadIfNeeded(Lead $lead, ?Lead $existingLead, ?array $intentResult, ?string $message): void
@@ -3045,6 +4049,31 @@ class WidgetController
         return null;
     }
 
+    private function isPricingFollowUp(string $message): bool
+    {
+        $msg = strtolower($message);
+        return (bool) preg_match('/\b(price|pricing|quote|estimate|breakdown|cost|range)\b/', $msg)
+            && str_word_count($msg) <= 8;
+    }
+
+    private function getLastUserMessageForSession(int $organizationId, string $sessionId): ?string
+    {
+        $conversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organizationId)
+            ->first();
+
+        if (!$conversation) {
+            return null;
+        }
+
+        $lastUser = ChatMessage::where('conversation_id', $conversation->id)
+            ->where('sender_type', 'user')
+            ->latest('id')
+            ->first();
+
+        return $lastUser?->message;
+    }
+
     private function sendChatInteractionNotification($organization, $conversation, $userMessage, $aiResponse, $userInfo = [], $locationInfo = []): void
     {
         try {
@@ -3067,6 +4096,24 @@ class WidgetController
             $intervalMinutes = (int) ($settings['notify_chat_email_interval_minutes'] ?? 10);
             $intervalMinutes = max(1, $intervalMinutes);
 
+            $mailgunDomain = config('services.mailgun.domain');
+            if (!$mailgunDomain) {
+                $fromAddress = config('mail.from.address');
+                if (is_string($fromAddress) && str_contains($fromAddress, '@')) {
+                    $mailgunDomain = substr(strrchr($fromAddress, '@'), 1) ?: null;
+                }
+            }
+            $replyTo = $mailgunDomain
+                ? ('ai-chat-support+' . $conversation->conversation_id . '@' . $mailgunDomain)
+                : null;
+
+            if (!$replyTo) {
+                Log::warning('Chat interaction reply-to missing mailgun domain', [
+                    'conversation_id' => $conversation->conversation_id,
+                    'org_id' => $organization->id ?? null,
+                ]);
+            }
+
             if ($mode === 'digest') {
                 $metadata = is_array($conversation->metadata) ? $conversation->metadata : [];
                 $lastSentAt = $metadata['email_last_sent_at'] ?? null;
@@ -3075,6 +4122,12 @@ class WidgetController
                     try {
                         $lastSentAtTime = \Carbon\Carbon::parse($lastSentAt);
                         if ($lastSentAtTime->diffInMinutes(now()) < $intervalMinutes) {
+                            Log::info('Chat digest suppressed (interval)', [
+                                'conversation_id' => $conversation->conversation_id,
+                                'org_id' => $organization->id ?? null,
+                                'last_sent_at' => $lastSentAt,
+                                'interval_minutes' => $intervalMinutes,
+                            ]);
                             return;
                         }
                     } catch (\Throwable $e) {
@@ -3092,6 +4145,10 @@ class WidgetController
 
                 $messages = $messagesQuery->get();
                 if ($messages->isEmpty()) {
+                    Log::info('Chat digest suppressed (no new messages)', [
+                        'conversation_id' => $conversation->conversation_id,
+                        'org_id' => $organization->id ?? null,
+                    ]);
                     return;
                 }
 
@@ -3104,10 +4161,16 @@ class WidgetController
                     'range_start' => $messages->first()->sent_at,
                     'range_end' => $messages->last()->sent_at,
                     'message_count' => $messages->count(),
-                    'interval_minutes' => $intervalMinutes
+                    'interval_minutes' => $intervalMinutes,
+                    'reply_to' => $replyTo,
                 ];
 
                 Mail::to($emails)->send(new ChatInteractionDigestNotification($payload));
+                Log::info('Chat digest sent', [
+                    'conversation_id' => $conversation->conversation_id,
+                    'org_id' => $organization->id ?? null,
+                    'email_count' => count($emails),
+                ]);
 
                 $metadata['email_last_sent_at'] = now()->toIso8601String();
                 $metadata['email_last_message_id'] = $messages->last()->id;
@@ -3123,10 +4186,16 @@ class WidgetController
                 'user_message' => $userMessage,
                 'ai_response' => $aiResponse,
                 'user_info' => $userInfo,
-                'location_info' => $locationInfo
+                'location_info' => $locationInfo,
+                'reply_to' => $replyTo,
             ];
 
             Mail::to($emails)->send(new ChatInteractionNotification($payload));
+            Log::info('Chat interaction email sent', [
+                'conversation_id' => $conversation->conversation_id,
+                'org_id' => $organization->id ?? null,
+                'email_count' => count($emails),
+            ]);
         } catch (\Throwable $e) {
             Log::warning('Chat interaction email notification failed', [
                 'org_id' => $organization->id ?? null,
@@ -3164,8 +4233,17 @@ class WidgetController
             return true;
         }
 
-        // Get the organization's owner (first user)
-        $user = $organization->users()->first();
+        // Get the organization's billing user (prefer admin, then legacy org users, then first)
+        $user = $organization->users()->where('role', 'admin')->first();
+        if (!$user) {
+            $user = $organization->legacyUsers()->where('role', 'admin')->first();
+        }
+        if (!$user) {
+            $user = $organization->legacyUsers()->first();
+        }
+        if (!$user) {
+            $user = $organization->users()->first();
+        }
         if (!$user) {
             // No user associated, allow chat but log warning
             Log::warning('No user associated with organization for token limit check', [

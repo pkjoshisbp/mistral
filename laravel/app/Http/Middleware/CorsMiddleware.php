@@ -79,7 +79,9 @@ class CorsMiddleware
 
         $logContext['allowed_origin'] = $allowedOrigin;
         $logContext['status'] = $response->getStatusCode();
-        \Log::info('CORS Middleware Debug', $logContext);
+        if (env('CORS_LOG_REQUESTS', false)) {
+            \Log::info('CORS Middleware Debug', $logContext);
+        }
 
         return $response;
     }
