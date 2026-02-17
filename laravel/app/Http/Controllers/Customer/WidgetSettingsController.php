@@ -27,6 +27,7 @@ class WidgetSettingsController extends Controller
             'offsetY' => 'nullable|integer|min:0|max:200',
             'welcomeMessage' => 'required|string|max:255',
             'assistantDisplayName' => 'nullable|string|max:64',
+            'requireContactForGuests' => 'nullable|boolean',
         ]);
 
         $settings = $org->settings ?? [];
@@ -40,6 +41,7 @@ class WidgetSettingsController extends Controller
                 ? trim((string)$data['assistantDisplayName'])
                 : null;
         }
+        $settings['require_contact_for_guests'] = (bool) ($data['requireContactForGuests'] ?? false);
 
         // Optional future flag to allow SEO follow links in widget branding
         if ($request->has('brandingFollow')) {

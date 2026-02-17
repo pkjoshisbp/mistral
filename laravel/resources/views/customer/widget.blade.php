@@ -75,6 +75,15 @@
                                         <input type="text" id="assistantDisplayName" name="assistantDisplayName" class="form-control" value="{{ $custOrg->settings['assistant_display_name'] ?? '' }}" placeholder="e.g., Ava, Support Bot, Acme Assistant">
                                         <small class="text-muted">This name will appear next to AI messages in chats.</small>
                                     </div>
+                                    <div class="mb-3">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="requireContactForGuests" name="requireContactForGuests" {{ !empty($custOrg->settings['require_contact_for_guests']) ? 'checked' : '' }}>
+                                            <label class="form-check-label" for="requireContactForGuests">
+                                                Contact info required before chat
+                                            </label>
+                                        </div>
+                                        <small class="text-muted">If enabled, visitors must provide name, email, and phone before chat starts. Skip button will be hidden.</small>
+                                    </div>
                                     <button type="submit" class="btn btn-success">Save Settings</button>
                                 </form>
                             </div>
@@ -159,6 +168,7 @@ document.getElementById('widgetSettingsForm').addEventListener('submit', async f
         offsetY: parseInt(document.getElementById('offsetY').value || '20', 10),
         welcomeMessage: document.getElementById('welcomeMessage').value,
         assistantDisplayName: document.getElementById('assistantDisplayName').value,
+        requireContactForGuests: document.getElementById('requireContactForGuests').checked,
         _token: form.querySelector('input[name="_token"]').value
     };
     try {

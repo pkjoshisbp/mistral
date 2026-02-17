@@ -138,6 +138,12 @@
               <p>Live Data Actions</p>
             </a>
           </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.csv-import') }}" class="nav-link {{ request()->routeIs('admin.csv-import') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-file-csv"></i>
+              <p>CSV Import</p>
+            </a>
+          </li>
           
           <li class="nav-item">
             <a href="{{ route('admin.ai-chat') }}" class="nav-link {{ request()->routeIs('admin.ai-chat') ? 'active' : '' }}">
@@ -194,6 +200,12 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{ route('admin.widget-backend-diagnostics') }}" class="nav-link {{ request()->routeIs('admin.widget-backend-diagnostics') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-heartbeat"></i>
+              <p>Widget Backend Diagnostics</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{ route('admin.api-endpoints') }}" class="nav-link {{ request()->routeIs('admin.api-endpoints') ? 'active' : '' }}">
               <i class="nav-icon fas fa-plug"></i>
               <p>API Endpoints</p>
@@ -205,6 +217,12 @@
             <a href="{{ route('admin.pricing.index') }}" class="nav-link {{ request()->routeIs('admin.pricing.*') ? 'active' : '' }}">
               <i class="nav-icon fas fa-dollar-sign"></i>
               <p>Pricing Management</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.personal-assistant-plans') }}" class="nav-link {{ request()->routeIs('admin.personal-assistant-plans') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-user-clock"></i>
+              <p>Assistant Plans</p>
             </a>
           </li>
           <li class="nav-item">
@@ -231,6 +249,12 @@
             <a href="{{ route('admin.whatsapp-campaigns') }}" class="nav-link {{ request()->routeIs('admin.whatsapp-campaigns') ? 'active' : '' }}">
               <i class="nav-icon fab fa-whatsapp"></i>
               <p>WhatsApp Campaigns</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('admin.whatsapp-templates') }}" class="nav-link {{ request()->routeIs('admin.whatsapp-templates') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-file-signature"></i>
+              <p>WhatsApp Templates</p>
             </a>
           </li>
           <li class="nav-item">

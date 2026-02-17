@@ -150,6 +150,12 @@
               <p>Live Data Actions</p>
             </a>
           </li>
+          <li class="nav-item">
+            <a href="{{ route('customer.csv-import') }}" class="nav-link {{ request()->routeIs('customer.csv-import') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-file-csv"></i>
+              <p>CSV Import</p>
+            </a>
+          </li>
 
           <li class="nav-header">WIDGET</li>
           <li class="nav-item">
@@ -186,6 +192,12 @@
             <a href="{{ route('customer.chat-history') }}" class="nav-link {{ request()->routeIs('customer.chat-history') ? 'active' : '' }}">
               <i class="nav-icon fas fa-history"></i>
               <p>Chat History</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('customer.personal-assistant') }}" class="nav-link {{ request()->routeIs('customer.personal-assistant') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-microphone"></i>
+              <p>Personal Assistant</p>
             </a>
           </li>
           @else

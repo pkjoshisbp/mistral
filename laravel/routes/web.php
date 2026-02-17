@@ -26,7 +26,7 @@ Route::get('/features', function () {
 })->name('features');
 
 Route::get('/credits-and-services', function () {
-    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    $creditPackages = \App\Models\PricingPlan::active()->credits()->orderBy('sort_order')->get();
     return view('public.credits-and-services', compact('creditPackages'));
 })->name('credits-and-services');
 
@@ -35,6 +35,19 @@ Route::get('/contact', function () {
 })->name('contact');
 
 Route::get('/integrations', \App\Livewire\Public\Integrations::class)->name('integrations');
+
+// Industry Solutions Pages
+Route::get('/solutions/education', function () {
+    return view('public.solutions.education');
+})->name('solutions.education');
+
+Route::get('/solutions/ecommerce', function () {
+    return view('public.solutions.ecommerce');
+})->name('solutions.ecommerce');
+
+Route::get('/solutions/healthcare', function () {
+    return view('public.solutions.healthcare');
+})->name('solutions.healthcare');
 
 Route::get('/escalations/quick/{conversation}/{token}', \App\Livewire\Public\EscalationMagicConsole::class)
     ->name('escalations.magic')
@@ -180,7 +193,7 @@ Route::get('/de/features', function () {
 });
 
 Route::get('/de/credits-and-services', function () {
-    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    $creditPackages = \App\Models\PricingPlan::active()->credits()->orderBy('sort_order')->get();
     return view('public.credits-and-services', compact('creditPackages'));
 });
 
@@ -221,7 +234,7 @@ Route::get('/fr/features', function () {
 });
 
 Route::get('/fr/credits-and-services', function () {
-    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    $creditPackages = \App\Models\PricingPlan::active()->credits()->orderBy('sort_order')->get();
     return view('public.credits-and-services', compact('creditPackages'));
 });
 
@@ -262,7 +275,7 @@ Route::get('/es/features', function () {
 });
 
 Route::get('/es/credits-and-services', function () {
-    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    $creditPackages = \App\Models\PricingPlan::active()->credits()->orderBy('sort_order')->get();
     return view('public.credits-and-services', compact('creditPackages'));
 });
 
@@ -303,7 +316,7 @@ Route::get('/it/features', function () {
 });
 
 Route::get('/it/credits-and-services', function () {
-    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    $creditPackages = \App\Models\PricingPlan::active()->credits()->orderBy('sort_order')->get();
     return view('public.credits-and-services', compact('creditPackages'));
 });
 
@@ -344,7 +357,7 @@ Route::get('/pt/features', function () {
 });
 
 Route::get('/pt/credits-and-services', function () {
-    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    $creditPackages = \App\Models\PricingPlan::active()->credits()->orderBy('sort_order')->get();
     return view('public.credits-and-services', compact('creditPackages'));
 });
 
@@ -385,7 +398,7 @@ Route::get('/hi/features', function () {
 });
 
 Route::get('/hi/credits-and-services', function () {
-    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    $creditPackages = \App\Models\PricingPlan::active()->credits()->orderBy('sort_order')->get();
     return view('public.credits-and-services', compact('creditPackages'));
 });
 
@@ -426,7 +439,7 @@ Route::get('/th/features', function () {
 });
 
 Route::get('/th/credits-and-services', function () {
-    $creditPackages = \App\Models\CreditPackage::where('is_active', true)->orderBy('sort_order')->get();
+    $creditPackages = \App\Models\PricingPlan::active()->credits()->orderBy('sort_order')->get();
     return view('public.credits-and-services', compact('creditPackages'));
 });
 
@@ -448,6 +461,62 @@ Route::get('/th/refund-policy', function () {
     $refund = \App\Models\TermsAndConditions::getRefundPolicy();
     return view('public.refund-policy', compact('refund'));
 });
+
+// Localized routes for high-traffic pages
+Route::prefix('{locale}')
+    ->whereIn('locale', ['de', 'fr', 'es', 'it', 'pt', 'hi', 'th'])
+    ->group(function () {
+        Route::get('/integrations', \App\Livewire\Public\Integrations::class);
+
+        Route::get('/reviews', function () {
+            return view('public.reviews');
+        });
+
+        Route::get('/shopify/install', \App\Livewire\Public\ShopifyInstall::class);
+
+        // Localized blog routes
+        Route::get('/blog', function () {
+            $blogs = Blog::published()->orderBy('published_at', 'desc')->paginate(6);
+            return view('public.blog.index', compact('blogs'));
+        });
+
+        Route::get('/blog/{slug}', function (string $slug) {
+            $blog = Blog::published()->where('slug', $slug)->firstOrFail();
+            $relatedPosts = Blog::published()
+                ->where('id', '!=', $blog->id)
+                ->inRandomOrder()
+                ->limit(3)
+                ->get();
+            return view('public.blog.show', compact('blog', 'relatedPosts'));
+        });
+
+        // Localized auth routes
+        Route::middleware('security.headers')->group(function () {
+            Route::middleware('guest')->group(function () {
+                Route::get('/register', [\App\Http\Controllers\Auth\RegisteredUserController::class, 'create']);
+                Route::post('/register', [\App\Http\Controllers\Auth\RegisteredUserController::class, 'store']);
+                Route::get('/login', [\App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'create']);
+                Route::post('/login', [\App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'store']);
+                Route::get('/forgot-password', [\App\Http\Controllers\Auth\PasswordResetLinkController::class, 'create']);
+                Route::post('/forgot-password', [\App\Http\Controllers\Auth\PasswordResetLinkController::class, 'store']);
+                Route::get('/reset-password/{token}', [\App\Http\Controllers\Auth\NewPasswordController::class, 'create']);
+                Route::post('/reset-password', [\App\Http\Controllers\Auth\NewPasswordController::class, 'store']);
+            });
+
+            Route::middleware('auth')->group(function () {
+                Route::get('/verify-email', \App\Http\Controllers\Auth\EmailVerificationPromptController::class);
+                Route::get('/verify-email/{id}/{hash}', \App\Http\Controllers\Auth\VerifyEmailController::class)
+                    ->middleware(['signed', 'throttle:6,1']);
+                Route::post('/email/verification-notification', [\App\Http\Controllers\Auth\EmailVerificationNotificationController::class, 'store'])
+                    ->middleware('throttle:6,1');
+                Route::get('/confirm-password', [\App\Http\Controllers\Auth\ConfirmablePasswordController::class, 'show']);
+                Route::post('/confirm-password', [\App\Http\Controllers\Auth\ConfirmablePasswordController::class, 'store']);
+                Route::put('/password', [\App\Http\Controllers\Auth\PasswordController::class, 'update']);
+                Route::post('/logout', [\App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'destroy']);
+                Route::get('/logout', [\App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'destroy']);
+            });
+        });
+    });
 
 
 
@@ -471,12 +540,8 @@ Route::get('/blog', function () {
     return view('public.blog.index', compact('blogs'));
 })->name('blog.index');
 
-
 Route::get('/blog/{blog:slug}', function (Blog $blog) {
     // Get related posts (exclude current post)
-// Email tracking (public)
-Route::get('/email/open/{token}.png', [\App\Http\Controllers\EmailTrackingController::class, 'open'])->name('email.open');
-Route::post('/email/webhooks/{provider}', [\App\Http\Controllers\EmailWebhookController::class, 'handle'])->name('email.webhook');
     $relatedPosts = Blog::published()
         ->where('id', '!=', $blog->id)
         ->inRandomOrder()
@@ -484,6 +549,16 @@ Route::post('/email/webhooks/{provider}', [\App\Http\Controllers\EmailWebhookCon
         ->get();
     return view('public.blog.show', compact('blog', 'relatedPosts'));
 })->name('blog.show');
+
+// Email tracking (public)
+Route::get('/email/open/{token}.png', [\App\Http\Controllers\EmailTrackingController::class, 'open'])->name('email.open');
+Route::get('/email/click/{token}', [\App\Http\Controllers\EmailClickController::class, 'redirect'])->name('email.click');
+Route::post('/email/webhooks/{provider}', [\App\Http\Controllers\EmailWebhookController::class, 'handle'])->name('email.webhook');
+
+// Test email tracking (development/testing only)
+Route::get('/test-email-tracking', [\App\Http\Controllers\TestEmailTrackingController::class, 'show'])->name('test.email.show');
+Route::post('/test-email-tracking/send', [\App\Http\Controllers\TestEmailTrackingController::class, 'send'])->name('test.email.send');
+Route::get('/test-email-tracking/check/{recipient}', [\App\Http\Controllers\TestEmailTrackingController::class, 'check'])->name('test.email.check');
 
 // SEO Routes
 Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('sitemap');
@@ -651,6 +726,8 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/reviews', function () {
         return view('admin.reviews');
     })->name('reviews');
+    Route::get('/personal-assistant-plans', \App\Livewire\Admin\PersonalAssistantPlanManager::class)->name('personal-assistant-plans');
+    Route::get('/widget-backend-diagnostics', \App\Livewire\Admin\WidgetBackendDiagnostics::class)->name('widget-backend-diagnostics');
 
     // Manual PayPal Capture page (admin)
     Route::get('/payments/manual-capture', function () {
@@ -667,6 +744,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/email-templates', \App\Livewire\Admin\EmailTemplateManager::class)->name('email-templates');
     Route::get('/email-campaigns', \App\Livewire\Admin\EmailCampaignManager::class)->name('email-campaigns');
     Route::get('/whatsapp-campaigns', \App\Livewire\Admin\WhatsappCampaignManager::class)->name('whatsapp-campaigns');
+    Route::get('/whatsapp-templates', \App\Livewire\Admin\WhatsappTemplateManager::class)->name('whatsapp-templates');
     Route::get('/email-composer', \App\Livewire\Admin\EmailComposer::class)->name('email-composer');
     
     // Widget Management Route
@@ -677,6 +755,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     
     // Action Manager Route - Live Data Actions
     Route::get('/action-manager', \App\Livewire\Admin\ActionManager::class)->name('action-manager');
+        Route::get('/csv-import', \App\Livewire\Admin\CsvImportManager::class)->name('csv-import');
     
     // Token Usage Analytics Route
     Route::get('/token-usage-analytics', \App\Livewire\Admin\TokenUsageAnalytics::class)->name('token-usage-analytics');
@@ -741,8 +820,10 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/api-integration', \App\Livewire\Customer\ApiIntegration::class)->name('api-integration');
         Route::get('/integration-settings', \App\Livewire\Customer\IntegrationSettingsManager::class)->name('integration-settings');
         Route::get('/action-manager', \App\Livewire\Customer\ActionManager::class)->name('action-manager');
+        Route::get('/csv-import', \App\Livewire\Customer\CsvImportManager::class)->name('csv-import');
         Route::get('/live-chats', \App\Livewire\Customer\AgentConsole::class)->name('live-chats');
         Route::get('/chat-history', \App\Livewire\Customer\ChatHistory::class)->name('chat-history');
+        Route::get('/personal-assistant', \App\Livewire\Customer\PersonalAssistant::class)->name('personal-assistant');
         Route::get('/token-usage', \App\Livewire\Customer\TokenUsage::class)->name('token-usage');
         Route::get('/credits', \App\Livewire\Customer\Credits::class)->name('credits');
         Route::get('/leads', \App\Livewire\Customer\LeadsManager::class)->name('leads');
@@ -795,6 +876,7 @@ Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class,
     Route::options('{orgId}/chat', function() { return response('', 204); });
     Route::options('{orgId}/chat/stream', function() { return response('', 204); });
     Route::get('{orgId}/messages', [\App\Http\Controllers\WidgetController::class, 'getAgentMessages'])->name('widget.messages');
+    Route::get('{orgId}/history', [\App\Http\Controllers\WidgetController::class, 'getConversationHistory'])->name('widget.history');
     Route::get('{orgId}/config', [\App\Http\Controllers\WidgetController::class, 'getConfig'])->name('widget.config');
     Route::get('{orgId}/test', function($orgId) {
         $organization = \App\Models\Organization::findOrFail($orgId);
@@ -996,36 +1078,117 @@ require __DIR__.'/auth.php';
 Route::get('/sitemap.xml', function () {
     $sitemap = '<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml"
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">';
 
-    // Static pages
+    // Supported languages
+    $languages = ['en', 'de', 'fr', 'es', 'it', 'pt', 'hi', 'th'];
+    
+    // Static pages (without trailing slashes to avoid duplicates)
     $pages = [
         ['url' => '', 'priority' => '1.0', 'changefreq' => 'daily'],
-        ['url' => '/features', 'priority' => '0.9', 'changefreq' => 'weekly'],
-        ['url' => '/about', 'priority' => '0.8', 'changefreq' => 'monthly'],
-        ['url' => '/contact', 'priority' => '0.8', 'changefreq' => 'monthly'],
-        ['url' => '/blog', 'priority' => '0.9', 'changefreq' => 'daily'],
+        ['url' => 'features', 'priority' => '0.9', 'changefreq' => 'weekly'],
+        ['url' => 'about', 'priority' => '0.8', 'changefreq' => 'monthly'],
+        ['url' => 'contact', 'priority' => '0.8', 'changefreq' => 'monthly'],
+        ['url' => 'blog', 'priority' => '0.9', 'changefreq' => 'daily'],
+        ['url' => 'integrations', 'priority' => '0.9', 'changefreq' => 'weekly'],
+        ['url' => 'reviews', 'priority' => '0.8', 'changefreq' => 'weekly'],
+        ['url' => 'login', 'priority' => '0.7', 'changefreq' => 'monthly'],
+        ['url' => 'register', 'priority' => '0.7', 'changefreq' => 'monthly'],
+        ['url' => 'solutions/education', 'priority' => '0.9', 'changefreq' => 'weekly'],
+        ['url' => 'solutions/ecommerce', 'priority' => '0.9', 'changefreq' => 'weekly'],
+        ['url' => 'solutions/healthcare', 'priority' => '0.9', 'changefreq' => 'weekly'],
     ];
 
     foreach ($pages as $page) {
+        // Add English version
+        $url = $page['url'] === '' ? config('app.url') : config('app.url') . '/' . $page['url'];
+        
         $sitemap .= '
     <url>
-        <loc>' . htmlspecialchars(config('app.url') . $page['url']) . '</loc>
+        <loc>' . htmlspecialchars($url) . '</loc>
         <changefreq>' . $page['changefreq'] . '</changefreq>
         <priority>' . $page['priority'] . '</priority>
-        <lastmod>' . now()->toISOString() . '</lastmod>
+        <lastmod>' . now()->toISOString() . '</lastmod>';
+        
+        // Add hreflang alternates for all languages
+        foreach ($languages as $lang) {
+            $altUrl = $lang === 'en' 
+                ? ($page['url'] === '' ? config('app.url') : config('app.url') . '/' . $page['url'])
+                : config('app.url') . '/' . $lang . '/' . $page['url'];
+            
+            $sitemap .= '
+        <xhtml:link rel="alternate" hreflang="' . $lang . '" href="' . htmlspecialchars($altUrl) . '" />';
+        }
+        
+        // Add x-default for English
+        $defaultUrl = $page['url'] === '' ? config('app.url') : config('app.url') . '/' . $page['url'];
+        $sitemap .= '
+        <xhtml:link rel="alternate" hreflang="x-default" href="' . htmlspecialchars($defaultUrl) . '" />';
+        
+        $sitemap .= '
     </url>';
+        
+        // Add localized versions for non-English languages
+        foreach ($languages as $lang) {
+            if ($lang !== 'en') {
+                $localizedUrl = $page['url'] === '' 
+                    ? config('app.url') . '/' . $lang
+                    : config('app.url') . '/' . $lang . '/' . $page['url'];
+                
+                $sitemap .= '
+    <url>
+        <loc>' . htmlspecialchars($localizedUrl) . '</loc>
+        <changefreq>' . $page['changefreq'] . '</changefreq>
+        <priority>' . ($page['priority'] - 0.1) . '</priority>
+        <lastmod>' . now()->toISOString() . '</lastmod>';
+                
+                // Add hreflang alternates
+                foreach ($languages as $altLang) {
+                    $altUrl = $altLang === 'en' 
+                        ? ($page['url'] === '' ? config('app.url') : config('app.url') . '/' . $page['url'])
+                        : ($page['url'] === '' 
+                            ? config('app.url') . '/' . $altLang
+                            : config('app.url') . '/' . $altLang . '/' . $page['url']);
+                    
+                    $sitemap .= '
+        <xhtml:link rel="alternate" hreflang="' . $altLang . '" href="' . htmlspecialchars($altUrl) . '" />';
+                }
+                
+                // Add x-default
+                $defaultUrl = $page['url'] === '' ? config('app.url') : config('app.url') . '/' . $page['url'];
+                $sitemap .= '
+        <xhtml:link rel="alternate" hreflang="x-default" href="' . htmlspecialchars($defaultUrl) . '" />';
+                
+                $sitemap .= '
+    </url>';
+            }
+        }
     }
 
     // Blog posts
     $blogs = Blog::published()->get();
     foreach ($blogs as $blog) {
+        // English blog post
         $sitemap .= '
     <url>
         <loc>' . htmlspecialchars(config('app.url') . '/blog/' . $blog->slug) . '</loc>
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
         <lastmod>' . $blog->updated_at->toISOString() . '</lastmod>';
+        
+        // Add hreflang alternates for blog posts
+        foreach ($languages as $lang) {
+            $altBlogUrl = $lang === 'en' 
+                ? config('app.url') . '/blog/' . $blog->slug
+                : config('app.url') . '/' . $lang . '/blog/' . $blog->slug;
+            
+            $sitemap .= '
+        <xhtml:link rel="alternate" hreflang="' . $lang . '" href="' . htmlspecialchars($altBlogUrl) . '" />';
+        }
+        
+        $sitemap .= '
+        <xhtml:link rel="alternate" hreflang="x-default" href="' . htmlspecialchars(config('app.url') . '/blog/' . $blog->slug) . '" />';
         
         if ($blog->featured_image) {
             $sitemap .= '
@@ -1037,6 +1200,44 @@ Route::get('/sitemap.xml', function () {
         
         $sitemap .= '
     </url>';
+        
+        // Add localized blog posts
+        foreach ($languages as $lang) {
+            if ($lang !== 'en') {
+                $localizedBlogUrl = config('app.url') . '/' . $lang . '/blog/' . $blog->slug;
+                
+                $sitemap .= '
+    <url>
+        <loc>' . htmlspecialchars($localizedBlogUrl) . '</loc>
+        <changefreq>monthly</changefreq>
+        <priority>0.7</priority>
+        <lastmod>' . $blog->updated_at->toISOString() . '</lastmod>';
+                
+                // Add hreflang alternates
+                foreach ($languages as $altLang) {
+                    $altBlogUrl = $altLang === 'en' 
+                        ? config('app.url') . '/blog/' . $blog->slug
+                        : config('app.url') . '/' . $altLang . '/blog/' . $blog->slug;
+                    
+                    $sitemap .= '
+        <xhtml:link rel="alternate" hreflang="' . $altLang . '" href="' . htmlspecialchars($altBlogUrl) . '" />';
+                }
+                
+                $sitemap .= '
+        <xhtml:link rel="alternate" hreflang="x-default" href="' . htmlspecialchars(config('app.url') . '/blog/' . $blog->slug) . '" />';
+                
+                if ($blog->featured_image) {
+                    $sitemap .= '
+        <image:image>
+            <image:loc>' . htmlspecialchars($blog->featured_image) . '</image:loc>
+            <image:title>' . htmlspecialchars($blog->title) . '</image:title>
+        </image:image>';
+                }
+                
+                $sitemap .= '
+    </url>';
+            }
+        }
     }
 
     $sitemap .= '

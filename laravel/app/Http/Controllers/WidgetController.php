@@ -6,8 +6,7 @@ use App\Models\Organization;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\Analytics;
-use App\Models\CreditPackage;
-use App\Models\SubscriptionPlan;
+use App\Models\PricingPlan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\ChatInteractionNotification;
@@ -15,6 +14,7 @@ use App\Mail\LeadCapturedNotification;
 use App\Models\Lead;
 use App\Services\IntentDetectionService;
 use App\Services\AiAgentService;
+use App\Services\FaqFollowUpService;
 use App\Services\LocationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -27,10 +27,12 @@ use App\Models\OrganizationData;
 class WidgetController
 {
     private $aiAgentService;
+    private $faqFollowUpService;
 
-    public function __construct(AiAgentService $aiAgentService)
+    public function __construct(AiAgentService $aiAgentService, FaqFollowUpService $faqFollowUpService)
     {
         $this->aiAgentService = $aiAgentService;
+        $this->faqFollowUpService = $faqFollowUpService;
     }
 
     /**
@@ -319,6 +321,30 @@ class WidgetController
             }
 
             $isAffirmativeFollowUp = $this->isAffirmativeFollowUp($message);
+            $isShortFollowUp = $this->isShortFollowUp($message);
+            $lastAssistantMessage = $this->getLastAssistantMessage($organization, $sessionId);
+            $lastAssistantAskedQuestion = is_string($lastAssistantMessage)
+                && trim($lastAssistantMessage) !== ''
+                && $this->responseHasQuestion($lastAssistantMessage);
+            $isContextualShortFollowUp = $isShortFollowUp
+                || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion);
+
+            $searchQuery = $message;
+            if ($isContextualShortFollowUp && !$isAffirmativeFollowUp) {
+                $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
+                $queryParts = [];
+
+                if (is_string($previousUserMessage) && trim($previousUserMessage) !== '') {
+                    $queryParts[] = trim($previousUserMessage);
+                }
+
+                if (is_string($lastAssistantMessage) && trim($lastAssistantMessage) !== '' && $this->responseHasQuestion($lastAssistantMessage)) {
+                    $queryParts[] = trim($lastAssistantMessage);
+                }
+
+                $queryParts[] = $message;
+                $searchQuery = trim(implode(' ', array_filter($queryParts)));
+            }
 
             // ---- SHOPIFY API INTEGRATION (SMART PATH) ----
             $shopifyContext = '';
@@ -448,22 +474,26 @@ class WidgetController
             Log::info('Starting enhanced search', [
                 'organization' => $organization->name,
                 'collection' => $collectionName,
-                'query' => $message
+                'query' => $searchQuery,
+                'original_message' => $message,
+                'query_was_enriched' => trim((string) $searchQuery) !== trim((string) $message),
+                'is_short_follow_up' => $isShortFollowUp,
+                'is_contextual_short_follow_up' => $isContextualShortFollowUp
             ]);
             
             $searchResults = null;
             if (!$isAffirmativeFollowUp) {
                 $searchResults = $this->aiAgentService->enhancedSearch(
                     $collectionName,
-                    $message, // Use original message for rewriting
+                    $searchQuery,
                     2 // Get top 2 relevant results for faster processing
                 );
             }
             
             $context = '';
             $orderedResults = [];
-            if ($isAffirmativeFollowUp && !empty($previousContextPayloads)) {
-                // Reuse last context payloads for elaboration
+            if (($isAffirmativeFollowUp || $isContextualShortFollowUp) && !empty($previousContextPayloads)) {
+                // Reuse last context payloads for follow-up continuity
                 $orderedResults = array_map(function ($p) {
                     return ['payload' => $p];
                 }, $previousContextPayloads);
@@ -526,6 +556,7 @@ class WidgetController
                                 $context .= ucfirst($field) . ": " . $this->htmlToPlainWithLinks((string) $payload[$field]) . "\n";
                             }
                         }
+                        
                         // Collect any explicit links if present in metadata
                         if (isset($payload['links']) && is_array($payload['links'])) {
                             foreach ($payload['links'] as $lnk) {
@@ -563,6 +594,7 @@ class WidgetController
                                 'availability' => $p['availability'] ?? ($p['metadata']['availability'] ?? null),
                                 'category' => $p['category'] ?? null,
                                 'links' => $p['links'] ?? null,
+                                'follow_up' => $p['follow_up'] ?? null,
                             ];
                         }
                     }
@@ -733,7 +765,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults);
+            $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization);
             if ($exactFaqMatch && !$hasShopifyData) {
                 Log::info('Widget exact FAQ match response', [
                     'org_id' => $organization->id,
@@ -783,6 +815,14 @@ class WidgetController
                 }
 
                 $finalFaqResponse = $paraphrasedResponse ?: $directResponse;
+                $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
+                    $organization,
+                    $finalFaqResponse,
+                    $exactFaqMatch['payload']['follow_up'] ?? null
+                );
+                if ($faqFollowUp !== '' && !$this->responseHasQuestion($finalFaqResponse)) {
+                    $finalFaqResponse = trim($finalFaqResponse) . "\n\n" . $faqFollowUp;
+                }
                 if (!$paraphrasedResponse) {
                     $tokenMessages = [
                         ['role' => 'user', 'content' => $message],
@@ -850,6 +890,58 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            if ($this->shouldClarifyAffirmative($message, $organization, $sessionId)) {
+                $shortResponse = $this->buildAffirmativeClarifyResponse();
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $shortResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+
+                if ($this->isUnansweredResponse($shortResponse)) {
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $shortResponse,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+                }
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $shortResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                return response()->json([
+                    'response' => $shortResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             if ($this->isVeryShortQuery($message)
                 && trim((string) $context) === ''
                 && empty($shopifyContext)
@@ -911,6 +1003,7 @@ class WidgetController
             $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
             $businessContext = $this->buildBusinessContext($organization);
             $promotionContext = $this->buildPromotionContext($organization);
+            $faqFollowUpInstruction = $this->faqFollowUpService->getFollowUpInstruction($organization);
 
             // Build smart system prompt
             if ($hasShopifyData) {
@@ -918,10 +1011,12 @@ class WidgetController
                 $systemPrompt = "You are {$assistantName} for {$organization->name}. ";
                 $systemPrompt .= "Tone: {$responseTone}. Language: {$responseLanguage}. ";
                 $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n";
+                $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity.\n";
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\".\n";
                 $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question.\n";
-                $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n\n";
-                $systemPrompt .= $finalContext . "\n";
+                $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n";
+                $systemPrompt .= "If the user says 'no', 'not needed', 'not interested', 'goodbye', or similar phrases to end the conversation, respond with a brief, friendly closing message (1 sentence max) like 'No problem! Feel free to reach out if you need anything.' Do NOT ask follow-up questions or provide additional information.\n\n";
+                $systemPrompt .= "\nCURRENT CONTEXT:\n" . $finalContext . "\n";
                 if ($businessContext) {
                     $systemPrompt .= $businessContext . "\n";
                 }
@@ -958,15 +1053,17 @@ class WidgetController
                 }
                 
                 if ($context) {
-                    $systemPrompt .= "\nInfo:\n{$context}\n";
+                    $systemPrompt .= "\nCURRENT CONTEXT:\n{$context}\n";
                 }
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\". ";
                 $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question. ";
+                $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
+                $systemPrompt .= "If the user says 'no', 'not needed', 'not interested', 'goodbye', or similar phrases to end the conversation, respond with a brief, friendly closing message (1 sentence max) like 'No problem! Feel free to reach out if you need anything.' Do NOT ask follow-up questions or provide additional information. ";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
             }
 
             // Get AI response using llmChat for better token tracking
-            $messages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message);
+            $messages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $finalContext);
             Log::info('Widget LLM context prepared', [
                 'org_id' => $orgId,
                 'session_id' => $sessionId,
@@ -1065,21 +1162,32 @@ class WidgetController
             ]);
 
             $escalationReason = $this->getEscalationReason($message, $responseText, $intentResult);
-            if ($escalationReason) {
+            $isWithinHours = $this->isWithinBusinessHours($organization);
+            if ($escalationReason === 'user_requested_human' && $isWithinHours === false) {
                 $handoffMessage = $this->buildHandoffMessage($organization);
                 if ($handoffMessage !== '') {
                     $responseText = trim($responseText) . "\n\n" . $handoffMessage;
                 }
             }
 
-            $suggestion = $hallucinationBlocked ? '' : $this->buildProactiveSuggestion($intentResult);
-            if ($suggestion !== '') {
-                $responseText = trim($responseText) . "\n\n" . $suggestion;
-            }
+            $responseHasQuestion = $this->responseHasQuestion($responseText);
+            $isConversationEnding = $this->isConversationEndingPhrase($message);
 
-            $followUp = $hallucinationBlocked ? '' : $this->buildFollowUpPrompt($intentResult);
-            if ($followUp !== '') {
-                $responseText = trim($responseText) . "\n\n" . $followUp;
+            if (!$hallucinationBlocked && !$responseHasQuestion && !$isConversationEnding) {
+                $intentFollowUp = $this->buildFollowUpPrompt($intentResult);
+                if ($intentFollowUp !== '') {
+                    $responseText = trim($responseText) . "\n\n" . $intentFollowUp;
+                } else {
+                    $faqFollowUp = $this->faqFollowUpService->getFollowUpText($organization, $responseText);
+                    if ($faqFollowUp !== '') {
+                        $responseText = trim($responseText) . "\n\n" . $faqFollowUp;
+                    } else {
+                        $suggestion = $this->buildProactiveSuggestion($intentResult);
+                        if ($suggestion !== '') {
+                            $responseText = trim($responseText) . "\n\n" . $suggestion;
+                        }
+                    }
+                }
             }
 
             // Save conversation to database
@@ -1284,7 +1392,8 @@ class WidgetController
         }
 
         $humanRequestReason = $this->getEscalationReason($message, '', null);
-        if ($humanRequestReason === 'user_requested_human') {
+        $isWithinHours = $this->isWithinBusinessHours($organization);
+        if ($humanRequestReason === 'user_requested_human' && $isWithinHours === false) {
             $handoffText = $this->buildHandoffMessage($organization);
             if ($handoffText === '') {
                 $handoffText = 'A human agent will review your message and reply as soon as possible.';
@@ -1380,6 +1489,33 @@ class WidgetController
 
         return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage) {
             $this->initStreamOutput();
+            
+            // Early detection: Check if user wants to end conversation
+            if ($this->isConversationEndingPhrase($message)) {
+                $closingResponses = [
+                    "No problem! Feel free to reach out if you need anything.",
+                    "Understood! Let me know if you have any questions later.",
+                    "All good! We're here if you need us.",
+                    "Thank you! Don't hesitate to contact us if you need help."
+                ];
+                $closingResponse = $closingResponses[array_rand($closingResponses)];
+                
+                echo "data: " . json_encode(['content' => $closingResponse, 'done' => true]) . "\n\n";
+                $this->streamFlush();
+                
+                $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $closingResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    null
+                );
+                
+                return;
+            }
+            
             try {
                 // Build context (simplified version - you can reuse logic from chat())
                 $aiService = app(AiAgentService::class);
@@ -1446,6 +1582,12 @@ class WidgetController
                             $payload = $result['payload'] ?? [];
                             if (isset($payload['title'])) $context .= "Title: " . $payload['title'] . "\n";
                             if (isset($payload['content'])) $context .= "Content: " . $payload['content'] . "\n";
+                            
+                            // Extract follow-up question if present
+                            if (isset($payload['follow_up']) && !empty($payload['follow_up'])) {
+                                $context .= "Follow-up: " . $payload['follow_up'] . "\n";
+                            }
+                            
                             $context .= "\n";
                         }
                     }
@@ -1567,9 +1709,17 @@ class WidgetController
                     return;
                 }
 
-                $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults);
+                $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization);
                 if ($exactFaqMatch && !$liveData) {
                     $directResponse = $exactFaqMatch['response'];
+                    $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
+                        $organization,
+                        $directResponse,
+                        $exactFaqMatch['payload']['follow_up'] ?? null
+                    );
+                    if ($faqFollowUp !== '') {
+                        $directResponse = trim($directResponse) . "\n\n" . $faqFollowUp;
+                    }
                     Log::info('Widget stream exact FAQ match response', [
                         'org_id' => $organization->id,
                         'session_id' => $sessionId,
@@ -1676,6 +1826,57 @@ class WidgetController
                             $conversation,
                             $message,
                             $safeResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
+                }
+
+                if ($this->shouldClarifyAffirmative($message, $organization, $sessionId)) {
+                    $shortResponse = $this->buildAffirmativeClarifyResponse();
+
+                    echo "data: " . json_encode(['content' => $shortResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $shortResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($shortResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $shortResponse,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $shortResponse,
                             $intentResult,
                             $request,
                             $sessionMetadata
@@ -1811,13 +2012,13 @@ class WidgetController
                     $systemPrompt .= "\n" . $promotionContext;
                 }
                 if ($context) {
-                    $systemPrompt .= $context;
+                    $systemPrompt .= "\nCURRENT CONTEXT:\n" . $context . "\n";
                 }
                 if ($intentResult && isset($intentResult['intent'])) {
                     $systemPrompt .= "\nIntent: " . $intentResult['intent'] . ". Add a short follow-up question and one proactive suggestion if appropriate.";
                 }
 
-                $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message);
+                $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $context);
                 $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
                 $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage) || $aiProvider === 'openai';
                 $maxTokens = $contactQuickResponse ? 60 : 140;
@@ -1828,10 +2029,14 @@ class WidgetController
                 }
 
                 if ($contactQuickResponse) {
+                    $streamBackendUsed = 'contact_quick_response';
+                    $streamBackendAttempts = [];
                     $fullResponse = $contactQuickResponse;
                     echo "data: " . json_encode(['content' => $fullResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
                 } else {
+                $streamBackendUsed = null;
+                $streamBackendAttempts = [];
 
                 if ($useOpenAiFallback) {
                     $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
@@ -1839,9 +2044,21 @@ class WidgetController
                     $fullResponse = (string) ($aiResponse['message']['content'] ?? '');
 
                     if (trim($fullResponse) !== '') {
+                        $streamBackendUsed = 'openai';
+                        $streamBackendAttempts[] = [
+                            'attempt' => 'openai-primary',
+                            'model' => $model,
+                            'successful' => true,
+                        ];
                         echo "data: " . json_encode(['content' => $fullResponse, 'done' => true]) . "\n\n";
                         $this->streamFlush();
                     } else {
+                        $streamBackendAttempts[] = [
+                            'attempt' => 'openai-primary',
+                            'model' => $model,
+                            'successful' => false,
+                            'reason' => 'empty_response',
+                        ];
                         $useOpenAiFallback = false;
                     }
                 }
@@ -1853,76 +2070,214 @@ class WidgetController
                     
                     $fastApiUrl = config('services.ai_agent.url');
                     $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
-                    
+
                     $fullResponse = '';
-                    $sseBuffer = '';
+                    $streamAttempt = function (bool $useVast, string $attemptModel, string $attemptLabel) use ($fastApiUrl, $chatMessages, $maxTokens, &$fullResponse) {
+                        $sseBuffer = '';
+                        $attemptResponse = '';
+                        $hadOutput = false;
+                        $hadDone = false;
+                        $hadError = false;
 
-                    $ch = curl_init("{$fastApiUrl}/llm/chat/stream");
-                    curl_setopt_array($ch, [
-                        CURLOPT_RETURNTRANSFER => false,
-                        CURLOPT_HEADER => false,
-                        CURLOPT_POST => true,
-                        CURLOPT_POSTFIELDS => json_encode([
-                            'messages' => $chatMessages,
-                            'model' => $model,
-                            'backend_type' => 'ollama',
-                            'options' => [
-                                'num_predict' => $maxTokens,
-                                'temperature' => 0.3,
-                                'use_vastai' => true
-                            ]
-                        ]),
-                        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                        CURLOPT_WRITEFUNCTION => function ($curl, $data) use (&$sseBuffer, &$fullResponse) {
-                            $sseBuffer .= $data;
+                        $ch = curl_init("{$fastApiUrl}/llm/chat/stream");
+                        curl_setopt_array($ch, [
+                            CURLOPT_RETURNTRANSFER => false,
+                            CURLOPT_HEADER => false,
+                            CURLOPT_POST => true,
+                            CURLOPT_POSTFIELDS => json_encode([
+                                'messages' => $chatMessages,
+                                'model' => $attemptModel,
+                                'backend_type' => 'ollama',
+                                'options' => [
+                                    'num_predict' => $maxTokens,
+                                    'temperature' => 0.3,
+                                    'use_vastai' => $useVast,
+                                ],
+                            ]),
+                            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                            CURLOPT_TIMEOUT => 70,
+                            CURLOPT_WRITEFUNCTION => function ($curl, $data) use (&$sseBuffer, &$attemptResponse, &$hadOutput, &$hadDone, &$hadError, &$fullResponse) {
+                                $sseBuffer .= $data;
 
-                            $parts = explode("\n\n", $sseBuffer);
-                            $sseBuffer = array_pop($parts);
+                                $parts = explode("\n\n", $sseBuffer);
+                                $sseBuffer = array_pop($parts);
 
-                            foreach ($parts as $part) {
-                                $part = trim($part);
-                                if ($part === '') {
-                                    continue;
-                                }
+                                foreach ($parts as $part) {
+                                    $part = trim($part);
+                                    if ($part === '') {
+                                        continue;
+                                    }
 
-                                $lines = preg_split('/\r?\n/', $part);
-                                foreach ($lines as $line) {
-                                    $line = trim($line);
-                                    if (str_starts_with($line, 'data: ')) {
+                                    $lines = preg_split('/\r?\n/', $part);
+                                    foreach ($lines as $line) {
+                                        $line = trim($line);
+                                        if (!str_starts_with($line, 'data: ')) {
+                                            continue;
+                                        }
+
                                         $payload = json_decode(substr($line, 6), true);
-                                        if (isset($payload['content'])) {
+                                        if (!is_array($payload)) {
+                                            continue;
+                                        }
+
+                                        if (!empty($payload['error'])) {
+                                            $hadError = true;
+                                            continue;
+                                        }
+
+                                        $hasContent = isset($payload['content']) && $payload['content'] !== '';
+                                        if ($hasContent) {
+                                            $attemptResponse .= $payload['content'];
                                             $fullResponse .= $payload['content'];
+                                            $hadOutput = true;
+                                        }
+
+                                        if (!empty($payload['done'])) {
+                                            $hadDone = true;
+                                        }
+
+                                        if ($hasContent || !empty($payload['done'])) {
+                                            echo "data: " . json_encode($payload) . "\n\n";
+                                            $this->streamFlush();
                                         }
                                     }
                                 }
-                            }
 
-                            echo $data;
-                            $this->streamFlush();
-                            return strlen($data);
-                        }
-                    ]);
-                    
-                    curl_exec($ch);
-                    curl_close($ch);
-                    
-                    $responseElapsedMs = round((microtime(true) - $responseStartTime) * 1000, 2);
-                    Log::info('LLM response generation completed', ['elapsed_ms' => $responseElapsedMs, 'response_length' => strlen($fullResponse)]);
+                                return strlen($data);
+                            },
+                        ]);
 
-                    if (trim($sseBuffer) !== '') {
-                        $lines = preg_split('/\r?\n/', trim($sseBuffer));
-                        foreach ($lines as $line) {
-                            $line = trim($line);
-                            if (str_starts_with($line, 'data: ')) {
+                        curl_exec($ch);
+                        $curlErrNo = curl_errno($ch);
+                        $curlErr = $curlErrNo ? curl_error($ch) : null;
+                        curl_close($ch);
+
+                        if (trim($sseBuffer) !== '') {
+                            $lines = preg_split('/\r?\n/', trim($sseBuffer));
+                            foreach ($lines as $line) {
+                                $line = trim($line);
+                                if (!str_starts_with($line, 'data: ')) {
+                                    continue;
+                                }
                                 $payload = json_decode(substr($line, 6), true);
-                                if (isset($payload['content'])) {
+                                if (!is_array($payload)) {
+                                    continue;
+                                }
+                                if (!empty($payload['error'])) {
+                                    $hadError = true;
+                                    continue;
+                                }
+                                if (isset($payload['content']) && $payload['content'] !== '') {
+                                    $attemptResponse .= $payload['content'];
                                     $fullResponse .= $payload['content'];
+                                    $hadOutput = true;
+                                    echo "data: " . json_encode(['content' => $payload['content'], 'done' => false]) . "\n\n";
+                                    $this->streamFlush();
+                                }
+                                if (!empty($payload['done'])) {
+                                    $hadDone = true;
+                                    echo "data: " . json_encode(['content' => '', 'done' => true]) . "\n\n";
+                                    $this->streamFlush();
                                 }
                             }
                         }
+
+                        Log::info('Widget stream backend attempt', [
+                            'attempt' => $attemptLabel,
+                            'model' => $attemptModel,
+                            'use_vastai' => $useVast,
+                            'curl_errno' => $curlErrNo,
+                            'curl_error' => $curlErr,
+                            'had_output' => $hadOutput,
+                            'had_done' => $hadDone,
+                            'had_error' => $hadError,
+                            'response_length' => strlen($attemptResponse),
+                        ]);
+
+                        return [
+                            'curl_errno' => $curlErrNo,
+                            'curl_error' => $curlErr,
+                            'had_output' => $hadOutput,
+                            'had_done' => $hadDone,
+                            'had_error' => $hadError,
+                            'response_length' => strlen($attemptResponse),
+                        ];
+                    };
+
+                    $firstAttempt = $streamAttempt(true, $model, 'vast-primary');
+                    $streamBackendAttempts[] = [
+                        'attempt' => 'vast-primary',
+                        'model' => $model,
+                        'successful' => ($firstAttempt['had_output'] && $firstAttempt['had_done'] && !$firstAttempt['had_error'] && $firstAttempt['curl_errno'] === 0),
+                        'had_output' => $firstAttempt['had_output'],
+                        'had_done' => $firstAttempt['had_done'],
+                        'had_error' => $firstAttempt['had_error'],
+                        'curl_errno' => $firstAttempt['curl_errno'],
+                    ];
+
+                    $shouldRetryLocal = (
+                        !$firstAttempt['had_output']
+                        || !$firstAttempt['had_done']
+                        || $firstAttempt['had_error']
+                        || $firstAttempt['curl_errno'] !== 0
+                    );
+
+                    if ($shouldRetryLocal) {
+                        $fullResponse = '';
+                        Log::warning('Widget stream retrying on local fallback model', [
+                            'reason' => [
+                                'had_output' => $firstAttempt['had_output'],
+                                'had_done' => $firstAttempt['had_done'],
+                                'had_error' => $firstAttempt['had_error'],
+                                'curl_errno' => $firstAttempt['curl_errno'],
+                            ],
+                            'fallback_model' => 'llama3.2:3b',
+                            'session_id' => $sessionId,
+                            'org_id' => $organization->id,
+                        ]);
+
+                        $secondAttempt = $streamAttempt(false, 'llama3.2:3b', 'local-fallback-3b');
+                        $streamBackendAttempts[] = [
+                            'attempt' => 'local-fallback-3b',
+                            'model' => 'llama3.2:3b',
+                            'successful' => ($secondAttempt['had_output'] && $secondAttempt['had_done'] && !$secondAttempt['had_error'] && $secondAttempt['curl_errno'] === 0),
+                            'had_output' => $secondAttempt['had_output'],
+                            'had_done' => $secondAttempt['had_done'],
+                            'had_error' => $secondAttempt['had_error'],
+                            'curl_errno' => $secondAttempt['curl_errno'],
+                        ];
+
+                        if (!$secondAttempt['had_output'] || !$secondAttempt['had_done']) {
+                            $safeErrorMessage = 'Sorry, I encountered an error. Please try again.';
+                            echo "data: " . json_encode(['content' => $safeErrorMessage, 'done' => true]) . "\n\n";
+                            $this->streamFlush();
+                            $fullResponse = $safeErrorMessage;
+                            $streamBackendUsed = 'error_fallback_message';
+                        } else {
+                            $streamBackendUsed = 'local_fallback_llama3.2:3b';
+                        }
+                    } else {
+                        $streamBackendUsed = 'vast_primary';
                     }
+
+                    $responseElapsedMs = round((microtime(true) - $responseStartTime) * 1000, 2);
+                    Log::info('LLM response generation completed', ['elapsed_ms' => $responseElapsedMs, 'response_length' => strlen($fullResponse)]);
                 }
                 }
+
+                if (!$streamBackendUsed) {
+                    $streamBackendUsed = $useOpenAiFallback ? 'openai' : 'unknown';
+                }
+
+                Log::info('Widget stream backend diagnostics', [
+                    'org_id' => $organization->id,
+                    'session_id' => $sessionId,
+                    'backend_used' => $streamBackendUsed,
+                    'fallback_used' => collect($streamBackendAttempts)->contains(function ($attempt) {
+                        return ($attempt['attempt'] ?? '') === 'local-fallback-3b';
+                    }),
+                    'attempts' => $streamBackendAttempts,
+                ]);
 
                 $finalResponse = trim($fullResponse);
                 $hallucinationBlocked = false;
@@ -1935,23 +2290,34 @@ class WidgetController
                 $escalationReason = $this->getEscalationReason($message, $finalResponse, $intentResult);
                 $postfixParts = [];
 
+                $isWithinHours = $this->isWithinBusinessHours($organization);
                 if ($hallucinationBlocked) {
                     $postfixParts = [];
-                } elseif ($escalationReason) {
+                } elseif ($escalationReason === 'user_requested_human' && $isWithinHours === false) {
                     $handoffMessage = $this->buildHandoffMessage($organization);
                     if ($handoffMessage !== '') {
                         $postfixParts[] = $handoffMessage;
                     }
                 }
 
-                $suggestion = $hallucinationBlocked ? '' : $this->buildProactiveSuggestion($intentResult);
-                if ($suggestion !== '') {
-                    $postfixParts[] = $suggestion;
-                }
+                $responseHasQuestion = $this->responseHasQuestion($finalResponse);
+                $isConversationEnding = $this->isConversationEndingPhrase($message);
 
-                $followUp = $hallucinationBlocked ? '' : $this->buildFollowUpPrompt($intentResult);
-                if ($followUp !== '') {
-                    $postfixParts[] = $followUp;
+                if (!$hallucinationBlocked && !$responseHasQuestion && !$isConversationEnding) {
+                    $intentFollowUp = $this->buildFollowUpPrompt($intentResult);
+                    if ($intentFollowUp !== '') {
+                        $postfixParts[] = $intentFollowUp;
+                    } else {
+                        $faqFollowUp = $this->faqFollowUpService->getFollowUpText($organization, $finalResponse);
+                        if ($faqFollowUp !== '') {
+                            $postfixParts[] = $faqFollowUp;
+                        } else {
+                            $suggestion = $this->buildProactiveSuggestion($intentResult);
+                            if ($suggestion !== '') {
+                                $postfixParts[] = $suggestion;
+                            }
+                        }
+                    }
                 }
 
                 if (!empty($postfixParts)) {
@@ -2167,6 +2533,8 @@ class WidgetController
             $pageTitle = $sessionMetadata['page_title'] ?? $request->input('page_title');
             $referrer = $sessionMetadata['referrer'] ?? $request->input('referrer') ?? $request->headers->get('referer');
 
+            $userAgent = Str::limit((string) $request->userAgent(), 255, '');
+
             Analytics::create([
                 'organization_id' => $organizationId,
                 'visitor_id' => $sessionId,
@@ -2175,7 +2543,7 @@ class WidgetController
                 'page_url' => $pageUrl ?: config('app.url'),
                 'page_title' => $pageTitle ?: '',
                 'referrer' => $referrer ?: '',
-                'user_agent' => $request->userAgent(),
+                'user_agent' => $userAgent,
                 'ip_address' => $request->ip(),
                 'country' => $locationInfo['country'] ?? null,
                 'region' => $locationInfo['region'] ?? null,
@@ -2231,6 +2599,8 @@ class WidgetController
             $pageTitle = $sessionMetadata['page_title'] ?? $request->input('page_title');
             $referrer = $sessionMetadata['referrer'] ?? $request->input('referrer') ?? $request->headers->get('referer');
 
+            $userAgent = Str::limit((string) $request->userAgent(), 255, '');
+
             Analytics::create([
                 'organization_id' => $organizationId,
                 'visitor_id' => $sessionId,
@@ -2239,7 +2609,7 @@ class WidgetController
                 'page_url' => $pageUrl ?: config('app.url'),
                 'page_title' => $pageTitle ?: '',
                 'referrer' => $referrer ?: '',
-                'user_agent' => $request->userAgent(),
+                'user_agent' => $userAgent,
                 'ip_address' => $request->ip(),
                 'country' => $locationInfo['country'] ?? null,
                 'region' => $locationInfo['region'] ?? null,
@@ -2330,6 +2700,8 @@ class WidgetController
 
         if (!$alreadyEscalated) {
             try {
+                $userAgent = Str::limit((string) $request->userAgent(), 255, '');
+
                 Analytics::create([
                     'organization_id' => $conversation->organization_id,
                     'visitor_id' => $conversation->visitor_id ?? $conversation->conversation_id,
@@ -2338,7 +2710,7 @@ class WidgetController
                     'page_url' => $sessionMetadata['page_url'] ?? config('app.url'),
                     'page_title' => $sessionMetadata['page_title'] ?? '',
                     'referrer' => $sessionMetadata['referrer'] ?? '',
-                    'user_agent' => $request->userAgent(),
+                    'user_agent' => $userAgent,
                     'ip_address' => $request->ip(),
                     'country' => $conversation->visitor_country,
                     'region' => $conversation->visitor_region,
@@ -2622,7 +2994,7 @@ class WidgetController
         return 'You can reach us at ' . implode(' | ', $parts) . '.';
     }
 
-    private function getExactFaqMatchResponse(?array $searchResults): ?array
+    private function getExactFaqMatchResponse(?array $searchResults, Organization $organization): ?array
     {
         if (!$searchResults || empty($searchResults['results']) || !is_array($searchResults['results'])) {
             return null;
@@ -2671,28 +3043,57 @@ class WidgetController
         ];
     }
 
-    private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message): array
+    private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message, string $context = ''): array
     {
-        $messages = [
-            ['role' => 'system', 'content' => $systemPrompt],
-        ];
+        $hasContext = trim($context) !== '';
+        $includeHistory = false;
+        $historyLimit = 0;
+        $isShortFollowUp = $this->isShortFollowUp($message);
 
-        $recentMessages = $this->getRecentConversationMessages($organization, $sessionId, $message, 4);
-        if (!empty($recentMessages)) {
-            $messages = array_merge($messages, $recentMessages);
+        $lastAssistant = $this->getLastAssistantMessage($organization, $sessionId);
+        $lastAssistantAskedQuestion = $lastAssistant !== null && $this->responseHasQuestion($lastAssistant);
+        $isLikelyShortReply = $isShortFollowUp || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion);
+
+        if ($isLikelyShortReply && $lastAssistantAskedQuestion) {
+            $includeHistory = true;
+            $historyLimit = 4;
         }
 
-        $messages[] = ['role' => 'user', 'content' => $message];
+        if (!$hasContext) {
+            $includeHistory = true;
+            $historyLimit = max($historyLimit, 4);
+        }
 
-        return $messages;
+        if ($this->isAffirmativeFollowUp($message) && $this->isPreviousUserAffirmative($organization, $sessionId)) {
+            $includeHistory = true;
+            $historyLimit = max($historyLimit, 10);
+        }
+
+        if ($includeHistory) {
+            $recentMessages = $this->getRecentConversationMessages($organization, $sessionId, $message, $historyLimit);
+            if (!empty($recentMessages)) {
+                $systemPrompt .= "\n\nPRIOR HISTORY (use only if the user explicitly refers to it):\n";
+                foreach ($recentMessages as $rm) {
+                    $label = $rm['role'] === 'user' ? 'User' : 'Assistant';
+                    $systemPrompt .= $label . ": " . $rm['content'] . "\n";
+                }
+            }
+        }
+
+        if ($isLikelyShortReply && $lastAssistantAskedQuestion) {
+            $systemPrompt .= "\nFOLLOW-UP MODE: The user's latest message is likely a short answer to the assistant's previous question. Interpret it using the immediately preceding question and context.\n";
+        }
+
+        $systemPrompt .= "\nCURRENT QUERY:\n" . $message . "\n";
+
+        return [
+            ['role' => 'system', 'content' => trim($systemPrompt)],
+            ['role' => 'user', 'content' => $message],
+        ];
     }
 
     private function getRecentConversationMessages(Organization $organization, string $sessionId, string $message, int $limit = 4): array
     {
-        if (!$this->isShortFollowUp($message)) {
-            return [];
-        }
-
         $conversation = ChatConversation::where('conversation_id', $sessionId)
             ->where('organization_id', $organization->id)
             ->first();
@@ -2721,6 +3122,33 @@ class WidgetController
         return $messages;
     }
 
+    private function isPreviousUserAffirmative(Organization $organization, string $sessionId): bool
+    {
+        $conversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organization->id)
+            ->first();
+
+        if (!$conversation) {
+            return false;
+        }
+
+        $lastUserMessage = $conversation->messages()
+            ->where('sender_type', 'user')
+            ->orderBy('sent_at', 'desc')
+            ->first();
+
+        if (!$lastUserMessage) {
+            return false;
+        }
+
+        $text = trim(strip_tags((string) $lastUserMessage->message));
+        if ($text === '') {
+            return false;
+        }
+
+        return $this->isAffirmativeFollowUp($text);
+    }
+
     private function isShortFollowUp(string $message): bool
     {
         $clean = trim(mb_strtolower($message));
@@ -2740,7 +3168,32 @@ class WidgetController
             return true;
         }
 
-        return str_word_count($clean) <= 3;
+        if (str_word_count($clean) <= 3) {
+            if (preg_match('/\b(it|that|those|these|this|they|them|there|here|above|previous|earlier|more|details|explain|expand|continue)\b/', $clean)) {
+                return true;
+            }
+            if (preg_match('/^(and|also|what about|how about)\b/', $clean)) {
+                return true;
+            }
+            return false;
+        }
+
+        return false;
+    }
+
+    private function isOneOrTwoWordReply(string $message): bool
+    {
+        $clean = trim(mb_strtolower(strip_tags($message)));
+        if ($clean === '') {
+            return false;
+        }
+
+        $wordCount = str_word_count($clean);
+        if ($wordCount === 0) {
+            return false;
+        }
+
+        return $wordCount <= 2;
     }
 
     private function shouldUseOpenAiFallback(string $message, Organization $organization, string $responseLanguage): bool
@@ -2764,10 +3217,13 @@ class WidgetController
             return '';
         }
 
-        $subscriptionPlans = SubscriptionPlan::where('is_active', true)
+        $subscriptionPlans = PricingPlan::active()
+            ->subscriptions()
             ->orderBy('sort_order')
+            ->orderBy('billing_period')
             ->get();
-        $creditPackages = CreditPackage::where('is_active', true)
+        $creditPackages = PricingPlan::active()
+            ->credits()
             ->orderBy('sort_order')
             ->get();
 
@@ -2787,18 +3243,47 @@ class WidgetController
 
         if ($subscriptionPlans->isNotEmpty()) {
             $lines[] = 'Subscription plans:';
+            $grouped = [];
             foreach ($subscriptionPlans as $plan) {
-                $monthly = $locationService->formatPrice($plan->getMonthlyPriceForCurrency($currency), $currency);
-                $yearly = $locationService->formatPrice($plan->getYearlyPriceForCurrency($currency), $currency);
-                $tokens = number_format((int) $plan->token_cap_monthly);
-                $estimate = $this->formatConversationEstimate((int) $plan->token_cap_monthly, $tokensPerConversation);
-                $line = "- {$plan->name}: {$monthly}/mo";
-                if ((float) $plan->yearly_price > 0) {
-                    $line .= " ({$yearly}/yr)";
+                $key = $plan->metadata['original_slug'] ?? $plan->slug ?? $plan->name;
+                if (!isset($grouped[$key])) {
+                    $grouped[$key] = [
+                        'name' => $plan->name,
+                        'token_cap' => $plan->token_cap,
+                        'overage' => $plan->overage_price_per_100k,
+                        'periods' => [],
+                    ];
                 }
-                $line .= ", {$tokens} tokens/mo (~{$estimate} conversations)";
-                if ((float) $plan->overage_price_per_100k > 0) {
-                    $overageAmount = (float) $plan->overage_price_per_100k;
+                $grouped[$key]['periods'][$plan->billing_period] = $plan;
+            }
+
+            foreach ($grouped as $group) {
+                $tokens = number_format((int) ($group['token_cap'] ?? 0));
+                $estimate = $this->formatConversationEstimate((int) ($group['token_cap'] ?? 0), $tokensPerConversation);
+
+                $monthlyPlan = $group['periods']['monthly'] ?? null;
+                $yearlyPlan = $group['periods']['yearly'] ?? null;
+
+                $line = "- {$group['name']}:";
+                if ($monthlyPlan) {
+                    $amount = (float) $monthlyPlan->price;
+                    if ($currency === 'INR') {
+                        $amount = $locationService->convertToINR($amount);
+                    }
+                    $line .= ' ' . $locationService->formatPrice($amount, $currency) . '/mo';
+                }
+                if ($yearlyPlan) {
+                    $amount = (float) $yearlyPlan->price;
+                    if ($currency === 'INR') {
+                        $amount = $locationService->convertToINR($amount);
+                    }
+                    $line .= ' (' . $locationService->formatPrice($amount, $currency) . '/yr)';
+                }
+                if ((int) ($group['token_cap'] ?? 0) > 0) {
+                    $line .= ", {$tokens} tokens/mo (~{$estimate} conversations)";
+                }
+                if ((float) ($group['overage'] ?? 0) > 0) {
+                    $overageAmount = (float) $group['overage'];
                     if ($currency === 'INR') {
                         $overageAmount = $locationService->convertToINR($overageAmount);
                     }
@@ -2812,9 +3297,16 @@ class WidgetController
         if ($creditPackages->isNotEmpty()) {
             $lines[] = 'Credit packages (one-time):';
             foreach ($creditPackages as $package) {
-                $price = $locationService->formatPrice($package->getPriceForCurrency($currency), $currency);
-                $tokens = number_format((int) $package->tokens);
-                $estimate = $this->formatConversationEstimate((int) $package->tokens, $tokensPerConversation);
+                $priceAmount = $package->getPriceForCurrency($currency);
+                if ($priceAmount === null) {
+                    $priceAmount = (float) $package->price;
+                    if ($currency === 'INR') {
+                        $priceAmount = $locationService->convertToINR($priceAmount);
+                    }
+                }
+                $price = $locationService->formatPrice($priceAmount, $currency);
+                $tokens = number_format((int) $package->credits);
+                $estimate = $this->formatConversationEstimate((int) $package->credits, $tokensPerConversation);
                 $lines[] = "- {$package->name}: {$price}, {$tokens} tokens (~{$estimate} conversations).";
             }
         }
@@ -3519,6 +4011,11 @@ class WidgetController
         return "I didn't understand that. Could you please share a bit more detail?";
     }
 
+    private function buildAffirmativeClarifyResponse(): string
+    {
+        return "Sure. What would you like help with?";
+    }
+
     private function buildClarifyNumberResponse(): string
     {
         return "I didn't understand that. Could you please rephrase or share what that number is about?";
@@ -3541,6 +4038,87 @@ class WidgetController
         }
 
         return $wordCount <= 2 && mb_strlen($trimmed) <= 12;
+    }
+
+    private function responseHasQuestion(string $text): bool
+    {
+        $clean = trim($text);
+        if ($clean === '') {
+            return false;
+        }
+
+        if (!str_contains($clean, '?')) {
+            return false;
+        }
+
+        return (bool) preg_match('/\?\s*$/', $clean);
+    }
+
+    private function getLastAssistantMessage(Organization $organization, string $sessionId): ?string
+    {
+        if ($sessionId === '') {
+            return null;
+        }
+
+        $conversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organization->id)
+            ->first();
+
+        if (!$conversation) {
+            return null;
+        }
+
+        $lastAssistant = $conversation->messages()
+            ->whereIn('sender_type', ['ai', 'assistant'])
+            ->orderBy('sent_at', 'desc')
+            ->first();
+
+        if (!$lastAssistant) {
+            return null;
+        }
+
+        $text = trim(strip_tags((string) $lastAssistant->message));
+        return $text !== '' ? $text : null;
+    }
+
+    private function shouldClarifyAffirmative(string $message, Organization $organization, string $sessionId): bool
+    {
+        if (!$this->isAffirmativeFollowUp($message)) {
+            return false;
+        }
+
+        $lastAssistant = $this->getLastAssistantMessage($organization, $sessionId);
+        if ($lastAssistant === null) {
+            return true;
+        }
+
+        return !$this->responseHasQuestion($lastAssistant);
+    }
+
+    private function isConversationEndingPhrase(?string $message): bool
+    {
+        if (!is_string($message) || trim($message) === '') {
+            return false;
+        }
+
+        $lowerMessage = strtolower(trim($message));
+        
+        // Exact matches for conversation ending phrases
+        $endPhrases = [
+            'no', 'nope', 'nah', 'no thanks', 'no thank you', 'not needed',
+            'not interested', 'no problem', 'all good', 'that\'s all',
+            'goodbye', 'bye', 'see you', 'later', 'thanks bye',
+            'i\'m good', 'im good', 'all set', 'nothing else'
+        ];
+
+        foreach ($endPhrases as $phrase) {
+            if ($lowerMessage === $phrase || str_ends_with($lowerMessage, $phrase)) {
+                return true;
+            }
+        }
+
+        // Check if message contains negative response patterns
+        return preg_match('/^(no|nope|nah|not)\s*(thank|thanks|needed|interested|required)/i', $lowerMessage) === 1;
     }
 
     private function isPromoQuery(string $message): bool
@@ -3797,7 +4375,7 @@ class WidgetController
         $t = trim(mb_strtolower($text));
         if ($t === '') return false;
         // Simple affirmatives
-        $affirm = ['yes', 'yeah', 'yup', 'ya', 'sure', 'ok', 'okay', 'please', 'go ahead'];
+        $affirm = ['yes', 'yeah', 'yup', 'ya', 'sure', 'ok', 'okay', 'please', 'go ahead', 'continue', 'proceed'];
         foreach ($affirm as $a) {
             if ($t === $a) return true;
         }
@@ -3955,6 +4533,83 @@ class WidgetController
 
         return response()->json(['messages' => $payload], 200)
             ->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    public function getConversationHistory(Request $request, $orgId)
+    {
+        $organization = is_numeric($orgId)
+            ? Organization::find($orgId)
+            : Organization::where('slug', $orgId)->first();
+
+        if (!$organization || !$organization->is_active) {
+            return response()->json(['session_id' => null, 'messages' => []], 404)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $email = strtolower(trim((string) $request->query('email', '')));
+        $phone = trim((string) $request->query('phone', ''));
+        $sessionId = trim((string) $request->query('session_id', ''));
+        $limit = max(1, min(50, (int) $request->query('limit', 30)));
+
+        if ($sessionId === '' && $email === '') {
+            return response()->json(['session_id' => null, 'messages' => []], 200)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $conversation = null;
+
+        if ($sessionId !== '') {
+            $conversation = ChatConversation::where('organization_id', $organization->id)
+                ->where('conversation_id', $sessionId)
+                ->first();
+        }
+
+        if (!$conversation && $email !== '') {
+            $query = ChatConversation::where('organization_id', $organization->id)
+                ->whereRaw('LOWER(visitor_email) = ?', [$email]);
+
+            if ($phone !== '') {
+                $query->where('visitor_phone', $phone);
+            }
+
+            $conversation = $query
+                ->orderByDesc('last_activity_at')
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        if (!$conversation) {
+            return response()->json(['session_id' => null, 'messages' => []], 200)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $messages = ChatMessage::where('conversation_id', $conversation->id)
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get()
+            ->reverse()
+            ->values()
+            ->map(function (ChatMessage $msg) {
+                $sender = 'bot';
+                if ($msg->sender_type === 'user') {
+                    $sender = 'user';
+                } elseif ($msg->sender_type === 'agent') {
+                    $sender = 'agent';
+                }
+
+                return [
+                    'id' => $msg->id,
+                    'sender' => $sender,
+                    'sender_name' => $msg->getSenderDisplayName(),
+                    'message' => $msg->message,
+                    'sent_at' => optional($msg->sent_at)->toISOString() ?? now()->toISOString(),
+                ];
+            });
+
+        return response()->json([
+            'session_id' => $conversation->conversation_id,
+            'messages' => $messages,
+        ], 200)->header('X-Robots-Tag', 'noindex, nofollow');
     }
 
     /**
@@ -4284,7 +4939,7 @@ class WidgetController
             return true;
         }
 
-        $tokenLimit = $subscription->subscriptionPlan->token_cap_monthly;
+        $tokenLimit = $subscription->subscriptionPlan->token_cap;
         $tokensUsed = $subscription->tokens_used_this_period;
         $remainingTokens = $subscription->remaining_tokens;
         $usagePercentage = $subscription->usage_percentage;

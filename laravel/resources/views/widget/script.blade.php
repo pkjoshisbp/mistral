@@ -27,6 +27,9 @@
             this.welcomeShown = false;
             this.leadCaptured = this.checkLeadCaptured();
             this.userInfo = this.loadUserInfo();
+            if (this.config.requireContactForGuests && !this.hasValidRequiredContact(this.userInfo)) {
+                this.leadCaptured = false;
+            }
             this.locationInfo = {};
             this.ws = null;
             this.wsReady = false;
@@ -40,6 +43,7 @@
             this.detectLocation();
             // ISSUE 5B FIX: Load previous messages after init
             this.loadPersistedMessages();
+            this.syncSessionFromStoredContact();
             if (this.config?.scriptVersion) {
                 console.info('[AI Widget] Script version:', this.config.scriptVersion);
             }
@@ -84,6 +88,16 @@
             localStorage.setItem(key, JSON.stringify(this.userInfo));
         }
 
+        hasValidRequiredContact(userInfo) {
+            const info = userInfo || {};
+            const email = String(info.email || '').trim();
+            const phone = String(info.phone || '').trim();
+            const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+            const phoneRegex = /^\+?[0-9][0-9\-\s()]{6,19}$/;
+            const phoneDigits = (phone.match(/\d/g) || []).length;
+            return emailRegex.test(email) && phoneRegex.test(phone) && phoneDigits >= 7 && phoneDigits <= 15;
+        }
+
         // ISSUE 5B FIX: Get or create persistent session ID
         getOrCreateSessionId() {
             const key = `ai_session_id_${this.config.orgId}`;
@@ -111,6 +125,87 @@
         generateSessionId() {
             // Deprecated - use getOrCreateSessionId instead
             return this.getOrCreateSessionId();
+        }
+
+        setSessionId(sessionId) {
+            if (!sessionId || typeof sessionId !== 'string') {
+                return;
+            }
+
+            this.sessionId = sessionId;
+            const key = `ai_session_id_${this.config.orgId}`;
+            const timestampKey = `ai_session_timestamp_${this.config.orgId}`;
+            sessionStorage.setItem(key, this.sessionId);
+            sessionStorage.setItem(timestampKey, Date.now().toString());
+        }
+
+        async syncSessionFromStoredContact() {
+            const email = String(this.userInfo?.email || '').trim();
+            if (!email) {
+                return;
+            }
+
+            const phone = String(this.userInfo?.phone || '').trim();
+
+            try {
+                const params = new URLSearchParams();
+                params.set('email', email);
+                if (phone) {
+                    params.set('phone', phone);
+                }
+                params.set('limit', '30');
+
+                const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/history?${params.toString()}`, {
+                    method: 'GET'
+                });
+
+                if (!response.ok) {
+                    return;
+                }
+
+                const data = await response.json();
+                if (!data || !data.session_id || !Array.isArray(data.messages) || data.messages.length === 0) {
+                    return;
+                }
+
+                if (data.session_id === this.sessionId && this.messages.length > 0) {
+                    return;
+                }
+
+                this.setSessionId(data.session_id);
+                this.messages = [];
+                this.lastAgentMessageId = 0;
+
+                const container = document.getElementById(this.ids.messages);
+                if (container) {
+                    container.innerHTML = '';
+                }
+
+                data.messages.forEach(msg => {
+                    const sender = msg.sender || 'bot';
+                    const content = msg.message || '';
+                    const senderName = msg.sender_name || null;
+                    const sentAt = msg.sent_at || null;
+
+                    this.renderMessage(content, sender, sentAt, senderName);
+                    this.messages.push({
+                        content,
+                        sender,
+                        senderName,
+                        messageId: msg.id || null,
+                        timestamp: sentAt ? new Date(sentAt) : new Date(),
+                    });
+
+                    if (sender === 'agent' && msg.id) {
+                        this.lastAgentMessageId = Math.max(this.lastAgentMessageId, msg.id);
+                    }
+                });
+
+                this.welcomeShown = this.messages.length > 0;
+                this.saveMessages();
+            } catch (error) {
+                console.debug('[AI Widget] Session sync by contact failed:', error);
+            }
         }
 
         // ISSUE 5B FIX: Save messages to localStorage
@@ -324,7 +419,7 @@
                                 </div>
                                 <div class="ai-chat-form-actions">
                                     <button type="button" id="${leadSubmitId}" class="ai-chat-lead-submit">Start Chatting</button>
-                                    <button type="button" id="${leadSkipId}" class="ai-chat-lead-skip">Skip for now</button>
+                                    ${this.config.requireContactForGuests ? '' : `<button type="button" id="${leadSkipId}" class="ai-chat-lead-skip">Skip for now</button>`}
                                 </div>
                             </div>
                         </div>
@@ -403,7 +498,7 @@
                 });
             }
             
-            if (leadSkip) {
+            if (leadSkip && !this.config.requireContactForGuests) {
                 leadSkip.addEventListener('click', () => this.skipLeadForm());
             }
             
@@ -471,6 +566,12 @@
                 if (!this.leadCaptured && !isLoggedIn) {
                     this.showLeadForm();
                 } else {
+                    if (this.config.requireContactForGuests && !this.hasValidRequiredContact(this.userInfo) && !isLoggedIn) {
+                        this.leadCaptured = false;
+                        this.showLeadForm();
+                        this.startAgentPolling();
+                        return;
+                    }
                     this.leadCaptured = true; // Skip lead capture for logged in users
                     this.saveLeadCaptured(); // Persist this state
                     const input = document.getElementById(this.ids.input);
@@ -850,21 +951,34 @@
             if (input) input.focus();
         }
 
-        submitLeadForm() {
+        async submitLeadForm() {
             console.log('submitLeadForm called');
             const name = document.getElementById(this.ids.leadName).value.trim();
             const email = document.getElementById(this.ids.leadEmail).value.trim();
             const phone = document.getElementById(this.ids.leadPhone).value.trim();
 
-            if (!name || !email) {
-                alert('Please fill in your name and email address.');
+            if (!name) {
+                alert('Please fill in your name.');
                 return;
             }
 
-            // Simple email validation
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(email)) {
+            const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+            if (!email || !emailRegex.test(email)) {
                 alert('Please enter a valid email address.');
+                return;
+            }
+
+            const phoneRegex = /^\+?[0-9][0-9\-\s()]{6,19}$/;
+            const phoneDigits = (phone.match(/\d/g) || []).length;
+            const requireContact = !!this.config.requireContactForGuests;
+
+            if (requireContact && !phone) {
+                alert('Phone number is required to start chat.');
+                return;
+            }
+
+            if (phone && (!phoneRegex.test(phone) || phoneDigits < 7 || phoneDigits > 15)) {
+                alert('Please enter a valid phone number.');
                 return;
             }
 
@@ -872,6 +986,8 @@
             this.leadCaptured = true;
             this.saveLeadCaptured();
             this.saveUserInfo();
+
+            await this.syncSessionFromStoredContact();
             
             // Store lead info (you can send this to server if needed)
             console.log('Lead captured:', this.userInfo);
@@ -880,10 +996,15 @@
             this.hideLeadForm();
             
             // Welcome message with name
-            this.showWelcomeMessage(`Hello ${name}! ${this.config.welcomeMessage}`);
+            if (this.messages.length === 0) {
+                this.showWelcomeMessage(`Hello ${name}! ${this.config.welcomeMessage}`);
+            }
         }
 
         skipLeadForm() {
+            if (this.config.requireContactForGuests) {
+                return;
+            }
             this.leadCaptured = true;
             this.saveLeadCaptured();
             this.hideLeadForm();
