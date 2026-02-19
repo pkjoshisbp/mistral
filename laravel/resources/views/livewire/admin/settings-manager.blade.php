@@ -238,6 +238,18 @@
                                 </div>
                             </div>
 
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-check mt-2">
+                                        <input class="form-check-input" type="checkbox" id="ai_use_intent_rewrite" wire:model="ai_use_intent_rewrite">
+                                        <label class="form-check-label" for="ai_use_intent_rewrite">
+                                            Use intent classification + query rewrite
+                                        </label>
+                                    </div>
+                                    <small class="form-text text-muted">Disable to use pure semantic search and action triggers only</small>
+                                </div>
+                            </div>
+
                             <!-- Ollama Settings -->
                             <div class="row" x-show="$wire.ai_model_provider === 'llama' && $wire.ai_backend_type === 'ollama'">
                                 <div class="col-md-12">

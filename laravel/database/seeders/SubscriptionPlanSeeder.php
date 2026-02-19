@@ -16,16 +16,17 @@ class SubscriptionPlanSeeder extends Seeder
             [
                 'name' => 'Starter',
                 'slug' => 'starter',
-                'description' => 'Perfect for small businesses getting started with AI chat',
-                'monthly_price' => 49.00,
-                'yearly_price' => 490.00,
-                'token_cap_monthly' => 2000000, // 2M tokens
-                'overage_price_per_100k' => 5.00,
+                'description' => 'Low-cost entry plan to try AI chat support',
+                'monthly_price' => 15.00,
+                'yearly_price' => 150.00, // 10 months price for 12 months
+                'token_cap_monthly' => 500000, // 500K tokens
+                'overage_price_per_100k' => 6.00,
                 'features' => [
                     'Dashboard access',
                     'Email support',
                     'Basic analytics',
-                    'Up to 2M tokens/month'
+                    'Up to 500K tokens/month',
+                    'Perfect for small projects'
                 ],
                 'is_active' => true,
                 'sort_order' => 1
@@ -33,13 +34,31 @@ class SubscriptionPlanSeeder extends Seeder
             [
                 'name' => 'Pro',
                 'slug' => 'pro',
+                'description' => 'Perfect for small businesses getting started with AI chat',
+                'monthly_price' => 49.00,
+                'yearly_price' => 490.00,
+                'token_cap_monthly' => 2000000, // 2M tokens
+                'overage_price_per_100k' => 5.00,
+                'features' => [
+                    'Everything in Starter',
+                    'Priority email support',
+                    'Advanced analytics',
+                    'Up to 2M tokens/month',
+                    'Team collaboration'
+                ],
+                'is_active' => true,
+                'sort_order' => 2
+            ],
+            [
+                'name' => 'Business',
+                'slug' => 'business',
                 'description' => 'For growing businesses with higher AI usage needs',
                 'monthly_price' => 199.00,
                 'yearly_price' => 1990.00,
                 'token_cap_monthly' => 10000000, // 10M tokens
                 'overage_price_per_100k' => 4.00,
                 'features' => [
-                    'Everything in Starter',
+                    'Everything in Pro',
                     'Team collaboration',
                     'API access',
                     'Advanced analytics',
@@ -47,7 +66,7 @@ class SubscriptionPlanSeeder extends Seeder
                     'Up to 10M tokens/month'
                 ],
                 'is_active' => true,
-                'sort_order' => 2
+                'sort_order' => 3
             ],
             [
                 'name' => 'Pay-as-you-go',
@@ -66,7 +85,7 @@ class SubscriptionPlanSeeder extends Seeder
                     'No monthly commitment'
                 ],
                 'is_active' => true,
-                'sort_order' => 3
+                'sort_order' => 4
             ],
             [
                 'name' => 'Enterprise',
@@ -77,7 +96,7 @@ class SubscriptionPlanSeeder extends Seeder
                 'token_cap_monthly' => 50000000, // 50M+ tokens
                 'overage_price_per_100k' => 3.00,
                 'features' => [
-                    'Everything in Pro',
+                    'Everything in Business',
                     'SLA guarantee',
                     'White-label options',
                     'Priority support',
@@ -86,7 +105,7 @@ class SubscriptionPlanSeeder extends Seeder
                     '50M+ tokens/month'
                 ],
                 'is_active' => true,
-                'sort_order' => 4
+                'sort_order' => 5
             ]
         ];
 

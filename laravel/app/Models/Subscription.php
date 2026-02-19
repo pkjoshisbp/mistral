@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
+use App\Models\PricingPlan;
 
 class Subscription extends Model
 {
@@ -45,7 +46,7 @@ class Subscription extends Model
 
     public function subscriptionPlan()
     {
-        return $this->belongsTo(SubscriptionPlan::class);
+        return $this->belongsTo(PricingPlan::class, 'subscription_plan_id');
     }
 
     public function tokenUsageLogs()
@@ -69,13 +70,13 @@ class Subscription extends Model
     {
         if (!$this->subscriptionPlan) return 0;
         
-        return max(0, $this->subscriptionPlan->token_cap_monthly - $this->tokens_used_this_period);
+        return max(0, (int) $this->subscriptionPlan->token_cap - $this->tokens_used_this_period);
     }
 
     public function getUsagePercentageAttribute()
     {
-        if (!$this->subscriptionPlan || $this->subscriptionPlan->token_cap_monthly == 0) return 0;
+        if (!$this->subscriptionPlan || (int) $this->subscriptionPlan->token_cap === 0) return 0;
         
-        return min(100, ($this->tokens_used_this_period / $this->subscriptionPlan->token_cap_monthly) * 100);
+        return min(100, ($this->tokens_used_this_period / (int) $this->subscriptionPlan->token_cap) * 100);
     }
 }

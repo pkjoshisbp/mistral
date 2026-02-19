@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use App\Models\SubscriptionPlan;
+use App\Models\PricingPlan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -36,7 +36,9 @@ class SetupPayPalPlans extends Command
             return 1;
         }
 
-        $subscriptionPlans = SubscriptionPlan::whereNull('paypal_plan_id')->get();
+        $subscriptionPlans = PricingPlan::subscriptions()
+            ->whereNull('metadata->paypal_plan_id')
+            ->get();
 
         if ($subscriptionPlans->isEmpty()) {
             $this->info('All subscription plans already have PayPal plan IDs configured.');
@@ -46,22 +48,17 @@ class SetupPayPalPlans extends Command
         foreach ($subscriptionPlans as $plan) {
             $this->line("Processing plan: {$plan->name}");
 
-            // Create monthly plan
-            if ($plan->monthly_price > 0) {
-                $monthlyPlanId = $this->createPayPalPlan($accessToken, $plan, 'monthly');
-                if ($monthlyPlanId && !$this->option('dry-run')) {
-                    $plan->update(['paypal_plan_id' => $monthlyPlanId]);
-                    $this->info("✓ Monthly plan created: {$monthlyPlanId}");
-                }
+            if (($plan->price ?? 0) <= 0) {
+                $this->warn("Skipping plan with non-positive price: {$plan->name}");
+                continue;
             }
 
-            // For yearly plans, we could create separate plans or handle them differently
-            if ($plan->yearly_price > 0 && $plan->yearly_price != $plan->monthly_price) {
-                $yearlyPlanId = $this->createPayPalPlan($accessToken, $plan, 'yearly');
-                if ($yearlyPlanId) {
-                    $this->info("✓ Yearly plan created: {$yearlyPlanId}");
-                    // You might want to store this in a separate field or table
-                }
+            $planId = $this->createPayPalPlan($accessToken, $plan, $plan->billing_period ?: 'monthly');
+            if ($planId && !$this->option('dry-run')) {
+                $meta = is_array($plan->metadata) ? $plan->metadata : [];
+                $meta['paypal_plan_id'] = $planId;
+                $plan->update(['metadata' => $meta]);
+                $this->info("✓ PayPal plan created: {$planId}");
             }
         }
 
@@ -93,7 +90,7 @@ class SetupPayPalPlans extends Command
     private function createPayPalPlan($accessToken, $subscriptionPlan, $cycle = 'monthly')
     {
         try {
-            $price = $cycle === 'yearly' ? $subscriptionPlan->yearly_price : $subscriptionPlan->monthly_price;
+            $price = $subscriptionPlan->price;
             $interval = $cycle === 'yearly' ? 'YEAR' : 'MONTH';
             $planName = $subscriptionPlan->name . ' (' . ucfirst($cycle) . ')';
 
@@ -164,7 +161,9 @@ class SetupPayPalPlans extends Command
 
     private function createOrGetProduct($accessToken, $subscriptionPlan)
     {
-        $productId = 'AIC-' . strtoupper($subscriptionPlan->slug);
+        $meta = is_array($subscriptionPlan->metadata) ? $subscriptionPlan->metadata : [];
+        $baseSlug = $meta['original_slug'] ?? $subscriptionPlan->slug;
+        $productId = 'AIC-' . strtoupper($baseSlug);
 
         // Try to get existing product first
         $response = Http::withToken($accessToken)

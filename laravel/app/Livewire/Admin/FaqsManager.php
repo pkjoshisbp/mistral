@@ -14,11 +14,13 @@ class FaqsManager extends Component
 {
     use WithFileUploads;
     public $selectedOrganization = '';
+    public $search = '';
     public $showForm = false;
     public $editingId = null;
 
     public $question = '';
     public $answer = '';
+    public $follow_up = '';
     public $category = '';
     public $is_active = true;
     public $sort_order = 0;
@@ -30,6 +32,7 @@ class FaqsManager extends Component
         'selectedOrganization' => 'required|exists:organizations,id',
         'question' => 'required|string|min:3',
         'answer' => 'required|string|min:3',
+        'follow_up' => 'nullable|string',
         'category' => 'nullable|string',
         'is_active' => 'boolean',
         'sort_order' => 'nullable|integer',
@@ -92,13 +95,24 @@ class FaqsManager extends Component
     {
         $q = OrganizationFaq::query()->with('organization')->orderBy('sort_order')->orderByDesc('id');
         if ($this->selectedOrganization) $q->where('organization_id', $this->selectedOrganization);
+        
+        if ($this->search) {
+            $q->where(function($query) {
+                $search = '%' . $this->search . '%';
+                $query->where('question', 'like', $search)
+                      ->orWhere('answer', 'like', $search)
+                      ->orWhere('category', 'like', $search)
+                      ->orWhere('keywords', 'like', $search);
+            });
+        }
+        
         return $q->get();
     }
 
     public function resetForm()
     {
         $this->editingId = null;
-        $this->question = $this->answer = $this->category = $this->keywords = '';
+        $this->question = $this->answer = $this->follow_up = $this->category = $this->keywords = '';
         $this->is_active = true;
         $this->sort_order = 0;
     }
@@ -111,6 +125,7 @@ class FaqsManager extends Component
                 'organization_id' => $this->selectedOrganization,
                 'question' => $this->question,
                 'answer' => $this->answer,
+                'follow_up' => $this->follow_up,
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order ?? 0,
@@ -136,6 +151,7 @@ class FaqsManager extends Component
         $this->selectedOrganization = $f->organization_id;
         $this->question = $f->question;
         $this->answer = $f->answer;
+        $this->follow_up = $f->follow_up;
         $this->category = $f->category;
         $this->keywords = $f->keywords;
         $this->sort_order = $f->sort_order ?? 0;
@@ -153,6 +169,7 @@ class FaqsManager extends Component
                 'organization_id' => $this->selectedOrganization,
                 'question' => $this->question,
                 'answer' => $this->answer,
+                'follow_up' => $this->follow_up,
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order ?? 0,
@@ -211,6 +228,7 @@ class FaqsManager extends Component
                     'category' => $faq->category ?? 'general',
                     'metadata' => [
                         'table_id' => $faq->id,
+                        'follow_up' => $faq->follow_up ?? '',
                         'updated_at' => $faq->updated_at->toISOString()
                     ]
                 ]

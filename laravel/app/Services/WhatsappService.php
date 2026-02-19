@@ -14,11 +14,16 @@ class WhatsappService
 
     public function __construct()
     {
-        $this->version = AdminSetting::get('whatsapp_api_version', 'v20.0');
-        $this->phoneNumberId = AdminSetting::get('whatsapp_phone_number_id', '');
-        $this->accessToken = AdminSetting::get('whatsapp_access_token', '');
-        $this->businessAccountId = AdminSetting::get('whatsapp_business_account_id', '');
+        $this->version = AdminSetting::get('whatsapp_api_version', env('WHATSAPP_API_VERSION', 'v20.0'));
+        $this->phoneNumberId = AdminSetting::get('whatsapp_phone_number_id', env('WHATSAPP_PHONE_NUMBER_ID', ''));
+        $this->accessToken = AdminSetting::get('whatsapp_access_token', env('WHATSAPP_ACCESS_TOKEN', ''));
+        $this->businessAccountId = AdminSetting::get('whatsapp_business_account_id', env('WHATSAPP_WABA_ID', ''));
         $this->defaultLanguage = 'en_US';
+    }
+
+    public function getBusinessAccountId(): string
+    {
+        return (string) $this->businessAccountId;
     }
 
     /**
@@ -250,6 +255,54 @@ class WhatsappService
     }
 
     /**
+     * Upload media by URL for template header examples (WABA media upload).
+     * Returns media ID that can be used as header_handle in template creation.
+     */
+    public function uploadTemplateMediaFromUrl(string $fileUrl, ?string $mimeType = null): array
+    {
+        $wabaId = $this->businessAccountId;
+        $token = $this->accessToken;
+        if (!$wabaId || !$token) {
+            throw new \RuntimeException('WhatsApp Business Account ID or Access Token not configured.');
+        }
+
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'file_url' => $fileUrl,
+        ];
+        if ($mimeType) {
+            $payload['type'] = $mimeType;
+        }
+
+        $url = "https://graph.facebook.com/{$this->version}/{$wabaId}/media";
+        \Log::info('WhatsApp template media upload attempt', [
+            'waba_id' => $wabaId,
+            'file_url' => $fileUrl,
+            'mime' => $mimeType,
+        ]);
+        $resp = \Http::asForm()->withToken($token)->post($url, $payload);
+        if (!$resp->successful()) {
+            $status = $resp->status();
+            $body = $resp->body();
+            $json = $resp->json();
+            $err = $json['error'] ?? null;
+            $code = $err['code'] ?? null;
+            $subcode = $err['error_subcode'] ?? null;
+            $msg = 'WhatsApp template media upload error: ' . $status . ' ' . $body;
+            \Log::error($msg);
+            if ($code === 190 && in_array($subcode, [463, 467, 460, 490], true)) {
+                throw new \App\Exceptions\WhatsappTokenExpiredException($msg, $status, $code, $subcode);
+            }
+            throw new \App\Exceptions\WhatsappApiException($msg, $status, $code, $subcode);
+        }
+        $json = $resp->json();
+        \Log::info('WhatsApp template media upload success', [
+            'media_id' => $json['id'] ?? null,
+        ]);
+        return $json;
+    }
+
+    /**
      * Create a message template in the WABA via Graph API.
      * $template array keys: name, category (MARKETING|UTILITY|AUTHENTICATION), language (optional), body_text,
      * header_type ('IMAGE'|'TEXT'|null), header_text (if TEXT), button_text, button_url.
@@ -261,6 +314,9 @@ class WhatsappService
             throw new \RuntimeException('WhatsApp Business Account ID or Access Token not configured.');
         }
         $lang = $template['language'] ?? $this->defaultLanguage;
+        if ($lang === 'en') {
+            $lang = 'en_US';
+        }
         $components = [];
 
         if (!empty($template['header_type'])) {
@@ -269,24 +325,63 @@ class WhatsappService
                 'format' => strtoupper($template['header_type'])
             ];
             if (strtoupper($template['header_type']) === 'TEXT' && !empty($template['header_text'])) {
-                $header['text'] = $template['header_text'];
+                $headerText = $template['header_text'];
+                $header['text'] = $headerText;
+                if (preg_match_all('/\{\{\s*(\d+)\s*\}\}/', $headerText, $matches)) {
+                    $varCount = count(array_unique($matches[1] ?? []));
+                    if ($varCount > 0) {
+                        $exampleValues = [];
+                        for ($i = 1; $i <= $varCount; $i++) {
+                            $exampleValues[] = 'Example ' . $i;
+                        }
+                        $header['example'] = [
+                            'header_text' => $exampleValues,
+                        ];
+                    }
+                }
+            }
+            if (strtoupper($template['header_type']) === 'IMAGE' && !empty($template['header_example'])) {
+                $header['example'] = [
+                    'header_handle' => [$template['header_example']]
+                ];
             }
             $components[] = $header;
         }
 
-        $components[] = [
+        $bodyText = $template['body_text'] ?? '';
+        $bodyComponent = [
             'type' => 'BODY',
-            'text' => $template['body_text']
+            'text' => $bodyText,
         ];
 
+        // If the body includes variables like {{1}}, include example values.
+        if (preg_match_all('/\{\{\s*(\d+)\s*\}\}/', $bodyText, $matches)) {
+            $varCount = count(array_unique($matches[1] ?? []));
+            if ($varCount > 0) {
+                $exampleValues = [];
+                for ($i = 1; $i <= $varCount; $i++) {
+                    $exampleValues[] = 'Example ' . $i;
+                }
+                $bodyComponent['example'] = [
+                    'body_text' => [$exampleValues],
+                ];
+            }
+        }
+
+        $components[] = $bodyComponent;
+
         if (!empty($template['button_text']) && !empty($template['button_url'])) {
+            $button = [
+                'type' => 'URL',
+                'text' => $template['button_text'],
+                'url' => $template['button_url']
+            ];
+            if (preg_match('/\{\{\s*1\s*\}\}/', (string) $template['button_url'])) {
+                $button['example'] = ['https://example.com/abc123'];
+            }
             $components[] = [
                 'type' => 'BUTTONS',
-                'buttons' => [[
-                    'type' => 'URL',
-                    'text' => $template['button_text'],
-                    'url' => $template['button_url']
-                ]]
+                'buttons' => [$button]
             ];
         }
 
@@ -301,7 +396,12 @@ class WhatsappService
         \Log::info('Creating WhatsApp template', ['name' => $template['name'], 'category' => $template['category'], 'language' => $lang]);
         $resp = \Http::withToken($this->accessToken)->post($url, $payload);
         if (!$resp->successful()) {
-            $msg = 'WhatsApp template create error: ' . $resp->status() . ' ' . $resp->body();
+            $body = $resp->json();
+            $error = $body['error'] ?? [];
+            $userTitle = $error['error_user_title'] ?? null;
+            $userMsg = $error['error_user_msg'] ?? null;
+            $detail = trim(($userTitle ? ($userTitle . ': ') : '') . ($userMsg ?? ''));
+            $msg = 'WhatsApp template create error: ' . $resp->status() . ' ' . ($detail !== '' ? $detail : $resp->body());
             \Log::error($msg);
             throw new \RuntimeException($msg);
         }
@@ -325,5 +425,48 @@ class WhatsappService
             throw new \RuntimeException($msg);
         }
         return $resp->json();
+    }
+
+    /**
+     * Fetch templates from WABA (optionally filtered by status).
+     */
+    public function fetchTemplates(?string $status = 'APPROVED'): array
+    {
+        $wabaId = $this->businessAccountId;
+        if (!$wabaId || !$this->accessToken) {
+            throw new \RuntimeException('WhatsApp Business Account ID or Access Token not configured.');
+        }
+
+        $fields = 'name,language,status,category,components';
+        $params = [
+            'fields' => $fields,
+            'limit' => 200,
+        ];
+        if ($status) {
+            $params['status'] = $status;
+        }
+
+        $url = "https://graph.facebook.com/{$this->version}/{$wabaId}/message_templates";
+        $templates = [];
+
+        while ($url) {
+            $resp = \Http::withToken($this->accessToken)->get($url, $params);
+            if (!$resp->successful()) {
+                $msg = 'WhatsApp template fetch error: ' . $resp->status() . ' ' . $resp->body();
+                \Log::error($msg);
+                throw new \RuntimeException($msg);
+            }
+
+            $json = $resp->json();
+            foreach (($json['data'] ?? []) as $tpl) {
+                $templates[] = $tpl;
+            }
+
+            $next = $json['paging']['next'] ?? null;
+            $url = $next ?: null;
+            $params = [];
+        }
+
+        return $templates;
     }
 }

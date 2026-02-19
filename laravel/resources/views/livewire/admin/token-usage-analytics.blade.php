@@ -72,6 +72,11 @@
             <div class="card">
                 <div class="card-header">
                     <h3 class="card-title">Filters</h3>
+                    <div class="card-tools">
+                        <span wire:loading class="badge badge-info">
+                            <i class="fas fa-spinner fa-spin"></i> Loading...
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -84,19 +89,19 @@
                         <div class="col-md-2">
                             <div class="form-group">
                                 <label>From Date</label>
-                                <input type="date" wire:model="dateFrom" class="form-control">
+                                <input type="date" wire:model.live="dateFrom" class="form-control">
                             </div>
                         </div>
                         <div class="col-md-2">
                             <div class="form-group">
                                 <label>To Date</label>
-                                <input type="date" wire:model="dateTo" class="form-control">
+                                <input type="date" wire:model.live="dateTo" class="form-control">
                             </div>
                         </div>
                         <div class="col-md-3">
                             <div class="form-group">
                                 <label>Organization</label>
-                                <select wire:model="selectedOrganization" class="form-control">
+                                <select wire:model.live="selectedOrganization" class="form-control">
                                     <option value="">All Organizations</option>
                                     @foreach($organizations as $org)
                                         <option value="{{ $org->id }}">{{ $org->name }}</option>
@@ -107,7 +112,7 @@
                         <div class="col-md-3">
                             <div class="form-group">
                                 <label>Endpoint Type</label>
-                                <select wire:model="selectedEndpointType" class="form-control">
+                                <select wire:model.live="selectedEndpointType" class="form-control">
                                     <option value="">All Types</option>
                                     @foreach($endpointTypes as $type)
                                         <option value="{{ $type }}">{{ $type }}</option>

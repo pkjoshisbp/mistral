@@ -29,6 +29,8 @@ class AnalyticsController extends Controller
             // Generate session ID if not provided
             $sessionId = $request->input('session_id') ?: 'session_' . Str::random(16);
             
+            $userAgent = Str::limit((string) $request->userAgent(), 255, '');
+
             $data = [
                 'organization_id' => $orgId,
                 'visitor_id' => $visitorId,
@@ -37,7 +39,7 @@ class AnalyticsController extends Controller
                 'page_url' => $request->input('page_url'),
                 'page_title' => $request->input('page_title'),
                 'referrer' => $request->input('referrer'),
-                'user_agent' => $request->userAgent(),
+                'user_agent' => $userAgent,
                 'ip_address' => $request->ip(),
                 'country' => $request->input('country'),
                 'region' => $request->input('region'),

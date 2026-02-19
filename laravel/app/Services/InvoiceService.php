@@ -28,9 +28,7 @@ class InvoiceService
         $invoice->billing_period = $startDate->format('F Y');
         
         // Calculate amounts
-        $planPrice = $subscription->billing_cycle === 'yearly' 
-            ? $subscription->subscriptionPlan->yearly_price 
-            : $subscription->subscriptionPlan->monthly_price;
+        $planPrice = $subscription->subscriptionPlan->price ?? 0;
             
         $invoice->subtotal = $planPrice;
         $invoice->overage_charges = $subscription->overage_charges ?? 0;
@@ -45,9 +43,9 @@ class InvoiceService
         // Store detailed invoice data
         $invoice->invoice_data = [
             'plan_name' => $subscription->subscriptionPlan->name,
-            'plan_features' => $subscription->subscriptionPlan->features,
+            'plan_features' => $subscription->subscriptionPlan->metadata['features'] ?? [],
             'tokens_used' => $subscription->tokens_used_this_period,
-            'token_cap' => $subscription->subscriptionPlan->token_cap_monthly,
+            'token_cap' => $subscription->subscriptionPlan->token_cap,
             'billing_cycle' => $subscription->billing_cycle,
             'organization_name' => $subscription->organization->name ?? 'N/A',
             'user_email' => $subscription->user->email,

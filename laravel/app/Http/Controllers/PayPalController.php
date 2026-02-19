@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Subscription;
-use App\Models\SubscriptionPlan;
+use App\Models\PricingPlan;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -49,15 +49,17 @@ class PayPalController extends Controller
     public function createSubscription(Request $request)
     {
         try {
-            $plan = SubscriptionPlan::findOrFail($request->plan_id);
+            $plan = PricingPlan::subscriptions()->findOrFail($request->plan_id);
             $user = Auth::user();
             $accessToken = $this->getAccessToken();
             
             // Get billing cycle from request (default to monthly)
-            $billingCycle = $request->input('billing_cycle', 'monthly');
+            $billingCycle = $plan->billing_period ?: $request->input('billing_cycle', 'monthly');
             
             // Get price based on billing cycle
-            $price = $billingCycle === 'yearly' ? $plan->yearly_price : $plan->monthly_price;
+            $price = $plan->price;
+            $baseSlug = $plan->metadata['original_slug'] ?? $plan->slug;
+            $paypalPlanId = $plan->metadata['paypal_plan_id'] ?? null;
 
             // Debug logging: what we are about to send (no secrets)
             Log::info('PayPal createSubscription init', [
@@ -72,10 +74,10 @@ class PayPalController extends Controller
             ]);
 
             // For subscription plans (not PAYG), create proper recurring PayPal subscription
-            if ($plan->slug !== 'payg' && $plan->paypal_plan_id) {
+            if ($baseSlug !== 'payg' && $paypalPlanId) {
                 // Create PayPal subscription using the billing plan
                 $subscriptionData = [
-                    'plan_id' => $plan->paypal_plan_id,
+                    'plan_id' => $paypalPlanId,
                     'start_time' => now()->addMinute()->toISOString(), // Start 1 minute from now
                     'quantity' => '1',
                     'shipping_amount' => [
@@ -229,7 +231,7 @@ class PayPalController extends Controller
     public function createCreditPayment(Request $request)
     {
         try {
-            $package = \App\Models\CreditPackage::findOrFail($request->package_id);
+            $package = PricingPlan::credits()->findOrFail($request->package_id);
             $user = Auth::user();
             $accessToken = $this->getAccessToken();
             
@@ -239,8 +241,8 @@ class PayPalController extends Controller
                 'client_id_tail' => substr((string)env('PAYPAL_CLIENT_ID'), -6),
                 'user_id' => $user->id,
                 'package_id' => $package->id,
-                'usd_price' => $package->usd_price,
-                'tokens' => $package->tokens,
+                'usd_price' => $package->price,
+                'tokens' => $package->credits,
             ]);
 
             // Create one-time payment order
@@ -250,7 +252,7 @@ class PayPalController extends Controller
                     [
                         'amount' => [
                             'currency_code' => 'USD',
-                            'value' => number_format($package->usd_price, 2, '.', '')
+                            'value' => number_format($package->price, 2, '.', '')
                         ],
                         'description' => $package->name . ' - Credit Package',
                         'custom_id' => 'user_' . $user->id . '_credit_' . $package->id
@@ -316,14 +318,14 @@ class PayPalController extends Controller
     public function creditCheckoutRedirect(Request $request, int $packageId)
     {
         try {
-            $package = \App\Models\CreditPackage::findOrFail($packageId);
+            $package = PricingPlan::credits()->findOrFail($packageId);
             $user = Auth::user();
             $accessToken = $this->getAccessToken();
 
             Log::info('PayPal creditCheckoutRedirect init', [
                 'user_id' => optional($user)->id,
                 'package_id' => $package->id,
-                'usd_price' => $package->usd_price,
+                'usd_price' => $package->price,
             ]);
 
             $paymentData = [
@@ -332,7 +334,7 @@ class PayPalController extends Controller
                     [
                         'amount' => [
                             'currency_code' => 'USD',
-                            'value' => number_format($package->usd_price, 2, '.', '')
+                            'value' => number_format($package->price, 2, '.', '')
                         ],
                         'description' => $package->name . ' - Credit Package',
                         'custom_id' => 'user_' . $user->id . '_credit_' . $package->id
@@ -409,7 +411,7 @@ class PayPalController extends Controller
                     $status = $data['status'] ?? 'APPROVAL_PENDING';
 
                     $user = Auth::user();
-                    $plan = $planId ? SubscriptionPlan::find($planId) : null;
+                    $plan = $planId ? PricingPlan::subscriptions()->find($planId) : null;
 
                     // Update the pending local record created at createSubscription()
                     $local = Subscription::where('paypal_subscription_id', $subscriptionId)->first();
@@ -459,7 +461,7 @@ class PayPalController extends Controller
             if ($response->successful()) {
                 $paypalOrder = $response->json();
                 if (($paypalOrder['status'] ?? null) === 'COMPLETED') {
-                    $plan = $planId ? SubscriptionPlan::find($planId) : null;
+                    $plan = $planId ? PricingPlan::subscriptions()->find($planId) : null;
                     if ($plan) {
                         $user = Auth::user();
                         $periodEnd = $billingCycle === 'yearly' ? now()->addYear() : now()->addMonth();
@@ -573,12 +575,12 @@ class PayPalController extends Controller
 
             if ($customId && preg_match('/user_(\d+)_credit_(\d+)/', $customId, $m)) {
                 $targetUser = \App\Models\User::find((int)$m[1]);
-                $creditPackage = \App\Models\CreditPackage::find((int)$m[2]);
-                if ($creditPackage) { $tokensToAdd = (int)$creditPackage->tokens; }
+                $creditPackage = PricingPlan::credits()->find((int)$m[2]);
+                if ($creditPackage) { $tokensToAdd = (int)$creditPackage->credits; }
             } elseif ($customId && preg_match('/user_(\d+)_payg_(\d+)/', $customId, $m2)) {
                 $targetUser = \App\Models\User::find((int)$m2[1]);
-                $paygPlan = \App\Models\SubscriptionPlan::find((int)$m2[2]);
-                if ($paygPlan) { $tokensToAdd = (int)($paygPlan->token_cap_monthly ?: 100000); }
+                $paygPlan = PricingPlan::subscriptions()->find((int)$m2[2]);
+                if ($paygPlan) { $tokensToAdd = (int)($paygPlan->token_cap ?: 100000); }
             }
 
             if (!$targetUser) { $targetUser = $user; }
@@ -597,7 +599,11 @@ class PayPalController extends Controller
                 'credits' => $tokensToAdd,
                 'payment_method' => 'paypal',
                 'reference_id' => $orderId,
-                'notes' => $creditPackage ? ('Package: ' . ($creditPackage->name ?? '')) : ($paygPlan ? ('PAYG Plan: ' . ($paygPlan->name ?? '')) : 'Manual allocation'),
+                'notes' => $creditPackage
+                    ? ('Package: ' . ($creditPackage->name ?? '') . ' | USD ' . number_format((float)($creditPackage->price ?? 0), 2))
+                    : ($paygPlan
+                        ? ('PAYG Plan: ' . ($paygPlan->name ?? '') . ' | USD ' . number_format((float)($paygPlan->price ?? 0), 2))
+                        : 'Manual allocation'),
             ]);
 
             Log::info('Admin manual capture: credits allocated', [
@@ -700,7 +706,7 @@ class PayPalController extends Controller
                 $userId = (int) $m[1];
                 $pkgId = (int) $m[2];
                 $user = \App\Models\User::find($userId) ?: $user;
-                $creditPackage = \App\Models\CreditPackage::find($pkgId);
+                $creditPackage = PricingPlan::credits()->find($pkgId);
             }
 
             // PAYG from subscription_plans should behave like 100k credit allocation (or plan token cap)
@@ -710,15 +716,15 @@ class PayPalController extends Controller
                     $userId = (int) $m2[1];
                     $planIdFromCustom = (int) $m2[2];
                     $user = \App\Models\User::find($userId) ?: $user;
-                    $paygPlan = \App\Models\SubscriptionPlan::find($planIdFromCustom);
+                    $paygPlan = PricingPlan::subscriptions()->find($planIdFromCustom);
                 } elseif ($paygPlanId) {
-                    $paygPlan = \App\Models\SubscriptionPlan::find($paygPlanId);
+                    $paygPlan = PricingPlan::subscriptions()->find($paygPlanId);
                 }
             }
 
             // Fallback to package_id query param
             if (!$creditPackage && $packageId) {
-                $creditPackage = \App\Models\CreditPackage::find($packageId);
+                $creditPackage = PricingPlan::credits()->find($packageId);
             }
 
             if (!$user || (!$creditPackage && !$paygPlan)) {
@@ -733,14 +739,14 @@ class PayPalController extends Controller
             }
 
             if ($creditPackage) {
-                $tokensToAdd = $creditPackage->tokens;
+                $tokensToAdd = $creditPackage->credits;
             } else {
                 // Default PAYG allocation based on plan token cap or fallback to 100k tokens
-                $tokensToAdd = $paygPlan && $paygPlan->token_cap_monthly ? (int)$paygPlan->token_cap_monthly : 100000;
+                $tokensToAdd = $paygPlan && $paygPlan->token_cap ? (int)$paygPlan->token_cap : 100000;
                 $creditPackage = (object) [
                     'id' => null,
                     'name' => $paygPlan ? ($paygPlan->name . ' (PAYG)') : 'PAYG Credits',
-                    'usd_price' => $paygPlan ? $paygPlan->monthly_price : 5.00,
+                    'price' => $paygPlan ? $paygPlan->price : 5.00,
                 ];
             }
 
@@ -751,7 +757,7 @@ class PayPalController extends Controller
                 'credits' => $tokensToAdd,
                 'payment_method' => 'paypal',
                 'reference_id' => $orderId,
-                'notes' => 'Package: ' . ($creditPackage->name ?? 'N/A') . ' | USD ' . ($creditPackage->usd_price ?? '0')
+                'notes' => 'Package: ' . ($creditPackage->name ?? 'N/A') . ' | USD ' . number_format((float)($creditPackage->price ?? 0), 2)
             ]);
 
             Log::info('Credits added after PayPal capture', [
@@ -826,7 +832,7 @@ class PayPalController extends Controller
             $planId = $matches[2];
             $cycle = $matches[3];
             $user = \App\Models\User::find($userId);
-            $plan = \App\Models\SubscriptionPlan::find($planId);
+            $plan = PricingPlan::subscriptions()->find($planId);
             if ($user && $plan) {
                 $subscription = \App\Models\Subscription::updateOrCreate(
                     [
@@ -871,7 +877,7 @@ class PayPalController extends Controller
         // If custom id indicates credit package
         if (preg_match('/user_(\d+)_credit_(\d+)/', $customId, $m)) {
             $user = \App\Models\User::find((int)$m[1]);
-            $package = \App\Models\CreditPackage::find((int)$m[2]);
+            $package = PricingPlan::credits()->find((int)$m[2]);
             if (!$user || !$package) {
                 Log::error('PayPal webhook APPROVED: user or package not found', ['custom_id' => $customId]);
                 return;
@@ -895,12 +901,12 @@ class PayPalController extends Controller
                     return;
                 }
                 $uc = \App\Models\UserCredit::getOrCreateForUser($user->id);
-                $uc->addCredits((int)$package->tokens, 'Credit package purchase (PayPal webhook APPROVED)', [
+                $uc->addCredits((int)$package->credits, 'Credit package purchase (PayPal webhook APPROVED)', [
                     'credit_package_id' => $package->id,
-                    'credits' => (int)$package->tokens,
+                    'credits' => (int)$package->credits,
                     'payment_method' => 'paypal',
                     'reference_id' => $orderId,
-                    'notes' => 'Package: ' . ($package->name ?? 'N/A') . ' | USD ' . ($package->usd_price ?? '0')
+                    'notes' => 'Package: ' . ($package->name ?? 'N/A') . ' | USD ' . number_format((float)($package->price ?? 0), 2)
                 ]);
                 Log::info('PayPal credit captured via APPROVED webhook', ['order_id' => $orderId, 'user_id' => $user->id, 'package_id' => $package->id]);
                 return;
@@ -913,7 +919,7 @@ class PayPalController extends Controller
         // Or PAYG treated as credits
         if (preg_match('/user_(\d+)_payg_(\d+)/', $customId, $m2)) {
             $user = \App\Models\User::find((int)$m2[1]);
-            $plan = \App\Models\SubscriptionPlan::find((int)$m2[2]);
+            $plan = PricingPlan::subscriptions()->find((int)$m2[2]);
             if (!$user || !$plan) {
                 Log::error('PayPal webhook APPROVED: user or PAYG plan not found', ['custom_id' => $customId]);
                 return;
@@ -936,14 +942,14 @@ class PayPalController extends Controller
                     Log::warning('PayPal APPROVED capture not completed (PAYG)', ['order_id' => $orderId, 'status' => $data['status'] ?? null]);
                     return;
                 }
-                $tokens = (int)($plan->token_cap_monthly ?: 100000);
+                $tokens = (int)($plan->token_cap ?: 100000);
                 $uc = \App\Models\UserCredit::getOrCreateForUser($user->id);
                 $uc->addCredits($tokens, 'PAYG credit allocation (PayPal webhook APPROVED)', [
                     'credit_package_id' => null,
                     'credits' => $tokens,
                     'payment_method' => 'paypal',
                     'reference_id' => $orderId,
-                    'notes' => 'PAYG Plan: ' . ($plan->name ?? 'N/A') . ' | USD ' . ($plan->monthly_price ?? '0')
+                    'notes' => 'PAYG Plan: ' . ($plan->name ?? 'N/A') . ' | USD ' . number_format((float)($plan->price ?? 0), 2)
                 ]);
                 Log::info('PayPal PAYG captured via APPROVED webhook', ['order_id' => $orderId, 'user_id' => $user->id, 'plan_id' => $plan->id]);
                 return;
@@ -991,18 +997,18 @@ class PayPalController extends Controller
             $userId = $matches[1];
             $packageId = $matches[2];
             $user = \App\Models\User::find($userId);
-            $package = \App\Models\CreditPackage::find($packageId);
+            $package = PricingPlan::credits()->find($packageId);
             
             if ($user && $package) {
                 // Add credits to user account via central model method
                 $userCredit = \App\Models\UserCredit::getOrCreateForUser($user->id);
-                $tokens = $package->tokens;
+                $tokens = $package->credits;
                 $userCredit->addCredits($tokens, 'Credit package purchase (PayPal)', [
                     'credit_package_id' => $package->id,
                     'credits' => $tokens,
                     'payment_method' => 'paypal',
                     'reference_id' => $resource['id'] ?? null,
-                    'notes' => 'Package: ' . ($package->name ?? 'N/A') . ' | USD ' . ($package->usd_price ?? '0')
+                    'notes' => 'Package: ' . ($package->name ?? 'N/A') . ' | USD ' . number_format((float)($package->price ?? 0), 2)
                 ]);
                 
                 Log::info('PayPal credit purchase completed', [
@@ -1022,16 +1028,16 @@ class PayPalController extends Controller
             $userId = (int)$m2[1];
             $planId = (int)$m2[2];
             $user = \App\Models\User::find($userId);
-            $plan = \App\Models\SubscriptionPlan::find($planId);
+            $plan = PricingPlan::subscriptions()->find($planId);
             if ($user && $plan) {
-                $tokens = $plan->token_cap_monthly ?: 100000;
+                $tokens = $plan->token_cap ?: 100000;
                 $userCredit = \App\Models\UserCredit::getOrCreateForUser($user->id);
                 $userCredit->addCredits($tokens, 'PAYG credit allocation (PayPal)', [
                     'credit_package_id' => null,
                     'credits' => $tokens,
                     'payment_method' => 'paypal',
                     'reference_id' => $resource['id'] ?? null,
-                    'notes' => 'PAYG Plan: ' . ($plan->name ?? 'N/A') . ' | USD ' . ($plan->monthly_price ?? '0')
+                    'notes' => 'PAYG Plan: ' . ($plan->name ?? 'N/A') . ' | USD ' . number_format((float)($plan->price ?? 0), 2)
                 ]);
                 Log::info('PayPal PAYG credit purchase completed via webhook', [
                     'user_id' => $user->id,

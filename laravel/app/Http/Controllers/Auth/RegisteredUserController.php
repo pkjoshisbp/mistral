@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\EmailOtp;
+use App\Models\PricingPlan;
 use App\Providers\RouteServiceProvider;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
@@ -65,20 +66,26 @@ class RegisteredUserController extends Controller
         $selectedPlan = $request->get('plan');
         if ($selectedPlan && $selectedPlan !== 'enterprise') {
             // Find the plan and redirect to appropriate payment method
-            $plan = \App\Models\SubscriptionPlan::where('slug', $selectedPlan)->first();
+            $plan = PricingPlan::subscriptions()
+                ->where('slug', $selectedPlan)
+                ->orWhere('metadata->original_slug', $selectedPlan)
+                ->orderByRaw("CASE WHEN billing_period = 'monthly' THEN 0 ELSE 1 END")
+                ->first();
             if ($plan) {
                 $locationService = app()->bound(\App\Services\LocationService::class) ? app(\App\Services\LocationService::class) : null;
                 $isFromIndia = $locationService && method_exists($locationService, 'isFromIndia') ? $locationService->isFromIndia() : false;
+                $billingCycle = $plan->billing_period ?: 'monthly';
+                $baseSlug = $plan->metadata['original_slug'] ?? $plan->slug;
                 
                 if ($isFromIndia) {
                     // For PAYG plan, default to one-time payment; others try recurring first
-                    if ($selectedPlan === 'payg') {
-                        return redirect()->route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']);
+                    if ($baseSlug === 'payg') {
+                        return redirect()->route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => $billingCycle]);
                     } else {
-                        return redirect()->route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']);
+                        return redirect()->route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => $billingCycle]);
                     }
                 } else {
-                    return redirect()->route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']);
+                    return redirect()->route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => $billingCycle]);
                 }
             }
         }

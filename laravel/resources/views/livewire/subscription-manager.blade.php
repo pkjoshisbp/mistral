@@ -29,7 +29,7 @@
                                     {{ $currentSubscription->current_period_end->format('M j, Y') }}
                                 </div>
                                 
-                                @if($currentSubscription->subscriptionPlan->token_cap_monthly > 0)
+                                @if($currentSubscription->subscriptionPlan->token_cap > 0)
                                     <div class="mb-3">
                                         <strong>Monthly Token Allowance:</strong><br>
                                         {{ $currentSubscription->subscriptionPlan->formatted_token_cap }}
@@ -38,18 +38,21 @@
                             </div>
                             <div class="col-md-6">
                                 <div class="mb-3">
-                                    <strong>Monthly Price:</strong>
+                                    <strong>Price:</strong>
                                     @php 
                                         $isFromIndia = request()->header('CF-IPCountry') === 'IN' || 
                                                       str_contains(request()->ip(), '127.') ||
                                                       str_contains(request()->ip(), '192.168.') ||
                                                       in_array(request()->ip(), ['::1', '127.0.0.1']);
+                                        $period = $currentSubscription->subscriptionPlan->billing_period ?? 'monthly';
+                                        $price = $currentSubscription->subscriptionPlan->price ?? 0;
                                     @endphp
                                     @if($isFromIndia)
-                                        <span class="h5 text-primary">₹{{ number_format($currentSubscription->subscriptionPlan->monthly_price * 83, 0) }}</span>
+                                        <span class="h5 text-primary">₹{{ number_format($price * 83, 0) }}</span>
                                     @else
-                                        <span class="h5 text-primary">${{ number_format($currentSubscription->subscriptionPlan->monthly_price, 0) }}</span>
+                                        <span class="h5 text-primary">${{ number_format($price, 0) }}</span>
                                     @endif
+                                    <small class="text-muted">/{{ $period }}</small>
                                 </div>
                                 
                                 @if($currentSubscription->status === 'active')
@@ -101,7 +104,7 @@
                         </h4>
                     </div>
                     <div class="card-body">
-                        @if($currentSubscription->subscriptionPlan->token_cap_monthly > 0)
+                        @if($currentSubscription->subscriptionPlan->token_cap > 0)
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="mb-3">

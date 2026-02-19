@@ -21,6 +21,22 @@
                     </div>
                 </div>
             </div>
+            
+            <div class="mb-3">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                    <input type="text" class="form-control" wire:model.live="search" placeholder="Search FAQs by question, answer, category, or keywords...">
+                    @if($search)
+                        <button class="btn btn-outline-secondary" wire:click="$set('search', '')" type="button">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    @endif
+                </div>
+                @if($search)
+                    <small class="text-muted">Showing results for: <strong>{{ $search }}</strong></small>
+                @endif
+            </div>
+            
             @if($showForm)
             <div class="border rounded p-3 mb-4 bg-light">
                 <form wire:submit.prevent="{{ $editingId ? 'update' : 'create' }}">
@@ -110,6 +126,11 @@
                             </small>
                             @error('answer')<small class="text-danger">{{ $message }}</small>@enderror
                         </div>
+                        <div class="col-md-12 mb-2">
+                            <label>Follow-up Question <small class="text-muted">(Optional - shown after answer)</small></label>
+                            <input type="text" wire:model="follow_up" class="form-control" placeholder="e.g., We also offer related services. Would you like to know more about them?">
+                            <small class="form-text text-muted">This question will be asked after providing the answer to guide further conversation.</small>
+                        </div>
                         <div class="col-md-3 mb-2">
                             <label>Sort Order</label>
                             <input type="number" wire:model="sort_order" class="form-control">
@@ -131,7 +152,7 @@
 
             @endif
             <h5><i class="fas fa-list"></i> FAQ List</h5>
-            <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Question</th><th>Category</th><th>Sort</th><th>Status</th><th></th></tr></thead><tbody>@forelse($this->faqs as $f)<tr><td>{{ $f->question }}</td><td>{{ $f->category ?? '-' }}</td><td>{{ $f->sort_order }}</td><td>{!! $f->is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-secondary">Inactive</span>' !!}</td><td><button class="btn btn-sm btn-warning" wire:click="edit({{ $f->id }})"><i class="fas fa-edit"></i></button> <button class="btn btn-sm btn-danger" wire:click="delete({{ $f->id }})" onclick="return confirm('Delete?')"><i class="fas fa-trash"></i></button></td></tr>@empty<tr><td colspan="5" class="text-muted">No FAQs.</td></tr>@endforelse</tbody></table></div>
+            <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Question</th><th>Category</th><th>Sort</th><th>Status</th><th></th></tr></thead><tbody>@forelse($this->faqs as $f)<tr><td>{{ $f->question }}</td><td>{{ $f->category ?? '-' }}</td><td>{{ $f->sort_order }}</td><td>{!! $f->is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-secondary">Inactive</span>' !!}</td><td><button class="btn btn-sm btn-warning" wire:click="edit({{ $f->id }})"><i class="fas fa-edit"></i></button> <button class="btn btn-sm btn-danger" wire:click="delete({{ $f->id }})" onclick="if(!confirm('Delete?')) { event.preventDefault(); event.stopImmediatePropagation(); }"><i class="fas fa-trash"></i></button></td></tr>@empty<tr><td colspan="5" class="text-muted">No FAQs.</td></tr>@endforelse</tbody></table></div>
             <div class="alert alert-info mt-3"><i class="fas fa-info-circle"></i> FAQs are embedded for AI search.</div>
         </div></div>
     </div></section>

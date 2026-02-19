@@ -8,7 +8,7 @@ use App\Models\User;
 use App\Models\UserCredit;
 use App\Models\CreditTransaction;
 use App\Models\Subscription;
-use App\Models\SubscriptionPlan;
+use App\Models\PricingPlan;
 use Carbon\Carbon;
 
 class CreditManager extends Component
@@ -45,7 +45,7 @@ class CreditManager extends Component
         'creditAmount' => 'required|integer|min:1|max:100000000',
         'creditReason' => 'required|string|max:255',
         'creditType' => 'required|in:add,deduct',
-        'subscriptionPlanId' => 'required|exists:subscription_plans,id',
+        'subscriptionPlanId' => 'required|exists:pricing_plans,id',
         'billingCycle' => 'required|in:monthly,yearly',
         'subscriptionStartDate' => 'required|date|after_or_equal:today',
         'subscriptionEndDate' => 'required|date|after:subscriptionStartDate',
@@ -177,7 +177,7 @@ class CreditManager extends Component
     public function createOfflineSubscription()
     {
         $this->validate([
-            'subscriptionPlanId' => 'required|exists:subscription_plans,id',
+            'subscriptionPlanId' => 'required|exists:pricing_plans,id',
             'billingCycle' => 'required|in:monthly,yearly',
             'subscriptionStartDate' => 'required|date|after_or_equal:today',
             'subscriptionEndDate' => 'required|date|after:subscriptionStartDate',
@@ -188,7 +188,7 @@ class CreditManager extends Component
         ]);
 
         $user = User::findOrFail($this->selectedUserId);
-        $plan = SubscriptionPlan::findOrFail($this->subscriptionPlanId);
+        $plan = PricingPlan::subscriptions()->findOrFail($this->subscriptionPlanId);
 
         // Cancel existing active subscriptions
         $user->subscriptions()->where('status', 'active')->update([
@@ -306,7 +306,10 @@ class CreditManager extends Component
             ->orderBy('created_at', 'desc')
             ->paginate(15);
 
-        $subscriptionPlans = SubscriptionPlan::where('is_active', true)->get();
+        $subscriptionPlans = PricingPlan::active()
+            ->subscriptions()
+            ->orderBy('sort_order')
+            ->get();
 
         return view('livewire.admin.credit-manager', compact('users', 'subscriptionPlans'))
             ->layout('layouts.admin');

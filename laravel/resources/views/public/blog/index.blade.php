@@ -1,7 +1,8 @@
 @extends('layouts.public')
 
-@section('title', 'Blog - AI Chat Support')
-@section('meta_description', 'Stay updated with the latest insights, tips, and trends in AI customer support. Expert advice to help your business thrive.')
+@section('title', 'AI Chatbot Blog - Automation Tips & WhatsApp Integration Guides')
+@section('meta_description', 'Learn how to use AI chatbots for business. Get tips on website chat automation, WhatsApp integration, reducing support costs, and improving customer engagement with AI.')
+@section('keywords', 'AI chatbot tips, WhatsApp automation guide, customer support automation, chatbot for business, reduce support costs, improve customer engagement, AI chat integration, business automation')
 
 @section('styles')
 <style>
@@ -243,8 +244,8 @@
         <div class="container">
             <div class="row align-items-center">
                 <div class="col-lg-8 mx-auto text-center">
-                    <h1 class="display-4 mb-4">AI Customer Support Blog</h1>
-                    <p class="lead mb-4">Stay updated with the latest insights, tips, and trends in AI customer support. Expert advice to help your business thrive.</p>
+                    <h1 class="display-4 mb-4">{{ __('blog.page_title') }}</h1>
+                    <p class="lead mb-4">{{ __('blog.page_subtitle') }}</p>
                 </div>
             </div>
         </div>
@@ -279,7 +280,7 @@
                                     </div>
                                     
                                     <a href="{{ route('blog.show', $blog->slug) }}" class="btn btn-primary">
-                                        Read More <i class="fas fa-arrow-right ms-2"></i>
+                                        {{ __('blog.read_more') }} <i class="fas fa-arrow-right ms-2"></i>
                                     </a>
                                 </div>
                             </div>

@@ -3,8 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Subscription;
-use App\Models\SubscriptionPlan;
-use App\Models\CreditPackage;
+use App\Models\PricingPlan;
 use App\Models\UserCredit;
 use App\Models\CreditTransaction;
 use App\Models\User;
@@ -37,18 +36,18 @@ class RazorpayController extends Controller
                 return $this->createCreditPayment($request);
             }
 
-            $plan = SubscriptionPlan::findOrFail($request->plan_id);
+            $plan = PricingPlan::subscriptions()->findOrFail($request->plan_id);
             $user = Auth::user();
             $locationService = app(\App\Services\LocationService::class);
             
             // Get billing cycle from request (default to monthly)
-            $billingCycle = $request->input('billing_cycle', 'monthly');
+            $billingCycle = $plan->billing_period ?: $request->input('billing_cycle', 'monthly');
 
             // Initialize Razorpay API
             $api = new Api($this->razorpayId, $this->razorpaySecret);
 
             // Get price based on billing cycle and convert to INR paise
-            $price = $billingCycle === 'yearly' ? $plan->yearly_price : $plan->monthly_price;
+            $price = $plan->price;
             $priceINR = $locationService->convertToINR($price);
             $amountInPaise = $priceINR * 100; // Convert to paise
 
@@ -121,18 +120,18 @@ class RazorpayController extends Controller
     public function createOnetimePayment(Request $request)
     {
         try {
-            $plan = SubscriptionPlan::findOrFail($request->plan_id);
+            $plan = PricingPlan::subscriptions()->findOrFail($request->plan_id);
             $user = Auth::user();
             $locationService = app(\App\Services\LocationService::class);
             
             // Get billing cycle from request (default to monthly)
-            $billingCycle = $request->input('billing_cycle', 'monthly');
+            $billingCycle = $plan->billing_period ?: $request->input('billing_cycle', 'monthly');
 
             // Initialize Razorpay API
             $api = new Api($this->razorpayId, $this->razorpaySecret);
 
             // Get price based on billing cycle and convert to INR paise
-            $price = $billingCycle === 'yearly' ? $plan->yearly_price : $plan->monthly_price;
+            $price = $plan->price;
             $priceINR = $locationService->convertToINR($price);
             $amountInPaise = $priceINR * 100; // Convert to paise
 
@@ -222,7 +221,7 @@ class RazorpayController extends Controller
                 'notes' => [
                     'local_plan_id' => $plan->id,
                     'billing_cycle' => $billingCycle,
-                    'tokens_cap' => $plan->token_cap_monthly
+                    'tokens_cap' => $plan->token_cap
                 ]
             ]);
             
@@ -236,7 +235,7 @@ class RazorpayController extends Controller
     public function createCreditPayment(Request $request)
     {
         try {
-            $creditPackage = CreditPackage::findOrFail($request->credit_package_id);
+            $creditPackage = PricingPlan::credits()->findOrFail($request->credit_package_id);
             $user = Auth::user();
             $locationService = app(\App\Services\LocationService::class);
             
@@ -244,7 +243,7 @@ class RazorpayController extends Controller
             $api = new Api($this->razorpayId, $this->razorpaySecret);
 
             // Always use configured INR price for credit packages (no USD conversion)
-            $priceINR = $creditPackage->inr_price ?? null;
+            $priceINR = $creditPackage->metadata['inr_price'] ?? null;
             if ($priceINR === null || $priceINR <= 0) {
                 return response()->json([
                     'success' => false,
@@ -269,7 +268,7 @@ class RazorpayController extends Controller
                     'user_id' => $user->id,
                     'credit_package_id' => $creditPackage->id,
                     'package_name' => $creditPackage->name,
-                    'tokens' => $creditPackage->tokens,
+                    'tokens' => $creditPackage->credits,
                     'payment_type' => 'credit'
                 ]
             ]);
@@ -423,7 +422,7 @@ class RazorpayController extends Controller
             }
 
             $user = User::find($userId);
-            $creditPackage = CreditPackage::find($creditPackageId);
+            $creditPackage = PricingPlan::credits()->find($creditPackageId);
 
             if (!$user || !$creditPackage) {
                 Log::error('User or credit package not found', [
@@ -441,7 +440,7 @@ class RazorpayController extends Controller
                 'payment_method' => 'razorpay',
                 'razorpay_payment_id' => $paymentId,
                 'reference_id' => $order['id'] ?? null,
-                'notes' => 'Package: ' . ($creditPackage->name ?? 'N/A') . ' | INR ' . ($creditPackage->inr_price ?? '0')
+                'notes' => 'Package: ' . ($creditPackage->name ?? 'N/A') . ' | INR ' . number_format((float)($creditPackage->metadata['inr_price'] ?? 0), 2)
             ]);
 
             Log::info('Credit purchase completed', [
@@ -620,7 +619,7 @@ class RazorpayController extends Controller
             }
 
             $user = User::find($userId);
-            $creditPackage = CreditPackage::find($creditPackageId);
+            $creditPackage = PricingPlan::credits()->find($creditPackageId);
 
             if (!$user || !$creditPackage) {
                 Log::error('User or credit package not found', [
@@ -638,7 +637,7 @@ class RazorpayController extends Controller
                 'payment_method' => 'razorpay',
                 'razorpay_payment_id' => $payment['id'] ?? null,
                 'reference_id' => $payment['order_id'] ?? null,
-                'notes' => 'Package: ' . ($creditPackage->name ?? 'N/A') . ' | INR ' . ($creditPackage->inr_price ?? '0')
+                'notes' => 'Package: ' . ($creditPackage->name ?? 'N/A') . ' | INR ' . number_format((float)($creditPackage->metadata['inr_price'] ?? 0), 2)
             ]);
 
             Log::info('Credit purchase completed via webhook', [

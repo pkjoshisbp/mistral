@@ -8,6 +8,9 @@ Sitemap: https://ai-chat.support/sitemap.xml
 Disallow: /admin/
 Disallow: /customer/
 Disallow: /api/
+Disallow: /auth/simple-login
+Disallow: /auth/send-otp
+Disallow: /auth/send-registration-otp
 Disallow: /widget/*/chat
 Disallow: /widget/*/config
 Disallow: /vendor/

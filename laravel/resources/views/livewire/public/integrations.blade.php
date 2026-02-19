@@ -3,11 +3,10 @@
     <div class="row">
         <div class="col-12 text-center mb-5">
             <h1 class="display-4 fw-bold text-primary mb-3">
-                <i class="fas fa-puzzle-piece me-3"></i>Integrations
+                <i class="fas fa-puzzle-piece me-3"></i>{{ __('integrations.page_title') }}
             </h1>
             <p class="lead text-muted">
-                Easy integration with your favorite platforms. Install our AI Chat Support system 
-                on WordPress, WooCommerce, Magento, and Shopify with just a few clicks.
+                {{ __('integrations.page_subtitle') }}
             </p>
         </div>
     </div>
@@ -44,13 +43,13 @@
                     <div class="row">
                         <!-- Description -->
                         <div class="col-md-6 mb-4">
-                            <h5 class="fw-bold text-dark mb-3">Description</h5>
+                            <h5 class="fw-bold text-dark mb-3">{{ __('integrations.description') }}</h5>
                             <p class="text-muted mb-4">{{ $pluginFiles['wordpress']['description'] }}</p>
                             
                             <!-- Download Button -->
                             <div class="d-grid mb-3">
                                 <button wire:click="downloadWordPress" class="btn btn-primary btn-lg">
-                                    <i class="fas fa-download me-2"></i>Download WordPress Plugin
+                                    <i class="fas fa-download me-2"></i>{{ __('integrations.download_button', ['platform' => 'WordPress']) }}
                                     <small class="ms-2">({{ $pluginFiles['wordpress']['size'] }})</small>
                                 </button>
                             </div>
@@ -58,7 +57,7 @@
                             <div class="alert alert-info">
                                 <small>
                                     <i class="fas fa-info-circle me-2"></i>
-                                    <strong>Note:</strong> You can also find this plugin on the official WordPress.org repository.
+                                    {!! __('integrations.wordpress_note') !!}
                                 </small>
                             </div>
                         </div>
@@ -67,7 +66,7 @@
                         <div class="col-md-6">
                             <div class="row">
                                 <div class="col-12 mb-3">
-                                    <h6 class="fw-bold text-dark">Features:</h6>
+                                    <h6 class="fw-bold text-dark">{{ __('integrations.features') }}</h6>
                                     <ul class="list-unstyled">
                                         @foreach($pluginFiles['wordpress']['features'] as $feature)
                                             <li class="mb-1">
@@ -77,7 +76,7 @@
                                     </ul>
                                 </div>
                                 <div class="col-12">
-                                    <h6 class="fw-bold text-dark">Requirements:</h6>
+                                    <h6 class="fw-bold text-dark">{{ __('integrations.requirements') }}</h6>
                                     <ul class="list-unstyled">
                                         @foreach($pluginFiles['wordpress']['requirements'] as $requirement)
                                             <li class="mb-1">
@@ -111,19 +110,19 @@
                     <div class="row">
                         <!-- Description -->
                         <div class="col-md-6 mb-4">
-                            <h5 class="fw-bold text-dark mb-3">Description</h5>
+                            <h5 class="fw-bold text-dark mb-3">{{ __('integrations.description') }}</h5>
                             <p class="text-muted mb-4">{{ $pluginFiles['magento']['description'] }}</p>
                             
                             <!-- Download Button -->
                             <div class="d-grid mb-3">
                                 <button wire:click="downloadMagento" class="btn btn-warning btn-lg text-dark">
-                                    <i class="fas fa-download me-2"></i>Download Magento Extension
+                                    <i class="fas fa-download me-2"></i>{{ __('integrations.download_button', ['platform' => 'Magento']) }}
                                     <small class="ms-2">({{ $pluginFiles['magento']['size'] }})</small>
                                 </button>
                             </div>
                             <div class="d-grid mb-3">
                                 <button wire:click="downloadMagentoComposer" class="btn btn-outline-dark btn-lg">
-                                    <i class="fas fa-download me-2"></i>Download Composer Package
+                                    <i class="fas fa-download me-2"></i>{{ __('integrations.magento_composer_button') }}
                                     <small class="ms-2">({{ $pluginFiles['magento']['composer_size'] }})</small>
                                 </button>
                             </div>
@@ -131,7 +130,7 @@
                             <div class="alert alert-info">
                                 <small>
                                     <i class="fas fa-info-circle me-2"></i>
-                                    <strong>Note:</strong> Upload the ZIP contents into your Magento root directory.
+                                    {!! __('integrations.magento_note') !!}
                                 </small>
                             </div>
                         </div>
@@ -140,7 +139,7 @@
                         <div class="col-md-6">
                             <div class="row">
                                 <div class="col-12 mb-3">
-                                    <h6 class="fw-bold text-dark">Features:</h6>
+                                    <h6 class="fw-bold text-dark">{{ __('integrations.features') }}</h6>
                                     <ul class="list-unstyled">
                                         @foreach($pluginFiles['magento']['features'] as $feature)
                                             <li class="mb-1">
@@ -150,7 +149,7 @@
                                     </ul>
                                 </div>
                                 <div class="col-12">
-                                    <h6 class="fw-bold text-dark">Requirements:</h6>
+                                    <h6 class="fw-bold text-dark">{{ __('integrations.requirements') }}</h6>
                                     <ul class="list-unstyled">
                                         @foreach($pluginFiles['magento']['requirements'] as $requirement)
                                             <li class="mb-1">
@@ -184,20 +183,20 @@
                     <div class="row">
                         <!-- Description -->
                         <div class="col-md-6 mb-4">
-                            <h5 class="fw-bold text-dark mb-3">Description</h5>
+                            <h5 class="fw-bold text-dark mb-3">{{ __('integrations.description') }}</h5>
                             <p class="text-muted mb-4">{{ $pluginFiles['shopify']['description'] }}</p>
                             
                             <!-- Install Button -->
                             <div class="d-grid mb-3">
                                 <a href="{{ $pluginFiles['shopify']['install_url'] }}" target="_blank" class="btn btn-success btn-lg">
-                                    <i class="fab fa-shopify me-2"></i>Install Shopify App
+                                    <i class="fab fa-shopify me-2"></i>{{ __('integrations.install_button', ['platform' => 'Shopify']) }}
                                 </a>
                             </div>
                             
                             <div class="alert alert-info">
                                 <small>
                                     <i class="fas fa-info-circle me-2"></i>
-                                    <strong>Note:</strong> Also available on the Shopify App Store for easy discovery.
+                                    {!! __('integrations.shopify_note') !!}
                                 </small>
                             </div>
                         </div>
@@ -206,7 +205,7 @@
                         <div class="col-md-6">
                             <div class="row">
                                 <div class="col-12 mb-3">
-                                    <h6 class="fw-bold text-dark">Features:</h6>
+                                    <h6 class="fw-bold text-dark">{{ __('integrations.features') }}</h6>
                                     <ul class="list-unstyled">
                                         @foreach($pluginFiles['shopify']['features'] as $feature)
                                             <li class="mb-1">
@@ -216,7 +215,7 @@
                                     </ul>
                                 </div>
                                 <div class="col-12">
-                                    <h6 class="fw-bold text-dark">Requirements:</h6>
+                                    <h6 class="fw-bold text-dark">{{ __('integrations.requirements') }}</h6>
                                     <ul class="list-unstyled">
                                         @foreach($pluginFiles['shopify']['requirements'] as $requirement)
                                             <li class="mb-1">

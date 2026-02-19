@@ -28,8 +28,9 @@ class ReviewsDisplay extends Component
     {
         if ($organizationId) {
             $this->organizationId = $organizationId;
-            $this->organization = Organization::findOrFail($organizationId);
-            $this->organizationName = $this->normalizeOrganizationName(data_get($this->organization, 'name'));
+            $org = Organization::findOrFail($organizationId);
+            $this->organization = $org;
+            $this->organizationName = $this->normalizeOrganizationName($org->name);
         }
     }
 
@@ -106,7 +107,12 @@ class ReviewsDisplay extends Component
     {
         $reviews = $this->reviews;
         $stats = $this->stats;
-        $organizationName = $this->organizationName ?? $this->normalizeOrganizationName(data_get($this->organization, 'name'));
+        
+        // Safely get organization name with fallback
+        $organizationName = $this->organizationName;
+        if (!$organizationName && $this->organization) {
+            $organizationName = $this->normalizeOrganizationName($this->organization->name ?? null);
+        }
         
         return view('livewire.public.reviews-display', compact('reviews', 'stats', 'organizationName'));
     }

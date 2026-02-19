@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\PricingPlan;
 
 class CreditTransaction extends Model
 {
@@ -44,6 +45,6 @@ class CreditTransaction extends Model
 
     public function creditPackage()
     {
-        return $this->belongsTo(CreditPackage::class);
+        return $this->belongsTo(PricingPlan::class, 'credit_package_id');
     }
 }

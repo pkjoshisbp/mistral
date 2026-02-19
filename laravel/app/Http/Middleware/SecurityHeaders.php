@@ -47,7 +47,13 @@ class SecurityHeaders
         $response->headers->set('X-XSS-Protection', '1; mode=block');
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
-        $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+        $isPersonalAssistantPage = $request->is('customer/personal-assistant') || $request->is('customer/personal-assistant/*');
+        if ($isPersonalAssistantPage) {
+            $response->headers->set('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
+        } else {
+            $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+        }
         
         // HSTS (HTTP Strict Transport Security)
         if ($request->secure()) {

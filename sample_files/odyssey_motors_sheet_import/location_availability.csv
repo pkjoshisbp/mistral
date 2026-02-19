@@ -1,0 +1,31 @@
+location,model,variant,current_stock_units,availability_status,estimated_wait_weeks,last_updated,notes
+Sambalpur,Swift,VXi,6,In Stock,0,2026-02-17,Popular color mix available
+Sambalpur,Dzire,VXi,4,In Stock,0,2026-02-17,Ready for immediate delivery
+Sambalpur,Brezza,ZXi,2,Limited Stock,1,2026-02-17,High demand in white and grey
+Sambalpur,Ertiga,VXi CNG,1,Limited Stock,2,2026-02-17,Fresh lot expected next week
+Sambalpur,Grand Vitara,Delta,3,In Stock,0,2026-02-17,Includes mild hybrid options
+Sambalpur,Fronx,Delta,5,In Stock,0,2026-02-17,Strong weekend enquiries
+Angul,WagonR,VXi 1.0,5,In Stock,0,2026-02-17,Good stock depth
+Angul,Alto K10,VXi,7,In Stock,0,2026-02-17,Entry segment demand stable
+Angul,Swift,ZXi,1,Limited Stock,2,2026-02-17,Fast moving trim
+Angul,Baleno,Delta,3,In Stock,0,2026-02-17,Nexa walk-ins increasing
+Angul,Grand Vitara,Zeta Strong Hybrid,0,Pre-Booking,4,2026-02-17,Hybrid waiting list active
+Angul,Jimny,Alpha,1,Limited Stock,2,2026-02-17,Special order colors only
+Bargarh,Dzire,VXi CNG,2,Limited Stock,1,2026-02-17,CNG allocation periodic
+Bargarh,Ertiga,VXi,3,In Stock,0,2026-02-17,Preferred by family buyers
+Bargarh,Brezza,VXi,2,In Stock,0,2026-02-17,Immediate billing possible
+Bargarh,Fronx,Delta CNG,0,Pre-Booking,3,2026-02-17,CNG lot expected soon
+Bargarh,Baleno,Zeta,1,Limited Stock,1,2026-02-17,Single display unit in stock
+Bargarh,Invicto,Zeta Plus,0,Pre-Booking,6,2026-02-17,Premium segment advance booking
+Jharsuguda,Swift,VXi CNG,2,Limited Stock,1,2026-02-17,CNG popular with commuters
+Jharsuguda,WagonR,VXi CNG,4,In Stock,0,2026-02-17,Good fleet demand
+Jharsuguda,Brezza,ZXi AT,1,Limited Stock,2,2026-02-17,AT demand rising
+Jharsuguda,Grand Vitara,Delta CNG,0,Pre-Booking,5,2026-02-17,Dependent on CNG allocation
+Jharsuguda,XL6,Alpha Plus,1,Limited Stock,2,2026-02-17,Nexa premium enquiry model
+Jharsuguda,Jimny,Zeta,1,Limited Stock,2,2026-02-17,Adventure package optional
+Bolangir,Alto K10,LXi,8,In Stock,0,2026-02-17,Strong first-time buyer demand
+Bolangir,Celerio,VXi CNG,2,Limited Stock,1,2026-02-17,CNG demand moderate
+Bolangir,Dzire,ZXi,2,In Stock,0,2026-02-17,Corporate enquiry model
+Bolangir,Ertiga,ZXi,1,Limited Stock,2,2026-02-17,High booking to stock ratio
+Bolangir,Baleno,Sigma,3,In Stock,0,2026-02-17,Entry Nexa stock healthy
+Bolangir,Fronx,Zeta,1,Limited Stock,2,2026-02-17,Automatic variants limited

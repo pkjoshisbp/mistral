@@ -3,7 +3,7 @@
 # This creates a tunnel so Laravel can access Ollama at http://127.0.0.1:11435
 
 # Direct connection to vast.ai instance
-VAST_HOST="116.106.20.52"
+VAST_HOST="171.248.41.73"
 VAST_PORT="29425"
 VAST_USER="root"
 LOCAL_PORT="11435"
@@ -11,7 +11,7 @@ REMOTE_PORT="11434"
 
 # Autossh monitoring port (must be different from LOCAL_PORT)
 # Autossh uses this port+1 for bidirectional tunnel health checks
-AUTOSSH_MONITOR_PORT="20000"
+AUTOSSH_MONITOR_PORT="0"
 
 # Colors for output
 GREEN='\033[0;32m'

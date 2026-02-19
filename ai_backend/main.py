@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 import httpx
 import logging
 from logging.handlers import RotatingFileHandler
@@ -14,6 +14,8 @@ import signal
 import json
 import tempfile
 import shutil
+import base64
+import re
 from pathlib import Path
 try:
     from rewrite import rewrite_prompt  # type: ignore
@@ -47,6 +49,14 @@ MODELS_DIR = os.getenv("MODELS_DIR", "/var/www/clients/client1/web64/web/models"
 
 # Models hosted on vast.ai (use tunnel)
 VASTAI_MODELS = ["llama3:8b-instruct-q5_K_M", "llama3.1:8b"]
+
+# Personal Assistant voice service configuration (typically tunneled from vast.ai)
+PERSONAL_ASSISTANT_WHISPER_URL = os.getenv("PERSONAL_ASSISTANT_WHISPER_URL", "http://127.0.0.1:18081/transcribe")
+PERSONAL_ASSISTANT_XTTS_URL = os.getenv("PERSONAL_ASSISTANT_XTTS_URL", "http://127.0.0.1:18082/tts")
+PERSONAL_ASSISTANT_INDIC_TTS_URL = os.getenv("PERSONAL_ASSISTANT_INDIC_TTS_URL", "http://127.0.0.1:18083/tts")
+PERSONAL_ASSISTANT_TIMEOUT_SEC = float(os.getenv("PERSONAL_ASSISTANT_TIMEOUT_SEC", "60"))
+PERSONAL_ASSISTANT_MAX_AUDIO_MB = int(os.getenv("PERSONAL_ASSISTANT_MAX_AUDIO_MB", "20"))
+LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "large-v3")
 
 def get_ollama_url(model: str) -> str:
     """Get the appropriate Ollama URL based on the model"""
@@ -97,6 +107,16 @@ current_llamacpp_model = None
 MAX_OLLAMA_RUNNER_CPU = float(os.getenv("MAX_OLLAMA_RUNNER_CPU", "200.0"))  # Max CPU % for runner processes
 MAX_OLLAMA_RUNNER_TIME = int(os.getenv("MAX_OLLAMA_RUNNER_TIME", "300"))    # Max runtime in seconds (5 min)
 PROCESS_CHECK_INTERVAL = int(os.getenv("PROCESS_CHECK_INTERVAL", "30"))     # Check every 30 seconds
+VASTAI_HEALTHCHECK_ENABLED = os.getenv("VASTAI_HEALTHCHECK_ENABLED", "true").lower() == "true"
+VASTAI_HEALTHCHECK_INTERVAL = int(os.getenv("VASTAI_HEALTHCHECK_INTERVAL", "30"))
+VASTAI_TUNNEL_SCRIPT = os.getenv(
+    "VASTAI_TUNNEL_SCRIPT",
+    "/var/www/clients/client1/web64/web/scripts/start-ollama-tunnel.sh",
+)
+VASTAI_RESTART_COOLDOWN = int(os.getenv("VASTAI_RESTART_COOLDOWN", "120"))
+
+_vastai_restart_lock = asyncio.Lock()
+_vastai_last_restart = 0.0
 
 embed_semaphore = asyncio.Semaphore(EMBED_CONCURRENCY)
 
@@ -198,6 +218,78 @@ async def stop_llamacpp_server():
         llamacpp_server_process = None
         current_llamacpp_model = None
         logging.info("llama-server stopped")
+
+async def check_vastai_health() -> bool:
+    """Check if the vast.ai tunnel is responding on OLLAMA_URL_VASTAI."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{OLLAMA_URL_VASTAI}/api/tags")
+            return resp.status_code == 200
+    except Exception:
+        return False
+
+async def restart_vastai_tunnel(reason: str) -> None:
+    """Attempt to restart the SSH tunnel using the local autossh script."""
+    global _vastai_last_restart
+    now = time.time()
+    if now - _vastai_last_restart < VASTAI_RESTART_COOLDOWN:
+        logging.info(
+            "Vast.ai tunnel restart skipped (cooldown %ss). reason=%s",
+            VASTAI_RESTART_COOLDOWN,
+            reason,
+        )
+        return
+
+    async with _vastai_restart_lock:
+        now = time.time()
+        if now - _vastai_last_restart < VASTAI_RESTART_COOLDOWN:
+            return
+        _vastai_last_restart = now
+
+        if not Path(VASTAI_TUNNEL_SCRIPT).exists():
+            logging.error("Vast.ai tunnel script not found: %s", VASTAI_TUNNEL_SCRIPT)
+            return
+
+        logging.warning("Restarting Vast.ai tunnel. reason=%s", reason)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "bash",
+                VASTAI_TUNNEL_SCRIPT,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logging.error(
+                    "Vast.ai tunnel restart failed code=%s stderr=%s",
+                    proc.returncode,
+                    (stderr or b"").decode("utf-8", errors="ignore"),
+                )
+            else:
+                logging.info("Vast.ai tunnel restart completed.")
+        except Exception as e:
+            logging.error("Vast.ai tunnel restart exception: %s", str(e))
+
+async def periodic_vastai_healthcheck() -> None:
+    """Periodically verify the vast.ai tunnel and restart if needed."""
+    if not VASTAI_HEALTHCHECK_ENABLED:
+        logging.info("Vast.ai healthcheck disabled")
+        return
+
+    logging.info("Starting Vast.ai healthcheck interval=%ss", VASTAI_HEALTHCHECK_INTERVAL)
+    consecutive_failures = 0
+    while True:
+        ok = await check_vastai_health()
+        if ok:
+            if consecutive_failures > 0:
+                logging.info("Vast.ai tunnel healthy again")
+            consecutive_failures = 0
+        else:
+            consecutive_failures += 1
+            logging.warning("Vast.ai healthcheck failed count=%s", consecutive_failures)
+            if consecutive_failures >= 2:
+                await restart_vastai_tunnel("healthcheck_failed")
+        await asyncio.sleep(VASTAI_HEALTHCHECK_INTERVAL)
 
 async def llamacpp_server_chat(messages: list) -> dict:
     """Send chat request to llama-server"""
@@ -757,11 +849,14 @@ async def search_qdrant(request: Request):
     query_vector = data["query_vector"]
     limit = data.get("limit", 5)
     try:
+        start_time = time.time()
         results = qdrant.search(
             collection_name=collection_name,
             query_vector=query_vector,
             limit=limit
         )
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logging.info(f"qdrant_search collection={collection_name} limit={limit} elapsed_ms={elapsed_ms}")
         return {"results": [{"id": r.id, "score": r.score, "payload": r.payload} for r in results]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -776,15 +871,21 @@ async def search_qdrant_text(request: Request):
     
     try:
         # First generate embedding for the query text
-        start_time = time.time()
-        query_vector = await _generate_embedding(model, query_text, start_time)
+        embed_start = time.time()
+        query_vector, embed_ms = await _generate_embedding(model, query_text, embed_start)
+        logging.info(
+            f"qdrant_search_text embedding collection={collection_name} model={model} chars={len(query_text)} elapsed_ms={embed_ms}"
+        )
         
         # Then search using the vector
+        search_start = time.time()
         results = qdrant.search(
             collection_name=collection_name,
             query_vector=query_vector,
             limit=limit
         )
+        search_ms = int((time.time() - search_start) * 1000)
+        logging.info(f"qdrant_search_text collection={collection_name} limit={limit} elapsed_ms={search_ms}")
         return {"results": [{"id": r.id, "score": r.score, "payload": r.payload} for r in results]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -892,6 +993,289 @@ async def embed_batch(request: Request):
     logging.info(f"embed_batch count={len(texts)} model={used_model} total_ms={total_ms}")
     return {"model": used_model, "count": len(results), "total_ms": total_ms, "results": results}
 
+_local_whisper_model = None
+
+
+def _extract_json_object(raw_text: str) -> dict:
+    cleaned = (raw_text or "").strip()
+    if cleaned == "":
+        return {}
+
+    code_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+    if code_match:
+        cleaned = code_match.group(1).strip()
+
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    first = cleaned.find("{")
+    last = cleaned.rfind("}")
+    if first != -1 and last != -1 and last > first:
+        candidate = cleaned[first:last + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            return {}
+
+    return {}
+
+
+def _get_local_whisper_model():
+    global _local_whisper_model
+    if _local_whisper_model is not None:
+        return _local_whisper_model
+
+    try:
+        from faster_whisper import WhisperModel  # type: ignore
+    except Exception as e:
+        raise RuntimeError(f"faster-whisper is not installed: {str(e)}")
+
+    compute_type = os.getenv("LOCAL_WHISPER_COMPUTE_TYPE", "float16")
+    device = os.getenv("LOCAL_WHISPER_DEVICE", "auto")
+    logging.info(f"Loading local Whisper model={LOCAL_WHISPER_MODEL} device={device} compute_type={compute_type}")
+    _local_whisper_model = WhisperModel(LOCAL_WHISPER_MODEL, device=device, compute_type=compute_type)
+    return _local_whisper_model
+
+
+async def _chat_completion(messages: list, model: str) -> dict:
+    ollama_url = get_ollama_url(model)
+    async with httpx.AsyncClient(timeout=PERSONAL_ASSISTANT_TIMEOUT_SEC) as client:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+                "num_predict": 300
+            }
+        }
+        resp = await client.post(f"{ollama_url}/api/chat", json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(f"LLM HTTP {resp.status_code}: {resp.text}")
+        result = resp.json()
+        if isinstance(result, dict) and result.get("error"):
+            raise RuntimeError(f"LLM error: {result.get('error')}")
+        return result
+
+
+@app.post("/voice/transcribe")
+async def voice_transcribe(
+    audio: UploadFile = File(...),
+    language: str = Form("auto"),
+    prompt: str = Form(""),
+    provider: str = Form("auto")
+):
+    provider = (provider or "auto").strip().lower()
+    language = (language or "auto").strip()
+    prompt = (prompt or "").strip()
+
+    audio_bytes = await audio.read()
+    max_bytes = PERSONAL_ASSISTANT_MAX_AUDIO_MB * 1024 * 1024
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Audio payload is empty")
+    if len(audio_bytes) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Audio exceeds {PERSONAL_ASSISTANT_MAX_AUDIO_MB}MB limit")
+
+    # Prefer tunneled Vast.ai whisper service
+    if provider in ["auto", "vast", "whisper"]:
+        try:
+            async with httpx.AsyncClient(timeout=PERSONAL_ASSISTANT_TIMEOUT_SEC) as client:
+                files = {
+                    "audio": (
+                        audio.filename or "speech.webm",
+                        audio_bytes,
+                        audio.content_type or "application/octet-stream",
+                    )
+                }
+                form_data = {
+                    "language": language,
+                    "prompt": prompt,
+                }
+                resp = await client.post(PERSONAL_ASSISTANT_WHISPER_URL, data=form_data, files=files)
+                if resp.status_code == 200:
+                    payload = resp.json()
+                    text = (payload.get("text") or "").strip()
+                    if text != "":
+                        return {
+                            "text": text,
+                            "language": payload.get("language", language),
+                            "provider_used": "vast_whisper",
+                            "meta": payload.get("meta", {}),
+                        }
+        except Exception as e:
+            logging.warning(f"Vast Whisper transcription failed, attempting local fallback: {str(e)}")
+
+    if provider not in ["auto", "local"]:
+        raise HTTPException(status_code=502, detail="Requested speech provider unavailable")
+
+    # Local fallback: faster-whisper
+    tmp_path = None
+    try:
+        model = _get_local_whisper_model()
+        suffix = Path(audio.filename or "speech.webm").suffix or ".webm"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            tmp_file.write(audio_bytes)
+            tmp_path = tmp_file.name
+
+        transcribe_kwargs = {
+            "beam_size": 5,
+            "vad_filter": True,
+        }
+        if language.lower() != "auto":
+            transcribe_kwargs["language"] = language
+        if prompt:
+            transcribe_kwargs["initial_prompt"] = prompt
+
+        segments, info = model.transcribe(tmp_path, **transcribe_kwargs)
+        text = " ".join([(segment.text or "").strip() for segment in segments]).strip()
+
+        return {
+            "text": text,
+            "language": getattr(info, "language", language),
+            "provider_used": "local_faster_whisper",
+            "meta": {
+                "duration": getattr(info, "duration", None),
+                "language_probability": getattr(info, "language_probability", None),
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+
+@app.post("/voice/synthesize")
+async def voice_synthesize(request: Request):
+    data = await request.json()
+    text = (data.get("text") or "").strip()
+    provider = (data.get("provider") or "auto").strip().lower()
+    language = (data.get("language") or "en").strip().lower()
+    speaker = (data.get("speaker") or "").strip()
+
+    if text == "":
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    providers_to_try = []
+    if provider == "xtts":
+        providers_to_try = [("xtts", PERSONAL_ASSISTANT_XTTS_URL)]
+    elif provider == "indic":
+        providers_to_try = [("indic", PERSONAL_ASSISTANT_INDIC_TTS_URL)]
+    else:
+        providers_to_try = [
+            ("xtts", PERSONAL_ASSISTANT_XTTS_URL),
+            ("indic", PERSONAL_ASSISTANT_INDIC_TTS_URL),
+        ]
+
+    last_error = None
+    for name, url in providers_to_try:
+        try:
+            async with httpx.AsyncClient(timeout=PERSONAL_ASSISTANT_TIMEOUT_SEC) as client:
+                payload = {
+                    "text": text,
+                    "language": language,
+                    "speaker": speaker,
+                }
+                resp = await client.post(url, json=payload)
+                if resp.status_code != 200:
+                    raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
+
+                content_type = (resp.headers.get("content-type") or "").lower()
+                if "application/json" in content_type:
+                    response_data = resp.json()
+                    audio_base64 = response_data.get("audio_base64") or response_data.get("audio")
+                    if not audio_base64:
+                        raise RuntimeError("No audio in JSON response")
+                    return {
+                        "audio_base64": audio_base64,
+                        "mime_type": response_data.get("mime_type", "audio/wav"),
+                        "provider_used": name,
+                    }
+
+                raw_audio = resp.content
+                if not raw_audio:
+                    raise RuntimeError("Empty audio response")
+
+                return {
+                    "audio_base64": base64.b64encode(raw_audio).decode("utf-8"),
+                    "mime_type": resp.headers.get("content-type", "audio/wav"),
+                    "provider_used": name,
+                }
+        except Exception as e:
+            last_error = e
+            logging.warning(f"TTS provider {name} failed: {str(e)}")
+            continue
+
+    raise HTTPException(status_code=502, detail=f"Speech synthesis failed: {str(last_error)}")
+
+
+@app.post("/assistant/parse_command")
+async def parse_assistant_command(request: Request):
+    data = await request.json()
+    query = (data.get("query") or "").strip()
+    language = (data.get("language") or "en").strip()
+    model = data.get("model") or DEFAULT_CHAT_MODEL
+    context_items = data.get("context") or []
+
+    if query == "":
+        raise HTTPException(status_code=400, detail="query is required")
+
+    context_text = ""
+    if isinstance(context_items, list) and context_items:
+        normalized = [str(item).strip() for item in context_items if str(item).strip() != ""]
+        context_text = "\n".join(normalized[:8])
+
+    system_prompt = (
+        "You are a voice personal assistant command parser. "
+        "Classify the user command and output STRICT JSON only with keys: "
+        "intent, action, entities, needs_confirmation, reply. "
+        "Allowed intents: dictation, send_email, calendar, appointment, reminder, notes, task, daily_brief, quick_search, unknown. "
+        "Keep reply concise and natural."
+    )
+
+    user_prompt = f"Language: {language}\n"
+    if context_text:
+        user_prompt += f"Recent context:\n{context_text}\n"
+    user_prompt += f"User command: {query}\n"
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    try:
+        llm_result = await _chat_completion(messages, model)
+        content = (llm_result.get("message", {}) or {}).get("content", "")
+        parsed = _extract_json_object(content)
+
+        if not parsed:
+            parsed = {
+                "intent": "unknown",
+                "action": "clarify",
+                "entities": {},
+                "needs_confirmation": True,
+                "reply": "I understood your command partially. Could you please clarify what you want me to do?",
+            }
+
+        parsed.setdefault("intent", "unknown")
+        parsed.setdefault("action", "clarify")
+        parsed.setdefault("entities", {})
+        parsed.setdefault("needs_confirmation", True)
+        parsed.setdefault("reply", "Please confirm what you want me to do.")
+
+        return {
+            "result": parsed,
+            "provider": "llm",
+            "model": model,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Command parsing failed: {str(e)}")
+
 @app.post("/llm/chat")
 async def llm_chat(request: Request):
     data = await request.json()
@@ -899,10 +1283,11 @@ async def llm_chat(request: Request):
     model = data.get("model", DEFAULT_CHAT_MODEL)  # Use high quality model by default
     backend_type = data.get("backend_type", AI_BACKEND_TYPE)  # Allow override from request
     options = data.get("options") or {}
+    request_id = uuid.uuid4().hex[:8]
     
     # Log incoming chat request
     logging.info(
-        f"llm_chat request: backend={backend_type} model={model} messages={len(messages)} msgs options_keys={list(options.keys()) if options else []}"
+        f"llm_chat request_id={request_id} backend={backend_type} model={model} messages={len(messages)} msgs options_keys={list(options.keys()) if options else []}"
     )
 
     # If system prompt contains context, log it for debugging
@@ -981,7 +1366,7 @@ async def llm_chat(request: Request):
         ollama_url = get_ollama_url(model)
     logging.info(f"Using Ollama URL: {ollama_url} for model: {model}")
     
-    # Try primary URL first, then fallback to local if vast.ai fails
+    # Try primary URL first, then fallback models/hosts
     configs_to_try = [(ollama_url, model)]
     if ollama_url == OLLAMA_URL_VASTAI:
         # Fallback to local Ollama - try same model first, then fallback model
@@ -989,12 +1374,16 @@ async def llm_chat(request: Request):
         if model != FALLBACK_CHAT_MODEL:
             configs_to_try.append((OLLAMA_URL_LOCAL, FALLBACK_CHAT_MODEL))
         logging.info(f"Will fallback to local Ollama ({OLLAMA_URL_LOCAL}) with models: {model}, {FALLBACK_CHAT_MODEL} if vast.ai fails")
+    elif model != FALLBACK_CHAT_MODEL:
+        configs_to_try.append((ollama_url, FALLBACK_CHAT_MODEL))
+        logging.info(f"Will fallback to model {FALLBACK_CHAT_MODEL} on {ollama_url} if {model} fails")
     
     last_error = None
     for url_to_try, model_to_use in configs_to_try:
         try:
             # Use shorter timeout for Vast.ai to enable fast fallback
             timeout = 15.0 if url_to_try == OLLAMA_URL_VASTAI else 60.0
+            attempt_start = time.time()
             async with httpx.AsyncClient(timeout=timeout) as client:
                 payload = {
                     "model": model_to_use,
@@ -1005,9 +1394,16 @@ async def llm_chat(request: Request):
                     payload["options"] = options
 
                 resp = await client.post(f"{url_to_try}/api/chat", json=payload)
+                if resp.status_code != 200:
+                    raise RuntimeError(f"Ollama HTTP {resp.status_code}: {resp.text}")
                 result = resp.json()
+                if isinstance(result, dict) and result.get("error"):
+                    raise RuntimeError(f"Ollama error: {result.get('error')}")
+                attempt_ms = int((time.time() - attempt_start) * 1000)
                 elapsed_ms = int((time.time() - start_time) * 1000)
-                logging.info(f"LLM chat completed model={model_to_use} url={url_to_try} elapsed_ms={elapsed_ms}")
+                logging.info(
+                    f"LLM chat completed request_id={request_id} model={model_to_use} url={url_to_try} attempt_ms={attempt_ms} elapsed_ms={elapsed_ms}"
+                )
             
                 # Debug logging - full response
                 print(f"DEBUG: Full Ollama response: {result}", flush=True)
@@ -1037,7 +1433,10 @@ async def llm_chat(request: Request):
         except Exception as e:
             last_error = e
             is_vastai = url_to_try == OLLAMA_URL_VASTAI
-            logging.warning(f"{'🚨 Vast.ai' if is_vastai else 'Local Ollama'} URL {url_to_try} failed: {str(e)}")
+            attempt_ms = int((time.time() - attempt_start) * 1000)
+            logging.warning(
+                f"{'🚨 Vast.ai' if is_vastai else 'Local Ollama'} URL {url_to_try} failed request_id={request_id} attempt_ms={attempt_ms}: {str(e)}"
+            )
             if is_vastai:
                 logging.info("⚡ Falling back to local Ollama...")
             continue  # Try next URL
@@ -1050,7 +1449,7 @@ async def llm_chat(request: Request):
             # Fallback to local llama-server
             result = await llamacpp_server_chat(messages)
             elapsed_ms = int((time.time() - start_time) * 1000)
-            logging.info(f"✅ llama-server fallback successful elapsed_ms={elapsed_ms}")
+            logging.info(f"✅ llama-server fallback successful request_id={request_id} elapsed_ms={elapsed_ms}")
             
             # Ensure usage keys present
             usage = result.get("usage") or {}
@@ -1069,7 +1468,9 @@ async def llm_chat(request: Request):
             
         except Exception as llamacpp_error:
             elapsed_ms = int((time.time() - start_time) * 1000)
-            logging.error(f"❌ Both Ollama and llama-server failed. Ollama: {str(last_error)}, llama-server: {str(llamacpp_error)} elapsed_ms={elapsed_ms}")
+            logging.error(
+                f"❌ Both Ollama and llama-server failed request_id={request_id}. Ollama: {str(last_error)}, llama-server: {str(llamacpp_error)} elapsed_ms={elapsed_ms}"
+            )
             raise HTTPException(status_code=500, detail=f"All LLM backends failed. Ollama: {str(last_error)}, llama-server: {str(llamacpp_error)}")
 
 @app.post("/llm/chat/stream")
@@ -1086,9 +1487,10 @@ async def stream_chat(request: Request):
     model = data.get("model", DEFAULT_CHAT_MODEL)
     backend_type = data.get("backend_type", AI_BACKEND_TYPE)
     options = data.get("options") or {}
+    request_id = uuid.uuid4().hex[:8]
     
     logging.info(
-        f"Stream chat request: model={model} backend={backend_type} messages={len(messages)} options_keys={list(options.keys()) if options else []}"
+        f"Stream chat request_id={request_id} model={model} backend={backend_type} messages={len(messages)} options_keys={list(options.keys()) if options else []}"
     )
     
     # Check if use_vastai is explicitly requested in options
@@ -1102,7 +1504,7 @@ async def stream_chat(request: Request):
         ollama_url = get_ollama_url(model)
         logging.info(f"Using Ollama URL: {ollama_url} for streaming model: {model}")
     
-    # Try primary URL first, then fallback to local if vast.ai fails
+    # Try primary URL first, then fallback models/hosts
     configs_to_try = [(ollama_url, model)]
     if ollama_url == OLLAMA_URL_VASTAI:
         # Fallback to local Ollama - try same model first, then fallback model
@@ -1110,6 +1512,9 @@ async def stream_chat(request: Request):
         if model != FALLBACK_CHAT_MODEL:
             configs_to_try.append((OLLAMA_URL_LOCAL, FALLBACK_CHAT_MODEL))
         logging.info(f"Will fallback to local Ollama ({OLLAMA_URL_LOCAL}) with models: {model}, {FALLBACK_CHAT_MODEL} if vast.ai fails for streaming")
+    elif model != FALLBACK_CHAT_MODEL:
+        configs_to_try.append((ollama_url, FALLBACK_CHAT_MODEL))
+        logging.info(f"Will fallback to model {FALLBACK_CHAT_MODEL} on {ollama_url} if {model} fails for streaming")
     
     async def generate():
         last_error = None
@@ -1117,6 +1522,7 @@ async def stream_chat(request: Request):
             try:
                 # Use shorter timeout for Vast.ai to enable fast fallback
                 timeout = 20.0 if url_to_try == OLLAMA_URL_VASTAI else 120.0
+                attempt_start = time.time()
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     # Make streaming request to Ollama
                     stream_payload = {
@@ -1132,26 +1538,44 @@ async def stream_chat(request: Request):
                         f"{url_to_try}/api/chat",
                         json=stream_payload
                     ) as response:
+                        if response.status_code != 200:
+                            body = (await response.aread()).decode("utf-8", errors="ignore")
+                            raise RuntimeError(f"Ollama HTTP {response.status_code}: {body}")
                         # Track tokens for usage counting
                         full_content = ""
+                        first_token_ms = None
                     
                         async for line in response.aiter_lines():
                             if not line:
                                 continue
+                            line_data = line.strip()
+                            if line_data.startswith("data:"):
+                                line_data = line_data[5:].strip()
+                            if line_data == "[DONE]":
+                                continue
                         
                             try:
-                                chunk = json.loads(line)
+                                chunk = json.loads(line_data)
                             
                                 # Extract content from message
                                 if 'message' in chunk and 'content' in chunk['message']:
                                     content = chunk['message']['content']
                                     full_content += content
+                                    if first_token_ms is None:
+                                        first_token_ms = int((time.time() - attempt_start) * 1000)
+                                        logging.info(
+                                            f"stream first_token request_id={request_id} model={model_to_use} url={url_to_try} first_token_ms={first_token_ms}"
+                                        )
                                 
                                     # Send SSE format
                                     yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
                             
                                 # Check if done
                                 if chunk.get('done', False):
+                                    if not full_content.strip():
+                                        raise RuntimeError(
+                                            f"Ollama stream completed with empty content for model={model_to_use} url={url_to_try}"
+                                        )
                                     # Calculate token usage
                                     input_text = " ".join([msg.get("content", "") for msg in messages])
                                     input_tokens = len(input_text) // 4
@@ -1171,7 +1595,10 @@ async def stream_chat(request: Request):
                                     yield f"data: {json.dumps(final_data)}\n\n"
                                 
                                     elapsed_ms = int((time.time() - start_time) * 1000)
-                                    logging.info(f"Stream completed model={model_to_use} url={url_to_try} tokens={total_tokens} elapsed_ms={elapsed_ms}")
+                                    attempt_ms = int((time.time() - attempt_start) * 1000)
+                                    logging.info(
+                                        f"Stream completed request_id={request_id} model={model_to_use} url={url_to_try} tokens={total_tokens} attempt_ms={attempt_ms} elapsed_ms={elapsed_ms}"
+                                    )
                                     return  # Success - exit generator
                                 
                             except json.JSONDecodeError:
@@ -1188,11 +1615,24 @@ async def stream_chat(request: Request):
                     logging.info(f"⚡ Falling back to local Ollama for streaming...")
                 continue  # Try next URL
         
-        # If all Ollama URLs failed
+        # If all Ollama URLs failed, fallback to llama.cpp and emit a single SSE message
         if last_error:
             logging.error(f"All Ollama stream URLs failed: {str(last_error)}")
-            error_data = {'error': f'All connection attempts failed: {str(last_error)}', 'done': True}
-            yield f"data: {json.dumps(error_data)}\n\n"
+            try:
+                result = await llamacpp_server_chat(messages)
+                message_content = result.get("message", {}).get("content", "")
+                usage = result.get("usage") or {}
+                if not message_content.strip():
+                    raise RuntimeError("llama.cpp fallback returned empty content")
+
+                yield f"data: {json.dumps({'content': message_content, 'done': False})}\n\n"
+                yield f"data: {json.dumps({'content': '', 'done': True, 'usage': usage})}\n\n"
+                logging.info(f"Stream llama.cpp fallback succeeded request_id={request_id}")
+                return
+            except Exception as llamacpp_error:
+                logging.error(f"Stream llama.cpp fallback failed request_id={request_id}: {llamacpp_error}")
+                error_data = {'error': f'All connection attempts failed: {str(last_error)}', 'done': True}
+                yield f"data: {json.dumps(error_data)}\n\n"
     
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -1207,6 +1647,10 @@ async def warm_model():
         # Start background process monitoring task
         asyncio.create_task(periodic_process_cleanup())
         logging.info("Started background process monitoring")
+
+        # Start Vast.ai healthcheck monitor
+        asyncio.create_task(periodic_vastai_healthcheck())
+        logging.info("Started Vast.ai healthcheck monitor")
         
         logging.info("Warming up models...")
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -1257,7 +1701,10 @@ async def warm_model():
                 except Exception as fc:
                     logging.warning(f"Fallback chat warm failed: {FALLBACK_CHAT_MODEL} error={fc}")
             
-            if embed_resp.status_code == 200 and chat_resp.status_code == 200:
+                    attempt_ms = int((time.time() - attempt_start) * 1000)
+                    logging.warning(
+                        f"{'🚨 Vast.ai' if is_vastai else 'Local Ollama'} stream failed request_id={request_id} for {url_to_try} attempt_ms={attempt_ms}: {str(e)} | repr={repr(e)}"
+                    )
                 MODEL_WARMED = True
                 logging.info(
                     "Models warmed up successfully: default_embed=%s default_chat=%s fallback_embed=%s fallback_chat=%s",
@@ -1342,6 +1789,7 @@ async def store_data(request: Request):
                     "title": item.get('title', ''),
                     "content": item.get('content', ''),
                     "category": item.get('category', ''),
+                    "follow_up": item.get('follow_up'),  # Add follow-up question if present
                     "organization_slug": organization_slug
                 }
                 

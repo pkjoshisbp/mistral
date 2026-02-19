@@ -211,6 +211,19 @@ class AiAgentService
     }
 
     /**
+     * Toggle: enable intent classification + query rewrite for retrieval/action gating.
+     */
+    public function useIntentAndRewrite(): bool
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $value = \App\Models\AdminSetting::get('ai_use_intent_rewrite', true);
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? true;
+        }
+
+        return true;
+    }
+
+    /**
      * Get AI model for specific organization (with fallback to global)
      */
     public function getAiModelForOrganization($organization = null)
@@ -532,6 +545,66 @@ class AiAgentService
     }
 
     /**
+     * Use LLM to select the most relevant answer between two options
+     * 
+     * @param string $userQuery The original user query
+     * @param array $resultA First result (from original query)
+     * @param array $resultB Second result (from rewritten query)
+     * @return string 'original' or 'rewritten'
+     */
+    private function selectBestAnswerWithLLM($userQuery, $resultA, $resultB)
+    {
+        $titleA = $resultA['payload']['title'] ?? 'N/A';
+        $contentA = $resultA['payload']['content'] ?? 'N/A';
+        $scoreA = $resultA['score'] ?? 0;
+        
+        $titleB = $resultB['payload']['title'] ?? 'N/A';
+        $contentB = $resultB['payload']['content'] ?? 'N/A';
+        $scoreB = $resultB['score'] ?? 0;
+        
+        // Truncate content to reduce token count (keep first 200 chars)
+        $contentA = mb_substr(strip_tags($contentA), 0, 200);
+        $contentB = mb_substr(strip_tags($contentB), 0, 200);
+        
+        $prompt = <<<PROMPT
+User's Question: "{$userQuery}"
+
+A: {$titleA}
+B: {$titleB}
+
+Which title better matches the question? Reply only: A or B
+PROMPT;
+
+        $messages = [
+            [
+                'role' => 'system',
+                'content' => 'You are a relevance judge. Select the answer that best matches the user\'s question.'
+            ],
+            [
+                'role' => 'user',
+                'content' => $prompt
+            ]
+        ];
+        
+        $response = $this->llmChat($messages, 'llama3.2:3b', 'ollama', [
+            'temperature' => 0.1,
+            'num_predict' => 10
+        ]);
+        
+        $choice = trim(strtoupper($response['message']['content'] ?? ''));
+        
+        Log::info('LLM answer selection', [
+            'user_query' => $userQuery,
+            'option_a' => $titleA,
+            'option_b' => $titleB,
+            'llm_choice' => $choice
+        ]);
+        
+        // Return 'original' for A, 'rewritten' for B
+        return (strpos($choice, 'A') !== false) ? 'original' : 'rewritten';
+    }
+
+    /**
      * Enhanced search with optional query rewriting 
      */
     public function enhancedSearch($collectionName, $originalQuery, $limit = 5)
@@ -542,6 +615,30 @@ class AiAgentService
                 'collection' => $collectionName,
                 'original_query' => $originalQuery
             ]);
+
+            $useRewriteAndIntent = $this->useIntentAndRewrite();
+            if (!$useRewriteAndIntent) {
+                $embedding = $this->embed($originalQuery);
+
+                if (!$embedding || !is_array($embedding)) {
+                    Log::warning('Failed to generate embedding for semantic search', [
+                        'query' => $originalQuery
+                    ]);
+                    return null;
+                }
+
+                $results = $this->searchQdrant($collectionName, $embedding, $limit);
+                $searchElapsed = round((microtime(true) - $searchStartTime) * 1000, 2);
+
+                Log::info('Semantic search completed (rewrite/intent disabled)', [
+                    'collection' => $collectionName,
+                    'original_query' => $originalQuery,
+                    'results_count' => isset($results['results']) ? count($results['results']) : 0,
+                    'total_elapsed_ms' => $searchElapsed
+                ]);
+
+                return $results;
+            }
 
             // Use query rewrite to improve keyword matching, with safeguards
             $rewrittenQuery = $this->rewriteQueryForSearch($originalQuery);
@@ -588,7 +685,58 @@ class AiAgentService
                 'total_elapsed_ms' => $searchElapsed
             ]);
 
-            // Merge results by best score per unique id
+            // Let LLM decide which result is more relevant to the user's original query
+            // Get top result from each query type
+            $topOriginal = isset($originalResults['results'][0]) ? $originalResults['results'][0] : null;
+            $topRewritten = isset($rewrittenResults['results'][0]) ? $rewrittenResults['results'][0] : null;
+            
+            // If we have different top results, let LLM choose the best one
+            $selectedResults = [];
+            if ($topOriginal && $topRewritten && 
+                ($topOriginal['id'] ?? null) !== ($topRewritten['id'] ?? null)) {
+                
+                try {
+                    $llmChoice = $this->selectBestAnswerWithLLM($originalQuery, $topOriginal, $topRewritten);
+                    
+                    if ($llmChoice === 'original') {
+                        // Use original query results
+                        $selectedResults = $originalResults['results'] ?? [];
+                        Log::info('LLM selected original query results as more relevant', [
+                            'original_title' => $topOriginal['payload']['title'] ?? 'N/A',
+                            'rewritten_title' => $topRewritten['payload']['title'] ?? 'N/A'
+                        ]);
+                    } else {
+                        // Use rewritten query results
+                        $selectedResults = $rewrittenResults['results'] ?? [];
+                        Log::info('LLM selected rewritten query results as more relevant', [
+                            'original_title' => $topOriginal['payload']['title'] ?? 'N/A',
+                            'rewritten_title' => $topRewritten['payload']['title'] ?? 'N/A'
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('LLM answer selection failed, using score-based merge', [
+                        'error' => $e->getMessage()
+                    ]);
+                    // Fallback to score-based merge
+                    $selectedResults = [];
+                }
+            }
+            
+            // If LLM selection was used, return those results
+            if (!empty($selectedResults)) {
+                Log::info('Enhanced search completed with LLM selection', [
+                    'collection' => $collectionName,
+                    'original_query' => $originalQuery,
+                    'query_used' => $rewrittenQuery,
+                    'results_count' => count($selectedResults)
+                ]);
+                
+                return [
+                    'results' => array_slice($selectedResults, 0, $limit)
+                ];
+            }
+            
+            // Otherwise, merge results by best score per unique id (fallback)
             $mergedResults = [];
             $resultsIndex = [];
 
@@ -1521,6 +1669,110 @@ Rules:
     }
 
     /**
+     * Transcribe an audio file using FastAPI personal assistant endpoint.
+     */
+    public function transcribeAudio(string $audioFilePath, array $options = [])
+    {
+        try {
+            if (!is_file($audioFilePath)) {
+                Log::warning('Transcribe audio file not found', ['path' => $audioFilePath]);
+                return null;
+            }
+
+            $language = $options['language'] ?? 'auto';
+            $provider = $options['provider'] ?? 'auto';
+            $prompt = $options['prompt'] ?? '';
+
+            $response = Http::timeout(120)
+                ->attach('audio', fopen($audioFilePath, 'r'), basename($audioFilePath))
+                ->asMultipart()
+                ->post("{$this->baseUrl}/voice/transcribe", [
+                    'language' => $language,
+                    'provider' => $provider,
+                    'prompt' => $prompt,
+                ]);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::error('Voice transcription failed', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'language' => $language,
+                'provider' => $provider,
+            ]);
+            return null;
+        } catch (\Exception $e) {
+            Log::error('Voice transcription exception', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Convert assistant response text to speech.
+     */
+    public function synthesizeSpeech(string $text, array $options = [])
+    {
+        try {
+            $payload = [
+                'text' => $text,
+                'provider' => $options['provider'] ?? 'auto',
+                'language' => $options['language'] ?? 'en',
+                'speaker' => $options['speaker'] ?? '',
+            ];
+
+            $response = Http::timeout(120)->post("{$this->baseUrl}/voice/synthesize", $payload);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::error('Speech synthesis failed', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'provider' => $payload['provider'],
+                'language' => $payload['language'],
+            ]);
+            return null;
+        } catch (\Exception $e) {
+            Log::error('Speech synthesis exception', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Parse voice command into structured intent/action payload.
+     */
+    public function parseAssistantCommand(string $query, array $options = [])
+    {
+        try {
+            $payload = [
+                'query' => $query,
+                'language' => $options['language'] ?? 'en',
+                'model' => $options['model'] ?? $this->getLlamaModel(),
+                'context' => $options['context'] ?? [],
+            ];
+
+            $response = Http::timeout(60)->post("{$this->baseUrl}/assistant/parse_command", $payload);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::error('Assistant command parse failed', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'query_preview' => substr($query, 0, 200),
+            ]);
+            return null;
+        } catch (\Exception $e) {
+            Log::error('Assistant command parse exception', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
      * Log token usage for billing and monitoring purposes
      */
     private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary)
@@ -1573,7 +1825,7 @@ Rules:
                     'subscription_id' => $subscription->id,
                     'tokens_added' => $tokensUsed,
                     'new_total' => $subscription->fresh()->tokens_used_this_period,
-                    'plan_limit' => $subscription->subscriptionPlan->token_cap_monthly ?? 'unlimited'
+                    'plan_limit' => $subscription->subscriptionPlan->token_cap ?? 'unlimited'
                 ]);
             } elseif ($userId) {
                 // No active subscription: deduct from credits balance

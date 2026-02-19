@@ -79,6 +79,27 @@
                     @error('description') <div class="invalid-feedback">{{ $message }}</div> @enderror
                 </div>
 
+                <div class="border rounded p-3 mb-3 bg-light">
+                    <h6 class="mb-2"><i class="fas fa-question-circle"></i> FAQ Follow-up Settings</h6>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="faq_follow_up_enabled" wire:model="faq_follow_up_enabled">
+                        <label class="form-check-label" for="faq_follow_up_enabled">
+                            Ask a follow-up question after FAQ answers
+                        </label>
+                    </div>
+                    <div class="form-group mb-2">
+                        <label class="form-label">Follow-up text</label>
+                        <input type="text" class="form-control @error('faq_follow_up_text') is-invalid @enderror" wire:model="faq_follow_up_text" placeholder="Would you like to know more about this?">
+                        @error('faq_follow_up_text') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                    </div>
+                    <div class="form-group mb-2">
+                        <label class="form-label">Negative response keywords (skip follow-up)</label>
+                        <textarea class="form-control @error('faq_follow_up_negative_keywords') is-invalid @enderror" rows="3" wire:model="faq_follow_up_negative_keywords" placeholder="no, no thanks, not interested, stop"></textarea>
+                        @error('faq_follow_up_negative_keywords') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                        <small class="text-muted">Comma or new-line separated keywords. If a response contains any of these, the follow-up is skipped.</small>
+                    </div>
+                </div>
+
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         @if($organization)

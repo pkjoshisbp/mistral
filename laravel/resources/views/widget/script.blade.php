@@ -39,6 +39,7 @@
             this.wsStream = null;
             this.wsPingTimer = null;
             this.wsShouldReconnect = true;
+            this.contactFields = this.normalizeContactFields(this.config.contactFields);
             this.init();
             this.detectLocation();
             // ISSUE 5B FIX: Load previous messages after init
@@ -96,6 +97,44 @@
             const phoneRegex = /^\+?[0-9][0-9\-\s()]{6,19}$/;
             const phoneDigits = (phone.match(/\d/g) || []).length;
             return emailRegex.test(email) && phoneRegex.test(phone) && phoneDigits >= 7 && phoneDigits <= 15;
+        }
+
+        normalizeContactFields(fields) {
+            if (!Array.isArray(fields)) {
+                return [];
+            }
+
+            const allowedTypes = ['text', 'email', 'phone', 'number', 'location'];
+            const seen = new Set();
+
+            return fields
+                .map((field) => {
+                    const keyRaw = String(field?.key || '').trim().toLowerCase();
+                    const key = keyRaw.replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+                    if (!key || seen.has(key)) {
+                        return null;
+                    }
+                    seen.add(key);
+
+                    const type = allowedTypes.includes(String(field?.type || '').toLowerCase())
+                        ? String(field.type).toLowerCase()
+                        : 'text';
+                    const label = String(field?.label || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+                    const required = !!field?.required;
+                    const placeholder = String(field?.placeholder || `Your ${label}${required ? ' *' : ''}`);
+
+                    return { key, type, label, required, placeholder };
+                })
+                .filter(Boolean);
+        }
+
+        escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
         }
 
         // ISSUE 5B FIX: Get or create persistent session ID
@@ -327,6 +366,10 @@
             const leadPhoneId = 'ai-lead-phone-' + this.config.orgId;
             const leadSubmitId = 'ai-chat-lead-submit-' + this.config.orgId;
             const leadSkipId = 'ai-chat-lead-skip-' + this.config.orgId;
+            const leadCustomFieldIds = {};
+            this.contactFields.forEach((field) => {
+                leadCustomFieldIds[field.key] = 'ai-lead-field-' + field.key + '-' + this.config.orgId;
+            });
             
             // Store IDs for later use
             this.ids = {
@@ -343,9 +386,25 @@
                 leadName: leadNameId,
                 leadEmail: leadEmailId,
                 leadPhone: leadPhoneId,
+                leadCustomFields: leadCustomFieldIds,
                 leadSubmit: leadSubmitId,
                 leadSkip: leadSkipId
             };
+
+            const customLeadFieldsHtml = this.contactFields.map((field) => {
+                const fieldId = this.ids.leadCustomFields[field.key];
+                let inputType = 'text';
+                if (field.type === 'email') inputType = 'email';
+                if (field.type === 'number') inputType = 'number';
+                if (field.type === 'phone') inputType = 'tel';
+                if (field.type === 'location') inputType = 'text';
+
+                return `
+                    <div class="ai-chat-form-group">
+                        <input type="${inputType}" id="${fieldId}" class="ai-chat-form-input" placeholder="${this.escapeHtml(field.placeholder)}" ${field.required ? 'required' : ''} />
+                    </div>
+                `;
+            }).join('');
             
             // Create widget container
             const widgetHTML = `
@@ -417,6 +476,7 @@
                                 <div class="ai-chat-form-group">
                                     <input type="tel" id="${leadPhoneId}" class="ai-chat-form-input" placeholder="Your Phone Number" />
                                 </div>
+                                ${customLeadFieldsHtml}
                                 <div class="ai-chat-form-actions">
                                     <button type="button" id="${leadSubmitId}" class="ai-chat-lead-submit">Start Chatting</button>
                                     ${this.config.requireContactForGuests ? '' : `<button type="button" id="${leadSkipId}" class="ai-chat-lead-skip">Skip for now</button>`}
@@ -956,6 +1016,7 @@
             const name = document.getElementById(this.ids.leadName).value.trim();
             const email = document.getElementById(this.ids.leadEmail).value.trim();
             const phone = document.getElementById(this.ids.leadPhone).value.trim();
+            const customFieldValues = {};
 
             if (!name) {
                 alert('Please fill in your name.');
@@ -982,7 +1043,45 @@
                 return;
             }
 
-            this.userInfo = { name, email, phone };
+            for (const field of this.contactFields) {
+                const fieldId = this.ids.leadCustomFields?.[field.key];
+                const inputEl = fieldId ? document.getElementById(fieldId) : null;
+                const value = String(inputEl?.value || '').trim();
+
+                if (field.required && !value) {
+                    alert(`${field.label} is required to start chat.`);
+                    if (inputEl) inputEl.focus();
+                    return;
+                }
+
+                if (value) {
+                    if (field.type === 'email' && !emailRegex.test(value)) {
+                        alert(`Please enter a valid email for ${field.label}.`);
+                        if (inputEl) inputEl.focus();
+                        return;
+                    }
+
+                    if (field.type === 'phone') {
+                        const fieldDigits = (value.match(/\d/g) || []).length;
+                        if (!phoneRegex.test(value) || fieldDigits < 7 || fieldDigits > 15) {
+                            alert(`Please enter a valid phone number for ${field.label}.`);
+                            if (inputEl) inputEl.focus();
+                            return;
+                        }
+                    }
+                }
+
+                customFieldValues[field.key] = value;
+            }
+
+            this.userInfo = { name, email, phone, custom_fields: customFieldValues };
+            if (customFieldValues.location) {
+                this.userInfo.location = customFieldValues.location;
+                this.locationInfo = {
+                    ...(this.locationInfo || {}),
+                    location: customFieldValues.location
+                };
+            }
             this.leadCaptured = true;
             this.saveLeadCaptured();
             this.saveUserInfo();
@@ -1584,6 +1683,71 @@
                             } catch (err) {
                                 console.error('Stream parse error:', err, { line });
                             }
+                        }
+                    }
+                }
+
+                // Process any trailing SSE payload left in buffer (some servers end without final \n\n)
+                if (buffer && buffer.trim().length > 0) {
+                    const trailingLines = buffer.split('\n');
+                    for (const line of trailingLines) {
+                        const trimmed = line.trim();
+                        if (!trimmed.startsWith('data: ')) continue;
+
+                        try {
+                            const data = JSON.parse(trimmed.slice(6));
+
+                            if (data.error) {
+                                if (!hasContent) {
+                                    this.removeTypingIndicator();
+                                    const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
+                                    if (contactFallback) {
+                                        this.addMessage(contactFallback, 'bot');
+                                    } else {
+                                        this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+                                    }
+                                }
+                                return;
+                            }
+
+                            if (data.content) {
+                                if (!firstChunkReceived) {
+                                    firstChunkReceived = true;
+                                    this.removeTypingIndicator();
+
+                                    const messagesContainer = document.getElementById(this.ids.messages);
+                                    botMessageElement = document.createElement('div');
+                                    botMessageElement.className = 'ai-chat-message ai-chat-message-bot';
+                                    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                                    botMessageElement.innerHTML = `
+                                        <div class="ai-chat-message-content"></div>
+                                        <div class="ai-chat-message-time">${time}</div>
+                                    `;
+                                    messagesContainer.appendChild(botMessageElement);
+                                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                                    contentEl = botMessageElement.querySelector('.ai-chat-message-content');
+                                }
+
+                                if (!firstTokenTimestampSet && botMessageElement) {
+                                    const firstTokenTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                                    const timeEl = botMessageElement.querySelector('.ai-chat-message-time');
+                                    if (timeEl) {
+                                        timeEl.textContent = firstTokenTime;
+                                    }
+                                    firstTokenTimestampSet = true;
+                                }
+
+                                fullResponse += data.content;
+                                hasContent = true;
+                                if (contentEl) {
+                                    contentEl.innerHTML = this.linkify(fullResponse);
+                                }
+                                if (botMessageElement && botMessageElement.parentNode) {
+                                    botMessageElement.parentNode.scrollTop = botMessageElement.parentNode.scrollHeight;
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Trailing stream parse error:', err, { line: trimmed });
                         }
                     }
                 }

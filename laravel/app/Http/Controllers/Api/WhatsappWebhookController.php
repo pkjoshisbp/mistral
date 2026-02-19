@@ -238,31 +238,55 @@ class WhatsappWebhookController extends Controller
 
                         // Build contexted AI reply aligned with widget behavior
                         $ai = app(AiAgentService::class);
+                        $actionService = app(\App\Services\ActionService::class);
                         Log::info('WhatsApp LLM search prep', [
                             'org_slug' => $org?->slug,
                             'phone_number_id' => $phoneNumberId,
                             'query_preview' => substr((string)$text, 0, 180)
                         ]);
-                        $embedding = $ai->embed($text);
+                        
                         $answer = null;
                         $usedContextChars = 0;
-                        if ($org && $embedding) {
-                            $collection = $org->slug;
-                            $search = $ai->searchQdrant($collection, $embedding, 5) ?: [];
-                            $context = '';
-                            $maxContextChars = 1500; // Limit context to prevent timeouts
-                            foreach (($search['results'] ?? []) as $res) {
-                                $payloadRes = $res['payload'] ?? [];
-                                $relevantFields = ['title', 'content', 'answer', 'description'];
-                                foreach ($relevantFields as $field) {
-                                    if (isset($payloadRes[$field]) && is_string($payloadRes[$field]) && !empty($payloadRes[$field])) {
-                                        $fieldContent = ucfirst($field) . ': ' . $payloadRes[$field] . "\n";
-                                        if (strlen($context . $fieldContent) > $maxContextChars) { break 2; }
-                                        $context .= $fieldContent;
+                        $context = '';
+                        
+                        if ($org) {
+                            // First, try to execute database actions (e.g., pricing queries)
+                            $actionResult = $actionService->processQuery($text, $org->id);
+                            $liveData = null;
+                            
+                            if ($actionResult['type'] === 'action_executed' && isset($actionResult['result']['success']) && $actionResult['result']['success']) {
+                                $liveData = $actionResult['result']['data'] ?? null;
+                                $actionName = $actionResult['action']['action_name'] ?? 'database query';
+                                
+                                if ($liveData) {
+                                    $context .= "\n[LIVE DATA from {$actionName}]:\n";
+                                    $context .= json_encode($liveData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n";
+                                    $context .= "[END LIVE DATA]\n\n";
+                                    $context .= "IMPORTANT: Use ONLY the LIVE DATA above to answer the question. Format pricing in a user-friendly way.\n\n";
+                                }
+                            }
+                            
+                            // Then search Qdrant for additional context (only if no live data or as supplement)
+                            if (!$liveData) {
+                                $embedding = $ai->embed($text);
+                                if ($embedding) {
+                                    $collection = $org->slug;
+                                    $search = $ai->searchQdrant($collection, $embedding, 5) ?: [];
+                                    $maxContextChars = 1500; // Limit context to prevent timeouts
+                                    foreach (($search['results'] ?? []) as $res) {
+                                        $payloadRes = $res['payload'] ?? [];
+                                        $relevantFields = ['title', 'content', 'answer', 'description'];
+                                        foreach ($relevantFields as $field) {
+                                            if (isset($payloadRes[$field]) && is_string($payloadRes[$field]) && !empty($payloadRes[$field])) {
+                                                $fieldContent = ucfirst($field) . ': ' . $payloadRes[$field] . "\n";
+                                                if (strlen($context . $fieldContent) > $maxContextChars) { break 2; }
+                                                $context .= $fieldContent;
+                                            }
+                                        }
+                                        $context .= "\n";
+                                        if (strlen($context) > $maxContextChars) { break; }
                                     }
                                 }
-                                $context .= "\n";
-                                if (strlen($context) > $maxContextChars) { break; }
                             }
                             $usedContextChars = strlen($context);
 
@@ -278,14 +302,12 @@ class WhatsappWebhookController extends Controller
                             $system .= "- Official website: {$orgWebsite}\n";
                             $system .= $orgEmail ? "- Official email: {$orgEmail}\n" : "- Official email: (not provided)\n";
                             $system .= $orgPhone ? "- Official phone: {$orgPhone}\n" : "- Official phone: (not provided)\n";
-                            if ($context) { $system .= "Use this info:\n{$context}\n"; }
+                            if ($context) { $system .= "CURRENT CONTEXT:\n{$context}\n"; }
+                            $system .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
                             $system .= "Rules: Only use the official website/email/phone above. Do not invent or guess any contact details. If an official contact is not provided, direct the user to the official website instead. ";
                             $system .= "Keep responses concise and direct. Always use plain text only - no HTML or markdown. Include full https URLs when mentioning sites. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
-                            $chatMessages = [
-                                ['role' => 'system', 'content' => $system],
-                                ['role' => 'user', 'content' => $text],
-                            ];
+                            $chatMessages = $this->buildWhatsAppChatMessages($org, $conversation, $system, $text, $context);
 
                             // Use the same provider/model selection as widget
                             $provider = $ai->getAiProviderForOrganization($org->id ?? null);
@@ -550,14 +572,12 @@ class WhatsappWebhookController extends Controller
                             $system .= "- Official website: {$orgWebsite}\n";
                             $system .= $orgEmail ? "- Official email: {$orgEmail}\n" : "- Official email: (not provided)\n";
                             $system .= $orgPhone ? "- Official phone: {$orgPhone}\n" : "- Official phone: (not provided)\n";
-                            if ($context) { $system .= "Use this info:\n{$context}\n"; }
+                            if ($context) { $system .= "CURRENT CONTEXT:\n{$context}\n"; }
+                            $system .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
                             $system .= "Rules: Only use the official website/email/phone above. Do not invent or guess any contact details. If an official contact is not provided, direct the user to the official website instead. ";
                             $system .= "Keep responses concise and direct. Always use plain text only - no HTML or markdown. Include full https URLs when mentioning sites. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
-                            $chatMessages = [
-                                ['role' => 'system', 'content' => $system],
-                                ['role' => 'user', 'content' => $text],
-                            ];
+                            $chatMessages = $this->buildWhatsAppChatMessages($org, $conversation, $system, $text, $context);
 
                             // Use provider/model selection consistent with widget
                             $provider = $ai->getAiProviderForOrganization($org->id);
@@ -628,6 +648,157 @@ class WhatsappWebhookController extends Controller
         }
 
         return response()->json(['status' => 'ok']);
+    }
+
+    private function buildWhatsAppChatMessages(Organization $organization, ?ChatConversation $conversation, string $systemPrompt, string $message, string $context = ''): array
+    {
+        $hasContext = trim($context) !== '';
+        $includeHistory = false;
+        $historyLimit = 0;
+
+        if ($this->isShortFollowUp($message)) {
+            $includeHistory = true;
+            $historyLimit = 4;
+        }
+
+        if (!$hasContext) {
+            $includeHistory = true;
+            $historyLimit = max($historyLimit, 4);
+        }
+
+        if ($this->isAffirmativeFollowUp($message) && $this->isPreviousUserAffirmative($conversation)) {
+            $includeHistory = true;
+            $historyLimit = max($historyLimit, 10);
+        }
+
+        if ($includeHistory) {
+            $recentMessages = $this->getRecentConversationMessages($conversation, $historyLimit);
+            if (!empty($recentMessages)) {
+                $systemPrompt .= "\n\nPRIOR HISTORY (use only if the user explicitly refers to it):\n";
+                foreach ($recentMessages as $rm) {
+                    $label = $rm['role'] === 'user' ? 'User' : 'Assistant';
+                    $systemPrompt .= $label . ": " . $rm['content'] . "\n";
+                }
+            }
+        }
+
+        $systemPrompt .= "\nCURRENT QUERY:\n" . $message . "\n";
+
+        return [
+            ['role' => 'system', 'content' => trim($systemPrompt)],
+            ['role' => 'user', 'content' => $message],
+        ];
+    }
+
+    private function getRecentConversationMessages(?ChatConversation $conversation, int $limit = 4): array
+    {
+        if (!$conversation) {
+            return [];
+        }
+
+        $recent = $conversation->messages()
+            ->orderBy('sent_at', 'desc')
+            ->limit($limit)
+            ->get()
+            ->reverse();
+
+        $messages = [];
+        foreach ($recent as $msg) {
+            $text = trim(strip_tags((string) $msg->message));
+            if ($text === '') {
+                continue;
+            }
+
+            $role = $msg->sender_type === 'user' ? 'user' : 'assistant';
+            $messages[] = ['role' => $role, 'content' => $text];
+        }
+
+        return $messages;
+    }
+
+    private function isPreviousUserAffirmative(?ChatConversation $conversation): bool
+    {
+        if (!$conversation) {
+            return false;
+        }
+
+        $lastUserMessage = $conversation->messages()
+            ->where('sender_type', 'user')
+            ->orderBy('sent_at', 'desc')
+            ->first();
+
+        if (!$lastUserMessage) {
+            return false;
+        }
+
+        $text = trim(strip_tags((string) $lastUserMessage->message));
+        if ($text === '') {
+            return false;
+        }
+
+        return $this->isAffirmativeFollowUp($text);
+    }
+
+    private function isShortFollowUp(string $message): bool
+    {
+        $clean = trim(mb_strtolower($message));
+        if ($clean === '') {
+            return false;
+        }
+
+        if ($this->isAffirmativeFollowUp($message)) {
+            return true;
+        }
+
+        $negatives = [
+            'no', 'nope', 'nah', 'not now', 'dont', 'don\'t', 'do not', 'not really', 'no thanks', 'no thank you',
+        ];
+
+        if (in_array($clean, $negatives, true)) {
+            return true;
+        }
+
+        if (str_word_count($clean) <= 3) {
+            if (preg_match('/\b(it|that|those|these|this|they|them|there|here|above|previous|earlier|more|details|explain|expand|continue)\b/', $clean)) {
+                return true;
+            }
+            if (preg_match('/^(and|also|what about|how about)\b/', $clean)) {
+                return true;
+            }
+            return false;
+        }
+
+        return false;
+    }
+
+    private function isAffirmativeFollowUp(string $text): bool
+    {
+        $t = trim(mb_strtolower($text));
+        if ($t === '') {
+            return false;
+        }
+        $affirm = ['yes', 'yeah', 'yup', 'ya', 'sure', 'ok', 'okay', 'please', 'go ahead', 'continue', 'proceed'];
+        foreach ($affirm as $a) {
+            if ($t === $a) {
+                return true;
+            }
+        }
+        $patterns = [
+            '/^yes\b.*more/',
+            '/\btell me more\b/',
+            '/\bmore details\b/',
+            '/\bhow it works\b/',
+            '/\bexplain more\b/'
+        ];
+        foreach ($patterns as $re) {
+            if (preg_match($re, $t)) {
+                return true;
+            }
+        }
+        if (mb_strlen($t) < 16 && preg_match('/\b(yes|ok|okay|sure|please)\b/', $t)) {
+            return true;
+        }
+        return false;
     }
 
     /**

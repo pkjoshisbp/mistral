@@ -96,6 +96,7 @@
                                         <td>
                                             <div class="small text-muted">Delivered: {{ $campaign->delivered_count ?? 0 }}</div>
                                             <div class="small text-muted">Opened: {{ $campaign->opened_count ?? 0 }}</div>
+                                            <div class="small text-muted">Clicked: {{ $campaign->clicked_count ?? 0 }}</div>
                                         </td>
                                         <td>
                                             @if($campaign->status === 'scheduled')

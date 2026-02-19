@@ -4,3 +4,5 @@ httpx
 qdrant-client
 pydantic
 llama-cpp-python==0.2.90
+python-multipart
+faster-whisper

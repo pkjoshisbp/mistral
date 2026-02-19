@@ -28,6 +28,8 @@ class WidgetSettingsController extends Controller
             'welcomeMessage' => 'required|string|max:255',
             'assistantDisplayName' => 'nullable|string|max:64',
             'requireContactForGuests' => 'nullable|boolean',
+            'widgetAllowedDomains' => 'nullable|string|max:3000',
+            'widgetContactFields' => 'nullable|string|max:5000',
         ]);
 
         $settings = $org->settings ?? [];
@@ -42,6 +44,71 @@ class WidgetSettingsController extends Controller
                 : null;
         }
         $settings['require_contact_for_guests'] = (bool) ($data['requireContactForGuests'] ?? false);
+
+        if (array_key_exists('widgetAllowedDomains', $data)) {
+            $raw = trim((string) $data['widgetAllowedDomains']);
+            if ($raw === '') {
+                unset($settings['widget_allowed_domains']);
+            } else {
+                $domains = preg_split('/[\r\n,]+/', $raw) ?: [];
+                $domains = array_values(array_filter(array_map(function ($domain) {
+                    $domain = strtolower(trim((string) $domain));
+                    if ($domain === '') {
+                        return null;
+                    }
+                    if (str_starts_with($domain, 'http://') || str_starts_with($domain, 'https://')) {
+                        $domain = strtolower((string) parse_url($domain, PHP_URL_HOST));
+                    }
+                    return trim($domain, '.');
+                }, $domains)));
+
+                $settings['widget_allowed_domains'] = $domains;
+            }
+        }
+
+        if (array_key_exists('widgetContactFields', $data)) {
+            $raw = trim((string) $data['widgetContactFields']);
+            if ($raw === '') {
+                unset($settings['widget_contact_fields']);
+            } else {
+                $fields = [];
+                $lines = preg_split('/\r\n|\r|\n/', $raw) ?: [];
+                foreach ($lines as $line) {
+                    $line = trim((string) $line);
+                    if ($line === '' || str_starts_with($line, '#')) {
+                        continue;
+                    }
+
+                    // Format: key|Label|type|required
+                    $parts = array_map('trim', explode('|', $line));
+                    $key = strtolower((string) ($parts[0] ?? ''));
+                    $key = preg_replace('/[^a-z0-9_]+/', '_', $key) ?? '';
+                    $key = trim($key, '_');
+                    if ($key === '') {
+                        continue;
+                    }
+
+                    $label = (string) ($parts[1] ?? ucfirst(str_replace('_', ' ', $key)));
+                    $type = strtolower((string) ($parts[2] ?? 'text'));
+                    if (!in_array($type, ['text', 'email', 'phone', 'number', 'location'], true)) {
+                        $type = 'text';
+                    }
+
+                    $requiredRaw = strtolower((string) ($parts[3] ?? 'false'));
+                    $required = in_array($requiredRaw, ['1', 'true', 'yes', 'required', 'y'], true);
+
+                    $fields[$key] = [
+                        'key' => $key,
+                        'label' => $label,
+                        'type' => $type,
+                        'required' => $required,
+                        'placeholder' => 'Your ' . $label . ($required ? ' *' : ''),
+                    ];
+                }
+
+                $settings['widget_contact_fields'] = array_values($fields);
+            }
+        }
 
         // Optional future flag to allow SEO follow links in widget branding
         if ($request->has('brandingFollow')) {

@@ -84,12 +84,12 @@ class PaypalCaptureOrder extends Command
 
             if ($customId && preg_match('/user_(\d+)_credit_(\d+)/', $customId, $m)) {
                 $targetUser = \App\Models\User::find((int)$m[1]);
-                $creditPackage = \App\Models\CreditPackage::find((int)$m[2]);
-                if ($creditPackage) { $tokensToAdd = (int)$creditPackage->tokens; }
+                $creditPackage = \App\Models\PricingPlan::credits()->find((int)$m[2]);
+                if ($creditPackage) { $tokensToAdd = (int)$creditPackage->credits; }
             } elseif ($customId && preg_match('/user_(\d+)_payg_(\d+)/', $customId, $m2)) {
                 $targetUser = \App\Models\User::find((int)$m2[1]);
-                $paygPlan = \App\Models\SubscriptionPlan::find((int)$m2[2]);
-                if ($paygPlan) { $tokensToAdd = (int)($paygPlan->token_cap_monthly ?: 100000); }
+                $paygPlan = \App\Models\PricingPlan::subscriptions()->find((int)$m2[2]);
+                if ($paygPlan) { $tokensToAdd = (int)($paygPlan->token_cap ?: 100000); }
             }
 
             if (!$targetUser || $tokensToAdd <= 0) {
@@ -107,7 +107,11 @@ class PaypalCaptureOrder extends Command
                 'credits' => $tokensToAdd,
                 'payment_method' => 'paypal',
                 'reference_id' => $orderId,
-                'notes' => $creditPackage ? ('Package: ' . ($creditPackage->name ?? '')) : ($paygPlan ? ('PAYG Plan: ' . ($paygPlan->name ?? '')) : 'Manual allocation'),
+                'notes' => $creditPackage
+                    ? ('Package: ' . ($creditPackage->name ?? '') . ' | USD ' . number_format((float)($creditPackage->price ?? 0), 2))
+                    : ($paygPlan
+                        ? ('PAYG Plan: ' . ($paygPlan->name ?? '') . ' | USD ' . number_format((float)($paygPlan->price ?? 0), 2))
+                        : 'Manual allocation'),
             ]);
 
             $this->info('Credits allocated: ' . $tokensToAdd . ' to user ID ' . $targetUser->id);

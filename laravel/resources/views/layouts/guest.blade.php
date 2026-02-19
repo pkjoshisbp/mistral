@@ -8,6 +8,41 @@
 
         <title>{{ config('app.name', 'Laravel') }}</title>
 
+        <!-- Hreflang Tags for Multilingual SEO -->
+        @php
+            $currentPath = ltrim(request()->path(), '/');
+            $currentLocale = app()->getLocale();
+            $supportedLocales = ['en', 'de', 'fr', 'es', 'it', 'pt', 'hi', 'th'];
+            $baseUrl = rtrim(config('app.url'), '/');
+            $buildUrl = function (string $path) use ($baseUrl) {
+                $clean = ltrim($path, '/');
+                return $clean === '' ? $baseUrl : $baseUrl . '/' . $clean;
+            };
+            
+            // Remove locale prefix from path if present
+            foreach ($supportedLocales as $loc) {
+                if (str_starts_with($currentPath, $loc . '/')) {
+                    $currentPath = substr($currentPath, strlen($loc) + 1);
+                    break;
+                }
+            }
+        @endphp
+        
+        @foreach ($supportedLocales as $locale)
+            @php
+                $hrefUrl = $locale === 'en'
+                    ? $buildUrl('/' . $currentPath)
+                    : $buildUrl('/' . $locale . '/' . $currentPath);
+            @endphp
+            <link rel="alternate" hreflang="{{ $locale }}" href="{{ rtrim($hrefUrl, '/') }}" />
+        @endforeach
+        
+        <!-- x-default points to English version -->
+        <link rel="alternate" hreflang="x-default" href="{{ rtrim($buildUrl('/' . $currentPath), '/') }}" />
+        
+        <!-- Canonical URL (always without trailing slash) -->
+        <link rel="canonical" href="{{ rtrim($buildUrl('/' . $currentPath), '/') }}" />
+
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 

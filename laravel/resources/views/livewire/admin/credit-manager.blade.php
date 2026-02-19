@@ -94,7 +94,7 @@
                                             @php 
                                                 $plan = $activeSubscription->subscriptionPlan;
                                                 $usedTokens = $activeSubscription->tokens_used_this_period;
-                                                $totalTokens = $plan->token_cap_monthly;
+                                                $totalTokens = $plan->token_cap;
                                                 $percentage = $totalTokens > 0 ? ($usedTokens / $totalTokens) * 100 : 0;
                                             @endphp
                                             <div>
@@ -294,7 +294,7 @@
                                     <option value="">Select Plan</option>
                                     @foreach($subscriptionPlans as $plan)
                                     <option value="{{ $plan->id }}">
-                                        {{ $plan->name }} - ${{ $plan->monthly_price }}/mo, ${{ $plan->yearly_price }}/yr
+                                        {{ $plan->name }} - ${{ number_format($plan->price ?? 0, 2) }} / {{ $plan->billing_period ?? 'monthly' }}
                                     </option>
                                     @endforeach
                                 </select>

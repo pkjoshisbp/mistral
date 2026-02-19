@@ -22,11 +22,28 @@ class CreditPackageSeeder extends Seeder
     {
         $packages = [
             [
+                'name' => 'Starter Credits',
+                'slug' => 'starter-credits',
+                'description' => 'Low-cost entry plan for trying AI chat support',
+                'usd_price' => 19.00, // Entry level price point
+                'inr_price' => 1580.00, // 1580 INR (~83x conversion)
+                'tokens' => 500000, // 500K tokens
+                'features' => [
+                    '500 Thousand tokens',
+                    'Never expires',
+                    'Easy entry, no commitment',
+                    'Perfect for testing',
+                    'Email support'
+                ],
+                'is_active' => true,
+                'sort_order' => 1
+            ],
+            [
                 'name' => 'Basic Credits',
                 'slug' => 'basic-credits',
                 'description' => 'Perfect for occasional usage with no expiration',
                 'usd_price' => 69.00, // ~40% more than Starter monthly rate per 1M
-                'inr_price' => 7000.00, // 100x conversion ($70 * 100)
+                'inr_price' => 5730.00, // 5730 INR (~83x conversion)
                 'tokens' => 1000000, // 1M tokens
                 'features' => [
                     '1 Million tokens',
@@ -36,7 +53,7 @@ class CreditPackageSeeder extends Seeder
                     'Email support'
                 ],
                 'is_active' => true,
-                'sort_order' => 1
+                'sort_order' => 2
             ],
             [
                 'name' => 'Standard Credits', 
@@ -53,7 +70,7 @@ class CreditPackageSeeder extends Seeder
                     'Usage analytics'
                 ],
                 'is_active' => true,
-                'sort_order' => 2
+                'sort_order' => 3
             ],
             [
                 'name' => 'Premium Credits',
@@ -71,7 +88,7 @@ class CreditPackageSeeder extends Seeder
                     'API priority access'
                 ],
                 'is_active' => true,
-                'sort_order' => 3
+                'sort_order' => 4
             ]
         ];
 

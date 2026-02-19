@@ -444,11 +444,24 @@ class ActionExecutorService
                 $csvBody = trim($csvResponse->body());
                 if ($csvBody === '') {
                     return [
-                        'success' => true,
-                        'data' => [],
+                        'success' => false,
+                        'error' => 'Google Sheets returned an empty CSV response (0 bytes). Ensure the sheet/tab is publicly readable, verify gid points to the populated tab, or configure api_key/service_account_path in source_config.',
                         'source' => 'google_sheets',
                         'spreadsheet_id' => $spreadsheetId,
-                        'total_rows' => 0
+                        'gid' => $gid,
+                        'csv_url' => $csvUrl
+                    ];
+                }
+
+                $csvBodyLower = strtolower(substr($csvBody, 0, 500));
+                if (str_contains($csvBodyLower, '<!doctype html') || str_contains($csvBodyLower, '<html')) {
+                    return [
+                        'success' => false,
+                        'error' => 'Google Sheets returned HTML instead of CSV (likely auth/access page). Publish the sheet for public CSV access or use api_key/service_account_path.',
+                        'source' => 'google_sheets',
+                        'spreadsheet_id' => $spreadsheetId,
+                        'gid' => $gid,
+                        'csv_url' => $csvUrl
                     ];
                 }
 
@@ -553,13 +566,32 @@ class ActionExecutorService
         $config = $action->getSourceConfig();
         
         try {
+            // Check if this is a multi-query configuration
+            if (isset($config['queries']) && is_array($config['queries'])) {
+                return $this->executeMultiDatabaseAction($config, $params);
+            }
+            
             $connection = $config['connection'] ?? 'mysql';
             $table = $config['table'];
             $columns = $config['columns'] ?? ['*'];
             $where = $config['where'] ?? [];
+            $orderBy = $config['order_by'] ?? [];
             $limit = $config['limit'] ?? 100;
 
-            $query = \DB::connection($connection)->table($table)->select($columns);
+            $query = \DB::connection($connection)->table($table);
+            
+            // Handle columns with calculated fields
+            $selectColumns = [];
+            foreach ($columns as $key => $value) {
+                if (is_string($key)) {
+                    // Calculated column: 'alias' => 'expression'
+                    $selectColumns[] = \DB::raw("({$value}) as {$key}");
+                } else {
+                    // Regular column
+                    $selectColumns[] = $value;
+                }
+            }
+            $query->select($selectColumns);
 
             // Apply where conditions with parameters
             foreach ($where as $condition) {
@@ -578,6 +610,13 @@ class ActionExecutorService
                 }
             }
 
+            // Apply order by clauses
+            foreach ($orderBy as $order) {
+                $column = $order['column'];
+                $direction = $order['direction'] ?? 'asc';
+                $query->orderBy($column, $direction);
+            }
+
             $results = $query->limit($limit)->get()->toArray();
 
             return [
@@ -592,6 +631,86 @@ class ActionExecutorService
             return [
                 'success' => false,
                 'error' => 'Database query failed: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Execute multiple database queries and combine results
+     */
+    private function executeMultiDatabaseAction(array $config, array $params): array
+    {
+        try {
+            $allResults = [];
+            $totalRows = 0;
+            
+            foreach ($config['queries'] as $queryConfig) {
+                $connection = $queryConfig['connection'] ?? 'mysql';
+                $table = $queryConfig['table'];
+                $columns = $queryConfig['columns'] ?? ['*'];
+                $where = $queryConfig['where'] ?? [];
+                $orderBy = $queryConfig['order_by'] ?? [];
+                $limit = $queryConfig['limit'] ?? 100;
+                $type = $queryConfig['type'] ?? 'default';
+
+                $query = \DB::connection($connection)->table($table);
+                
+                // Handle columns with calculated fields
+                $selectColumns = [];
+                foreach ($columns as $key => $value) {
+                    if (is_string($key)) {
+                        $selectColumns[] = \DB::raw("({$value}) as {$key}");
+                    } else {
+                        $selectColumns[] = $value;
+                    }
+                }
+                $query->select($selectColumns);
+
+                // Apply where conditions
+                foreach ($where as $condition) {
+                    $column = $condition['column'];
+                    $operator = $condition['operator'] ?? '=';
+                    
+                    if (isset($condition['param'])) {
+                        $paramKey = $condition['param'];
+                        if (isset($params[$paramKey])) {
+                            $query->where($column, $operator, $params[$paramKey]);
+                        }
+                    } elseif (isset($condition['value'])) {
+                        $query->where($column, $operator, $condition['value']);
+                    }
+                }
+
+                // Apply order by
+                foreach ($orderBy as $order) {
+                    $column = $order['column'];
+                    $direction = $order['direction'] ?? 'asc';
+                    $query->orderBy($column, $direction);
+                }
+
+                $results = $query->limit($limit)->get()->toArray();
+                
+                // Add type to each result
+                foreach ($results as &$result) {
+                    $result = (array) $result;
+                    $result['pricing_type'] = $type;
+                }
+                
+                $allResults = array_merge($allResults, $results);
+                $totalRows += count($results);
+            }
+
+            return [
+                'success' => true,
+                'data' => $allResults,
+                'source' => 'database_multi',
+                'total_rows' => $totalRows
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'error' => 'Multi-database query failed: ' . $e->getMessage()
             ];
         }
     }

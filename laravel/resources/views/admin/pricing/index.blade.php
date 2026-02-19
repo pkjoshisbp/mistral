@@ -118,7 +118,7 @@
                                     </td>
                                     <td>${{ number_format($package->usd_price, 2) }}</td>
                                     <td>₹{{ number_format($package->inr_price, 2) }}</td>
-                                    <td>{{ $package->formatted_tokens }} tokens</td>
+                                    <td>{{ $package->formatted_credits ?? number_format($package->tokens) }} tokens</td>
                                     <td>
                                         ${{ number_format(($package->usd_price / $package->tokens) * 1000000, 2) }}
                                         <br><small class="text-muted">₹{{ number_format(($package->inr_price / $package->tokens) * 1000000, 2) }}</small>

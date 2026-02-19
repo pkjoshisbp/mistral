@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Organization;
 use App\Services\AiAgentService;
+use App\Services\FaqFollowUpService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
@@ -11,10 +12,12 @@ use Illuminate\Support\Facades\Http;
 class WhatsAppController extends Controller
 {
     private $aiAgentService;
+    private $faqFollowUpService;
 
-    public function __construct(AiAgentService $aiAgentService)
+    public function __construct(AiAgentService $aiAgentService, FaqFollowUpService $faqFollowUpService)
     {
         $this->aiAgentService = $aiAgentService;
+        $this->faqFollowUpService = $faqFollowUpService;
     }
 
     /**
@@ -153,6 +156,11 @@ class WhatsAppController extends Controller
                 $systemPrompt .= "Context:\n{$context}\n\n";
             }
 
+            $faqFollowUpInstruction = $this->faqFollowUpService->getFollowUpInstruction($organization);
+            if ($faqFollowUpInstruction !== '') {
+                $systemPrompt .= $faqFollowUpInstruction . "\n\n";
+            }
+
             $systemPrompt .= "WhatsApp Message: {$message}\n\nPlease provide a helpful response:";
 
             // Get AI response
@@ -162,7 +170,13 @@ class WhatsAppController extends Controller
                 throw new \Exception('Failed to get AI response');
             }
 
-            return $aiResponse['answer'];
+            $finalResponse = $aiResponse['answer'];
+            $faqFollowUp = $this->faqFollowUpService->getFollowUpText($organization, $finalResponse);
+            if ($faqFollowUp !== '') {
+                $finalResponse = trim($finalResponse) . "\n\n" . $faqFollowUp;
+            }
+
+            return $finalResponse;
 
         } catch (\Exception $e) {
             Log::error('WhatsApp AI processing error', [

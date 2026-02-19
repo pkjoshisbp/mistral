@@ -48,7 +48,7 @@ class SubscriptionConfirmation extends Mailable implements ShouldQueue
                 'user' => $this->user,
                 'subscription' => $this->subscription,
                 'planName' => $this->subscription->subscriptionPlan->name ?? 'N/A',
-                'planPrice' => $this->subscription->subscriptionPlan->monthly_price ?? 0,
+                'planPrice' => $this->subscription->subscriptionPlan->price ?? 0,
                 'billingCycle' => $this->subscription->billing_cycle ?? 'monthly',
             ]
         );

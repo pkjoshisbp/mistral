@@ -5,7 +5,7 @@
                     <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                 </svg>
                 <span>
-                    Selected Plan: {{ ucfirst(request('plan')) }} 
+                    {{ __('auth.selected_plan') }}: {{ ucfirst(request('plan')) }} 
                     @if(request('plan') == 'starter')
                         ($49/month)
                     @elseif(request('plan') == 'pro')
@@ -25,39 +25,39 @@
 
         <!-- Name -->
         <div class="mb-3">
-            <x-input-label for="name" :value="__('Name')" />
+            <x-input-label for="name" :value="__('auth.name')" />
             <x-text-input id="name" type="text" name="name" :value="old('name')" required autofocus autocomplete="name" />
             <x-input-error :messages="$errors->get('name')" />
         </div>
 
         <!-- Email Address -->
         <div class="mb-3">
-            <x-input-label for="email" :value="__('Email')" />
+            <x-input-label for="email" :value="__('auth.email')" />
             <x-text-input id="email" type="email" name="email" :value="old('email')" required autocomplete="username" />
             <x-input-error :messages="$errors->get('email')" />
         </div>
 
         <!-- Password -->
         <div class="mb-3">
-            <x-input-label for="password" :value="__('Password')" />
+            <x-input-label for="password" :value="__('auth.password')" />
             <x-text-input id="password" type="password" name="password" required autocomplete="new-password" />
             <x-input-error :messages="$errors->get('password')" />
         </div>
 
         <!-- Confirm Password -->
         <div class="mb-3">
-            <x-input-label for="password_confirmation" :value="__('Confirm Password')" />
+            <x-input-label for="password_confirmation" :value="__('auth.confirm_password')" />
             <x-text-input id="password_confirmation" type="password" name="password_confirmation" required autocomplete="new-password" />
-            <div id="password-mismatch" class="invalid-feedback d-none">Passwords do not match.</div>
+            <div id="password-mismatch" class="invalid-feedback d-none">{{ __('auth.passwords_must_match') }}</div>
             <x-input-error :messages="$errors->get('password_confirmation')" />
         </div>
 
         <!-- OTP Section -->
         <div class="mb-3" id="otp-section" style="display: none;">
-            <x-input-label for="otp" :value="__('Email Verification Code')" />
+            <x-input-label for="otp" :value="__('auth.email_verification_code')" />
             <div class="d-flex gap-2">
-                <x-text-input id="otp" type="text" name="otp" maxlength="6" placeholder="Enter 6-digit code" />
-                <button type="button" id="resend-otp" class="btn btn-secondary btn-sm">Resend</button>
+                <x-text-input id="otp" type="text" name="otp" maxlength="6" placeholder="{{ __('auth.email_verification_code') }}" />
+                <button type="button" id="resend-otp" class="btn btn-secondary btn-sm">{{ __('auth.resend') }}</button>
             </div>
             <x-input-error :messages="$errors->get('otp')" />
             <div id="otp-status" class="mt-1 small"></div>
@@ -66,32 +66,32 @@
         <!-- Email Verification Button -->
         <div class="mb-3" id="verify-email-container" style="display: block !important; visibility: visible !important;">
             <button type="button" id="verify-email" class="btn btn-info w-100" style="display: block !important; visibility: visible !important;">
-                Verify Email Address
+                {{ __('auth.verify_email') }}
             </button>
         </div>
 
         <div class="d-flex align-items-center justify-content-between mt-3">
             <a class="text-decoration-underline small" href="{{ route('login') }}">
-                {{ __('Already registered?') }}
+                {{ __('auth.already_registered') }}
             </a>
 
             <x-primary-button class="ms-4" id="register-button" disabled>
-                {{ __('Register') }}
+                {{ __('auth.register') }}
             </x-primary-button>
         </div>
             <!-- Trust & Security Section -->
             <div class="mt-4 text-center small text-muted">
                 <hr class="my-3">
                 <div class="mb-2">
-                    <strong>ai-chat.support is owned and operated by MYWEB SOLUTIONS.</strong>
+                    <strong>{{ __('auth.owned_by') }}</strong>
                 </div>
                 <div>
-                    <a href="{{ route('privacy') }}" class="me-3 text-decoration-underline">Privacy Policy</a>
-                    <a href="{{ route('terms') }}" class="me-3 text-decoration-underline">Terms of Service</a>
-                    <a href="{{ route('contact') }}" class="text-decoration-underline">Contact Us</a>
+                    <a href="{{ route('privacy') }}" class="me-3 text-decoration-underline">{{ __('auth.privacy_policy') }}</a>
+                    <a href="{{ route('terms') }}" class="me-3 text-decoration-underline">{{ __('auth.terms_of_service') }}</a>
+                    <a href="{{ route('contact') }}" class="text-decoration-underline">{{ __('auth.contact_us') }}</a>
                 </div>
                 <div class="mt-2">
-                    <span>For support or security concerns, email <a href="mailto:info@ai-chat.support" class="text-decoration-underline">info@ai-chat.support</a></span>
+                    <span>{{ __('auth.support_email') }} <a href="mailto:info@ai-chat.support" class="text-decoration-underline">info@ai-chat.support</a></span>
                 </div>
             </div>
 

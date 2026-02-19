@@ -1,7 +1,8 @@
 @extends('layouts.public')
 
-@section('title', 'Features - AI Chat Support')
-@section('meta_description', 'Discover powerful AI chat support features including intelligent conversations, multiple data sources, easy widget integration, multilingual support, vector search, and real-time sync.')
+@section('title', 'AI Chatbot Features - 24/7 Automation & WhatsApp Integration')
+@section('meta_description', 'Discover powerful AI chatbot for website with 24/7 customer support automation, automated WhatsApp replies, AI support bot for customer service, chatbot integration with website, and AI-powered virtual assistant for customers.')
+@section('keywords', 'AI chatbot for business websites, 24/7 live chat support automation, WhatsApp chatbot for business support, AI chatbot automation tools, chatbot integration with website, automated lead generation chatbot, AI support bot for customer service')
 
 @push('styles')
 <style>
@@ -173,6 +174,89 @@
                         <div>
                             <h5>API Integration</h5>
                             <p class="text-muted">Integrate with your existing systems using our powerful REST API and webhooks.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detailed Features & Benefits Section -->
+    <section class="py-5" style="background: #f8f9fa;">
+        <div class="container">
+            <div class="row">
+                <div class="col-lg-10 mx-auto">
+                    <h2 class="text-center mb-5">Everything You Need to Automate Customer Support</h2>
+                    
+                    <div class="row mb-4">
+                        <div class="col-md-6 mb-4">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title"><i class="fas fa-comments text-primary me-2"></i>Website Chat</h5>
+                                    <p class="card-text">Add AI chat to your website in minutes. Answer visitor questions instantly, capture leads, and provide support 24/7.</p>
+                                    <ul class="list-unstyled mb-0">
+                                        <li><i class="fas fa-check text-success me-2"></i>Instant answers to common questions</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Lead capture when visitors show interest</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Works even when your team is offline</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-4">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title"><i class="fab fa-whatsapp text-success me-2"></i>WhatsApp Integration</h5>
+                                    <p class="card-text">Connect your business WhatsApp and let AI handle routine messages. Perfect for appointment reminders and follow-ups.</p>
+                                    <ul class="list-unstyled mb-0">
+                                        <li><i class="fas fa-check text-success me-2"></i>Auto-reply to customer messages</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Send automated reminders</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Follow up with leads automatically</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded shadow-sm mb-4">
+                        <h4 class="mb-3">Built for Results</h4>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <ul class="list-unstyled">
+                                    <li class="mb-2"><i class="fas fa-dollar-sign text-success me-2"></i><strong>Lower Costs:</strong> Reduce support expenses by up to 70%</li>
+                                    <li class="mb-2"><i class="fas fa-chart-line text-primary me-2"></i><strong>More Engagement:</strong> Visitors get answers instantly and stay on your site longer</li>
+                                    <li class="mb-2"><i class="fas fa-users text-info me-2"></i><strong>Better Leads:</strong> Qualify visitors before your team calls</li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <ul class="list-unstyled">
+                                    <li class="mb-2"><i class="fas fa-clock text-warning me-2"></i><strong>Always Available:</strong> Support customers 24/7</li>
+                                    <li class="mb-2"><i class="fas fa-bolt text-danger me-2"></i><strong>Instant Response:</strong> No more waiting for replies</li>
+                                    <li class="mb-2"><i class="fas fa-robot text-secondary me-2"></i><strong>Set and Forget:</strong> Works automatically once configured</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row text-center">
+                        <div class="col-md-3 mb-3">
+                            <i class="fas fa-shopping-cart text-primary fa-2x mb-2"></i>
+                            <h6 class="mb-1">Ecommerce</h6>
+                            <small class="text-muted">Answer product questions instantly</small>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <i class="fas fa-heartbeat text-danger fa-2x mb-2"></i>
+                            <h6 class="mb-1">Healthcare</h6>
+                            <small class="text-muted">Book appointments 24/7</small>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <i class="fas fa-briefcase text-success fa-2x mb-2"></i>
+                            <h6 class="mb-1">Small Business</h6>
+                            <small class="text-muted">Handle inquiries automatically</small>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <i class="fas fa-handshake text-warning fa-2x mb-2"></i>
+                            <h6 class="mb-1">Sales Teams</h6>
+                            <small class="text-muted">Qualify leads before calling</small>
                         </div>
                     </div>
                 </div>

@@ -78,6 +78,8 @@ class AnalyticsTrackingController extends Controller
             $ipAddress = $request->ip();
             $locationData = $this->getLocationFromIP($ipAddress);
 
+            $userAgent = Str::limit((string) ($validated['user_agent'] ?? $request->userAgent() ?? ''), 255, '');
+
             // Create analytics record
             Analytics::create([
                 'organization_id' => $validated['organization_id'],
@@ -87,7 +89,7 @@ class AnalyticsTrackingController extends Controller
                 'page_url' => $validated['page_url'] ?? config('app.url'),
                 'page_title' => $validated['page_title'] ?? '',
                 'referrer' => $validated['referrer'] ?? '',
-                'user_agent' => $validated['user_agent'] ?? $request->userAgent() ?? '',
+                'user_agent' => $userAgent,
                 'ip_address' => $ipAddress,
                 'country' => $locationData['country'] ?? null,
                 'region' => $locationData['region'] ?? null,

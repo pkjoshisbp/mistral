@@ -9,7 +9,7 @@ Environment="AUTOSSH_GATETIME=0"
 Environment="AUTOSSH_POLL=30"
 Environment="AUTOSSH_LOGFILE=/var/www/clients/client1/web64/web/logs/ollama-tunnel.log"
 Environment="AUTOSSH_DEBUG=1"
-ExecStart=/usr/bin/autossh -M 20000 -N -L 11435:127.0.0.1:11434 root@116.106.20.52 -p 29425 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no
+ExecStart=/usr/bin/autossh -M 0 -N -L 11435:127.0.0.1:11434 root@171.248.41.73 -p 29425 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no
 Restart=always
 RestartSec=10
 

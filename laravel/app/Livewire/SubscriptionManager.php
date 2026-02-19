@@ -4,7 +4,7 @@ namespace App\Livewire;
 
 use Livewire\Component;
 use App\Models\Subscription;
-use App\Models\SubscriptionPlan;
+use App\Models\PricingPlan;
 use App\Models\TokenUsageLog;
 use Illuminate\Support\Facades\Auth;
 
@@ -29,9 +29,50 @@ class SubscriptionManager extends Component
 
     public function loadAvailablePlans()
     {
-        $this->availablePlans = SubscriptionPlan::where('is_active', true)
+        $rows = PricingPlan::active()
+            ->subscriptions()
             ->orderBy('sort_order')
+            ->orderBy('billing_period')
             ->get();
+
+        $grouped = [];
+        foreach ($rows as $plan) {
+            $meta = is_array($plan->metadata) ? $plan->metadata : [];
+            $baseSlug = $meta['original_slug'] ?? $plan->slug;
+            $key = $baseSlug ?: $plan->name;
+
+            if (!isset($grouped[$key])) {
+                $tokenCap = (int) ($plan->token_cap ?? 0);
+                $grouped[$key] = (object) [
+                    'id' => $plan->id,
+                    'monthly_id' => null,
+                    'yearly_id' => null,
+                    'name' => $plan->name,
+                    'slug' => $baseSlug ?: $plan->slug,
+                    'description' => $plan->description,
+                    'monthly_price' => null,
+                    'yearly_price' => null,
+                    'token_cap_monthly' => $tokenCap,
+                    'overage_price_per_100k' => $plan->overage_price_per_100k,
+                    'features' => $meta['features'] ?? [],
+                    'formatted_token_cap' => $tokenCap >= 1000000
+                        ? number_format($tokenCap / 1000000, 0) . 'M'
+                        : number_format($tokenCap / 1000, 0) . 'K',
+                ];
+            }
+
+            if ($plan->billing_period === 'monthly') {
+                $grouped[$key]->monthly_price = $plan->price;
+                $grouped[$key]->monthly_id = $plan->id;
+                $grouped[$key]->id = $plan->id;
+            }
+            if ($plan->billing_period === 'yearly') {
+                $grouped[$key]->yearly_price = $plan->price;
+                $grouped[$key]->yearly_id = $plan->id;
+            }
+        }
+
+        $this->availablePlans = collect(array_values($grouped));
     }
 
     public function loadTokenUsage()
@@ -59,30 +100,30 @@ class SubscriptionManager extends Component
 
     public function getUsagePercentage()
     {
-        if (!$this->currentSubscription || $this->currentSubscription->subscriptionPlan->token_cap_monthly <= 0) {
+        if (!$this->currentSubscription || (int) $this->currentSubscription->subscriptionPlan->token_cap <= 0) {
             return 0;
         }
 
-        return min(100, ($this->tokenUsageCurrentPeriod / $this->currentSubscription->subscriptionPlan->token_cap_monthly) * 100);
+        return min(100, ($this->tokenUsageCurrentPeriod / (int) $this->currentSubscription->subscriptionPlan->token_cap) * 100);
     }
 
     public function getRemainingTokens()
     {
-        if (!$this->currentSubscription || $this->currentSubscription->subscriptionPlan->token_cap_monthly <= 0) {
+        if (!$this->currentSubscription || (int) $this->currentSubscription->subscriptionPlan->token_cap <= 0) {
             return 'Unlimited';
         }
 
-        $remaining = $this->currentSubscription->subscriptionPlan->token_cap_monthly - $this->tokenUsageCurrentPeriod;
+        $remaining = (int) $this->currentSubscription->subscriptionPlan->token_cap - $this->tokenUsageCurrentPeriod;
         return max(0, $remaining);
     }
 
     public function getOverageTokens()
     {
-        if (!$this->currentSubscription || $this->currentSubscription->subscriptionPlan->token_cap_monthly <= 0) {
+        if (!$this->currentSubscription || (int) $this->currentSubscription->subscriptionPlan->token_cap <= 0) {
             return 0;
         }
 
-        return max(0, $this->tokenUsageCurrentPeriod - $this->currentSubscription->subscriptionPlan->token_cap_monthly);
+        return max(0, $this->tokenUsageCurrentPeriod - (int) $this->currentSubscription->subscriptionPlan->token_cap);
     }
 
     public function getOverageCost()

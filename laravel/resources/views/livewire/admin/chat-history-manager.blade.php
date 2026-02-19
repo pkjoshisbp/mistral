@@ -43,7 +43,7 @@
                         <tbody>
                         @forelse($conversations as $conversation)
                             <tr>
-                                <td>{{ $conversation->created_at->format('Y-m-d H:i') }}</td>
+                                <td>{{ $conversation->created_at->format('Y-m-d H:i:s') }}</td>
                                 <td>{{ $conversation->organization->name ?? 'N/A' }}</td>
                                 <td>
                                     <div>{{ $conversation->visitor_name ?? 'Anonymous' }}</div>
@@ -74,7 +74,7 @@
                                             @php 
                                                 $isUser = ($message->sender_type === 'user');
                                                 $sender = method_exists($message, 'getSenderDisplayName') ? $message->getSenderDisplayName() : ($message->sender_name ?? ucfirst($message->sender_type ?? 'System'));
-                                                $time = ($message->sent_at ?? $message->created_at)->format('H:i');
+                                                $time = ($message->sent_at ?? $message->created_at)->format('H:i:s');
                                             @endphp
                                             <div class="mb-3">
                                                 <div class="small mb-1">

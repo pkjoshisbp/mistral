@@ -46,6 +46,7 @@ class ResyncFaqsToQdrant extends Command
                     'title' => $faq->question,
                     'content' => $content,
                     'category' => $faq->category ?? 'general',
+                    'follow_up' => $faq->follow_up ?? null,
                     'metadata' => [
                         'table_id' => $faq->id,
                         'updated_at' => $faq->updated_at ? $faq->updated_at->toISOString() : now()->toISOString(),

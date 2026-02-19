@@ -13,10 +13,12 @@ use Illuminate\Support\Facades\Artisan;
 class Faqs extends Component
 {
     use WithFileUploads;
+    public $search = '';
     public $showForm = false;
     public $editingId = null;
     public $question = '';
     public $answer = '';
+    public $follow_up = '';
     public $category = '';
     public $keywords = '';
     public $sort_order = 0;
@@ -30,6 +32,7 @@ class Faqs extends Component
     protected $rules = [
         'question' => 'required|string|min:3',
     'answer' => 'required|string|min:3',
+        'follow_up' => 'nullable|string',
         'category' => 'nullable|string',
         'keywords' => 'nullable|string',
         'sort_order' => 'nullable|integer',
@@ -80,21 +83,36 @@ class Faqs extends Component
     private function orgId()
     {
         $u = auth()->user();
-        return $u->organization->id ?? $u->organizations->first()->id ?? null;
+        if (!$u) {
+            return null;
+        }
+
+        return $u->primaryOrganization()?->id;
     }
 
     public function getFaqsProperty()
     {
-        return OrganizationFaq::where('organization_id', $this->orgId())
+        $q = OrganizationFaq::where('organization_id', $this->orgId())
             ->orderBy('sort_order')
-            ->orderByDesc('id')
-            ->get();
+            ->orderByDesc('id');
+        
+        if ($this->search) {
+            $search = '%' . $this->search . '%';
+            $q->where(function($query) use ($search) {
+                $query->where('question', 'like', $search)
+                      ->orWhere('answer', 'like', $search)
+                      ->orWhere('category', 'like', $search)
+                      ->orWhere('keywords', 'like', $search);
+            });
+        }
+        
+        return $q->get();
     }
 
     public function resetForm()
     {
     $this->editingId = null;
-    $this->question = $this->answer = $this->category = $this->keywords = '';
+    $this->question = $this->answer = $this->follow_up = $this->category = $this->keywords = '';
         $this->sort_order = 0;
         $this->is_active = true;
         $this->showPreview = false;
@@ -237,6 +255,7 @@ class Faqs extends Component
                 'question' => $this->question,
                 'answer' => $htmlContent,
                 'answer_markdown' => null,
+                'follow_up' => $this->follow_up,
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order,
@@ -263,6 +282,7 @@ class Faqs extends Component
         $this->editingId = $id;
         $this->question = $f->question;
     $this->answer = $f->answer;
+        $this->follow_up = $f->follow_up;
         $this->category = $f->category;
         $this->keywords = $f->keywords;
         $this->sort_order = $f->sort_order ?? 0;
@@ -288,6 +308,7 @@ class Faqs extends Component
                 'question' => $this->question,
                 'answer' => $htmlContent,
                 'answer_markdown' => null,
+                'follow_up' => $this->follow_up,
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order,
@@ -368,6 +389,7 @@ class Faqs extends Component
                     'title' => $faq->question,
                     'content' => $content, // Use plain text for embeddings
                     'category' => $faq->category ?? 'general',
+                    'follow_up' => $faq->follow_up ?? null,
                     'metadata' => [
                         'table_id' => $faq->id,
                         'updated_at' => $faq->updated_at->toISOString(),

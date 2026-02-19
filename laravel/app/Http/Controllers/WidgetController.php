@@ -81,6 +81,7 @@ class WidgetController
             'welcomeMessage' => $settings['welcome_message'] ?? 'Hello! How can I help you today?',
             'chatHistoryTtlHours' => (int)($settings['chat_history_ttl_hours'] ?? 24),
             'requireContactForGuests' => (bool)($settings['require_contact_for_guests'] ?? false),
+            'contactFields' => is_array($settings['widget_contact_fields'] ?? null) ? $settings['widget_contact_fields'] : [],
             // Branding/backlink controls (defaults: enabled + dofollow)
             'brandingEnabled' => array_key_exists('branding_enabled', $settings) ? (bool)$settings['branding_enabled'] : true,
             'brandingFollow' => array_key_exists('branding_follow', $settings) ? (bool)$settings['branding_follow'] : true,
@@ -160,6 +161,11 @@ class WidgetController
             
             if (!$organization || !$organization->is_active) {
                 return response()->json(['error' => 'Organization not found or inactive'], 404)
+                    ->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            if (!$this->isWidgetRequestAllowedForOrganization($organization, $request)) {
+                return response()->json(['error' => 'Widget request origin is not allowed for this organization'], 403)
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
@@ -1072,13 +1078,13 @@ class WidgetController
             ]);
             
             // Use organization-specific AI provider and model
-            $maxTokens = 120;
+            $maxTokens = 220;
             if ($isContactQuery) {
                 $maxTokens = 60;
             } elseif (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
                 || strlen($message) > 120
                 || strlen($finalContext) > 2000) {
-                $maxTokens = 220;
+                $maxTokens = 420;
             }
             $localOptions = ['num_predict' => $maxTokens, 'temperature' => 0.3];
             $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
@@ -1266,6 +1272,10 @@ class WidgetController
         
         if (!$organization || !$organization->is_active) {
             return response()->json(['error' => 'Organization not found or inactive'], 404);
+        }
+
+        if (!$this->isWidgetRequestAllowedForOrganization($organization, $request)) {
+            return response()->json(['error' => 'Widget request origin is not allowed for this organization'], 403);
         }
 
         // Check token limits
@@ -2021,11 +2031,11 @@ class WidgetController
                 $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $context);
                 $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
                 $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage) || $aiProvider === 'openai';
-                $maxTokens = $contactQuickResponse ? 60 : 140;
+                $maxTokens = $contactQuickResponse ? 60 : 220;
                 if (!$contactQuickResponse && (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
                     || strlen($message) > 120
                     || strlen($context) > 2000)) {
-                    $maxTokens = 240;
+                    $maxTokens = 420;
                 }
 
                 if ($contactQuickResponse) {
@@ -2516,6 +2526,10 @@ class WidgetController
             'utm_term' => $request->input('utm_term'),
             'utm_content' => $request->input('utm_content'),
         ];
+
+        if (!empty($allUserInfo['custom_fields']) && is_array($allUserInfo['custom_fields'])) {
+            $metadata['custom_contact_fields'] = $allUserInfo['custom_fields'];
+        }
 
         return array_filter($metadata, function ($value) {
             return !is_null($value) && $value !== '';
@@ -4497,6 +4511,11 @@ class WidgetController
                 ->header('X-Robots-Tag', 'noindex, nofollow');
         }
 
+        if (!$this->isWidgetRequestAllowedForOrganization($organization, $request)) {
+            return response()->json(['messages' => []], 403)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
         $sessionId = (string) $request->query('session_id');
         $lastId = (int) $request->query('last_id', 0);
 
@@ -4543,6 +4562,11 @@ class WidgetController
 
         if (!$organization || !$organization->is_active) {
             return response()->json(['session_id' => null, 'messages' => []], 404)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        if (!$this->isWidgetRequestAllowedForOrganization($organization, $request)) {
+            return response()->json(['session_id' => null, 'messages' => []], 403)
                 ->header('X-Robots-Tag', 'noindex, nofollow');
         }
 
@@ -4610,6 +4634,99 @@ class WidgetController
             'session_id' => $conversation->conversation_id,
             'messages' => $messages,
         ], 200)->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    private function isWidgetRequestAllowedForOrganization(Organization $organization, Request $request): bool
+    {
+        $settings = $organization->settings ?? [];
+        $configured = $settings['widget_allowed_domains'] ?? [];
+
+        if (is_string($configured)) {
+            $configured = preg_split('/[\r\n,]+/', $configured) ?: [];
+        }
+
+        if (!is_array($configured)) {
+            $configured = [];
+        }
+
+        $allowedHosts = array_values(array_filter(array_map(function ($item) {
+            $host = strtolower(trim((string) $item));
+            if ($host === '') {
+                return null;
+            }
+            if (str_starts_with($host, 'http://') || str_starts_with($host, 'https://')) {
+                $parsed = parse_url($host, PHP_URL_HOST);
+                $host = strtolower(trim((string) $parsed));
+            }
+            return trim($host, '.');
+        }, $configured)));
+
+        if (empty($allowedHosts)) {
+            $websiteHost = strtolower((string) parse_url((string) ($organization->website ?? ''), PHP_URL_HOST));
+            $websiteHost = trim($websiteHost, '.');
+
+            if ($websiteHost !== '') {
+                $allowedHosts[] = $websiteHost;
+            }
+
+            $appHost = strtolower((string) parse_url((string) config('app.url'), PHP_URL_HOST));
+            $appHost = trim($appHost, '.');
+            if ($appHost !== '') {
+                $allowedHosts[] = $appHost;
+            }
+
+            $allowedHosts = array_values(array_unique(array_filter($allowedHosts)));
+        }
+
+        $origin = trim((string) $request->header('origin', ''));
+        $referer = trim((string) $request->header('referer', ''));
+        $currentHost = '';
+
+        if ($origin !== '') {
+            $currentHost = strtolower((string) parse_url($origin, PHP_URL_HOST));
+        }
+        if ($currentHost === '' && $referer !== '') {
+            $currentHost = strtolower((string) parse_url($referer, PHP_URL_HOST));
+        }
+
+        $currentHost = trim($currentHost, '.');
+        if ($currentHost === '') {
+            Log::warning('Widget domain guard could not resolve request host', [
+                'org_id' => $organization->id,
+                'org_slug' => $organization->slug,
+                'origin' => $origin,
+                'referer' => $referer,
+                'allowed_hosts' => $allowedHosts,
+            ]);
+            return false;
+        }
+
+        if (empty($allowedHosts)) {
+            Log::warning('Widget domain guard has no allowed hosts configured or derivable', [
+                'org_id' => $organization->id,
+                'org_slug' => $organization->slug,
+                'origin' => $origin,
+                'referer' => $referer,
+            ]);
+            return false;
+        }
+
+        foreach ($allowedHosts as $allowed) {
+            if ($currentHost === $allowed || str_ends_with($currentHost, '.' . $allowed)) {
+                return true;
+            }
+        }
+
+        Log::warning('Widget domain guard blocked request', [
+            'org_id' => $organization->id,
+            'org_slug' => $organization->slug,
+            'current_host' => $currentHost,
+            'origin' => $origin,
+            'referer' => $referer,
+            'allowed_hosts' => $allowedHosts,
+        ]);
+
+        return false;
     }
 
     /**

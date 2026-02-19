@@ -15,6 +15,8 @@ class ContactPageManager extends Component
     public $description = '';
     public $email = '';
     public $phone = '';
+    public $primary_address = '';
+    public $secondary_address = '';
     public $address = '';
     public $business_hours = '';
     public $map_embed = '';
@@ -48,8 +50,11 @@ class ContactPageManager extends Component
         $this->description = AdminSetting::get('contact_description', 'Have questions about our AI Chat Support service? Need help with your subscription? Our team is here to assist you.');
         $this->email = AdminSetting::get('contact_email', 'support@ai-chat.support');
         $this->phone = AdminSetting::get('contact_phone', '+1 (555) 123-4567');
-        $this->address = AdminSetting::get('contact_address', '123 AI Street, Tech City, TC 12345');
-        $this->business_hours = AdminSetting::get('contact_business_hours', 'Monday - Friday: 9:00 AM - 6:00 PM EST');
+        $this->primary_address = AdminSetting::get('contact_primary_address', 'Road No. 16, Bhagirathi House, Plot No. 195, opposite Park, near VLR Residency, Journalists Colony Phase 3, Gachibowli, Hyderabad, Telangana 500032');
+        $legacyAddress = AdminSetting::get('contact_address', '123 AI Street, Tech City, TC 12345');
+        $this->secondary_address = AdminSetting::get('contact_secondary_address', $legacyAddress);
+        $this->address = $this->primary_address;
+        $this->business_hours = AdminSetting::get('contact_business_hours', 'Monday - Friday: 11:00 AM - 11:30 PM IST');
         $this->map_embed = AdminSetting::get('contact_map_embed', '');
     }
 
@@ -71,7 +76,8 @@ class ContactPageManager extends Component
             'description' => 'required|string',
             'email' => 'required|email',
             'phone' => 'required|string|max:50',
-            'address' => 'required|string',
+            'primary_address' => 'required|string',
+            'secondary_address' => 'nullable|string',
             'business_hours' => 'required|string',
         ]);
 
@@ -80,7 +86,9 @@ class ContactPageManager extends Component
         AdminSetting::set('contact_description', $this->description);
         AdminSetting::set('contact_email', $this->email);
         AdminSetting::set('contact_phone', $this->phone);
-        AdminSetting::set('contact_address', $this->address);
+        AdminSetting::set('contact_primary_address', $this->primary_address);
+        AdminSetting::set('contact_secondary_address', $this->secondary_address);
+        AdminSetting::set('contact_address', $this->primary_address);
         AdminSetting::set('contact_business_hours', $this->business_hours);
         AdminSetting::set('contact_map_embed', $this->map_embed);
 

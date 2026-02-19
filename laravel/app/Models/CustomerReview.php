@@ -87,9 +87,9 @@ class CustomerReview extends Model
         $stars = '';
         for ($i = 1; $i <= 5; $i++) {
             if ($i <= $this->rating) {
-                $stars .= '<span class="text-yellow-400">★</span>';
+                $stars .= '<span class="text-warning">★</span>';
             } else {
-                $stars .= '<span class="text-gray-300">☆</span>';
+                $stars .= '<span class="text-muted">☆</span>';
             }
         }
         return $stars;

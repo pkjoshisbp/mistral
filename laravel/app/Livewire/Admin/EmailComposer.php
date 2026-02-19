@@ -105,10 +105,14 @@ class EmailComposer extends Component
                         'variables' => [],
                         'status' => 'sent',
                         'sent_at' => now(),
+                        'delivered_at' => now(),
+                        'delivery_status' => 'sent',
                         'tracking_token' => $trackingToken,
                         'resend_count' => 0,
                         'last_sent_at' => now(),
                         'next_resend_at' => now()->addDays(7),
+                        'last_event' => 'delivered',
+                        'last_event_at' => now(),
                     ]);
                     $sentCount++;
                 } catch (\Exception $e) {
@@ -136,14 +140,57 @@ class EmailComposer extends Component
     protected function buildTrackedContent(string $content, string $token): string
     {
         $content = $this->applyEmailTypography($content);
+        
+        // Wrap all links with tracking URLs
+        $content = $this->wrapLinksWithTracking($content, $token);
+        
         $baseUrl = rtrim(config('app.url'), '/');
-        $pixel = '<img src="' . $baseUrl . '/email/open/' . $token . '.png" width="1" height="1" style="display:none" alt="" />';
-
+        
+        // Multiple tracking pixels for better reliability
+        $pixel = '<img src="' . $baseUrl . '/email/open/' . $token . '.png" width="1" height="1" style="display:block;width:1px;height:1px;" alt="" />';
+        $hiddenPixel = '<div style="display:none;"><img src="' . $baseUrl . '/email/open/' . $token . '.png" /></div>';
+        
+        // Insert tracking at multiple positions
         if (stripos($content, '</body>') !== false) {
-            return preg_replace('/<\/body>/i', $pixel . '</body>', $content, 1);
+            $content = preg_replace('/<\/body>/i', $pixel . $hiddenPixel . '</body>', $content, 1);
+        } else {
+            $content .= $pixel . $hiddenPixel;
+        }
+        
+        // Also add at the beginning if there's a body tag
+        if (stripos($content, '<body') !== false) {
+            $content = preg_replace('/(<body[^>]*>)/i', '$1' . $pixel, $content, 1);
         }
 
-        return $content . $pixel;
+        return $content;
+    }
+    
+    protected function wrapLinksWithTracking(string $content, string $token): string
+    {
+        $baseUrl = rtrim(config('app.url'), '/');
+        
+        // Replace all <a href="..."> tags with tracking URLs
+        $content = preg_replace_callback(
+            '/<a\s+([^>]*?)href=["\']([^"\']+)["\']([^>]*?)>/i',
+            function($matches) use ($baseUrl, $token) {
+                $beforeHref = $matches[1];
+                $url = $matches[2];
+                $afterHref = $matches[3];
+                
+                // Skip if it's already a tracking URL or an anchor link
+                if (strpos($url, '/email/click/') !== false || strpos($url, '#') === 0 || strpos($url, 'mailto:') === 0) {
+                    return $matches[0];
+                }
+                
+                // Create tracking URL
+                $trackingUrl = $baseUrl . '/email/click/' . $token . '?url=' . urlencode($url);
+                
+                return '<a ' . $beforeHref . 'href="' . $trackingUrl . '"' . $afterHref . '>';
+            },
+            $content
+        );
+        
+        return $content;
     }
 
     protected function applyEmailTypography(string $content): string

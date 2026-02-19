@@ -16,6 +16,7 @@ class OrganizationFaq extends Model
         'question',
         'answer', 
         'answer_markdown',
+        'follow_up',
         'category',
         'keywords',
         'sort_order',

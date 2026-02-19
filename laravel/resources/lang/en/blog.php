@@ -1,0 +1,21 @@
+<?php
+return [
+    'page_title' => 'AI Customer Support Blog',
+    'page_subtitle' => 'Stay updated with the latest insights, tips, and trends in AI customer support. Expert advice to help your business thrive.',
+    'read_more' => 'Read More',
+    'published_on' => 'Published on',
+    'by_author' => 'by :author',
+    'min_read' => ':minutes min read',
+    'categories' => 'Categories',
+    'tags' => 'Tags',
+    'share' => 'Share',
+    'recent_posts' => 'Recent Posts',
+    'subscribe_newsletter' => 'Subscribe to Newsletter',
+    'subscribe_text' => 'Get the latest articles delivered to your inbox',
+    'enter_email' => 'Enter your email',
+    'subscribe' => 'Subscribe',
+    'no_posts' => 'No blog posts available at this time.',
+    'search_placeholder' => 'Search articles...',
+    'filter_by_category' => 'Filter by Category',
+    'all_categories' => 'All Categories',
+];

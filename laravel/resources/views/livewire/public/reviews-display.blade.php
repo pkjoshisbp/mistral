@@ -6,7 +6,7 @@
                 <h2 class="display-5 fw-bold mb-3">
                     <i class="fas fa-star text-warning me-2"></i>Customer Reviews
                 </h2>
-                @if($organizationName)
+                @if($organizationName && is_string($organizationName))
                     <p class="lead text-muted">What our customers say about {{ $organizationName }}'s AI Chat Service</p>
                 @else
                     <p class="lead text-muted">What our customers say about our AI Chat Services</p>

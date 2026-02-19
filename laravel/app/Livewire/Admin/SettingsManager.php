@@ -44,6 +44,7 @@ class SettingsManager extends Component
     public $llamacpp_model_repo = 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom';
     public $llamacpp_threads = 4;
     public $llamacpp_context_length = 4096;
+    public $ai_use_intent_rewrite = true;
 
     // WhatsApp Cloud Settings
     public $whatsapp_api_version = 'v20.0';
@@ -166,6 +167,7 @@ class SettingsManager extends Component
         $this->llamacpp_model_repo = AdminSetting::get('llamacpp_model_repo', 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom');
         $this->llamacpp_threads = AdminSetting::get('llamacpp_threads', 4);
         $this->llamacpp_context_length = AdminSetting::get('llamacpp_context_length', 4096);
+        $this->ai_use_intent_rewrite = (bool) AdminSetting::get('ai_use_intent_rewrite', true);
 
         // WhatsApp Settings
         $this->whatsapp_api_version = AdminSetting::get('whatsapp_api_version', 'v20.0');
@@ -323,6 +325,7 @@ class SettingsManager extends Component
             'llamacpp_model_repo' => 'nullable|string',
             'llamacpp_threads' => 'nullable|integer|min:1|max:32',
             'llamacpp_context_length' => 'nullable|integer|min:512|max:8192',
+            'ai_use_intent_rewrite' => 'boolean',
         ]);
 
         // Save to admin settings
@@ -335,6 +338,7 @@ class SettingsManager extends Component
         AdminSetting::set('llamacpp_model_repo', $this->llamacpp_model_repo, 'select', 'ai', 'llama.cpp Model Repository');
         AdminSetting::set('llamacpp_threads', $this->llamacpp_threads, 'number', 'ai', 'llama.cpp Threads');
         AdminSetting::set('llamacpp_context_length', $this->llamacpp_context_length, 'number', 'ai', 'llama.cpp Context Length');
+        AdminSetting::set('ai_use_intent_rewrite', $this->ai_use_intent_rewrite ? '1' : '0', 'boolean', 'ai', 'Use intent + query rewrite');
 
         // Update environment file
         $envUpdates = [

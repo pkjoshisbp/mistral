@@ -33,19 +33,28 @@ class ActionService
         ]);
 
         try {
-            // Step 1: Detect intent
-            $intentResult = $this->intentDetector->detectIntent($query, $organizationId);
+            $useIntent = $this->aiAgent->useIntentAndRewrite();
+            $intentResult = $useIntent
+                ? $this->intentDetector->detectIntent($query, $organizationId)
+                : ['intent' => 'general_qna', 'confidence' => 0.0];
+
+            if (!$useIntent) {
+                Log::info('Intent gating disabled for actions', [
+                    'organization_id' => $organizationId
+                ]);
+            }
 
             // Step 2: Find matching actions (even if intent says static_info) so we can run high-confidence actions
-            $matchingActions = $this->findMatchingActions($query, $organizationId, $intentResult);
+            $matchingActions = $this->findMatchingActions($query, $organizationId, $intentResult, $useIntent);
             $topAction = $matchingActions[0] ?? null;
             $topScore = $topAction['score'] ?? 0;
             $scoreThreshold = $topAction && isset($topAction['action']->min_score_threshold)
                 ? (float) $topAction['action']->min_score_threshold
                 : 0.7;
 
-            $requiresAction = $this->intentDetector->requiresAction($intentResult);
-            $shouldExecuteAction = $requiresAction || ($topAction && $topScore >= $scoreThreshold);
+            $requiresAction = $useIntent ? $this->intentDetector->requiresAction($intentResult) : false;
+            $topMethod = $topAction['method'] ?? null;
+            $shouldExecuteAction = $requiresAction || ($topAction && ($topMethod === 'keyword' || $topScore >= $scoreThreshold));
 
             if (!$shouldExecuteAction) {
                 Log::info('No action required, using knowledge base', [
@@ -135,7 +144,7 @@ class ActionService
     /**
      * Find actions that match the user query using semantic similarity
      */
-    private function findMatchingActions(string $query, int $organizationId, array $intentResult): array
+    private function findMatchingActions(string $query, int $organizationId, array $intentResult, bool $useIntent = true): array
     {
         // Get active actions for this organization
         $actions = OrganizationAction::forOrganization($organizationId)
@@ -146,8 +155,10 @@ class ActionService
             return [];
         }
 
-        // Get recommended action types based on intent
-        $recommendedTypes = $this->intentDetector->getRecommendedActionTypes($intentResult);
+        // Get recommended action types based on intent (optional)
+        $recommendedTypes = $useIntent
+            ? $this->intentDetector->getRecommendedActionTypes($intentResult)
+            : [];
 
         $matches = [];
         $queryLower = strtolower($query);
@@ -208,7 +219,7 @@ class ActionService
                 return in_array($action->action_type, ['pricing', 'cost', 'rates'], true);
             })->values();
 
-            if ($intent === 'pricing'
+            if ($useIntent && $intent === 'pricing'
                 && $this->queryHasPricingSignals($queryLower, $pricingKeywords)
                 && $pricingActions->count() === 1) {
                 $fallbackAction = $pricingActions->first();

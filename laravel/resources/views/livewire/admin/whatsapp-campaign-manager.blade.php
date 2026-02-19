@@ -18,11 +18,20 @@
                         <select class="form-select" wire:model="selectedTemplate">
                             <option value="">— Select —</option>
                             @foreach ($templates as $tpl)
-                                <option value="{{ $tpl['key'] }}">{{ $tpl['label'] }}</option>
+                                <option value="{{ $tpl['value'] }}">{{ $tpl['label'] }}</option>
                             @endforeach
                         </select>
+                        @error('selectedTemplate')
+                            <div class="text-danger small mt-1">{{ $message }}</div>
+                        @enderror
+                        @foreach ($errors->get('template') as $message)
+                            <div class="text-danger small mt-1">{{ $message }}</div>
+                        @endforeach
                     </div>
                     <div class="col-md-6 d-flex gap-2">
+                        <button class="btn btn-outline-success" wire:click="syncApprovedTemplates" wire:loading.attr="disabled" title="Sync approved templates from WhatsApp">
+                            Sync Approved Templates
+                        </button>
                         <button class="btn btn-outline-primary" wire:click="insertTemplate" wire:loading.attr="disabled" title="Select a template above, then click to insert">
                             Insert into composer
                         </button>
@@ -37,12 +46,35 @@
                         </button>
                     </div>
                 </div>
+                <div class="row g-2 mt-2">
+                    <div class="col-md-6">
+                        <label class="form-label mb-1">Template name for API (required)</label>
+                        <input type="text" class="form-control @error('templateName') is-invalid @enderror" wire:model="templateName" placeholder="e.g., intro_business_automation_v2">
+                        @error('templateName')
+                            <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                        @foreach ($errors->get('template') as $message)
+                            <div class="text-danger small mt-1">{{ $message }}</div>
+                        @endforeach
+                        <small class="text-muted">Lowercase letters, numbers, and underscores only. Use a new name when you edit existing content.</small>
+                    </div>
+                </div>
                 @if($selectedTemplate)
-                    @php $tpl = collect($templates)->firstWhere('key', $selectedTemplate); @endphp
+                    @php $tpl = collect($templates)->firstWhere('value', $selectedTemplate); @endphp
                     @if($tpl)
                         <div class="mt-3 p-3 border rounded">
                             <div class="d-flex align-items-center gap-3">
-                                <img src="{{ $tpl['header_image'] }}" alt="header" class="rounded" style="width: 80px; height: 80px; object-fit: cover;">
+                                @php
+                                    $headerPreview = $tpl['header_image'] ?? '';
+                                    if ($image_file) {
+                                        $headerPreview = $image_file->temporaryUrl();
+                                    } elseif (!empty($image_url)) {
+                                        $headerPreview = $image_url;
+                                    }
+                                @endphp
+                                @if(!empty($headerPreview))
+                                    <img src="{{ $headerPreview }}" alt="header" class="rounded" style="width: 80px; height: 80px; object-fit: cover;">
+                                @endif
                                 <div>
                                     <div class="fw-bold">Preview</div>
                                     <div style="white-space: pre-line">{{ $tpl['body'] }}</div>
@@ -52,11 +84,28 @@
                                             <span class="ms-2 text-muted">{{ $tpl['button_url'] }}</span>
                                         </div>
                                     @endif
-                                    <div class="mt-3">
-                                        <label class="form-label mb-1">Body variable &#123;&#123;1&#125;&#125; (e.g., recipient name)</label>
-                                        <input type="text" class="form-control" placeholder="e.g., Pawan" wire:model="templateParam1">
-                                        <small class="text-muted">Template messages can initiate conversations and include header image + body variables.</small>
-                                    </div>
+                                    @php
+                                        $headerText = (string) ($tpl['header_text'] ?? '');
+                                        preg_match_all('/\{\{\s*(\d+)\s*\}\}/', $headerText, $headerMatches);
+                                        $headerVarCount = count(array_unique($headerMatches[1] ?? []));
+                                        $bodyText = (string) ($tpl['body'] ?? '');
+                                        preg_match_all('/\{\{\s*(\d+)\s*\}\}/', $bodyText, $bodyMatches);
+                                        $bodyVarCount = count(array_unique($bodyMatches[1] ?? []));
+                                    @endphp
+                                    @if($headerVarCount > 0)
+                                        <div class="mt-3">
+                                            <label class="form-label mb-1">Header variables (comma-separated)</label>
+                                            <input type="text" class="form-control" placeholder="e.g., Clinic" wire:model="headerParam1">
+                                            <small class="text-muted">Provide {{ $headerVarCount }} value(s) for header variables.</small>
+                                        </div>
+                                    @endif
+                                    @if($bodyVarCount > 0)
+                                        <div class="mt-3">
+                                            <label class="form-label mb-1">Body variables (comma-separated)</label>
+                                            <input type="text" class="form-control" placeholder="e.g., Pawan, Clinic" wire:model="templateParam1">
+                                            <small class="text-muted">Provide {{ $bodyVarCount }} value(s) for body variables.</small>
+                                        </div>
+                                    @endif
                                     <div class="mt-3">
                                         <label class="form-label mb-1">Button URL variable &#123;&#123;1&#125;&#125; (if template URL uses a variable)</label>
                                         <input type="text" class="form-control" placeholder="e.g., referral-code-123" wire:model="buttonUrlVar1">
@@ -112,7 +161,12 @@
                 <label class="form-label">Or upload image</label>
                 <input type="file" class="form-control @error('image_file') is-invalid @enderror" wire:model="image_file" accept="image/*">
                 @error('image_file')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                <small class="text-muted">Max 5MB. Uploaded image will override Image URL above.</small>
+                <small class="text-muted">Max 5MB. Uploaded image will override Image URL above and be used for template header examples.</small>
+                @if($image_file)
+                    <div class="mt-2 text-muted">
+                        Selected image: {{ $image_file->getClientOriginalName() }}
+                    </div>
+                @endif
             </div>
 
             <div class="mb-3">

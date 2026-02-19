@@ -81,7 +81,7 @@
                                                 {{ $conversation->created_at->format('M d, Y') }}
                                             </div>
                                             <small class="text-muted">
-                                                {{ $conversation->created_at->format('h:i A') }}
+                                                {{ $conversation->created_at->format('h:i:s A') }}
                                             </small>
                                         </td>
                                         <td>
@@ -153,7 +153,7 @@
                                                                 <div class="{{ $isUser ? 'text-end' : 'text-start' }}" style="max-width: 80%;">
                                                                     <div class="small mb-1">
                                                                         <span class="badge {{ $isUser ? 'bg-primary' : 'bg-secondary' }}">{{ $sender }}</span>
-                                                                        <span class="text-muted ms-2">{{ ($message->sent_at ?? $message->created_at)->format('h:i A') }}</span>
+                                                                        <span class="text-muted ms-2">{{ ($message->sent_at ?? $message->created_at)->format('h:i:s A') }}</span>
                                                                     </div>
                                                                     <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
                                                                         {!! preg_replace('/(<br\s*\/?\s*>\s*){2,}/i', '<br>', $message->message_html) !!}

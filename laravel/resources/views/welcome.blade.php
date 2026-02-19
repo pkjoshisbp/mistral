@@ -66,6 +66,29 @@
         </div>
     </section>
 
+    <!-- Key Benefits Banner -->
+    <section class="py-3" style="background: #f8f9fa;">
+        <div class="container">
+            <div class="row text-center">
+                <div class="col-md-4">
+                    <i class="fas fa-robot text-primary fa-2x mb-2"></i>
+                    <h6>AI Chat on Your Website</h6>
+                    <small class="text-muted">Instant answers for every visitor</small>
+                </div>
+                <div class="col-md-4">
+                    <i class="fab fa-whatsapp text-success fa-2x mb-2"></i>
+                    <h6>WhatsApp Automation</h6>
+                    <small class="text-muted">Reply to customers automatically</small>
+                </div>
+                <div class="col-md-4">
+                    <i class="fas fa-clock text-info fa-2x mb-2"></i>
+                    <h6>Never Miss a Lead</h6>
+                    <small class="text-muted">Available 24/7, even when you sleep</small>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Social Share Section -->
     <section class="py-4" style="background: #1e293b; color: white;">
         <div class="container text-center">
@@ -172,9 +195,52 @@
             <div class="row pricing-container show-monthly">
                 @php
                     try {
-                        $plans = App\Models\SubscriptionPlan::where('is_active', true)
+                        $rawPlans = App\Models\PricingPlan::active()
+                            ->subscriptions()
                             ->orderBy('sort_order')
+                            ->orderBy('billing_period')
                             ->get();
+
+                        $grouped = [];
+                        foreach ($rawPlans as $plan) {
+                            $meta = is_array($plan->metadata) ? $plan->metadata : [];
+                            $baseSlug = $meta['original_slug'] ?? $plan->slug;
+                            $key = $baseSlug ?: $plan->name;
+
+                            if (!isset($grouped[$key])) {
+                                $tokenCap = (int) ($plan->token_cap ?? 0);
+                                $grouped[$key] = (object) [
+                                    'id' => null,
+                                    'monthly_id' => null,
+                                    'yearly_id' => null,
+                                    'name' => $plan->name,
+                                    'slug' => $baseSlug ?: $plan->slug,
+                                    'monthly_price' => null,
+                                    'yearly_price' => null,
+                                    'token_cap_monthly' => $tokenCap,
+                                    'overage_price_per_100k' => $plan->overage_price_per_100k,
+                                    'features' => $meta['features'] ?? [],
+                                    'formatted_token_cap' => $tokenCap >= 1000000
+                                        ? number_format($tokenCap / 1000000, 0) . 'M'
+                                        : number_format($tokenCap / 1000, 0) . 'K',
+                                ];
+                            }
+
+                            if ($plan->billing_period === 'monthly') {
+                                $grouped[$key]->id = $plan->id;
+                                $grouped[$key]->monthly_id = $plan->id;
+                                $grouped[$key]->monthly_price = $plan->price;
+                            }
+                            if ($plan->billing_period === 'yearly') {
+                                if (!$grouped[$key]->id) {
+                                    $grouped[$key]->id = $plan->id;
+                                }
+                                $grouped[$key]->yearly_id = $plan->id;
+                                $grouped[$key]->yearly_price = $plan->price;
+                            }
+                        }
+
+                        $plans = collect(array_values($grouped));
                     } catch (\Throwable $e) {
                         $plans = collect();
                     }
@@ -195,11 +261,16 @@
                             <div class="card-body text-center">
                                 <h4 class="card-title">{{ __('common.plan_' . $plan->slug . '_title') }}</h4>
                                 <div class="price-section mb-3">
+                                    @php
+                                        $currencySymbol = $currency === 'INR' ? '₹' : '$';
+                                    @endphp
                                     @if($plan->monthly_price > 0)
                                         <div class="monthly-price price-display" data-cycle="monthly">
                                             @php
-                                                $monthlyPrice = $plan->getMonthlyPriceForCurrency($currency);
-                                                $currencySymbol = $currency === 'INR' ? '₹' : '$';
+                                                $monthlyPrice = $plan->monthly_price;
+                                                if ($currency === 'INR' && $locationService) {
+                                                    $monthlyPrice = $locationService->convertToINR($monthlyPrice);
+                                                }
                                             @endphp
                                             @if($plan->slug === 'starter')
                                                 <span class="h3 text-success">{{ $currencySymbol }}{{ number_format($monthlyPrice, 0) }}</span>
@@ -218,7 +289,10 @@
                                         </div>
                                         <div class="yearly-price price-display" data-cycle="yearly">
                                             @php
-                                                $yearlyPrice = $plan->getYearlyPriceForCurrency($currency);
+                                                $yearlyPrice = $plan->yearly_price;
+                                                if ($currency === 'INR' && $locationService) {
+                                                    $yearlyPrice = $locationService->convertToINR($yearlyPrice);
+                                                }
                                             @endphp
                                             @if($plan->slug === 'starter')
                                                 <span class="h3 text-success">{{ $currencySymbol }}{{ number_format($yearlyPrice, 0) }}</span>
@@ -242,8 +316,10 @@
                                     @else
                                         <div class="h3">Custom</div>
                                         @php
-                                            $customPrice = $plan->getMonthlyPriceForCurrency($currency);
-                                            $currencySymbol = $currency === 'INR' ? '₹' : '$';
+                                            $customPrice = $plan->monthly_price;
+                                            if ($currency === 'INR' && $locationService) {
+                                                $customPrice = $locationService->convertToINR($customPrice);
+                                            }
                                         @endphp
                                         <small class="text-muted">Starting ~{{ $currencySymbol }}{{ number_format($customPrice, 0) }}</small>
                                     @endif
@@ -260,8 +336,10 @@
                                     <br>
                                     <small class="text-muted">
                                         @php
-                                            $overagePrice = $currency === 'INR' ? $locationService->convertToINR($plan->overage_price_per_100k) : $plan->overage_price_per_100k;
-                                            $currencySymbol = $currency === 'INR' ? '₹' : '$';
+                                            $overagePrice = $plan->overage_price_per_100k;
+                                            if ($currency === 'INR' && $locationService) {
+                                                $overagePrice = $locationService->convertToINR($overagePrice);
+                                            }
                                         @endphp
                                         Overage: {{ $currencySymbol }}{{ number_format($overagePrice, 0) }} per 100k tokens
                                     </small>
@@ -464,6 +542,71 @@
         </div>
     </section>
 
+    <!-- SEO Content Section -->
+    <section class="py-5" style="background: #f8f9fa;">
+        <div class="container">
+            <div class="row">
+                <div class="col-lg-8 mx-auto">
+                    <h2 class="text-center mb-4">Turn Your Website and WhatsApp Into a 24/7 Sales Team</h2>
+                    
+                    <div class="row mb-4">
+                        <div class="col-md-6 mb-3">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-body">
+                                    <h5><i class="fas fa-robot text-primary me-2"></i>AI Chat on Your Website</h5>
+                                    <p class="text-muted mb-0">Answer customer questions instantly, capture leads while they're interested, and provide support even when your team is offline.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-body">
+                                    <h5><i class="fab fa-whatsapp text-success me-2"></i>WhatsApp Automation</h5>
+                                    <p class="text-muted mb-0">Reply to WhatsApp messages automatically, send appointment reminders, and follow up with leads — all without lifting a finger.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded shadow-sm mb-4">
+                        <h4 class="mb-3">Why Businesses Choose Our AI Chat</h4>
+                        <ul class="list-unstyled">
+                            <li class="mb-3"><i class="fas fa-check-circle text-success me-2"></i><strong>Cut support costs by up to 70%</strong><br><small class="text-muted">Your AI handles routine questions so your team focuses on real sales</small></li>
+                            <li class="mb-3"><i class="fas fa-check-circle text-success me-2"></i><strong>24/7 availability</strong><br><small class="text-muted">Customers get instant answers even when your office is closed</small></li>
+                            <li class="mb-3"><i class="fas fa-check-circle text-success me-2"></i><strong>Works on website + WhatsApp</strong><br><small class="text-muted">One AI assistant for all your channels</small></li>
+                            <li class="mb-3"><i class="fas fa-check-circle text-success me-2"></i><strong>More leads, less manual work</strong><br><small class="text-muted">The bot qualifies visitors before you call them</small></li>
+                            <li class="mb-3"><i class="fas fa-check-circle text-success me-2"></i><strong>Easy setup, no coding required</strong><br><small class="text-muted">Start chatting with customers in under 10 minutes</small></li>
+                        </ul>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 text-center mb-3">
+                            <div class="p-3">
+                                <i class="fas fa-store text-info fa-3x mb-2"></i>
+                                <h6>Ecommerce</h6>
+                                <small class="text-muted">Answer product questions and recover abandoned carts</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-center mb-3">
+                            <div class="p-3">
+                                <i class="fas fa-hospital text-danger fa-3x mb-2"></i>
+                                <h6>Healthcare</h6>
+                                <small class="text-muted">Automate appointment booking and reminders</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-center mb-3">
+                            <div class="p-3">
+                                <i class="fas fa-graduation-cap text-warning fa-3x mb-2"></i>
+                                <h6>Education</h6>
+                                <small class="text-muted">Answer admissions questions 24/7</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- CTA Section -->
     <section class="bg-light py-5">
         <div class="container text-center">
@@ -581,30 +724,146 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Organization",
+        "@type": "SoftwareApplication",
         "name": "AI Chat Support",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web Browser",
         "url": "{{ url('/') }}",
         "logo": "{{ asset('images/logo.png') }}",
-        "description": "Revolutionary AI-powered customer support automation platform providing 24/7 intelligent chat assistance.",
-        "address": {
-            "@type": "PostalAddress",
-            "streetAddress": "Villa No.10, Sriram Villa, AN Guha Lane",
-            "addressLocality": "Sambalpur",
-            "postalCode": "768001",
-            "addressCountry": "IN"
+        "description": "AI-powered customer support automation platform providing 24/7 intelligent chatbot assistance for businesses. Includes live chat, multilingual support, and seamless website integration.",
+        "offers": [
+            {
+                "@type": "Offer",
+                "name": "Basic Monthly Subscription",
+                "description": "Perfect for individuals and small projects testing AI chat support",
+                "price": "15.00",
+                "priceCurrency": "USD",
+                "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "15.00",
+                    "priceCurrency": "USD",
+                    "billingDuration": "P1M",
+                    "unitText": "500,000 tokens per month"
+                },
+                "availability": "https://schema.org/InStock",
+                "url": "{{ url('/register') }}"
+            },
+            {
+                "@type": "Offer",
+                "name": "Starter Monthly Subscription",
+                "description": "Perfect for small businesses getting started with AI chat",
+                "price": "49.00",
+                "priceCurrency": "USD",
+                "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "49.00",
+                    "priceCurrency": "USD",
+                    "billingDuration": "P1M",
+                    "unitText": "2 million tokens per month"
+                },
+                "availability": "https://schema.org/InStock",
+                "url": "{{ url('/register') }}"
+            },
+            {
+                "@type": "Offer",
+                "name": "Business Monthly Subscription",
+                "description": "Advanced features for established businesses",
+                "price": "199.00",
+                "priceCurrency": "USD",
+                "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "199.00",
+                    "priceCurrency": "USD",
+                    "billingDuration": "P1M",
+                    "unitText": "10 million tokens per month"
+                },
+                "availability": "https://schema.org/InStock",
+                "url": "{{ url('/register') }}"
+            },
+            {
+                "@type": "Offer",
+                "name": "Starter Credits Package",
+                "description": "One-time credit purchase for occasional usage",
+                "price": "19.00",
+                "priceCurrency": "USD",
+                "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "19.00",
+                    "priceCurrency": "USD",
+                    "unitText": "500,000 tokens - never expires"
+                },
+                "availability": "https://schema.org/InStock",
+                "url": "{{ url('/credits-and-services') }}"
+            },
+            {
+                "@type": "Offer",
+                "name": "Basic Credits Package",
+                "description": "Perfect for occasional usage with no expiration",
+                "price": "69.00",
+                "priceCurrency": "USD",
+                "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "69.00",
+                    "priceCurrency": "USD",
+                    "unitText": "2 million tokens - never expires"
+                },
+                "availability": "https://schema.org/InStock",
+                "url": "{{ url('/credits-and-services') }}"
+            },
+            {
+                "@type": "Offer",
+                "name": "Standard Credits Package",
+                "description": "Great value for regular usage with lifetime validity",
+                "price": "129.00",
+                "priceCurrency": "USD",
+                "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "129.00",
+                    "priceCurrency": "USD",
+                    "unitText": "4 million tokens - never expires"
+                },
+                "availability": "https://schema.org/InStock",
+                "url": "{{ url('/credits-and-services') }}"
+            },
+            {
+                "@type": "Offer",
+                "name": "Premium Credits Package",
+                "description": "Best value for heavy users with maximum flexibility",
+                "price": "299.00",
+                "priceCurrency": "USD",
+                "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "299.00",
+                    "priceCurrency": "USD",
+                    "unitText": "5 million tokens - never expires"
+                },
+                "availability": "https://schema.org/InStock",
+                "url": "{{ url('/credits-and-services') }}"
+            }
+        ],
+        "aggregateRating": {
+            "@type": "AggregateRating",
+            "ratingValue": "4.8",
+            "reviewCount": "127",
+            "bestRating": "5",
+            "worstRating": "1"
         },
-        "contactPoint": {
-            "@type": "ContactPoint",
-            "contactType": "customer service",
-            "availableLanguage": ["English", "Hindi"]
-        },
-        "offers": {
-            "@type": "Offer",
-            "name": "AI Chat Support Service",
-            "description": "AI-powered customer support automation with 24/7 availability",
-            "category": "Software as a Service",
-            "priceCurrency": "USD",
-            "price": "49.00"
+        "provider": {
+            "@type": "Organization",
+            "name": "MYWEB SOLUTIONS",
+            "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "Villa No.10, Sriram Villa, AN Guha Lane",
+                "addressLocality": "Sambalpur",
+                "postalCode": "768001",
+                "addressCountry": "IN"
+            },
+            "contactPoint": {
+                "@type": "ContactPoint",
+                "contactType": "customer service",
+                "availableLanguage": ["en", "hi"],
+                "telephone": "+91-XXX-XXX-XXXX"
+            }
         }
     }
     </script>

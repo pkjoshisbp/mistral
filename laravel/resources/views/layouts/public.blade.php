@@ -8,13 +8,13 @@
     <!-- SEO Meta Tags -->
     <title>@yield('title', __('common.hero_intro'))</title>
     <meta name="description" content="@yield('description', __('common.hero_sub'))">
-    <meta name="keywords" content="@yield('keywords', 'AI chat support, customer service automation, chatbot, artificial intelligence, live chat, customer support software')">
+    <meta name="keywords" content="@yield('keywords', 'AI chatbot for website, automated WhatsApp replies, 24/7 customer support AI, AI chatbot for business websites, AI support bot for customer service, AI chatbot solutions for websites, WhatsApp chatbot for business support, AI chatbot automation tools, AI chatbot software for small business, 24/7 live chat support automation, AI-powered virtual assistant for customers, chatbot integration with website, automated lead generation chatbot, WhatsApp automation for business, WhatsApp marketing automation tools, automated WhatsApp responses for companies, WhatsApp bulk messaging solutions, WhatsApp auto reply for customer enquiries, WhatsApp API automation services, WhatsApp chatbot integration, reduce support cost with chatbot, improve customer engagement with AI, lead generation through messaging automation, automate customer communications, chatbot for instant query response, AI customer support automation tools')">
     
     <!-- Open Graph Meta Tags -->
     <meta property="og:title" content="@yield('og_title', __('common.hero_intro'))">
     <meta property="og:description" content="@yield('og_description', __('common.hero_sub'))">
     <meta property="og:image" content="@yield('og_image', asset('images/ai-chat-og-image.jpg'))">
-    <meta property="og:url" content="{{ url()->current() }}">
+    <meta property="og:url" content="{{ rtrim(config('app.url'), '/') . request()->getPathInfo() }}">
     <meta property="og:type" content="website">
     
     <!-- Twitter Card Meta Tags -->
@@ -28,22 +28,27 @@
     @php($supportedLocales = ['de','fr','es','it','pt','hi','th'])
     @php($isLocalized = !empty($currentSegments) && in_array($currentSegments[0], $supportedLocales))
     @php($basePath = $isLocalized && count($currentSegments) > 1 ? '/' . implode('/', array_slice($currentSegments, 1)) : ($isLocalized ? '' : $currentPath))
+    @php($baseUrl = rtrim(config('app.url'), '/'))
+    @php($buildUrl = function (string $path) use ($baseUrl) {
+        $clean = ltrim($path, '/');
+        return $clean === '' ? $baseUrl : $baseUrl . '/' . $clean;
+    })
     
-    <!-- English version (no prefix) -->
-    <link rel="alternate" hreflang="en" href="{{ url($basePath ?: '/') }}" />
+    <!-- English version (no prefix, no trailing slash) -->
+    <link rel="alternate" hreflang="en" href="{{ rtrim($buildUrl($basePath ?: '/'), '/') ?: $baseUrl }}" />
     
-    <!-- Localized versions -->
+    <!-- Localized versions (no trailing slashes) -->
     @foreach($supportedLocales as $loc)
-        <link rel="alternate" hreflang="{{ $loc }}" href="{{ url('/' . $loc . $basePath) }}" />
+        <link rel="alternate" hreflang="{{ $loc }}" href="{{ rtrim($buildUrl('/' . $loc . $basePath), '/') }}" />
     @endforeach
     
-    <!-- Default language -->
-    <link rel="alternate" hreflang="x-default" href="{{ url($basePath ?: '/') }}" />
+    <!-- Default language (no trailing slash) -->
+    <link rel="alternate" hreflang="x-default" href="{{ rtrim($buildUrl($basePath ?: '/'), '/') ?: $baseUrl }}" />
     
-    <!-- Canonical URL (current page) -->
+    <!-- Canonical URL (current page, no trailing slash) -->
     @php($currentLocale = app()->getLocale())
     @php($canonicalPath = $currentLocale === 'en' ? ($basePath ?: '/') : '/' . $currentLocale . $basePath)
-    <link rel="canonical" href="{{ url($canonicalPath) }}" />
+    <link rel="canonical" href="{{ rtrim($buildUrl($canonicalPath), '/') ?: $baseUrl }}" />
     
     <meta name="twitter:image" content="@yield('twitter_image', asset('images/ai-chat-twitter-image.jpg'))">
     

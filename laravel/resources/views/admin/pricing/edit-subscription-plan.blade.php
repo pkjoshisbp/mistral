@@ -31,6 +31,8 @@
                     <form action="{{ route('admin.pricing.subscription-plans.update', $plan->id) }}" method="POST">
                         @csrf
                         @method('PUT')
+                        <input type="hidden" name="monthly_id" value="{{ $plan->monthly_id }}">
+                        <input type="hidden" name="yearly_id" value="{{ $plan->yearly_id }}">
                         
                         <div class="card-body">
                             <div class="form-group">

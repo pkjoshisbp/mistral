@@ -3,7 +3,7 @@
 # Run this in a screen/tmux session: screen -S ollama-tunnel ./monitor-ollama-tunnel.sh
 
 # Direct connection to vast.ai instance
-VAST_HOST="116.106.20.52"
+VAST_HOST="171.248.41.73"
 VAST_PORT="29425"
 VAST_USER="root"
 LOCAL_PORT="11435"
@@ -38,7 +38,7 @@ while true; do
         fi
     else
         # Test if Ollama is actually responding
-        if ! curl -s --max-time 5 http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
+        if ! curl -s --max-time 5 http://127.0.0.1:${LOCAL_PORT}/api/tags > /dev/null 2>&1; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚠️  Tunnel exists but Ollama not responding. Restarting..."
             pkill -f "ssh.*${VAST_PORT}.*${LOCAL_PORT}:127.0.0.1:${REMOTE_PORT}"
             sleep 3

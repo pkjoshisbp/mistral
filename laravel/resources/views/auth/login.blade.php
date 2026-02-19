@@ -17,14 +17,14 @@
 
         <!-- Email Address -->
         <div class="mb-3">
-            <x-input-label for="email" :value="__('Email')" />
+            <x-input-label for="email" :value="__('auth.email')" />
             <x-text-input id="email" type="email" name="email" :value="old('email')" required autofocus autocomplete="username" />
             <x-input-error :messages="$errors->get('email')" />
         </div>
 
         <!-- Password -->
         <div class="mb-3">
-            <x-input-label for="password" :value="__('Password')" />
+            <x-input-label for="password" :value="__('auth.password')" />
             <div class="position-relative">
                 <x-text-input id="password" class="pe-5"
                                 type="password"
@@ -45,39 +45,39 @@
         <!-- Remember Me -->
         <div class="form-check mb-3">
             <input id="remember_me" type="checkbox" class="form-check-input" name="remember">
-            <label for="remember_me" class="form-check-label">{{ __('Remember me') }}</label>
+            <label for="remember_me" class="form-check-label">{{ __('auth.remember_me') }}</label>
         </div>
 
         <!-- OTP Section -->
     <div id="otp-section" class="mb-3" style="display: {{ $errors->has('otp') ? 'block' : 'none' }};">
             <div class="mb-2">
-                <x-input-label for="otp" :value="__('Enter OTP Code')" />
-                <x-text-input id="otp" type="text" name="otp" maxlength="6" placeholder="Enter 6-digit OTP" @if(!$errors->has('otp')) disabled @endif />
+                <x-input-label for="otp" :value="__('auth.enter_otp_code')" />
+                <x-text-input id="otp" type="text" name="otp" maxlength="6" placeholder="{{ __('auth.enter_otp_code') }}" @if(!$errors->has('otp')) disabled @endif />
                 <x-input-error :messages="$errors->get('otp')" />
             </div>
             <div class="text-muted small mb-2">
-                <span id="otp-message">We've sent a 6-digit code to your email address. Please check your inbox.</span>
-                <button type="button" id="resend-otp" class="btn btn-link p-0 ms-2">Resend OTP</button>
+                <span id="otp-message">{{ __('auth.otp_sent_message') }}</span>
+                <button type="button" id="resend-otp" class="btn btn-link p-0 ms-2">{{ __('auth.resend_otp') }}</button>
             </div>
             
             <!-- Remember Device for OTP -->
             <div class="form-check">
                 <input id="remember_device" type="checkbox" class="form-check-input" name="remember_device">
-                <label for="remember_device" class="form-check-label">{{ __('Remember this device (skip OTP for 30 days)') }}</label>
+                <label for="remember_device" class="form-check-label">{{ __('auth.remember_device') }}</label>
             </div>
         </div>
 
         <div class="d-flex align-items-center justify-content-between mt-3">
             @if (Route::has('password.request'))
                 <a class="text-decoration-underline small" href="{{ route('password.request') }}">
-                    {{ __('Forgot your password?') }}
+                    {{ __('auth.forgot_password') }}
                 </a>
             @endif
 
             
 
             <x-primary-button id="login-button" class="ms-3">
-                <span id="login-text">{{ __('Log In') }}</span>
+                <span id="login-text">{{ __('auth.log_in') }}</span>
                 <span id="login-spinner" class="d-none ms-2">
                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                 </span>
@@ -87,15 +87,15 @@
         <div class="mt-4 text-center small text-muted">
             <hr class="my-3">
             <div class="mb-2">
-                <strong>ai-chat.support is owned and operated by MYWEB SOLUTIONS.</strong>
+                <strong>{{ __('auth.owned_by') }}</strong>
             </div>
             <div>
-                <a href="{{ route('privacy') }}" class="me-3 text-decoration-underline">Privacy Policy</a>
-                <a href="{{ route('terms') }}" class="me-3 text-decoration-underline">Terms of Service</a>
-                <a href="{{ route('contact') }}" class="text-decoration-underline">Contact Us</a>
+                <a href="{{ route('privacy') }}" class="me-3 text-decoration-underline">{{ __('auth.privacy_policy') }}</a>
+                <a href="{{ route('terms') }}" class="me-3 text-decoration-underline">{{ __('auth.terms_of_service') }}</a>
+                <a href="{{ route('contact') }}" class="text-decoration-underline">{{ __('auth.contact_us') }}</a>
             </div>
             <div class="mt-2">
-                <span class="text-muted">For support or security concerns, email <a href="mailto:info@ai-chat.support" class="text-decoration-underline">info@ai-chat.support</a></span>
+                <span class="text-muted">{{ __('auth.support_email') }} <a href="mailto:info@ai-chat.support" class="text-decoration-underline">info@ai-chat.support</a></span>
             </div>
         </div>
     </form>

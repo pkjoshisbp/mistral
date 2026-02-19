@@ -52,11 +52,19 @@
                     </div>
                     
                     <div class="form-group mb-3">
-                        <label for="address">Address</label>
-                        <textarea class="form-control @error('address') is-invalid @enderror" 
-                                  wire:model="address" rows="3" 
-                                  placeholder="Company address"></textarea>
-                        @error('address')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        <label for="primary_address">Primary Address</label>
+                        <textarea class="form-control @error('primary_address') is-invalid @enderror" 
+                                  wire:model="primary_address" rows="3" 
+                                  placeholder="Primary company address"></textarea>
+                        @error('primary_address')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                    </div>
+
+                    <div class="form-group mb-3">
+                        <label for="secondary_address">Secondary Address (Optional)</label>
+                        <textarea class="form-control @error('secondary_address') is-invalid @enderror" 
+                                  wire:model="secondary_address" rows="3" 
+                                  placeholder="Additional address"></textarea>
+                        @error('secondary_address')<div class="invalid-feedback">{{ $message }}</div>@enderror
                     </div>
                 </div>
             </div>
@@ -64,7 +72,7 @@
             <div class="form-group mb-3">
                 <label for="business_hours">Business Hours</label>
                 <input type="text" class="form-control @error('business_hours') is-invalid @enderror" 
-                       wire:model="business_hours" placeholder="Monday - Friday: 9:00 AM - 6:00 PM EST">
+                       wire:model="business_hours" placeholder="Monday - Friday: 11:00 AM - 11:30 PM IST">
                 @error('business_hours')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
             
@@ -119,7 +127,7 @@
                                     </div>
                                     <div>
                                         <h5 class="mb-1">Call Us</h5>
-                                        <p class="text-muted mb-0">Mon-Fri from 8am to 5pm</p>
+                                        <p class="text-muted mb-0">Mon-Sun from 11:00 AM to 11:30 PM IST</p>
                                     </div>
                                 </div>
                                 <p class="mb-0">
@@ -139,7 +147,10 @@
                                         <p class="text-muted mb-0">Come say hello</p>
                                     </div>
                                 </div>
-                                <p class="mb-0">{{ $address }}</p>
+                                <p class="mb-1"><strong>Primary:</strong> {{ $primary_address }}</p>
+                                @if(!empty($secondary_address))
+                                    <p class="mb-0"><strong>Also:</strong> {{ $secondary_address }}</p>
+                                @endif
                             </div>
                         </div>
                         

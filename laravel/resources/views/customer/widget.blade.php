@@ -84,6 +84,32 @@
                                         </div>
                                         <small class="text-muted">If enabled, visitors must provide name, email, and phone before chat starts. Skip button will be hidden.</small>
                                     </div>
+                                    @php
+                                        $contactFieldsLines = '';
+                                        $configuredContactFields = $custOrg->settings['widget_contact_fields'] ?? [];
+                                        if (is_array($configuredContactFields)) {
+                                            $contactFieldsLines = implode("\n", array_map(function ($f) {
+                                                $key = (string) ($f['key'] ?? '');
+                                                $label = (string) ($f['label'] ?? '');
+                                                $type = (string) ($f['type'] ?? 'text');
+                                                $required = !empty($f['required']) ? 'true' : 'false';
+                                                if ($key === '') {
+                                                    return '';
+                                                }
+                                                return $key . '|' . $label . '|' . $type . '|' . $required;
+                                            }, $configuredContactFields));
+                                        }
+                                    @endphp
+                                    <div class="mb-3">
+                                        <label class="form-label">Additional Lead Fields (optional)</label>
+                                        <textarea id="widgetContactFields" name="widgetContactFields" class="form-control" rows="4" placeholder="location|Location|location|true&#10;city|City|text|false">{{ $contactFieldsLines }}</textarea>
+                                        <small class="text-muted">One field per line in format: <strong>key|Label|type|required</strong>. Types: text, email, phone, number, location.</small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Allowed Widget Domains (optional, comma/newline separated)</label>
+                                        <textarea id="widgetAllowedDomains" name="widgetAllowedDomains" class="form-control" rows="3" placeholder="example.com&#10;www.example.com">{{ is_array($custOrg->settings['widget_allowed_domains'] ?? null) ? implode("\n", $custOrg->settings['widget_allowed_domains']) : ($custOrg->settings['widget_allowed_domains'] ?? '') }}</textarea>
+                                        <small class="text-muted">If set, widget chat requests will only be accepted from these domains (including subdomains).</small>
+                                    </div>
                                     <button type="submit" class="btn btn-success">Save Settings</button>
                                 </form>
                             </div>
@@ -169,6 +195,8 @@ document.getElementById('widgetSettingsForm').addEventListener('submit', async f
         welcomeMessage: document.getElementById('welcomeMessage').value,
         assistantDisplayName: document.getElementById('assistantDisplayName').value,
         requireContactForGuests: document.getElementById('requireContactForGuests').checked,
+        widgetContactFields: document.getElementById('widgetContactFields').value,
+        widgetAllowedDomains: document.getElementById('widgetAllowedDomains').value,
         _token: form.querySelector('input[name="_token"]').value
     };
     try {

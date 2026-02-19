@@ -1,0 +1,18 @@
+location,model,variant,test_drive_available,test_drive_slots,booking_contact,vehicle_status,remarks,last_updated
+Sambalpur,Swift,VXi,Yes,10:00-18:00,+91 7381015933,Ready,Same-day slots usually available,2026-02-17
+Sambalpur,Dzire,VXi,Yes,10:00-17:30,+91 7381015933,Ready,Corporate test drives on request,2026-02-17
+Sambalpur,Brezza,ZXi,Yes,11:00-18:00,+91 7381015933,Ready,Weekend demand high,2026-02-17
+Sambalpur,Grand Vitara,Delta,Yes,10:30-17:30,+91 7381015933,Ready,Nexa advisor escort required,2026-02-17
+Angul,WagonR,VXi 1.0,Yes,10:00-17:00,+91 7381015933,Ready,Walk-in accepted,2026-02-17
+Angul,Swift,ZXi,Yes,11:00-17:00,+91 7381015933,Limited,Prior booking preferred,2026-02-17
+Angul,Baleno,Delta,Yes,10:30-17:30,+91 7381015933,Ready,Nexa test route available,2026-02-17
+Angul,Jimny,Alpha,Yes,12:00-16:00,+91 7381015933,Limited,Off-road patch demo on request,2026-02-17
+Bargarh,Dzire,VXi CNG,Yes,10:30-16:30,+91 7381015933,Limited,CNG demo vehicle shared,2026-02-17
+Bargarh,Ertiga,VXi,Yes,10:00-17:00,+91 7381015933,Ready,Family demo route available,2026-02-17
+Bargarh,Fronx,Delta CNG,No,NA,+91 7381015933,Awaiting,Demo unit expected next allocation,2026-02-17
+Jharsuguda,Swift,VXi CNG,Yes,10:30-17:00,+91 7381015933,Ready,Mileage-focused demo request common,2026-02-17
+Jharsuguda,Brezza,ZXi AT,Yes,11:00-17:30,+91 7381015933,Limited,Automatic slot pre-book advised,2026-02-17
+Jharsuguda,XL6,Alpha Plus,Yes,11:30-16:30,+91 7381015933,Ready,Nexa premium demo,2026-02-17
+Bolangir,Alto K10,LXi,Yes,10:00-17:00,+91 7381015933,Ready,Fast local loop available,2026-02-17
+Bolangir,Celerio,VXi CNG,Yes,10:30-16:30,+91 7381015933,Limited,CNG demo depends on fueling schedule,2026-02-17
+Bolangir,Baleno,Sigma,Yes,10:30-17:00,+91 7381015933,Ready,Nexa walk-in test drives accepted,2026-02-17

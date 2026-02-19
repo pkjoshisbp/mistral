@@ -6,9 +6,9 @@
     <div class="container">
         <div class="row">
             <div class="col-lg-4 mb-4">
-                <h5 class="text-gradient mb-3">
-                    <i class="fas fa-robot me-2"></i>AI Chat Support
-                </h5>
+                <div class="mb-3">
+                    <img src="{{ asset('images/ai-chat-logo-sm.png') }}" alt="AI Chat Support" style="height: 50px; width: auto;">
+                </div>
                 <p class="text-light">
                     {{ __('common.hero_intro') }}
                     {{ __('common.hero_sub') }}
@@ -27,6 +27,16 @@
                     <li><a href="{{ route('home') }}#pricing">{{ __('marketing.pricing') }}</a></li>
                     <li><a href="{{ route('integrations') }}">{{ __('marketing.integration') }}</a></li>
                     <li><a href="#">{{ __('marketing.api_docs') }}</a></li>
+                </ul>
+            </div>
+            
+            <div class="col-lg-2 col-md-6 col-6 mb-4">
+                <h6 class="fw-bold mb-3">Solutions</h6>
+                <ul class="list-unstyled">
+                    <li><a href="{{ route('solutions.healthcare') }}">Healthcare AI Chatbot</a></li>
+                    <li><a href="{{ route('solutions.ecommerce') }}">Ecommerce Chatbot</a></li>
+                    <li><a href="{{ route('solutions.education') }}">Education AI Support</a></li>
+                    <li><a href="{{ route('integrations') }}">WhatsApp Automation</a></li>
                 </ul>
             </div>
             

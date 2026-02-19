@@ -34,6 +34,11 @@
                         @endphp
                         
                         @foreach($creditPackages as $index => $package)
+                            @php
+                                $meta = is_array($package->metadata) ? $package->metadata : [];
+                                $inrPrice = $meta['inr_price'] ?? null;
+                                $features = $meta['features'] ?? [];
+                            @endphp
                             <div class="col-md-4">
                                 <div class="card border-{{ $colors[$index % count($colors)] }} h-100">
                                     <div class="card-header {{ $index == 1 ? 'bg-primary text-white' : 'bg-light' }}">
@@ -47,16 +52,16 @@
                                     <div class="card-body text-center">
                                         <div class="mb-3">
                                             @if($currency === 'INR')
-                                                <span class="h3 text-{{ $colors[$index % count($colors)] }}">₹{{ number_format($package->inr_price, 0) }}</span>
-                                                <div><small class="text-muted">${{ number_format($package->usd_price, 0) }}</small></div>
+                                                <span class="h3 text-{{ $colors[$index % count($colors)] }}">₹{{ number_format($inrPrice ?? 0, 0) }}</span>
+                                                <div><small class="text-muted">${{ number_format($package->price ?? 0, 0) }}</small></div>
                                             @else
-                                                <span class="h3 text-{{ $colors[$index % count($colors)] }}">${{ number_format($package->usd_price, 0) }}</span>
-                                                <div><small class="text-muted">₹{{ number_format($package->inr_price, 0) }}</small></div>
+                                                <span class="h3 text-{{ $colors[$index % count($colors)] }}">${{ number_format($package->price ?? 0, 0) }}</span>
+                                                <div><small class="text-muted">₹{{ number_format($inrPrice ?? 0, 0) }}</small></div>
                                             @endif
                                         </div>
                                         <ul class="list-unstyled mb-4">
-                                            @if($package->features)
-                                                @foreach($package->features as $feature)
+                                            @if($features)
+                                                @foreach($features as $feature)
                                                     <li>{{ $feature }}</li>
                                                 @endforeach
                                             @endif
