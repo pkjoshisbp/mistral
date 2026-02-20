@@ -21,6 +21,16 @@
 <!-- Main content -->
 <section class="content">
     <div class="container-fluid">
+        @php
+            $today = now()->toDateString();
+            $tokensToday = \App\Models\TokenUsageLog::whereDate('used_at', $today)->sum('tokens_used');
+            $tokensTotal = \App\Models\TokenUsageLog::sum('tokens_used');
+            $aiRepliesToday = \App\Models\ChatMessage::whereIn('sender_type', ['ai', 'assistant'])
+                ->whereDate('created_at', $today)
+                ->count();
+            $aiRepliesTotal = \App\Models\ChatMessage::whereIn('sender_type', ['ai', 'assistant'])->count();
+        @endphp
+
         <!-- Small boxes (Stat box) -->
         <div class="row">
             <div class="col-lg-3 col-6">
@@ -79,6 +89,61 @@
                 </div>
             </div>
             <!-- ./col -->
+        </div>
+        <!-- /.row -->
+
+        <div class="row">
+            <div class="col-lg-3 col-6">
+                <div class="small-box bg-primary">
+                    <div class="inner">
+                        <h3>{{ number_format($tokensToday) }}</h3>
+                        <p>Tokens Used Today</p>
+                    </div>
+                    <div class="icon">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <a href="{{ route('admin.analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                </div>
+            </div>
+
+            <div class="col-lg-3 col-6">
+                <div class="small-box bg-indigo">
+                    <div class="inner">
+                        <h3>{{ number_format($tokensTotal) }}</h3>
+                        <p>Total Tokens Used</p>
+                    </div>
+                    <div class="icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <a href="{{ route('admin.analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                </div>
+            </div>
+
+            <div class="col-lg-3 col-6">
+                <div class="small-box bg-secondary">
+                    <div class="inner">
+                        <h3>{{ number_format($aiRepliesToday) }}</h3>
+                        <p>AI Replies Today</p>
+                    </div>
+                    <div class="icon">
+                        <i class="fas fa-reply"></i>
+                    </div>
+                    <a href="{{ route('admin.analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                </div>
+            </div>
+
+            <div class="col-lg-3 col-6">
+                <div class="small-box bg-dark">
+                    <div class="inner">
+                        <h3>{{ number_format($aiRepliesTotal) }}</h3>
+                        <p>Total AI Replies</p>
+                    </div>
+                    <div class="icon">
+                        <i class="fas fa-comments"></i>
+                    </div>
+                    <a href="{{ route('admin.analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                </div>
+            </div>
         </div>
         <!-- /.row -->
 

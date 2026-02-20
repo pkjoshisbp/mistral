@@ -236,19 +236,40 @@ class ImportOrganizationCsvData extends Command
 
             if (!empty($upsertedRows)) {
                 $items = array_map(function (OrganizationData $row) use ($defaultCategory): array {
+                    $csvRow = data_get($row->metadata, 'csv', []);
+                    $model = trim((string) data_get($csvRow, 'model', ''));
+                    $variant = trim((string) data_get($csvRow, 'variant', ''));
+                    $exShowroomPrice = trim((string) data_get($csvRow, 'ex_showroom_price_inr', ''));
+                    $onRoadPrice = trim((string) data_get($csvRow, 'approx_on_road_price_inr', ''));
+
+                    $metadata = [
+                        'table_id' => $row->id,
+                        'updated_at' => optional($row->updated_at)->toISOString(),
+                        'source' => 'csv_import',
+                        'dataset' => data_get($row->metadata, 'dataset'),
+                        'external_key' => data_get($row->metadata, 'external_key'),
+                        'type' => $row->type,
+                    ];
+
+                    if ($model !== '') {
+                        $metadata['model'] = $model;
+                    }
+                    if ($variant !== '') {
+                        $metadata['variant'] = $variant;
+                    }
+                    if ($exShowroomPrice !== '') {
+                        $metadata['ex_showroom_price_inr'] = $exShowroomPrice;
+                    }
+                    if ($onRoadPrice !== '') {
+                        $metadata['approx_on_road_price_inr'] = $onRoadPrice;
+                    }
+
                     return [
                         'id' => data_get($row->metadata, 'qdrant_type', 'info') . '_' . $row->id,
                         'title' => $row->name,
                         'content' => $row->content ?: ($row->description ?? ''),
                         'category' => data_get($row->metadata, 'category', $defaultCategory),
-                        'metadata' => [
-                            'table_id' => $row->id,
-                            'updated_at' => optional($row->updated_at)->toISOString(),
-                            'source' => 'csv_import',
-                            'dataset' => data_get($row->metadata, 'dataset'),
-                            'external_key' => data_get($row->metadata, 'external_key'),
-                            'type' => $row->type,
-                        ],
+                        'metadata' => $metadata,
                     ];
                 }, $upsertedRows);
 

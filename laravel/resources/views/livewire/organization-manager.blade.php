@@ -82,6 +82,36 @@
                             </div>
                         </div>
 
+                        <div class="form-group">
+                            <label for="supplementary_instruction">Supplementary Context Instruction (LLM)</label>
+                            <small class="text-muted d-block mb-2">Persistent instruction for how the model should use supplementary context (from Qdrant payload/metadata).</small>
+                            <textarea wire:model="supplementary_instruction" class="form-control" id="supplementary_instruction" rows="3" placeholder="Enter your supplementary context instruction..."></textarea>
+                            @error('supplementary_instruction') <span class="text-danger">{{ $message }}</span> @enderror
+                            <small class="text-muted d-block mt-2">Example: If context contains 'Supplementary:', add one short final sentence and never invent missing details.</small>
+                        </div>
+
+                        <div class="border rounded p-3 mb-3 bg-light">
+                            <h6 class="mb-2"><i class="fas fa-sliders-h"></i> Widget Follow-up Rule Policy</h6>
+                            <small class="text-muted d-block mb-2">These settings apply only to this organization and override default global behavior.</small>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="widget_skip_intent_on_affirmative_follow_up" wire:model="widget_skip_intent_on_affirmative_follow_up">
+                                <label class="form-check-label" for="widget_skip_intent_on_affirmative_follow_up">
+                                    Skip intent detection for affirmative follow-up (e.g., "yes please")
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="widget_skip_exact_match_on_affirmative_follow_up" wire:model="widget_skip_exact_match_on_affirmative_follow_up">
+                                <label class="form-check-label" for="widget_skip_exact_match_on_affirmative_follow_up">
+                                    Skip exact-match shortcut on affirmative follow-up
+                                </label>
+                            </div>
+                            <div class="form-group mb-0">
+                                <label for="widget_affirmative_follow_up_max_tokens">Affirmative follow-up max tokens</label>
+                                <input type="number" min="80" max="300" wire:model="widget_affirmative_follow_up_max_tokens" class="form-control" id="widget_affirmative_follow_up_max_tokens">
+                                @error('widget_affirmative_follow_up_max_tokens') <span class="text-danger">{{ $message }}</span> @enderror
+                            </div>
+                        </div>
+
                         <div class="card-footer">
                             <button type="submit" class="btn btn-primary">
                                 <i class="fas fa-save"></i> Create Organization
@@ -157,6 +187,36 @@
                                     <input type="text" wire:model="contact_phone" class="form-control" id="edit_contact_phone">
                                     @error('contact_phone') <span class="text-danger">{{ $message }}</span> @enderror
                                 </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit_supplementary_instruction">Supplementary Context Instruction (LLM)</label>
+                            <small class="text-muted d-block mb-2">Persistent instruction for how the model should use supplementary context (from Qdrant payload/metadata).</small>
+                            <textarea wire:model="supplementary_instruction" class="form-control" id="edit_supplementary_instruction" rows="3" placeholder="Enter your supplementary context instruction..."></textarea>
+                            @error('supplementary_instruction') <span class="text-danger">{{ $message }}</span> @enderror
+                            <small class="text-muted d-block mt-2">Example: If context contains 'Supplementary:', add one short final sentence and never invent missing details.</small>
+                        </div>
+
+                        <div class="border rounded p-3 mb-3 bg-light">
+                            <h6 class="mb-2"><i class="fas fa-sliders-h"></i> Widget Follow-up Rule Policy</h6>
+                            <small class="text-muted d-block mb-2">These settings apply only to this organization and override default global behavior.</small>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="edit_widget_skip_intent_on_affirmative_follow_up" wire:model="widget_skip_intent_on_affirmative_follow_up">
+                                <label class="form-check-label" for="edit_widget_skip_intent_on_affirmative_follow_up">
+                                    Skip intent detection for affirmative follow-up (e.g., "yes please")
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="edit_widget_skip_exact_match_on_affirmative_follow_up" wire:model="widget_skip_exact_match_on_affirmative_follow_up">
+                                <label class="form-check-label" for="edit_widget_skip_exact_match_on_affirmative_follow_up">
+                                    Skip exact-match shortcut on affirmative follow-up
+                                </label>
+                            </div>
+                            <div class="form-group mb-0">
+                                <label for="edit_widget_affirmative_follow_up_max_tokens">Affirmative follow-up max tokens</label>
+                                <input type="number" min="80" max="300" wire:model="widget_affirmative_follow_up_max_tokens" class="form-control" id="edit_widget_affirmative_follow_up_max_tokens">
+                                @error('widget_affirmative_follow_up_max_tokens') <span class="text-danger">{{ $message }}</span> @enderror
                             </div>
                         </div>
 

@@ -240,6 +240,7 @@
                                         <label>Name *</label>
                                         <input type="text" wire:model="name" class="form-control @error('name') is-invalid @enderror" 
                                                placeholder="e.g. Pricing Information">
+                                        <small class="form-text text-muted">Use a clear action name users/admins can recognize quickly.</small>
                                         @error('name')<span class="invalid-feedback">{{ $message }}</span>@enderror
                                     </div>
 
@@ -262,6 +263,7 @@
                                         <label>Description *</label>
                                         <textarea wire:model="description" class="form-control @error('description') is-invalid @enderror" 
                                                   rows="3" placeholder="Describe what this action does and when it should be triggered"></textarea>
+                                        <small class="form-text text-muted">Keep it specific: what data is fetched and when this should trigger.</small>
                                         @error('description')<span class="invalid-feedback">{{ $message }}</span>@enderror
                                     </div>
                                 </div>
@@ -296,7 +298,7 @@
                                             <label>CSV File Path</label>
                                             <input type="text" wire:model="csv_file_path" class="form-control" 
                                                    placeholder="/path/to/file.csv or storage/app/data.csv">
-                                            <small class="form-text text-muted">Path to your CSV file on the server</small>
+                                            <small class="form-text text-muted">Path to your CSV file on the server (absolute or relative to Laravel app).</small>
                                         </div>
                                     @endif
 
@@ -305,7 +307,7 @@
                                             <label>Excel File Path</label>
                                             <input type="text" wire:model="excel_file_path" class="form-control" 
                                                    placeholder="/path/to/file.xlsx">
-                                            <small class="form-text text-muted">Path to your Excel file on the server</small>
+                                            <small class="form-text text-muted">Path to your Excel file on the server (absolute or relative to Laravel app).</small>
                                         </div>
                                     @endif
 
@@ -314,7 +316,7 @@
                                             <label>Table Name</label>
                                             <input type="text" wire:model="db_table" class="form-control" 
                                                    placeholder="pricing_plans">
-                                            <small class="form-text text-muted">Name of the database table to query</small>
+                                            <small class="form-text text-muted">Database table to query when this action is triggered.</small>
                                         </div>
                                     @endif
 
@@ -329,7 +331,7 @@
                                             <label>Range</label>
                                             <input type="text" wire:model="sheets_range" class="form-control" 
                                                    placeholder="A:Z">
-                                            <small class="form-text text-muted">Range of cells to read (e.g., A:Z, Sheet1!A1:C100)</small>
+                                            <small class="form-text text-muted">Range of cells to read (example: A:Z or Sheet1!A1:C100).</small>
                                         </div>
                                     @endif
 
@@ -375,6 +377,7 @@
                                                 <small class="form-text text-muted">
                                                     When customers mention these keywords, the AI will check if this action should be triggered.
                                                 </small>
+                                                <small class="form-text text-muted">Tip: add synonyms (price, pricing, cost, charges) to improve trigger accuracy.</small>
                                             </div>
                                         </div>
                                     </div>

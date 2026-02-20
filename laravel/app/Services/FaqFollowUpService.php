@@ -6,7 +6,7 @@ use App\Models\Organization;
 
 class FaqFollowUpService
 {
-    public function getFollowUpText(Organization $organization, string $responseText, ?string $override = null): string
+    public function getFollowUpText(Organization $organization, string $responseText, ?string $override = null, array $context = []): string
     {
         $settings = $organization->settings ?? [];
 
@@ -23,7 +23,12 @@ class FaqFollowUpService
             return '';
         }
 
-        if ($this->responseAlreadyContainsFollowUp($responseText, $candidate)) {
+        $resolvedCandidate = $this->resolveDynamicFollowUpText($candidate, $settings, $context);
+        if ($resolvedCandidate === '') {
+            return '';
+        }
+
+        if ($this->responseAlreadyContainsFollowUp($responseText, $resolvedCandidate)) {
             return '';
         }
 
@@ -31,7 +36,7 @@ class FaqFollowUpService
             return '';
         }
 
-        return $candidate;
+        return $resolvedCandidate;
     }
 
     public function getFollowUpInstruction(Organization $organization): string
@@ -119,5 +124,101 @@ class FaqFollowUpService
             'bye',
             'cancel'
         ];
+    }
+
+    private function resolveDynamicFollowUpText(string $template, array $settings, array $context): string
+    {
+        $text = trim($template);
+        if ($text === '') {
+            return '';
+        }
+
+        $locationContacts = $this->normalizeAssociativeMap($settings['faq_follow_up_location_contacts'] ?? []);
+        $dynamicVariables = $this->normalizeAssociativeMap($settings['faq_follow_up_dynamic_variables'] ?? []);
+
+        $normalizedContext = $this->normalizeContext($context);
+        $locationRaw = (string) ($normalizedContext['location'] ?? '');
+        $locationKey = $this->normalizeMapKey($locationRaw);
+
+        $locationContact = '';
+        if ($locationKey !== '' && isset($locationContacts[$locationKey])) {
+            $locationContact = (string) $locationContacts[$locationKey];
+        } elseif (isset($dynamicVariables['default_contact'])) {
+            $locationContact = (string) $dynamicVariables['default_contact'];
+        }
+
+        $replacements = [
+            '{{location}}' => $locationRaw,
+            '{{region}}' => (string) ($normalizedContext['region'] ?? ''),
+            '{{country}}' => (string) ($normalizedContext['country'] ?? ''),
+            '{{location_contact}}' => $locationContact,
+            '{{contact_number}}' => $locationContact,
+        ];
+
+        foreach ($dynamicVariables as $key => $value) {
+            $replacements['{{' . $key . '}}'] = (string) $value;
+        }
+
+        $resolved = strtr($text, $replacements);
+        $resolved = preg_replace('/\{\{[^}]+\}\}/', '', (string) $resolved) ?? '';
+        $resolved = preg_replace('/[ \t]{2,}/', ' ', $resolved) ?? '';
+        $resolved = preg_replace('/\n{3,}/', "\n\n", $resolved) ?? '';
+
+        return trim((string) $resolved);
+    }
+
+    private function normalizeContext(array $context): array
+    {
+        $normalized = [];
+
+        foreach ($context as $key => $value) {
+            if (is_string($value) || is_numeric($value)) {
+                $normalized[(string) $key] = trim((string) $value);
+            }
+        }
+
+        if (!empty($context['custom_fields']) && is_array($context['custom_fields'])) {
+            foreach ($context['custom_fields'] as $customKey => $customValue) {
+                if (is_string($customValue) || is_numeric($customValue)) {
+                    $normalized[(string) $customKey] = trim((string) $customValue);
+                }
+            }
+        }
+
+        return $normalized;
+    }
+
+    private function normalizeAssociativeMap($value): array
+    {
+        $pairs = [];
+
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                if (is_string($key) && (is_string($item) || is_numeric($item))) {
+                    $mapKey = $this->normalizeMapKey($key);
+                    if ($mapKey !== '') {
+                        $pairs[$mapKey] = trim((string) $item);
+                    }
+                    continue;
+                }
+
+                if (is_array($item)) {
+                    $itemKey = $this->normalizeMapKey((string) ($item['key'] ?? $item['location'] ?? ''));
+                    $itemValue = trim((string) ($item['value'] ?? $item['contact'] ?? ''));
+                    if ($itemKey !== '' && $itemValue !== '') {
+                        $pairs[$itemKey] = $itemValue;
+                    }
+                }
+            }
+        }
+
+        return $pairs;
+    }
+
+    private function normalizeMapKey(string $key): string
+    {
+        $key = mb_strtolower(trim($key));
+        $key = preg_replace('/\s+/', ' ', $key) ?? '';
+        return trim((string) $key);
     }
 }

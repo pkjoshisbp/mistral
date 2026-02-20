@@ -271,6 +271,7 @@
                                             <option value="database">Database Query</option>
                                             <option value="google_sheets">Google Sheets</option>
                                         </select>
+                                        <small class="form-text text-muted">Select where this action pulls live data from.</small>
                                         @error('source_type')<span class="invalid-feedback">{{ $message }}</span>@enderror
                                     </div>
 
@@ -298,6 +299,7 @@
                                             <label>CSV File Path</label>
                                             <input type="text" wire:model="csv_file_path" class="form-control" 
                                                    placeholder="/path/to/file.csv">
+                                            <small class="form-text text-muted">Use a server path that Laravel can access.</small>
                                         </div>
                                         <div class="form-group">
                                             <label>Delimiter</label>
@@ -314,6 +316,7 @@
                                             <label>Excel File Path</label>
                                             <input type="text" wire:model="excel_file_path" class="form-control" 
                                                    placeholder="/path/to/file.xlsx">
+                                            <small class="form-text text-muted">Use a server path that Laravel can access.</small>
                                         </div>
                                         <div class="form-group">
                                             <label>Sheet Name (optional)</label>
@@ -340,11 +343,13 @@
                                         <div class="form-group">
                                             <label>Spreadsheet ID</label>
                                             <input type="text" wire:model="sheets_spreadsheet_id" class="form-control">
+                                            <small class="form-text text-muted">Copy only the sheet ID from the Google Sheets URL.</small>
                                         </div>
                                         <div class="form-group">
                                             <label>Range</label>
                                             <input type="text" wire:model="sheets_range" class="form-control" 
                                                    placeholder="A:Z or Sheet1!A1:Z100">
+                                            <small class="form-text text-muted">Example: <strong>A:Z</strong> or <strong>Sheet1!A1:Z100</strong>.</small>
                                         </div>
                                     @endif
 
@@ -410,6 +415,7 @@
                                                                 @endforeach
                                                             </div>
                                                         @endif
+                                                        <small class="form-text text-muted">Aliases help the model match different phrases to the same action.</small>
                                                     </div>
 
                                                     <!-- Keywords -->
@@ -436,6 +442,7 @@
                                                                 @endforeach
                                                             </div>
                                                         @endif
+                                                        <small class="form-text text-muted">Add synonyms (price, pricing, cost) to improve trigger precision.</small>
                                                     </div>
                                                 </div>
 
@@ -464,6 +471,7 @@
                                                                 @endforeach
                                                             </div>
                                                         @endif
+                                                        <small class="form-text text-muted">These must be present in a query before the action runs.</small>
                                                     </div>
 
                                                     <div class="form-group">
@@ -489,6 +497,7 @@
                                                                 @endforeach
                                                             </div>
                                                         @endif
+                                                        <small class="form-text text-muted">Optional parameters add context but are not mandatory.</small>
                                                     </div>
                                                 </div>
                                             </div>

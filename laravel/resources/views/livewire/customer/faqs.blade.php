@@ -32,6 +32,7 @@
                         </button>
                     @endif
                 </div>
+                <small class="text-muted d-block mt-1">Search supports question, answer, category, and keyword matching.</small>
                 @if($search)
                     <small class="text-muted">Showing results for: <strong>{{ $search }}</strong></small>
                 @endif
@@ -53,6 +54,7 @@
                         <div class="col-md-3 mb-2">
                             <label>Keywords</label>
                             <input type="text" wire:model="keywords" class="form-control" placeholder="comma separated">
+                            <small class="text-muted d-block mt-1">Use comma-separated keywords to improve search matches (example: service, angul, contact).</small>
                         </div>
                         <div class="col-md-12 mb-2">
                             <div class="d-flex justify-content-between align-items-center mb-2">
@@ -121,6 +123,7 @@
                             @endif
                             
                             <textarea id="faq-answer-editor" wire:model.live="answer" rows="8" class="form-control font-monospace" placeholder="Enter your answer using simple HTML (e.g., &lt;strong&gt;bold&lt;/strong&gt;, &lt;a href='https://example.com'&gt;link&lt;/a&gt;)" ></textarea>
+                            <small class="text-muted d-block mt-1">Write concise factual content. Keep phone/address/map details exactly as stored.</small>
                             <small class="form-text text-muted">
                                 Allowed tags: p, br, strong, b, em, i, u, ul, ol, li, a, img, code, pre, blockquote, h1–h6. Links will open in a new tab and are marked nofollow.
                             </small>
@@ -130,6 +133,7 @@
                             <label>Follow-up Question <small class="text-muted">(Optional - shown after answer)</small></label>
                             <input type="text" wire:model="follow_up" class="form-control" placeholder="e.g., We also offer related services. Would you like to know more about them?">
                             <small class="form-text text-muted">This question will be asked after providing the answer to guide further conversation.</small>
+                            <small class="form-text text-muted">Tip: keep follow-up short and action-oriented (one sentence).</small>
                         </div>
                         <div class="col-md-3 mb-2">
                             <label>Sort Order</label>

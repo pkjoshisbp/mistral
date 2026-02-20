@@ -198,19 +198,42 @@ class WidgetController
             $approvedSensitive = $settings['approved_sensitive_categories'] ?? [];
             $responseTone = $settings['response_tone'] ?? 'friendly';
             $responseLanguage = $settings['response_language'] ?? 'auto';
-
-            try {
-                $intentResult = app(IntentDetectionService::class)->detectIntent($message, $organization->id);
-            } catch (\Throwable $t) {
-                Log::warning('Intent detection failed', [
-                    'org_id' => $organization->id,
-                    'error' => $t->getMessage()
-                ]);
-            }
+            $rulePolicy = $this->getWidgetRulePolicy($organization);
 
             if (!$message) {
                 return response()->json(['error' => 'Message is required'], 400)
                     ->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            // Load existing conversation early for handoff and follow-up continuity
+            $existingConversation = ChatConversation::where('conversation_id', $sessionId)
+                ->where('organization_id', $organization->id)
+                ->first();
+            $previousContextPayloads = $existingConversation->metadata['last_context_payloads'] ?? [];
+
+            $lastAssistantForIntent = $this->getLastAssistantMessage($organization, $sessionId);
+            $skipIntentOnAffirmative = (bool) ($rulePolicy['skip_intent_on_affirmative_follow_up'] ?? true);
+            $isAffirmativeContinuationForIntent = $this->isAffirmativeFollowUp((string) $message)
+                && $existingConversation
+                && is_string($lastAssistantForIntent)
+                && $this->responseHasQuestion($lastAssistantForIntent)
+                && $skipIntentOnAffirmative;
+
+            if (!$isAffirmativeContinuationForIntent) {
+                try {
+                    $intentResult = app(IntentDetectionService::class)->detectIntent($message, $organization->id);
+                } catch (\Throwable $t) {
+                    Log::warning('Intent detection failed', [
+                        'org_id' => $organization->id,
+                        'error' => $t->getMessage()
+                    ]);
+                }
+            } else {
+                $intentResult = [
+                    'intent' => 'follow_up',
+                    'confidence' => 0.95,
+                    'method' => 'rule_follow_up',
+                ];
             }
 
 
@@ -267,12 +290,6 @@ class WidgetController
                 );
                 Log::info('Lead upserted via widget', ['org_id' => $orgId, 'session_id' => $sessionId]);
             }
-
-            // Load existing conversation to enable follow-up continuity
-            $existingConversation = ChatConversation::where('conversation_id', $sessionId)
-                ->where('organization_id', $organization->id)
-                ->first();
-            $previousContextPayloads = $existingConversation->metadata['last_context_payloads'] ?? [];
 
             if ($this->isNumericOnlyMessage($message) && !$this->shouldBypassNumericGuard($existingConversation)) {
                 $clarifyResponse = $this->buildClarifyNumberResponse();
@@ -334,9 +351,14 @@ class WidgetController
                 && $this->responseHasQuestion($lastAssistantMessage);
             $isContextualShortFollowUp = $isShortFollowUp
                 || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion);
+            $isAffirmativeContinuation = $isAffirmativeFollowUp && $lastAssistantAskedQuestion;
+            $skipExactMatchOnAffirmative = (bool) ($rulePolicy['skip_exact_match_on_affirmative_follow_up'] ?? true);
+
+            $canReusePreviousContext = !empty($previousContextPayloads)
+                && ($isAffirmativeFollowUp || $isContextualShortFollowUp);
 
             $searchQuery = $message;
-            if ($isContextualShortFollowUp && !$isAffirmativeFollowUp) {
+            if ($isContextualShortFollowUp && !$canReusePreviousContext) {
                 $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                 $queryParts = [];
 
@@ -488,7 +510,7 @@ class WidgetController
             ]);
             
             $searchResults = null;
-            if (!$isAffirmativeFollowUp) {
+            if (!$canReusePreviousContext) {
                 $searchResults = $this->aiAgentService->enhancedSearch(
                     $collectionName,
                     $searchQuery,
@@ -498,7 +520,7 @@ class WidgetController
             
             $context = '';
             $orderedResults = [];
-            if (($isAffirmativeFollowUp || $isContextualShortFollowUp) && !empty($previousContextPayloads)) {
+            if ($canReusePreviousContext) {
                 // Reuse last context payloads for follow-up continuity
                 $orderedResults = array_map(function ($p) {
                     return ['payload' => $p];
@@ -562,6 +584,19 @@ class WidgetController
                                 $context .= ucfirst($field) . ": " . $this->htmlToPlainWithLinks((string) $payload[$field]) . "\n";
                             }
                         }
+
+                        $supplementaryInfo = $this->extractSupplementaryInfoFromPayload($payload);
+                        if ($supplementaryInfo !== '') {
+                            $context .= "Supplementary: " . $supplementaryInfo . "\n";
+                        }
+
+                        $modelPricing = $this->extractModelPricingFromPayload($payload);
+                        if ($modelPricing['ex_showroom_price_inr'] !== '') {
+                            $context .= "Ex-showroom Price (INR): " . $modelPricing['ex_showroom_price_inr'] . "\n";
+                        }
+                        if ($modelPricing['approx_on_road_price_inr'] !== '') {
+                            $context .= "On-road Price (INR): " . $modelPricing['approx_on_road_price_inr'] . "\n";
+                        }
                         
                         // Collect any explicit links if present in metadata
                         if (isset($payload['links']) && is_array($payload['links'])) {
@@ -601,6 +636,9 @@ class WidgetController
                                 'category' => $p['category'] ?? null,
                                 'links' => $p['links'] ?? null,
                                 'follow_up' => $p['follow_up'] ?? null,
+                                'supplementary_info' => $this->extractSupplementaryInfoFromPayload($p),
+                                'ex_showroom_price_inr' => $this->extractModelPricingFromPayload($p)['ex_showroom_price_inr'] ?? null,
+                                'approx_on_road_price_inr' => $this->extractModelPricingFromPayload($p)['approx_on_road_price_inr'] ?? null,
                             ];
                         }
                     }
@@ -772,7 +810,7 @@ class WidgetController
             }
 
             $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization);
-            if ($exactFaqMatch && !$hasShopifyData) {
+            if ($exactFaqMatch && !$hasShopifyData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                 Log::info('Widget exact FAQ match response', [
                     'org_id' => $organization->id,
                     'session_id' => $sessionId,
@@ -824,7 +862,8 @@ class WidgetController
                 $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
                     $organization,
                     $finalFaqResponse,
-                    $exactFaqMatch['payload']['follow_up'] ?? null
+                    $exactFaqMatch['payload']['follow_up'] ?? null,
+                    $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location'))
                 );
                 if ($faqFollowUp !== '' && !$this->responseHasQuestion($finalFaqResponse)) {
                     $finalFaqResponse = trim($finalFaqResponse) . "\n\n" . $faqFollowUp;
@@ -948,6 +987,57 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            $lowConfidenceResponse = $this->buildLowConfidenceClarificationResponse($message, $searchResults);
+            if ($lowConfidenceResponse !== null && empty($shopifyContext) && !$this->isContactQuery($message)) {
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $lowConfidenceResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+
+                if ($this->isUnansweredResponse($lowConfidenceResponse)) {
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $lowConfidenceResponse,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+                }
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $lowConfidenceResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                return response()->json([
+                    'response' => $lowConfidenceResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             if ($this->isVeryShortQuery($message)
                 && trim((string) $context) === ''
                 && empty($shopifyContext)
@@ -1010,6 +1100,7 @@ class WidgetController
             $businessContext = $this->buildBusinessContext($organization);
             $promotionContext = $this->buildPromotionContext($organization);
             $faqFollowUpInstruction = $this->faqFollowUpService->getFollowUpInstruction($organization);
+            $supplementaryInstruction = $this->buildSupplementaryInstruction($organization);
 
             // Build smart system prompt
             if ($hasShopifyData) {
@@ -1021,6 +1112,7 @@ class WidgetController
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\".\n";
                 $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question.\n";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n";
+                $systemPrompt .= $supplementaryInstruction . "\n";
                 $systemPrompt .= "If the user says 'no', 'not needed', 'not interested', 'goodbye', or similar phrases to end the conversation, respond with a brief, friendly closing message (1 sentence max) like 'No problem! Feel free to reach out if you need anything.' Do NOT ask follow-up questions or provide additional information.\n\n";
                 $systemPrompt .= "\nCURRENT CONTEXT:\n" . $finalContext . "\n";
                 if ($businessContext) {
@@ -1066,6 +1158,7 @@ class WidgetController
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
                 $systemPrompt .= "If the user says 'no', 'not needed', 'not interested', 'goodbye', or similar phrases to end the conversation, respond with a brief, friendly closing message (1 sentence max) like 'No problem! Feel free to reach out if you need anything.' Do NOT ask follow-up questions or provide additional information. ";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
+                $systemPrompt .= " " . $supplementaryInstruction;
             }
 
             // Get AI response using llmChat for better token tracking
@@ -1079,7 +1172,10 @@ class WidgetController
             
             // Use organization-specific AI provider and model
             $maxTokens = 220;
-            if ($isContactQuery) {
+            $affirmativeMaxTokens = (int) ($rulePolicy['affirmative_follow_up_max_tokens'] ?? 140);
+            if ($isAffirmativeContinuation) {
+                $maxTokens = max(80, min(300, $affirmativeMaxTokens));
+            } elseif ($isContactQuery) {
                 $maxTokens = 60;
             } elseif (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
                 || strlen($message) > 120
@@ -1184,7 +1280,12 @@ class WidgetController
                 if ($intentFollowUp !== '') {
                     $responseText = trim($responseText) . "\n\n" . $intentFollowUp;
                 } else {
-                    $faqFollowUp = $this->faqFollowUpService->getFollowUpText($organization, $responseText);
+                    $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
+                        $organization,
+                        $responseText,
+                        null,
+                        $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location'))
+                    );
                     if ($faqFollowUp !== '') {
                         $responseText = trim($responseText) . "\n\n" . $faqFollowUp;
                     } else {
@@ -1497,7 +1598,9 @@ class WidgetController
             ]);
         }
 
-        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage) {
+        $rulePolicy = $this->getWidgetRulePolicy($organization);
+
+        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy) {
             $this->initStreamOutput();
             
             // Early detection: Check if user wants to end conversation
@@ -1531,6 +1634,32 @@ class WidgetController
                 $aiService = app(AiAgentService::class);
                 $actionService = app(\App\Services\ActionService::class);
 
+                $lastAssistantMessage = $this->getLastAssistantMessage($organization, $sessionId);
+                $lastAssistantAskedQuestion = is_string($lastAssistantMessage)
+                    && trim($lastAssistantMessage) !== ''
+                    && $this->responseHasQuestion($lastAssistantMessage);
+                $isAffirmativeFollowUp = $this->isAffirmativeFollowUp((string) $message);
+                $isAffirmativeContinuation = $isAffirmativeFollowUp && $lastAssistantAskedQuestion;
+                $skipIntentOnAffirmative = (bool) ($rulePolicy['skip_intent_on_affirmative_follow_up'] ?? true);
+                $skipExactMatchOnAffirmative = (bool) ($rulePolicy['skip_exact_match_on_affirmative_follow_up'] ?? true);
+
+                $searchQuery = $message;
+                if ($isAffirmativeContinuation) {
+                    $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
+                    $queryParts = [];
+
+                    if (is_string($previousUserMessage) && trim($previousUserMessage) !== '') {
+                        $queryParts[] = trim($previousUserMessage);
+                    }
+
+                    if (is_string($lastAssistantMessage) && trim($lastAssistantMessage) !== '') {
+                        $queryParts[] = trim($lastAssistantMessage);
+                    }
+
+                    $queryParts[] = $message;
+                    $searchQuery = trim(implode(' ', array_filter($queryParts)));
+                }
+
                 $actionQuery = $message;
                 if ($this->isPricingFollowUp($message)) {
                     $previousMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
@@ -1540,7 +1669,18 @@ class WidgetController
                 }
                 
                 // Check if any action should be executed
-                $actionResult = $actionService->processQuery($actionQuery, $organization->id);
+                if ($isAffirmativeContinuation && $skipIntentOnAffirmative) {
+                    $actionResult = [
+                        'type' => 'no_action',
+                        'intent' => [
+                            'intent' => 'follow_up',
+                            'confidence' => 0.95,
+                            'method' => 'rule_follow_up',
+                        ],
+                    ];
+                } else {
+                    $actionResult = $actionService->processQuery($actionQuery, $organization->id);
+                }
                 $intentResult = $actionResult['intent'] ?? null;
 
                 // Update lead with intent/priority if lead info is provided
@@ -1584,7 +1724,7 @@ class WidgetController
                 
                 // Search for relevant context only if no action was executed or as supplementary info
                 if (!$liveData) {
-                    $searchResults = $aiService->enhancedSearch($organization->slug, $message, 5);
+                    $searchResults = $aiService->enhancedSearch($organization->slug, $searchQuery, 5);
                     
                     if ($searchResults && isset($searchResults['results'])) {
                         $context .= "\n\nAdditional information from knowledge base:\n\n";
@@ -1596,6 +1736,19 @@ class WidgetController
                             // Extract follow-up question if present
                             if (isset($payload['follow_up']) && !empty($payload['follow_up'])) {
                                 $context .= "Follow-up: " . $payload['follow_up'] . "\n";
+                            }
+
+                            $supplementaryInfo = $this->extractSupplementaryInfoFromPayload($payload);
+                            if ($supplementaryInfo !== '') {
+                                $context .= "Supplementary: " . $supplementaryInfo . "\n";
+                            }
+
+                            $modelPricing = $this->extractModelPricingFromPayload($payload);
+                            if ($modelPricing['ex_showroom_price_inr'] !== '') {
+                                $context .= "Ex-showroom Price (INR): " . $modelPricing['ex_showroom_price_inr'] . "\n";
+                            }
+                            if ($modelPricing['approx_on_road_price_inr'] !== '') {
+                                $context .= "On-road Price (INR): " . $modelPricing['approx_on_road_price_inr'] . "\n";
                             }
                             
                             $context .= "\n";
@@ -1720,12 +1873,13 @@ class WidgetController
                 }
 
                 $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization);
-                if ($exactFaqMatch && !$liveData) {
+                if ($exactFaqMatch && !$liveData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                     $directResponse = $exactFaqMatch['response'];
                     $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
                         $organization,
                         $directResponse,
-                        $exactFaqMatch['payload']['follow_up'] ?? null
+                        $exactFaqMatch['payload']['follow_up'] ?? null,
+                        $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location'))
                     );
                     if ($faqFollowUp !== '') {
                         $directResponse = trim($directResponse) . "\n\n" . $faqFollowUp;
@@ -1896,6 +2050,56 @@ class WidgetController
                     return;
                 }
 
+                $lowConfidenceResponse = $this->buildLowConfidenceClarificationResponse($message, $searchResults);
+                if ($lowConfidenceResponse !== null && !$liveData && !$this->isContactQuery($message)) {
+                    echo "data: " . json_encode(['content' => $lowConfidenceResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $lowConfidenceResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($lowConfidenceResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $lowConfidenceResponse,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $lowConfidenceResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
+                }
+
                 if ($this->isVeryShortQuery($message)
                     && trim((string) $context) === ''
                     && !$liveData
@@ -2004,13 +2208,16 @@ class WidgetController
                     : null;
 
                 // Build messages
-                $systemPrompt = "You are AI Assistant for {$organization->name}.";
+                $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
+                $systemPrompt = "You are {$assistantName} for {$organization->name}.";
                 $businessContext = $this->buildBusinessContext($organization);
                 $promotionContext = $this->buildPromotionContext($organization);
+                $supplementaryInstruction = $this->buildSupplementaryInstruction($organization);
                 $systemPrompt .= " Tone: {$responseTone}. Language: {$responseLanguage}.";
                 $systemPrompt .= " Write in first-person plural as the business (use \"we/our\"), not \"they\".";
                 $systemPrompt .= " Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short.";
                 $systemPrompt .= " If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
+                $systemPrompt .= " " . $supplementaryInstruction;
                 $systemPrompt .= " Website: {$orgWebsite}";
                 if ($orgEmail) $systemPrompt .= " | Email: {$orgEmail}";
                 if ($orgPhone) $systemPrompt .= " | Phone: {$orgPhone}";
@@ -2032,6 +2239,10 @@ class WidgetController
                 $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
                 $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage) || $aiProvider === 'openai';
                 $maxTokens = $contactQuickResponse ? 60 : 220;
+                $affirmativeMaxTokens = (int) ($rulePolicy['affirmative_follow_up_max_tokens'] ?? 140);
+                if ($isAffirmativeContinuation && !$contactQuickResponse) {
+                    $maxTokens = max(80, min(300, $affirmativeMaxTokens));
+                }
                 if (!$contactQuickResponse && (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
                     || strlen($message) > 120
                     || strlen($context) > 2000)) {
@@ -2318,7 +2529,12 @@ class WidgetController
                     if ($intentFollowUp !== '') {
                         $postfixParts[] = $intentFollowUp;
                     } else {
-                        $faqFollowUp = $this->faqFollowUpService->getFollowUpText($organization, $finalResponse);
+                        $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
+                            $organization,
+                            $finalResponse,
+                            null,
+                            $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location'))
+                        );
                         if ($faqFollowUp !== '') {
                             $postfixParts[] = $faqFollowUp;
                         } else {
@@ -2508,6 +2724,36 @@ class WidgetController
         }
 
         return 'new';
+    }
+
+    private function buildFaqFollowUpContext(array $allUserInfo, array $locationInfo = []): array
+    {
+        $context = [];
+
+        $locationValue = $locationInfo['location']
+            ?? ($allUserInfo['location'] ?? null)
+            ?? ($allUserInfo['custom_fields']['location'] ?? null)
+            ?? null;
+
+        if (is_string($locationValue) && trim($locationValue) !== '') {
+            $context['location'] = trim($locationValue);
+        }
+
+        $regionValue = $locationInfo['region'] ?? ($allUserInfo['region'] ?? null);
+        if (is_string($regionValue) && trim($regionValue) !== '') {
+            $context['region'] = trim($regionValue);
+        }
+
+        $countryValue = $locationInfo['country'] ?? ($allUserInfo['country'] ?? null);
+        if (is_string($countryValue) && trim($countryValue) !== '') {
+            $context['country'] = trim($countryValue);
+        }
+
+        if (!empty($allUserInfo['custom_fields']) && is_array($allUserInfo['custom_fields'])) {
+            $context['custom_fields'] = $allUserInfo['custom_fields'];
+        }
+
+        return $context;
     }
 
     private function buildLeadSessionMetadata(Request $request, array $allUserInfo): array
@@ -3096,6 +3342,10 @@ class WidgetController
 
         if ($isLikelyShortReply && $lastAssistantAskedQuestion) {
             $systemPrompt .= "\nFOLLOW-UP MODE: The user's latest message is likely a short answer to the assistant's previous question. Interpret it using the immediately preceding question and context.\n";
+        }
+
+        if ($this->isAffirmativeFollowUp($message) && $lastAssistantAskedQuestion) {
+            $systemPrompt .= "\nAFFIRMATIVE CONTINUATION: The user accepted your previous follow-up question. Continue with one relevant detail from the option(s) you just offered, grounded in CURRENT CONTEXT. Do not reset the conversation or ask 'what would you like help with?'.\n";
         }
 
         $systemPrompt .= "\nCURRENT QUERY:\n" . $message . "\n";
@@ -4025,6 +4275,178 @@ class WidgetController
         return "I didn't understand that. Could you please share a bit more detail?";
     }
 
+    private function buildLowConfidenceClarificationResponse(string $message, ?array $searchResults): ?string
+    {
+        if (!$this->isEntityInfoQuery($message)) {
+            return null;
+        }
+
+        $subject = $this->extractEntityInfoSubject($message);
+        if ($subject === '') {
+            return null;
+        }
+
+        $results = $searchResults['results'] ?? null;
+        if (!is_array($results) || empty($results)) {
+            return null;
+        }
+
+        $maxScore = 0.0;
+        $titles = [];
+        $subjectNormalized = $this->normalizeEntityText($subject);
+        $hasDirectMatch = false;
+
+        foreach ($results as $result) {
+            $score = (float) ($result['score'] ?? 0.0);
+            if ($score > $maxScore) {
+                $maxScore = $score;
+            }
+
+            $payload = $result['payload'] ?? [];
+            $title = trim((string) ($payload['title'] ?? ''));
+            $content = trim((string) ($payload['content'] ?? ''));
+
+            if ($title !== '') {
+                $titles[] = $title;
+            }
+
+            $titleNormalized = $this->normalizeEntityText($title);
+            $contentNormalized = $this->normalizeEntityText($content);
+
+            if ($subjectNormalized !== '' && (
+                ($titleNormalized !== '' && str_contains($titleNormalized, $subjectNormalized)) ||
+                ($contentNormalized !== '' && str_contains($contentNormalized, $subjectNormalized))
+            )) {
+                $hasDirectMatch = true;
+            }
+        }
+
+        if ($maxScore >= 0.58 || $hasDirectMatch) {
+            return null;
+        }
+
+        $suggestions = $this->pickClosestEntitySuggestions($subject, $titles, 3);
+        if (empty($suggestions)) {
+            return "I couldn't find an exact match for '{$subject}' in our records yet. Could you share the model name again or check the spelling?";
+        }
+
+        $options = $this->formatSuggestionList($suggestions);
+        return "I couldn't find an exact match for '{$subject}'. Did you mean {$options}? If yes, I can share full details right away.";
+    }
+
+    private function isEntityInfoQuery(string $message): bool
+    {
+        $trimmed = trim($message);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(tell me more about|tell me about|more about|details about|details of|information about|info about)\b/i', $trimmed);
+    }
+
+    private function extractEntityInfoSubject(string $message): string
+    {
+        $trimmed = trim($message);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        $patterns = [
+            '/(?:tell me more about|tell me about|more about|details about|details of|information about|info about)\s+(.+)$/i',
+            '/\babout\s+(.+)$/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $trimmed, $matches)) {
+                $subject = trim((string) ($matches[1] ?? ''));
+                $subject = trim($subject, " \t\n\r\0\x0B.?!,;:'\"");
+                if ($subject !== '') {
+                    return $subject;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function normalizeEntityText(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            return '';
+        }
+
+        $normalized = preg_replace('/[^a-z0-9]+/i', ' ', $normalized) ?? $normalized;
+        return trim(preg_replace('/\s+/', ' ', $normalized) ?? $normalized);
+    }
+
+    private function pickClosestEntitySuggestions(string $subject, array $titles, int $limit = 3): array
+    {
+        $subjectNormalized = $this->normalizeEntityText($subject);
+        if ($subjectNormalized === '') {
+            return [];
+        }
+
+        $scored = [];
+        foreach ($titles as $title) {
+            $title = trim((string) $title);
+            if ($title === '') {
+                continue;
+            }
+
+            $titleNormalized = $this->normalizeEntityText($title);
+            if ($titleNormalized === '') {
+                continue;
+            }
+
+            similar_text($subjectNormalized, $titleNormalized, $percent);
+            $containsBoost = str_contains($titleNormalized, $subjectNormalized) ? 8.0 : 0.0;
+            $score = (float) $percent + $containsBoost;
+
+            $scored[] = [
+                'title' => $title,
+                'score' => $score,
+            ];
+        }
+
+        usort($scored, function (array $a, array $b): int {
+            return $b['score'] <=> $a['score'];
+        });
+
+        $results = [];
+        foreach ($scored as $item) {
+            if (count($results) >= $limit) {
+                break;
+            }
+
+            $title = $item['title'];
+            if (!in_array($title, $results, true)) {
+                $results[] = $title;
+            }
+        }
+
+        return $results;
+    }
+
+    private function formatSuggestionList(array $items): string
+    {
+        $values = array_values(array_filter(array_map(function ($item) {
+            return trim((string) $item);
+        }, $items)));
+
+        $count = count($values);
+        if ($count === 0) {
+            return '';
+        }
+
+        if ($count === 1) {
+            return $values[0];
+        }
+
+        $last = array_pop($values);
+        return implode(', ', $values) . ' or ' . $last;
+    }
+
     private function buildAffirmativeClarifyResponse(): string
     {
         return "Sure. What would you like help with?";
@@ -4061,11 +4483,9 @@ class WidgetController
             return false;
         }
 
-        if (!str_contains($clean, '?')) {
-            return false;
-        }
-
-        return (bool) preg_match('/\?\s*$/', $clean);
+        // Consider it a question if any line contains a question mark,
+        // even when additional helper/supplementary lines follow.
+        return str_contains($clean, '?');
     }
 
     private function getLastAssistantMessage(Organization $organization, string $sessionId): ?string
@@ -4393,13 +4813,12 @@ class WidgetController
         foreach ($affirm as $a) {
             if ($t === $a) return true;
         }
-        // Phrases asking to elaborate
+        // Phrases asking to elaborate (generic follow-up only)
+        // Important: avoid matching specific intent queries like "tell me more about Victoris"
         $patterns = [
             '/^yes\b.*more/',
-            '/\btell me more\b/',
-            '/\bmore details\b/',
-            '/\bhow it works\b/',
-            '/\bexplain more\b/'
+            '/^(tell me more|more details|explain more|how it works)\s*$/',
+            '/^(yes|yeah|yup|sure|ok|okay|please)\b.*\b(tell me more|more details|explain more|how it works)\b/'
         ];
         foreach ($patterns as $re) {
             if (preg_match($re, $t)) return true;
@@ -5124,6 +5543,135 @@ class WidgetController
     /**
      * Detect if the message is asking about Shopify-related data
      */
+    private function extractSupplementaryInfoFromPayload(array $payload): string
+    {
+        $candidates = [
+            $payload['supplementary_info'] ?? null,
+            $payload['supplementary'] ?? null,
+            data_get($payload, 'metadata.supplementary_info'),
+            data_get($payload, 'metadata.supplementary'),
+            data_get($payload, 'metadata.csv.supplementary_info'),
+            data_get($payload, 'metadata.csv.supplementary'),
+        ];
+
+        foreach ($candidates as $value) {
+            if (is_string($value)) {
+                $text = trim($this->htmlToPlainWithLinks($value));
+                if ($text !== '') {
+                    return $text;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function extractModelPricingFromPayload(array $payload): array
+    {
+        $exShowroom = $this->firstNonEmptyString([
+            $payload['ex_showroom_price_inr'] ?? null,
+            $payload['ex_showroom_price'] ?? null,
+            data_get($payload, 'metadata.ex_showroom_price_inr'),
+            data_get($payload, 'metadata.ex_showroom_price'),
+            data_get($payload, 'metadata.csv.ex_showroom_price_inr'),
+            data_get($payload, 'metadata.csv.ex_showroom_price'),
+        ]);
+
+        $onRoad = $this->firstNonEmptyString([
+            $payload['approx_on_road_price_inr'] ?? null,
+            $payload['on_road_price_inr'] ?? null,
+            $payload['on_road_price'] ?? null,
+            data_get($payload, 'metadata.approx_on_road_price_inr'),
+            data_get($payload, 'metadata.on_road_price_inr'),
+            data_get($payload, 'metadata.on_road_price'),
+            data_get($payload, 'metadata.csv.approx_on_road_price_inr'),
+            data_get($payload, 'metadata.csv.on_road_price_inr'),
+            data_get($payload, 'metadata.csv.on_road_price'),
+        ]);
+
+        $content = (string) ($payload['content'] ?? '');
+        if ($content !== '') {
+            if ($exShowroom === '' && preg_match('/ex\s*showroom\s*price(?:\s*inr)?\s*:\s*([^\n]+)/i', $content, $matches)) {
+                $exShowroom = trim((string) ($matches[1] ?? ''));
+            }
+
+            if ($onRoad === '' && preg_match('/(?:approx\s*)?on\s*road\s*price(?:\s*inr)?\s*:\s*([^\n]+)/i', $content, $matches)) {
+                $onRoad = trim((string) ($matches[1] ?? ''));
+            }
+        }
+
+        return [
+            'ex_showroom_price_inr' => $this->normalizePriceText($exShowroom),
+            'approx_on_road_price_inr' => $this->normalizePriceText($onRoad),
+        ];
+    }
+
+    private function firstNonEmptyString(array $values): string
+    {
+        foreach ($values as $value) {
+            if (is_string($value)) {
+                $trimmed = trim($value);
+                if ($trimmed !== '') {
+                    return $trimmed;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function normalizePriceText(string $value): string
+    {
+        $normalized = trim($value);
+        if ($normalized === '') {
+            return '';
+        }
+
+        return trim((string) preg_replace('/\s+/', ' ', $normalized));
+    }
+
+    private function buildSupplementaryInstruction(Organization $organization): string
+    {
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+        $customInstruction = trim((string) ($settings['supplementary_instruction'] ?? ''));
+        if ($customInstruction !== '') {
+            return $customInstruction;
+        }
+
+        return "When CURRENT CONTEXT includes a line starting with 'Supplementary:', include one short, relevant final sentence using that data. Treat supplementary data as optional context, never invent missing values, and only include it when it helps answer the user's query.";
+    }
+
+    private function getWidgetRulePolicy(Organization $organization): array
+    {
+        $defaults = [
+            'skip_intent_on_affirmative_follow_up' => true,
+            'skip_exact_match_on_affirmative_follow_up' => true,
+            'affirmative_follow_up_max_tokens' => 140,
+        ];
+
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+        $overrides = $settings['widget_rule_policy'] ?? [];
+        if (!is_array($overrides)) {
+            return $defaults;
+        }
+
+        $policy = $defaults;
+
+        if (array_key_exists('skip_intent_on_affirmative_follow_up', $overrides)) {
+            $policy['skip_intent_on_affirmative_follow_up'] = (bool) $overrides['skip_intent_on_affirmative_follow_up'];
+        }
+
+        if (array_key_exists('skip_exact_match_on_affirmative_follow_up', $overrides)) {
+            $policy['skip_exact_match_on_affirmative_follow_up'] = (bool) $overrides['skip_exact_match_on_affirmative_follow_up'];
+        }
+
+        if (array_key_exists('affirmative_follow_up_max_tokens', $overrides) && is_numeric($overrides['affirmative_follow_up_max_tokens'])) {
+            $policy['affirmative_follow_up_max_tokens'] = max(80, min(300, (int) $overrides['affirmative_follow_up_max_tokens']));
+        }
+
+        return $policy;
+    }
+
     private function detectShopifyQuery(string $message): bool
     {
         $lowerMessage = strtolower($message);

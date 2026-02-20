@@ -137,6 +137,7 @@
                                             <option value="database">Database Connection</option>
                                             <option value="api_push">API Push</option>
                                         </select>
+                                        <small class="form-text text-muted">Choose based on where your data lives: website, files, sheets, database, or API.</small>
                                         @error('type') <span class="text-danger">{{ $message }}</span> @enderror
                                     </div>
                                 </div>
@@ -144,6 +145,7 @@
                                     <div class="form-group">
                                         <label>Name</label>
                                         <input type="text" class="form-control" wire:model="name" placeholder="Enter data source name">
+                                        <small class="form-text text-muted">Use a descriptive name like <strong>Product Catalog Crawler</strong> or <strong>Pricing Sheet</strong>.</small>
                                         @error('name') <span class="text-danger">{{ $message }}</span> @enderror
                                     </div>
                                 </div>
@@ -152,6 +154,7 @@
                             <div class="form-group">
                                 <label>Description</label>
                                 <textarea class="form-control" wire:model="description" rows="3" placeholder="Optional description"></textarea>
+                                <small class="form-text text-muted">Document what this source contains and how often it should be refreshed.</small>
                                 @error('description') <span class="text-danger">{{ $message }}</span> @enderror
                             </div>
 

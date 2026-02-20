@@ -4,6 +4,7 @@
         <div class="form-group">
             <label>Website URL</label>
             <input type="url" class="form-control" wire:model="config.url" placeholder="https://example.com">
+            <small class="form-text text-muted">Start URL for crawling. Use full URL including https.</small>
             @error('config.url') <span class="text-danger">{{ $message }}</span> @enderror
         </div>
     </div>
@@ -11,6 +12,7 @@
         <div class="form-group">
             <label>Max Pages</label>
             <input type="number" class="form-control" wire:model="config.max_pages" placeholder="100" min="1" max="1000">
+            <small class="form-text text-muted">Safety limit for number of pages per crawl run.</small>
             @error('config.max_pages') <span class="text-danger">{{ $message }}</span> @enderror
         </div>
     </div>
@@ -48,7 +50,7 @@
               placeholder="/products/*
 /services/*
 /blog/*"></textarea>
-    <small class="form-text text-muted">Optional: Specify URL patterns to include. Leave empty to crawl all pages.</small>
+    <small class="form-text text-muted">Optional allow-list. Leave empty to crawl all pages discovered from start URL.</small>
 </div>
 
 <div class="form-group">
@@ -57,7 +59,7 @@
               placeholder="/admin/*
 /login*
 *.pdf"></textarea>
-    <small class="form-text text-muted">Optional: Specify URL patterns to exclude from crawling.</small>
+    <small class="form-text text-muted">Optional block-list to skip private, auth, or irrelevant paths.</small>
 </div>
 
 <div class="row">

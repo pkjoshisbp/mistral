@@ -33,6 +33,7 @@
                         </button>
                     @endif
                 </div>
+                <small class="text-muted d-block mt-1">Search supports question, answer, category, and keyword matching.</small>
                 @if($search)
                     <small class="text-muted">Showing results for: <strong>{{ $search }}</strong></small>
                 @endif
@@ -44,9 +45,9 @@
                     <div class="row">
                         <div class="col-md-6 mb-2"><label>Question *</label><input type="text" wire:model="question" class="form-control">@error('question')<small class="text-danger">{{ $message }}</small>@enderror</div>
                         <div class="col-md-3 mb-2"><label>Category</label><input type="text" wire:model="category" class="form-control"></div>
-                        <div class="col-md-3 mb-2"><label>Keywords</label><input type="text" wire:model="keywords" class="form-control" placeholder="comma separated"></div>
+                        <div class="col-md-3 mb-2"><label>Keywords</label><input type="text" wire:model="keywords" class="form-control" placeholder="comma separated"><small class="text-muted d-block mt-1">Use comma-separated keywords to improve retrieval quality.</small></div>
                         <div class="col-md-12 mb-2"><label>Answer *</label><textarea wire:model="answer" rows="3" class="form-control"></textarea>@error('answer')<small class="text-danger">{{ $message }}</small>@enderror</div>
-                        <div class="col-md-12 mb-2"><label>Follow-up Question <small class="text-muted">(Optional - shown after answer)</small></label><input type="text" wire:model="follow_up" class="form-control" placeholder="e.g., We also offer related services. Would you like to know more about them?"></div>
+                        <div class="col-md-12 mb-2"><label>Follow-up Question <small class="text-muted">(Optional - shown after answer)</small></label><input type="text" wire:model="follow_up" class="form-control" placeholder="e.g., We also offer related services. Would you like to know more about them?"><small class="text-muted d-block mt-1">Keep follow-up short and relevant to the current answer.</small></div>
                         <div class="col-md-3 mb-2"><label>Sort Order</label><input type="number" wire:model="sort_order" class="form-control"></div>
                         <div class="col-md-3 mb-2"><label>Status</label><select wire:model="is_active" class="form-control"><option value="1">Active</option><option value="0">Inactive</option></select></div>
                     </div>

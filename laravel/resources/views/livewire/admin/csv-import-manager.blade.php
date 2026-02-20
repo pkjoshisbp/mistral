@@ -27,6 +27,9 @@
             <div class="alert alert-info">
                 <i class="fas fa-info-circle"></i>
                 CSV-only workflow is active. Google Sheets import is not used here.
+                <div class="mt-2 mb-0">
+                    For model pricing, use dedicated CSV columns such as <strong>model</strong>, <strong>variant</strong>, <strong>ex_showroom_price_inr</strong>, and <strong>approx_on_road_price_inr</strong>.
+                </div>
             </div>
 
             <div class="card">
@@ -56,6 +59,7 @@
                             <div class="col-md-4 mb-3">
                                 <label>Dataset (optional)</label>
                                 <input type="text" class="form-control" wire:model="dataset" placeholder="e.g. models_master">
+                                <small class="text-muted d-block mt-1">Logical dataset name used to group imported rows.</small>
                                 @error('dataset')<small class="text-danger">{{ $message }}</small>@enderror
                             </div>
 
@@ -86,26 +90,31 @@
                             <div class="col-md-6 mb-3">
                                 <label>Name Columns (comma separated)</label>
                                 <input type="text" class="form-control" wire:model="nameColumns" placeholder="model,variant">
+                                <small class="text-muted d-block mt-1">Used to build title for each imported row.</small>
                             </div>
 
                             <div class="col-md-6 mb-3">
                                 <label>Description Columns (comma separated)</label>
                                 <input type="text" class="form-control" wire:model="descriptionColumns" placeholder="design,comfort,safety">
+                                <small class="text-muted d-block mt-1">Short descriptive fields for display and retrieval.</small>
                             </div>
 
                             <div class="col-md-6 mb-3">
                                 <label>Content Columns (comma separated, optional)</label>
                                 <input type="text" class="form-control" wire:model="contentColumns" placeholder="leave blank to use all columns">
+                                <small class="text-muted d-block mt-1">Primary searchable content for embeddings; leave blank to include all columns.</small>
                             </div>
 
                             <div class="col-md-6 mb-3">
                                 <label>Category Column (optional)</label>
                                 <input type="text" class="form-control" wire:model="categoryColumn" placeholder="category">
+                                <small class="text-muted d-block mt-1">Category source column per row (optional).</small>
                             </div>
 
                             <div class="col-md-6 mb-3">
                                 <label>Default Category *</label>
                                 <input type="text" class="form-control" wire:model="defaultCategory" placeholder="general">
+                                <small class="text-muted d-block mt-1">Used when category column is missing or empty.</small>
                                 @error('defaultCategory')<small class="text-danger">{{ $message }}</small>@enderror
                             </div>
 
