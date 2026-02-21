@@ -12,9 +12,11 @@ use Illuminate\Support\Facades\Mail;
 use App\Mail\ChatInteractionNotification;
 use App\Mail\LeadCapturedNotification;
 use App\Models\Lead;
+use App\Models\OrganizationFaq;
 use App\Services\IntentDetectionService;
 use App\Services\AiAgentService;
 use App\Services\FaqFollowUpService;
+use App\Services\FollowUpStateService;
 use App\Services\LocationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -28,11 +30,13 @@ class WidgetController
 {
     private $aiAgentService;
     private $faqFollowUpService;
+    private $followUpStateService;
 
-    public function __construct(AiAgentService $aiAgentService, FaqFollowUpService $faqFollowUpService)
+    public function __construct(AiAgentService $aiAgentService, FaqFollowUpService $faqFollowUpService, FollowUpStateService $followUpStateService)
     {
         $this->aiAgentService = $aiAgentService;
         $this->faqFollowUpService = $faqFollowUpService;
+        $this->followUpStateService = $followUpStateService;
     }
 
     /**
@@ -61,6 +65,7 @@ class WidgetController
             ->exists();
 
         $scriptVersion = now()->format('Ymd.His');
+        $starterPrompts = $this->getWidgetStarterPrompts($organization);
         $widgetConfig = [
             'orgId' => $orgId,
             'orgName' => $organization->name,
@@ -82,6 +87,7 @@ class WidgetController
             'chatHistoryTtlHours' => (int)($settings['chat_history_ttl_hours'] ?? 24),
             'requireContactForGuests' => (bool)($settings['require_contact_for_guests'] ?? false),
             'contactFields' => is_array($settings['widget_contact_fields'] ?? null) ? $settings['widget_contact_fields'] : [],
+            'starterPrompts' => $starterPrompts,
             // Branding/backlink controls (defaults: enabled + dofollow)
             'brandingEnabled' => array_key_exists('branding_enabled', $settings) ? (bool)$settings['branding_enabled'] : true,
             'brandingFollow' => array_key_exists('branding_follow', $settings) ? (bool)$settings['branding_follow'] : true,
@@ -210,13 +216,14 @@ class WidgetController
                 ->where('organization_id', $organization->id)
                 ->first();
             $previousContextPayloads = $existingConversation->metadata['last_context_payloads'] ?? [];
+            $pendingFollowUpState = $this->followUpStateService->getPendingState($existingConversation);
+            $hasPendingFollowUpState = is_array($pendingFollowUpState) && !empty($pendingFollowUpState);
 
             $lastAssistantForIntent = $this->getLastAssistantMessage($organization, $sessionId);
             $skipIntentOnAffirmative = (bool) ($rulePolicy['skip_intent_on_affirmative_follow_up'] ?? true);
             $isAffirmativeContinuationForIntent = $this->isAffirmativeFollowUp((string) $message)
                 && $existingConversation
-                && is_string($lastAssistantForIntent)
-                && $this->responseHasQuestion($lastAssistantForIntent)
+                && ((is_string($lastAssistantForIntent) && $this->responseHasQuestion($lastAssistantForIntent)) || $hasPendingFollowUpState)
                 && $skipIntentOnAffirmative;
 
             if (!$isAffirmativeContinuationForIntent) {
@@ -359,6 +366,9 @@ class WidgetController
 
             $searchQuery = $message;
             if ($isContextualShortFollowUp && !$canReusePreviousContext) {
+                if ($isAffirmativeFollowUp && $hasPendingFollowUpState) {
+                    $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
+                } else {
                 $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                 $queryParts = [];
 
@@ -372,6 +382,7 @@ class WidgetController
 
                 $queryParts[] = $message;
                 $searchQuery = trim(implode(' ', array_filter($queryParts)));
+                }
             }
 
             // ---- SHOPIFY API INTEGRATION (SMART PATH) ----
@@ -617,41 +628,14 @@ class WidgetController
             }
 
             // Persist last context payloads for follow-up continuity (limit to top 5)
-            try {
-                if (!empty($orderedResults)) {
-                    $payloads = [];
-                    foreach (array_slice($orderedResults, 0, 5) as $res) {
-                        $p = $res['payload'] ?? [];
-                        if (!empty($p)) {
-                            // Keep only relevant fields to reduce storage
-                            $payloads[] = [
-                                'data_type' => $p['data_type'] ?? null,
-                                'title' => $p['title'] ?? null,
-                                'content' => $p['content'] ?? null,
-                                'price' => $p['price'] ?? null,
-                                'currency' => $p['currency'] ?? null,
-                                'duration' => $p['duration'] ?? null,
-                                'requirements' => $p['requirements'] ?? null,
-                                'availability' => $p['availability'] ?? ($p['metadata']['availability'] ?? null),
-                                'category' => $p['category'] ?? null,
-                                'links' => $p['links'] ?? null,
-                                'follow_up' => $p['follow_up'] ?? null,
-                                'supplementary_info' => $this->extractSupplementaryInfoFromPayload($p),
-                                'ex_showroom_price_inr' => $this->extractModelPricingFromPayload($p)['ex_showroom_price_inr'] ?? null,
-                                'approx_on_road_price_inr' => $this->extractModelPricingFromPayload($p)['approx_on_road_price_inr'] ?? null,
-                            ];
-                        }
-                    }
-                    if ($existingConversation) {
-                        $meta = $existingConversation->metadata ?? [];
-                        $meta['last_context_payloads'] = $payloads;
-                        $existingConversation->metadata = $meta;
-                        $existingConversation->save();
-                    }
-                }
-            } catch (\Throwable $t) {
-                Log::warning('Failed saving last context payloads', ['error' => $t->getMessage()]);
-            }
+            $payloads = $this->buildContextPayloadCache($orderedResults);
+            $this->persistLastContextPayloads(
+                $organization,
+                $sessionId,
+                $payloads,
+                $allUserInfo,
+                compact('country', 'region', 'location')
+            );
 
             // Create concise system prompt with official org contact metadata
             $orgWebsite = $organization->website ?: config('app.url');
@@ -735,6 +719,58 @@ class WidgetController
             }
 
             $hasVerifiedContext = !empty($finalContext) || !empty($shopifyContext);
+            if ($this->shouldUseAffirmativeNoContextFallback($isAffirmativeContinuation, $context, $shopifyContext, null)) {
+                $safeResponse = $this->buildAffirmativeNoContextResponse($organization);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $safeResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location'),
+                    $sessionMetadata
+                );
+
+                if ($this->isUnansweredResponse($safeResponse)) {
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $safeResponse,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+                }
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $safeResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                return response()->json([
+                    'response' => $safeResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             if ($verifiedOnly && !$hasVerifiedContext) {
                 $safeResponse = $this->buildVerifiedOnlyResponse($organization);
                 return response()->json([
@@ -1113,7 +1149,7 @@ class WidgetController
                 $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question.\n";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n";
                 $systemPrompt .= $supplementaryInstruction . "\n";
-                $systemPrompt .= "If the user says 'no', 'not needed', 'not interested', 'goodbye', or similar phrases to end the conversation, respond with a brief, friendly closing message (1 sentence max) like 'No problem! Feel free to reach out if you need anything.' Do NOT ask follow-up questions or provide additional information.\n\n";
+                $systemPrompt .= "If the user clearly ends the conversation (for example: 'goodbye', 'that's all', 'nothing else'), respond with a brief, friendly closing message (1 sentence max). If the user says 'no' as an answer to your clarifying question, continue helping with their original request instead of ending the chat.\n\n";
                 $systemPrompt .= "\nCURRENT CONTEXT:\n" . $finalContext . "\n";
                 if ($businessContext) {
                     $systemPrompt .= $businessContext . "\n";
@@ -1156,7 +1192,7 @@ class WidgetController
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\". ";
                 $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question. ";
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
-                $systemPrompt .= "If the user says 'no', 'not needed', 'not interested', 'goodbye', or similar phrases to end the conversation, respond with a brief, friendly closing message (1 sentence max) like 'No problem! Feel free to reach out if you need anything.' Do NOT ask follow-up questions or provide additional information. ";
+                $systemPrompt .= "If the user clearly ends the conversation (for example: 'goodbye', 'that's all', 'nothing else'), respond with a brief, friendly closing message (1 sentence max). If the user says 'no' as an answer to your clarifying question, continue helping with their original request instead of ending the chat. ";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
                 $systemPrompt .= " " . $supplementaryInstruction;
             }
@@ -1273,7 +1309,11 @@ class WidgetController
             }
 
             $responseHasQuestion = $this->responseHasQuestion($responseText);
-            $isConversationEnding = $this->isConversationEndingPhrase($message);
+            $isConversationEnding = $this->shouldTreatAsConversationEnding(
+                $message,
+                $lastAssistantAskedQuestion,
+                $hasPendingFollowUpState
+            );
 
             if (!$hallucinationBlocked && !$responseHasQuestion && !$isConversationEnding) {
                 $intentFollowUp = $this->buildFollowUpPrompt($intentResult);
@@ -1600,11 +1640,18 @@ class WidgetController
 
         $rulePolicy = $this->getWidgetRulePolicy($organization);
 
-        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy) {
+        $pendingFollowUpState = $this->followUpStateService->getPendingState($existingConversation);
+
+        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy, $pendingFollowUpState) {
             $this->initStreamOutput();
             
-            // Early detection: Check if user wants to end conversation
-            if ($this->isConversationEndingPhrase($message)) {
+            $lastAssistantMessageForEnding = $this->getLastAssistantMessage($organization, $sessionId);
+            $lastAssistantAskedQuestionForEnding = is_string($lastAssistantMessageForEnding)
+                && trim($lastAssistantMessageForEnding) !== ''
+                && $this->responseHasQuestion($lastAssistantMessageForEnding);
+            $hasPendingFollowUpStateForEnding = is_array($pendingFollowUpState) && !empty($pendingFollowUpState);
+
+            if ($this->shouldTreatAsConversationEnding($message, $lastAssistantAskedQuestionForEnding, $hasPendingFollowUpStateForEnding)) {
                 $closingResponses = [
                     "No problem! Feel free to reach out if you need anything.",
                     "Understood! Let me know if you have any questions later.",
@@ -1639,25 +1686,29 @@ class WidgetController
                     && trim($lastAssistantMessage) !== ''
                     && $this->responseHasQuestion($lastAssistantMessage);
                 $isAffirmativeFollowUp = $this->isAffirmativeFollowUp((string) $message);
-                $isAffirmativeContinuation = $isAffirmativeFollowUp && $lastAssistantAskedQuestion;
+                $isAffirmativeContinuation = $isAffirmativeFollowUp && ($lastAssistantAskedQuestion || (is_array($pendingFollowUpState) && !empty($pendingFollowUpState)));
                 $skipIntentOnAffirmative = (bool) ($rulePolicy['skip_intent_on_affirmative_follow_up'] ?? true);
                 $skipExactMatchOnAffirmative = (bool) ($rulePolicy['skip_exact_match_on_affirmative_follow_up'] ?? true);
 
                 $searchQuery = $message;
                 if ($isAffirmativeContinuation) {
-                    $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
-                    $queryParts = [];
+                    if ($isAffirmativeFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
+                        $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
+                    } else {
+                        $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
+                        $queryParts = [];
 
-                    if (is_string($previousUserMessage) && trim($previousUserMessage) !== '') {
-                        $queryParts[] = trim($previousUserMessage);
+                        if (is_string($previousUserMessage) && trim($previousUserMessage) !== '') {
+                            $queryParts[] = trim($previousUserMessage);
+                        }
+
+                        if (is_string($lastAssistantMessage) && trim($lastAssistantMessage) !== '') {
+                            $queryParts[] = trim($lastAssistantMessage);
+                        }
+
+                        $queryParts[] = $message;
+                        $searchQuery = trim(implode(' ', array_filter($queryParts)));
                     }
-
-                    if (is_string($lastAssistantMessage) && trim($lastAssistantMessage) !== '') {
-                        $queryParts[] = trim($lastAssistantMessage);
-                    }
-
-                    $queryParts[] = $message;
-                    $searchQuery = trim(implode(' ', array_filter($queryParts)));
                 }
 
                 $actionQuery = $message;
@@ -1698,6 +1749,7 @@ class WidgetController
                 $liveData = null;
                 $isPricingIntent = ($intentResult['intent'] ?? null) === 'pricing';
                 $searchResults = null;
+                $resultsForPayloadCache = [];
                 
                 // If action was executed, include the live data
                 if ($actionResult['type'] === 'action_executed' && isset($actionResult['result']['success']) && $actionResult['result']['success']) {
@@ -1727,6 +1779,7 @@ class WidgetController
                     $searchResults = $aiService->enhancedSearch($organization->slug, $searchQuery, 5);
                     
                     if ($searchResults && isset($searchResults['results'])) {
+                        $resultsForPayloadCache = $searchResults['results'];
                         $context .= "\n\nAdditional information from knowledge base:\n\n";
                         foreach ($searchResults['results'] as $result) {
                             $payload = $result['payload'] ?? [];
@@ -1754,6 +1807,17 @@ class WidgetController
                             $context .= "\n";
                         }
                     }
+                }
+
+                if (!empty($resultsForPayloadCache)) {
+                    $payloads = $this->buildContextPayloadCache($resultsForPayloadCache);
+                    $this->persistLastContextPayloads(
+                        $organization,
+                        $sessionId,
+                        $payloads,
+                        $allUserInfo,
+                        compact('country', 'region', 'location')
+                    );
                 }
 
                 if ($isPricingIntent && !$liveData) {
@@ -1820,6 +1884,56 @@ class WidgetController
                 $agentContext = $this->buildAgentContext($organization->id, $sessionId);
                 if ($agentContext) {
                     $context .= "\nAgent notes:\n" . $agentContext . "\n";
+                }
+
+                if ($this->shouldUseAffirmativeNoContextFallback($isAffirmativeContinuation, $context, null, $liveData)) {
+                    $safeResponse = $this->buildAffirmativeNoContextResponse($organization);
+                    echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $safeResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($safeResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $safeResponse,
+                            $request,
+                            compact('country', 'region', 'location'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $safeResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
                 }
 
                 if ($verifiedOnly && !$liveData && trim($context) === '') {
@@ -2522,7 +2636,11 @@ class WidgetController
                 }
 
                 $responseHasQuestion = $this->responseHasQuestion($finalResponse);
-                $isConversationEnding = $this->isConversationEndingPhrase($message);
+                $isConversationEnding = $this->shouldTreatAsConversationEnding(
+                    $message,
+                    $lastAssistantAskedQuestion,
+                    is_array($pendingFollowUpState) && !empty($pendingFollowUpState)
+                );
 
                 if (!$hallucinationBlocked && !$responseHasQuestion && !$isConversationEnding) {
                     $intentFollowUp = $this->buildFollowUpPrompt($intentResult);
@@ -4555,6 +4673,28 @@ class WidgetController
         return preg_match('/^(no|nope|nah|not)\s*(thank|thanks|needed|interested|required)/i', $lowerMessage) === 1;
     }
 
+    private function shouldTreatAsConversationEnding(?string $message, bool $lastAssistantAskedQuestion = false, bool $hasPendingFollowUpState = false): bool
+    {
+        if (!$this->isConversationEndingPhrase($message)) {
+            return false;
+        }
+
+        if (!is_string($message)) {
+            return false;
+        }
+
+        $clean = strtolower(trim($message));
+        $ambiguousNegativeReplies = [
+            'no', 'nope', 'nah', 'not really', 'not now', 'no thanks', 'no thank you',
+        ];
+
+        if (($lastAssistantAskedQuestion || $hasPendingFollowUpState) && in_array($clean, $ambiguousNegativeReplies, true)) {
+            return false;
+        }
+
+        return true;
+    }
+
     private function isPromoQuery(string $message): bool
     {
         return (bool) preg_match('/\b(promo|promotion|discount|offer|coupon|deal|sale|special)\b/i', $message);
@@ -4809,7 +4949,7 @@ class WidgetController
         $t = trim(mb_strtolower($text));
         if ($t === '') return false;
         // Simple affirmatives
-        $affirm = ['yes', 'yeah', 'yup', 'ya', 'sure', 'ok', 'okay', 'please', 'go ahead', 'continue', 'proceed'];
+        $affirm = ['yes', 'yeah', 'yup', 'yep', 'ya', 'yah', 'sure', 'certainly', 'ok', 'okay', 'please', 'go ahead', 'go on', 'continue', 'proceed', 'carry on'];
         foreach ($affirm as $a) {
             if ($t === $a) return true;
         }
@@ -4818,14 +4958,106 @@ class WidgetController
         $patterns = [
             '/^yes\b.*more/',
             '/^(tell me more|more details|explain more|how it works)\s*$/',
-            '/^(yes|yeah|yup|sure|ok|okay|please)\b.*\b(tell me more|more details|explain more|how it works)\b/'
+            '/^(yes|yeah|yup|yep|ya|yah|sure|certainly|ok|okay|please)\b.*\b(tell me more|more details|explain more|how it works)\b/'
         ];
         foreach ($patterns as $re) {
             if (preg_match($re, $t)) return true;
         }
         // Also treat short confirmations under 16 chars as affirmative if contain yes/ok/sure
-        if (mb_strlen($t) < 16 && preg_match('/\b(yes|ok|okay|sure|please)\b/', $t)) return true;
+        if (mb_strlen($t) < 16 && preg_match('/\b(yes|yeah|yup|yep|ya|yah|ok|okay|sure|please)\b/', $t)) return true;
         return false;
+    }
+
+    private function shouldUseAffirmativeNoContextFallback(bool $isAffirmativeContinuation, string $context = '', ?string $shopifyContext = null, $liveData = null): bool
+    {
+        if (!$isAffirmativeContinuation) {
+            return false;
+        }
+
+        if (!empty($liveData)) {
+            return false;
+        }
+
+        $combined = trim($context . "\n" . (string) ($shopifyContext ?? ''));
+        return $combined === '';
+    }
+
+    private function buildAffirmativeNoContextResponse(Organization $organization): string
+    {
+        $orgWebsite = $organization->website ?: config('app.url');
+        $orgEmail = $organization->contact_email ?? null;
+        $orgPhone = $organization->contact_phone ?? null;
+        $contactResponse = $this->buildContactResponse($orgEmail, $orgPhone, $orgWebsite);
+
+        return "Sorry, we don't have the required details in our verified knowledge base right now. {$contactResponse}";
+    }
+
+    private function buildContextPayloadCache(array $results): array
+    {
+        $payloads = [];
+        foreach (array_slice($results, 0, 5) as $res) {
+            $p = is_array($res) ? ($res['payload'] ?? $res) : [];
+            if (!is_array($p) || empty($p)) {
+                continue;
+            }
+
+            $modelPricing = $this->extractModelPricingFromPayload($p);
+            $payloads[] = [
+                'data_type' => $p['data_type'] ?? null,
+                'title' => $p['title'] ?? null,
+                'content' => $p['content'] ?? null,
+                'price' => $p['price'] ?? null,
+                'currency' => $p['currency'] ?? null,
+                'duration' => $p['duration'] ?? null,
+                'requirements' => $p['requirements'] ?? null,
+                'availability' => $p['availability'] ?? ($p['metadata']['availability'] ?? null),
+                'category' => $p['category'] ?? null,
+                'links' => $p['links'] ?? null,
+                'follow_up' => $p['follow_up'] ?? null,
+                'supplementary_info' => $this->extractSupplementaryInfoFromPayload($p),
+                'ex_showroom_price_inr' => $modelPricing['ex_showroom_price_inr'] ?? null,
+                'approx_on_road_price_inr' => $modelPricing['approx_on_road_price_inr'] ?? null,
+            ];
+        }
+
+        return $payloads;
+    }
+
+    private function persistLastContextPayloads(Organization $organization, string $sessionId, array $payloads, array $userInfo = [], array $locationInfo = []): void
+    {
+        if (empty($payloads) || trim($sessionId) === '') {
+            return;
+        }
+
+        try {
+            $conversation = ChatConversation::firstOrCreate(
+                [
+                    'conversation_id' => $sessionId,
+                    'organization_id' => $organization->id,
+                ],
+                [
+                    'visitor_id' => $sessionId,
+                    'visitor_name' => $userInfo['name'] ?? null,
+                    'visitor_email' => $userInfo['email'] ?? null,
+                    'visitor_phone' => $userInfo['phone'] ?? null,
+                    'visitor_country' => $locationInfo['country'] ?? null,
+                    'visitor_region' => $locationInfo['region'] ?? null,
+                    'visitor_location' => $locationInfo['location'] ?? null,
+                    'status' => 'active',
+                    'agent_status' => 'ai_active',
+                    'last_activity_at' => now(),
+                ]
+            );
+
+            $meta = is_array($conversation->metadata) ? $conversation->metadata : [];
+            $meta['last_context_payloads'] = $payloads;
+            $conversation->update([
+                'metadata' => $meta,
+                'last_activity_at' => now(),
+            ]);
+        } catch (\Throwable $t) {
+            Log::warning('Failed saving last context payloads', ['error' => $t->getMessage()]);
+        }
     }
 
     /**
@@ -4910,10 +5142,49 @@ class WidgetController
         return response()->json([
             'name' => $organization->name,
             'welcomeMessage' => $organization->settings['welcome_message'] ?? 'Hello! How can I help you today?',
+            'starterPrompts' => $this->getWidgetStarterPrompts($organization),
             'theme' => $organization->settings['widget_theme'] ?? 'default',
             'position' => $organization->settings['widget_position'] ?? 'bottom-right',
             'primaryColor' => $organization->settings['primary_color'] ?? '#007bff'
         ])->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    private function getWidgetStarterPrompts(Organization $organization): array
+    {
+        try {
+            $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+            $customPrompts = [];
+            foreach ((array) ($settings['widget_custom_starter_prompts'] ?? []) as $prompt) {
+                $value = trim((string) $prompt);
+                if ($value !== '' && !in_array($value, $customPrompts, true)) {
+                    $customPrompts[] = $value;
+                }
+            }
+
+            $faqs = OrganizationFaq::where('organization_id', $organization->id)
+                ->where('is_active', true)
+                ->where('is_starter_prompt', true)
+                ->orderBy('starter_sort_order')
+                ->orderBy('sort_order')
+                ->orderBy('id')
+                ->limit(6)
+                ->pluck('question')
+                ->map(function ($question) {
+                    return trim((string) $question);
+                })
+                ->filter()
+                ->values()
+                ->all();
+
+            $merged = array_values(array_unique(array_filter(array_merge($customPrompts, $faqs))));
+            return array_slice($merged, 0, 6);
+        } catch (\Throwable $e) {
+            Log::warning('Failed loading widget starter prompts', [
+                'org_id' => $organization->id,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
     }
 
     /**
@@ -5216,6 +5487,15 @@ class WidgetController
                 'last_activity_at' => now()
             ]);
 
+            $conversation->refresh();
+            $conversationMeta = is_array($conversation->metadata) ? $conversation->metadata : [];
+            $contextPayloads = $conversationMeta['last_context_payloads'] ?? [];
+            $this->followUpStateService->updatePendingState(
+                $conversation,
+                (string) $aiResponse,
+                is_array($contextPayloads) ? $contextPayloads : []
+            );
+
             // Generate conversation title from first message if not set
             if (!$conversation->title) {
                 $conversation->generateTitle();
@@ -5400,20 +5680,6 @@ class WidgetController
      */
     private function checkTokenLimits($organization)
     {
-        // Bypass limits for the platform host only (ai-chat.support)
-        $bypassHosts = ['ai-chat.support', 'www.ai-chat.support'];
-        $bypassOrgSlugs = ['platform', 'ai-chat-support'];
-        $requestHost = request()->getHost();
-
-        if (in_array($requestHost, $bypassHosts, true) || in_array($organization->slug, $bypassOrgSlugs, true)) {
-            \Log::debug('Token limits bypassed for allowlisted host/org', [
-                'host' => $requestHost,
-                'org_id' => $organization->id,
-                'org_slug' => $organization->slug
-            ]);
-            return true;
-        }
-
         // Allow disabling token enforcement via config/services.ai_agent.enforce_limits or env AI_ENFORCE_LIMITS=false
         $enforce = (bool) config('services.ai_agent.enforce_limits', env('AI_ENFORCE_LIMITS', true));
         if (!$enforce) {

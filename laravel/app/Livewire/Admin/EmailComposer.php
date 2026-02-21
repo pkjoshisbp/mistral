@@ -17,6 +17,7 @@ class EmailComposer extends Component
     public $showPreview = false;
     public $recipientList = [];
     public $bccList = [];
+    public $selectedCampaignId = null;
 
     protected $rules = [
         'subject' => 'required|string|max:255',
@@ -33,7 +34,35 @@ class EmailComposer extends Component
 
     public function render()
     {
-        return view('livewire.admin.email-composer')->layout('layouts.admin');
+        $recentCampaigns = EmailCampaign::query()
+            ->withCount([
+                'recipients as opened_count' => fn($q) => $q->whereNotNull('opened_at'),
+                'recipients as delivered_count' => fn($q) => $q->whereNotNull('delivered_at'),
+                'recipients as clicked_count' => fn($q) => $q->whereNotNull('clicked_at'),
+            ])
+            ->where('name', 'like', 'Quick Email - %')
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get();
+
+        $selectedCampaignRecipients = collect();
+        if ($this->selectedCampaignId) {
+            $selectedCampaign = EmailCampaign::query()->find($this->selectedCampaignId);
+
+            $selectedCampaignRecipients = $selectedCampaign
+                ? $selectedCampaign->recipients()->orderByDesc('sent_at')->get()
+                : collect();
+        }
+
+        return view('livewire.admin.email-composer', [
+            'recentCampaigns' => $recentCampaigns,
+            'selectedCampaignRecipients' => $selectedCampaignRecipients,
+        ])->layout('layouts.admin');
+    }
+
+    public function viewCampaignReport(int $campaignId): void
+    {
+        $this->selectedCampaignId = $campaignId;
     }
 
     public function preview()
@@ -92,6 +121,12 @@ class EmailComposer extends Component
                         $message->getSymfonyMessage()
                                 ->getHeaders()
                                 ->addTextHeader('X-AICS-Tracking-Token', $trackingToken);
+                        $message->getSymfonyMessage()
+                                ->getHeaders()
+                                ->addTextHeader('X-Mailgun-Variables', json_encode([
+                                    'tracking_token' => $trackingToken,
+                                    'campaign_id' => $campaign->id,
+                                ]));
 
                         // Add BCC if specified
                         if (!empty($this->bccList)) {
@@ -105,13 +140,12 @@ class EmailComposer extends Component
                         'variables' => [],
                         'status' => 'sent',
                         'sent_at' => now(),
-                        'delivered_at' => now(),
                         'delivery_status' => 'sent',
                         'tracking_token' => $trackingToken,
                         'resend_count' => 0,
                         'last_sent_at' => now(),
                         'next_resend_at' => now()->addDays(7),
-                        'last_event' => 'delivered',
+                        'last_event' => 'sent',
                         'last_event_at' => now(),
                     ]);
                     $sentCount++;
@@ -129,8 +163,11 @@ class EmailComposer extends Component
                 'sent_at' => now(),
             ]);
 
+            $this->selectedCampaignId = $campaign->id;
+
             session()->flash('success', "Email sent successfully! Sent: {$sentCount}, Failed: {$failedCount}");
             $this->resetForm();
+            $this->dispatch('email-composer-clear-editor');
 
         } catch (\Exception $e) {
             session()->flash('error', 'Failed to send email: ' . $e->getMessage());

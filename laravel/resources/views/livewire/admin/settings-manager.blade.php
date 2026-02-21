@@ -490,6 +490,15 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">Default Seed Question For "Yes" Replies</label>
+                                        <textarea class="form-control" rows="2" wire:model="whatsapp_default_seed_question" placeholder="Would you like to know more about our services, products, pricing, or latest offers?"></textarea>
+                                        <small class="text-muted">Applied globally for WhatsApp when users send only short affirmatives like "yes/okay/sure" without prior assistant context. Organization-level override is available in customer WhatsApp settings.</small>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="d-flex justify-content-end">
                                 <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save WhatsApp Settings</button>
                             </div>

@@ -14,6 +14,7 @@ return [
     'plan_basic_feature_email_support' => 'Email support',
     'plan_basic_feature_basic_analytics' => 'Basic analytics',
     'plan_basic_feature_up_to_500k_tokensmonth' => 'Up to 500K tokens/month',
+    'plan_basic_feature_up_to_300k_tokensmonth' => 'Up to 300K tokens/month',
     'plan_basic_button' => 'Choose Basic',
     
     'plan_starter_title' => 'Starter',
@@ -25,6 +26,7 @@ return [
     'plan_starter_feature_basic_analytics' => 'Basic analytics',
     'plan_starter_feature_up_to_2m_tokens_month' => 'Up to 2M tokens/month',
     'plan_starter_feature_up_to_2_m_tokens_month' => 'Up to 2M tokens/month',
+    'plan_starter_feature_up_to_15m_tokensmonth' => 'Up to 1.5M tokens/month',
     'plan_starter_button' => 'Choose Starter',
 
     'plan_pro_title' => 'Pro',

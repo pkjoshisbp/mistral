@@ -24,6 +24,8 @@ class FaqsManager extends Component
     public $category = '';
     public $is_active = true;
     public $sort_order = 0;
+    public $is_starter_prompt = false;
+    public $starter_sort_order = 0;
     public $keywords = '';
     public $uploadFile; // JSON upload
     public $importing = false;
@@ -36,7 +38,9 @@ class FaqsManager extends Component
         'category' => 'nullable|string',
         'is_active' => 'boolean',
         'sort_order' => 'nullable|integer',
-        'keywords' => 'nullable|string'
+        'keywords' => 'nullable|string',
+        'is_starter_prompt' => 'boolean',
+        'starter_sort_order' => 'nullable|integer|min:0'
     ];
 
     public function importJson()
@@ -115,6 +119,8 @@ class FaqsManager extends Component
         $this->question = $this->answer = $this->follow_up = $this->category = $this->keywords = '';
         $this->is_active = true;
         $this->sort_order = 0;
+        $this->is_starter_prompt = false;
+        $this->starter_sort_order = 0;
     }
 
     public function create()
@@ -129,7 +135,9 @@ class FaqsManager extends Component
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order ?? 0,
-                'is_active' => $this->is_active
+                'is_active' => $this->is_active,
+                'is_starter_prompt' => (bool) $this->is_starter_prompt,
+                'starter_sort_order' => (int) $this->starter_sort_order,
             ]);
             
             // Auto-sync to Qdrant using new unified system
@@ -156,6 +164,8 @@ class FaqsManager extends Component
         $this->keywords = $f->keywords;
         $this->sort_order = $f->sort_order ?? 0;
         $this->is_active = (bool)$f->is_active;
+        $this->is_starter_prompt = (bool) ($f->is_starter_prompt ?? false);
+        $this->starter_sort_order = (int) ($f->starter_sort_order ?? 0);
         $this->showForm = true;
     }
 
@@ -173,7 +183,9 @@ class FaqsManager extends Component
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order ?? 0,
-                'is_active' => $this->is_active
+                'is_active' => $this->is_active,
+                'is_starter_prompt' => (bool) $this->is_starter_prompt,
+                'starter_sort_order' => (int) $this->starter_sort_order,
             ]);
             
             // Auto-sync updated FAQ to Qdrant

@@ -18,10 +18,12 @@ class WhatsappIntegration extends Component
     public $isConnected = false;
     public $connectionStatus;
     public $tokenExpired = false;
+    public $affirmativeSeedQuestion = '';
 
     protected $rules = [
         'accessToken' => 'required|string',
         'phoneNumberId' => 'required|string',
+        'affirmativeSeedQuestion' => 'nullable|string|max:500',
     ];
 
     public function mount()
@@ -31,6 +33,8 @@ class WhatsappIntegration extends Component
             $this->accessToken = $org->settings['whatsapp_access_token'] ?? '';
             $this->phoneNumberId = $org->settings['whatsapp_phone_number_id'] ?? '';
             $this->tokenExpired = !empty($org->settings['whatsapp_token_expired']);
+            $this->affirmativeSeedQuestion = $org->settings['whatsapp_affirmative_seed_question']
+                ?? AdminSetting::get('whatsapp_default_seed_question', 'Would you like to know more about our services, products, pricing, or latest offers?');
             // If an invalid value (like an email) was stored earlier, don't prefill
             if (!empty($this->phoneNumberId) && !preg_match('/^\d{5,}$/', $this->phoneNumberId)) {
                 $this->phoneNumberId = '';
@@ -64,6 +68,7 @@ class WhatsappIntegration extends Component
             $settings['whatsapp_access_token'] = $this->accessToken;
             $settings['whatsapp_phone_number_id'] = $this->phoneNumberId;
             $settings['whatsapp_verify_token'] = $this->verifyToken;
+            $settings['whatsapp_affirmative_seed_question'] = trim((string) $this->affirmativeSeedQuestion);
             // Reset token expired flag on save (new token provided)
             unset($settings['whatsapp_token_expired']);
             
@@ -131,6 +136,7 @@ class WhatsappIntegration extends Component
             unset($settings['whatsapp_phone_number_id']);
             unset($settings['whatsapp_verify_token']);
             unset($settings['whatsapp_token_expired']);
+            unset($settings['whatsapp_affirmative_seed_question']);
             
             $org->settings = $settings;
             $org->save();
@@ -140,6 +146,7 @@ class WhatsappIntegration extends Component
             $this->isConnected = false;
             $this->connectionStatus = 'Not Connected';
             $this->tokenExpired = false;
+            $this->affirmativeSeedQuestion = AdminSetting::get('whatsapp_default_seed_question', 'Would you like to know more about our services, products, pricing, or latest offers?');
 
             session()->flash('success', 'WhatsApp integration disconnected.');
         } catch (\Exception $e) {

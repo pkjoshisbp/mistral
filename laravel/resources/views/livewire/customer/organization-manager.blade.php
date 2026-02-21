@@ -132,6 +132,12 @@
                             <input type="number" min="80" max="300" class="form-control @error('widget_affirmative_follow_up_max_tokens') is-invalid @enderror" wire:model="widget_affirmative_follow_up_max_tokens">
                             @error('widget_affirmative_follow_up_max_tokens') <div class="invalid-feedback">{{ $message }}</div> @enderror
                         </div>
+                        <div class="form-group mt-3 mb-0">
+                            <label class="form-label">Custom Widget Starter Prompts</label>
+                            <textarea class="form-control @error('widget_custom_starter_prompts') is-invalid @enderror" rows="3" wire:model="widget_custom_starter_prompts" placeholder="What services do you offer?&#10;What are your pricing options?&#10;What documents are required?"></textarea>
+                            @error('widget_custom_starter_prompts') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                            <small class="text-muted d-block mt-1">One prompt per line. These appear as clickable chips in the widget. You can mix these with FAQs marked as starter prompts.</small>
+                        </div>
                     </div>
 
                     <div class="form-group mb-0">

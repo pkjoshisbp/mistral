@@ -220,9 +220,7 @@
                                     'token_cap_monthly' => $tokenCap,
                                     'overage_price_per_100k' => $plan->overage_price_per_100k,
                                     'features' => $meta['features'] ?? [],
-                                    'formatted_token_cap' => $tokenCap >= 1000000
-                                        ? number_format($tokenCap / 1000000, 0) . 'M'
-                                        : number_format($tokenCap / 1000, 0) . 'K',
+                                    'formatted_token_cap' => \App\Models\PricingPlan::formatTokenCap($tokenCap),
                                 ];
                             }
 
@@ -347,9 +345,13 @@
 
                                 <ul class="list-unstyled text-start">
                                     @foreach($plan->features as $feature)
+                                        @php
+                                            $featureKey = 'common.plan_' . $plan->slug . '_feature_' . Str::slug($feature, '_');
+                                            $translatedFeature = __($featureKey);
+                                        @endphp
                                         <li class="mb-2 d-flex align-items-start">
                                             <i class="fas fa-check text-success me-2 mt-1 flex-shrink-0"></i>
-                                            <span>{{ __('common.plan_' . $plan->slug . '_feature_' . Str::slug($feature, '_')) }}</span>
+                                            <span>{{ $translatedFeature === $featureKey ? $feature : $translatedFeature }}</span>
                                         </li>
                                     @endforeach
                                 </ul>

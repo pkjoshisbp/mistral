@@ -23,6 +23,8 @@ class Faqs extends Component
     public $keywords = '';
     public $sort_order = 0;
     public $is_active = true;
+    public $is_starter_prompt = false;
+    public $starter_sort_order = 0;
     public $showPreview = false;
     public $formSnapshot = [];
     public $uploadFile; // JSON upload
@@ -36,7 +38,9 @@ class Faqs extends Component
         'category' => 'nullable|string',
         'keywords' => 'nullable|string',
         'sort_order' => 'nullable|integer',
-        'is_active' => 'boolean'
+        'is_active' => 'boolean',
+        'is_starter_prompt' => 'boolean',
+        'starter_sort_order' => 'nullable|integer|min:0'
     ];
 
     public function importJson()
@@ -115,6 +119,8 @@ class Faqs extends Component
     $this->question = $this->answer = $this->follow_up = $this->category = $this->keywords = '';
         $this->sort_order = 0;
         $this->is_active = true;
+        $this->is_starter_prompt = false;
+        $this->starter_sort_order = 0;
         $this->showPreview = false;
     }
 
@@ -136,6 +142,8 @@ class Faqs extends Component
             'keywords' => (string) $this->keywords,
             'sort_order' => (int) $this->sort_order,
             'is_active' => (bool) $this->is_active,
+            'is_starter_prompt' => (bool) $this->is_starter_prompt,
+            'starter_sort_order' => (int) $this->starter_sort_order,
         ];
     }
 
@@ -153,6 +161,8 @@ class Faqs extends Component
             'keywords' => (string) $this->keywords,
             'sort_order' => (int) $this->sort_order,
             'is_active' => (bool) $this->is_active,
+            'is_starter_prompt' => (bool) $this->is_starter_prompt,
+            'starter_sort_order' => (int) $this->starter_sort_order,
         ];
         return $current !== $this->formSnapshot;
     }
@@ -187,6 +197,8 @@ class Faqs extends Component
         $this->question = $this->answer = $this->category = $this->keywords = '';
         $this->sort_order = 0;
         $this->is_active = true;
+        $this->is_starter_prompt = false;
+        $this->starter_sort_order = 0;
         $this->showPreview = false;
         $this->showForm = true;
         $this->snapshotForm();
@@ -210,6 +222,8 @@ class Faqs extends Component
                 $this->question = $this->answer = $this->category = $this->keywords = '';
                 $this->sort_order = 0;
                 $this->is_active = true;
+                $this->is_starter_prompt = false;
+                $this->starter_sort_order = 0;
                 $this->showPreview = false;
                 $this->snapshotForm();
                 $this->dispatch('activate-toolbar');
@@ -222,6 +236,8 @@ class Faqs extends Component
             $this->question = $this->answer = $this->category = $this->keywords = '';
             $this->sort_order = 0;
             $this->is_active = true;
+            $this->is_starter_prompt = false;
+            $this->starter_sort_order = 0;
             $this->showPreview = false;
             $this->showForm = true;
             $this->snapshotForm();
@@ -259,7 +275,9 @@ class Faqs extends Component
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order,
-                'is_active' => $this->is_active
+                'is_active' => $this->is_active,
+                'is_starter_prompt' => (bool) $this->is_starter_prompt,
+                'starter_sort_order' => (int) $this->starter_sort_order,
             ]);
 
             // Sync to Qdrant using new unified system
@@ -287,6 +305,8 @@ class Faqs extends Component
         $this->keywords = $f->keywords;
         $this->sort_order = $f->sort_order ?? 0;
         $this->is_active = (bool)$f->is_active;
+        $this->is_starter_prompt = (bool) ($f->is_starter_prompt ?? false);
+        $this->starter_sort_order = (int) ($f->starter_sort_order ?? 0);
         $this->showForm = true;
         
         // Dispatch event to activate toolbar
@@ -312,7 +332,9 @@ class Faqs extends Component
                 'category' => $this->category,
                 'keywords' => $this->keywords,
                 'sort_order' => $this->sort_order,
-                'is_active' => $this->is_active
+                'is_active' => $this->is_active,
+                'is_starter_prompt' => (bool) $this->is_starter_prompt,
+                'starter_sort_order' => (int) $this->starter_sort_order,
             ]);
 
             // Sync updated FAQ to Qdrant using new unified system

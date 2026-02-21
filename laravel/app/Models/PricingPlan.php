@@ -75,11 +75,28 @@ class PricingPlan extends Model
             return null;
         }
 
-        if ($this->token_cap >= 1000000) {
-            return number_format($this->token_cap / 1000000, 0) . 'M';
+        return self::formatTokenCap((int) $this->token_cap);
+    }
+
+    public static function formatTokenCap(int $tokenCap): string
+    {
+        if ($tokenCap >= 1000000) {
+            $value = $tokenCap / 1000000;
+            $formatted = fmod($value, 1.0) === 0.0
+                ? number_format($value, 0)
+                : rtrim(rtrim(number_format($value, 1), '0'), '.');
+            return $formatted . 'M';
         }
 
-        return number_format($this->token_cap / 1000, 0) . 'K';
+        if ($tokenCap >= 1000) {
+            $value = $tokenCap / 1000;
+            $formatted = fmod($value, 1.0) === 0.0
+                ? number_format($value, 0)
+                : rtrim(rtrim(number_format($value, 1), '0'), '.');
+            return $formatted . 'K';
+        }
+
+        return (string) $tokenCap;
     }
 
     public function getFormattedCreditsAttribute(): ?string

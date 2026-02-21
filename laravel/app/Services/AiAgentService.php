@@ -1622,7 +1622,7 @@ Rules:
     /**
      * Update existing data in Qdrant (wrapper for storeDataToQdrant with update semantics)
      */
-    public function updateDataToQdrant($organizationSlug, $dataType, $items)
+    public function updateDataToQdrant($organizationSlug, $dataType, $items, int $timeoutSeconds = 60)
     {
         try {
             Log::info('Updating data to Qdrant', [
@@ -1637,7 +1637,7 @@ Rules:
                 'items' => $items
             ];
 
-            $response = Http::timeout(60)->post("{$this->baseUrl}/update_data", $payload);
+            $response = Http::timeout(max(30, $timeoutSeconds))->post("{$this->baseUrl}/update_data", $payload);
 
             if ($response->successful()) {
                 $data = $response->json();
@@ -1661,7 +1661,7 @@ Rules:
             Log::error('Update data to Qdrant exception', [
                 'organization_slug' => $organizationSlug,
                 'data_type' => $dataType,
-                'items' => $items,
+                'item_count' => is_array($items) ? count($items) : 0,
                 'error' => $e->getMessage()
             ]);
             return null;

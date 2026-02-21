@@ -139,6 +139,21 @@
                                                 <small class="text-muted">WhatsApp Business phone number ID</small>
                                             </div>
                                         </div>
+
+                                        <div class="row">
+                                            <div class="col-12 mb-3">
+                                                <label class="form-label">Initial Question Seed for "Yes" Replies</label>
+                                                <textarea
+                                                    wire:model="affirmativeSeedQuestion"
+                                                    class="form-control @error('affirmativeSeedQuestion') is-invalid @enderror"
+                                                    rows="2"
+                                                    placeholder="Would you like to know more about our services, products, pricing, or latest offers?"></textarea>
+                                                @error('affirmativeSeedQuestion')
+                                                    <div class="invalid-feedback">{{ $message }}</div>
+                                                @enderror
+                                                <small class="text-muted">Used when a customer sends only "yes/okay/sure" on WhatsApp without prior context. This organization value overrides the global default.</small>
+                                            </div>
+                                        </div>
                                         
                                         <div class="d-flex gap-2">
                                             <button type="submit" class="btn btn-success">

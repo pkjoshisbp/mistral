@@ -146,6 +146,19 @@
                                 <option value="0">Inactive</option>
                             </select>
                         </div>
+                        <div class="col-md-3 mb-2">
+                            <div class="form-check mt-4">
+                                <input class="form-check-input" type="checkbox" id="is_starter_prompt" wire:model="is_starter_prompt">
+                                <label class="form-check-label" for="is_starter_prompt">
+                                    Show as widget starter prompt
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-2">
+                            <label>Starter Prompt Sort</label>
+                            <input type="number" wire:model="starter_sort_order" class="form-control" min="0">
+                            <small class="text-muted d-block mt-1">Lower value appears first in widget prompt chips.</small>
+                        </div>
                     </div>
                     <div>
                         <button class="btn btn-success"><i class="fas fa-save"></i> {{ $editingId ? 'Update' : 'Save' }}</button>
@@ -156,7 +169,7 @@
 
             @endif
             <h5><i class="fas fa-list"></i> FAQ List</h5>
-            <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Question</th><th>Category</th><th>Sort</th><th>Status</th><th></th></tr></thead><tbody>@forelse($this->faqs as $f)<tr><td>{{ $f->question }}</td><td>{{ $f->category ?? '-' }}</td><td>{{ $f->sort_order }}</td><td>{!! $f->is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-secondary">Inactive</span>' !!}</td><td><button class="btn btn-sm btn-warning" wire:click="edit({{ $f->id }})"><i class="fas fa-edit"></i></button> <button class="btn btn-sm btn-danger" wire:click="delete({{ $f->id }})" onclick="if(!confirm('Delete?')) { event.preventDefault(); event.stopImmediatePropagation(); }"><i class="fas fa-trash"></i></button></td></tr>@empty<tr><td colspan="5" class="text-muted">No FAQs.</td></tr>@endforelse</tbody></table></div>
+            <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Question</th><th>Category</th><th>Sort</th><th>Starter</th><th>Status</th><th></th></tr></thead><tbody>@forelse($this->faqs as $f)<tr><td>{{ $f->question }}</td><td>{{ $f->category ?? '-' }}</td><td>{{ $f->sort_order }}</td><td>@if($f->is_starter_prompt)<span class="badge badge-primary">Yes ({{ $f->starter_sort_order ?? 0 }})</span>@else<span class="badge badge-light">No</span>@endif</td><td>{!! $f->is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-secondary">Inactive</span>' !!}</td><td><button class="btn btn-sm btn-warning" wire:click="edit({{ $f->id }})"><i class="fas fa-edit"></i></button> <button class="btn btn-sm btn-danger" wire:click="delete({{ $f->id }})" onclick="if(!confirm('Delete?')) { event.preventDefault(); event.stopImmediatePropagation(); }"><i class="fas fa-trash"></i></button></td></tr>@empty<tr><td colspan="6" class="text-muted">No FAQs.</td></tr>@endforelse</tbody></table></div>
             <div class="alert alert-info mt-3"><i class="fas fa-info-circle"></i> FAQs are embedded for AI search.</div>
         </div></div>
     </div></section>

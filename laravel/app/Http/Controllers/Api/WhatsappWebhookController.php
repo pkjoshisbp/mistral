@@ -236,13 +236,18 @@ class WhatsappWebhookController extends Controller
                             ]);
                         }
 
+                        $resolvedInbound = $this->resolveInboundWhatsappQuery((string) $text, $org, $conversation);
+                        $searchText = $resolvedInbound['query'];
+                        $seedApplied = (bool) ($resolvedInbound['seed_applied'] ?? false);
+
                         // Build contexted AI reply aligned with widget behavior
                         $ai = app(AiAgentService::class);
                         $actionService = app(\App\Services\ActionService::class);
                         Log::info('WhatsApp LLM search prep', [
                             'org_slug' => $org?->slug,
                             'phone_number_id' => $phoneNumberId,
-                            'query_preview' => substr((string)$text, 0, 180)
+                            'query_preview' => substr((string)$searchText, 0, 180),
+                            'seed_applied' => $seedApplied,
                         ]);
                         
                         $answer = null;
@@ -251,7 +256,7 @@ class WhatsappWebhookController extends Controller
                         
                         if ($org) {
                             // First, try to execute database actions (e.g., pricing queries)
-                            $actionResult = $actionService->processQuery($text, $org->id);
+                            $actionResult = $actionService->processQuery($searchText, $org->id);
                             $liveData = null;
                             
                             if ($actionResult['type'] === 'action_executed' && isset($actionResult['result']['success']) && $actionResult['result']['success']) {
@@ -268,7 +273,7 @@ class WhatsappWebhookController extends Controller
                             
                             // Then search Qdrant for additional context (only if no live data or as supplement)
                             if (!$liveData) {
-                                $embedding = $ai->embed($text);
+                                $embedding = $ai->embed($searchText);
                                 if ($embedding) {
                                     $collection = $org->slug;
                                     $search = $ai->searchQdrant($collection, $embedding, 5) ?: [];
@@ -307,7 +312,7 @@ class WhatsappWebhookController extends Controller
                             $system .= "Rules: Only use the official website/email/phone above. Do not invent or guess any contact details. If an official contact is not provided, direct the user to the official website instead. ";
                             $system .= "Keep responses concise and direct. Always use plain text only - no HTML or markdown. Include full https URLs when mentioning sites. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
-                            $chatMessages = $this->buildWhatsAppChatMessages($org, $conversation, $system, $text, $context);
+                            $chatMessages = $this->buildWhatsAppChatMessages($org, $conversation, $system, $searchText, $context);
 
                             // Use the same provider/model selection as widget
                             $provider = $ai->getAiProviderForOrganization($org->id ?? null);
@@ -528,14 +533,19 @@ class WhatsappWebhookController extends Controller
                             ]);
                         }
 
+                        $resolvedInbound = $this->resolveInboundWhatsappQuery((string) $text, $org, $conversation);
+                        $searchText = $resolvedInbound['query'];
+                        $seedApplied = (bool) ($resolvedInbound['seed_applied'] ?? false);
+
                         // Build AI reply (slug endpoint) aligned with widget behavior
                         $ai = app(AiAgentService::class);
                         Log::info('WhatsApp LLM search prep (slug endpoint)', [
                             'org_slug' => $org->slug,
                             'phone_number_id' => $phoneNumberId,
-                            'query_preview' => substr((string)$text, 0, 180)
+                            'query_preview' => substr((string)$searchText, 0, 180),
+                            'seed_applied' => $seedApplied,
                         ]);
-                        $embedding = $ai->embed($text);
+                        $embedding = $ai->embed($searchText);
                         $answer = null;
                         $usedContextChars = 0;
                         if ($embedding) {
@@ -577,7 +587,7 @@ class WhatsappWebhookController extends Controller
                             $system .= "Rules: Only use the official website/email/phone above. Do not invent or guess any contact details. If an official contact is not provided, direct the user to the official website instead. ";
                             $system .= "Keep responses concise and direct. Always use plain text only - no HTML or markdown. Include full https URLs when mentioning sites. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
-                            $chatMessages = $this->buildWhatsAppChatMessages($org, $conversation, $system, $text, $context);
+                            $chatMessages = $this->buildWhatsAppChatMessages($org, $conversation, $system, $searchText, $context);
 
                             // Use provider/model selection consistent with widget
                             $provider = $ai->getAiProviderForOrganization($org->id);
@@ -777,7 +787,7 @@ class WhatsappWebhookController extends Controller
         if ($t === '') {
             return false;
         }
-        $affirm = ['yes', 'yeah', 'yup', 'ya', 'sure', 'ok', 'okay', 'please', 'go ahead', 'continue', 'proceed'];
+        $affirm = ['yes', 'yeah', 'yup', 'yep', 'ya', 'yah', 'sure', 'certainly', 'ok', 'okay', 'please', 'go ahead', 'go on', 'continue', 'proceed', 'carry on'];
         foreach ($affirm as $a) {
             if ($t === $a) {
                 return true;
@@ -795,10 +805,60 @@ class WhatsappWebhookController extends Controller
                 return true;
             }
         }
-        if (mb_strlen($t) < 16 && preg_match('/\b(yes|ok|okay|sure|please)\b/', $t)) {
+        if (mb_strlen($t) < 16 && preg_match('/\b(yes|yeah|yup|yep|ya|yah|ok|okay|sure|please)\b/', $t)) {
             return true;
         }
         return false;
+    }
+
+    private function resolveInboundWhatsappQuery(string $text, ?Organization $organization, ?ChatConversation $conversation): array
+    {
+        $message = trim($text);
+        if ($message === '' || !$this->isAffirmativeFollowUp($message)) {
+            return ['query' => $message, 'seed_applied' => false];
+        }
+
+        if (!$this->shouldApplyWhatsappSeed($conversation)) {
+            return ['query' => $message, 'seed_applied' => false];
+        }
+
+        $seed = $this->getWhatsappAffirmativeSeedQuestion($organization);
+        if ($seed === '') {
+            return ['query' => $message, 'seed_applied' => false];
+        }
+
+        return [
+            'query' => trim($seed . ' User replied: ' . $message),
+            'seed_applied' => true,
+        ];
+    }
+
+    private function shouldApplyWhatsappSeed(?ChatConversation $conversation): bool
+    {
+        if (!$conversation) {
+            return true;
+        }
+
+        $hasAssistantHistory = $conversation->messages()
+            ->whereIn('sender_type', ['ai', 'assistant'])
+            ->exists();
+
+        return !$hasAssistantHistory;
+    }
+
+    private function getWhatsappAffirmativeSeedQuestion(?Organization $organization): string
+    {
+        $orgSeed = trim((string) data_get($organization?->settings, 'whatsapp_affirmative_seed_question', ''));
+        if ($orgSeed !== '') {
+            return $orgSeed;
+        }
+
+        $globalSeed = trim((string) AdminSetting::get(
+            'whatsapp_default_seed_question',
+            'Would you like to know more about our services, products, pricing, or latest offers?'
+        ));
+
+        return $globalSeed;
     }
 
     /**

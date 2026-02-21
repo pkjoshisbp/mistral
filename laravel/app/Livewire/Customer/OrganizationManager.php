@@ -15,7 +15,7 @@ class OrganizationManager extends Component
     public $website = '';
     public $contact_email = '';
     public $contact_phone = '';
-    public $timezone = 'UTC';
+    public $timezone = 'Asia/Kolkata';
     public $faq_follow_up_enabled = false;
     public $faq_follow_up_text = '';
     public $faq_follow_up_negative_keywords = '';
@@ -25,6 +25,7 @@ class OrganizationManager extends Component
     public $widget_skip_intent_on_affirmative_follow_up = true;
     public $widget_skip_exact_match_on_affirmative_follow_up = true;
     public $widget_affirmative_follow_up_max_tokens = 140;
+    public $widget_custom_starter_prompts = '';
     public $organization; // existing org
 
     protected $rules = [
@@ -43,7 +44,8 @@ class OrganizationManager extends Component
         'supplementary_instruction' => 'nullable|string|max:2000',
         'widget_skip_intent_on_affirmative_follow_up' => 'boolean',
         'widget_skip_exact_match_on_affirmative_follow_up' => 'boolean',
-        'widget_affirmative_follow_up_max_tokens' => 'required|integer|min:80|max:300'
+        'widget_affirmative_follow_up_max_tokens' => 'required|integer|min:80|max:300',
+        'widget_custom_starter_prompts' => 'nullable|string|max:2000'
     ];
 
     public function mount()
@@ -61,7 +63,7 @@ class OrganizationManager extends Component
                 'website' => $this->organization->website,
                 'contact_email' => $this->organization->contact_email,
                 'contact_phone' => $this->organization->contact_phone,
-                'timezone' => $this->organization->timezone ?? 'UTC',
+                'timezone' => $this->organization->timezone ?? config('app.timezone', 'Asia/Kolkata'),
                 'faq_follow_up_enabled' => (bool) ($settings['faq_follow_up_enabled'] ?? false),
                 'faq_follow_up_text' => (string) ($settings['faq_follow_up_text'] ?? 'Would you like to know more about this?'),
                 'faq_follow_up_negative_keywords' => is_array($keywords) ? implode("\n", $keywords) : (string) $keywords,
@@ -71,6 +73,7 @@ class OrganizationManager extends Component
                 'widget_skip_intent_on_affirmative_follow_up' => (bool) data_get($settings, 'widget_rule_policy.skip_intent_on_affirmative_follow_up', true),
                 'widget_skip_exact_match_on_affirmative_follow_up' => (bool) data_get($settings, 'widget_rule_policy.skip_exact_match_on_affirmative_follow_up', true),
                 'widget_affirmative_follow_up_max_tokens' => (int) data_get($settings, 'widget_rule_policy.affirmative_follow_up_max_tokens', 140),
+                'widget_custom_starter_prompts' => implode("\n", (array) ($settings['widget_custom_starter_prompts'] ?? [])),
             ]);
         } else {
             $this->faq_follow_up_text = 'Would you like to know more about this?';
@@ -78,6 +81,7 @@ class OrganizationManager extends Component
             $this->widget_skip_intent_on_affirmative_follow_up = true;
             $this->widget_skip_exact_match_on_affirmative_follow_up = true;
             $this->widget_affirmative_follow_up_max_tokens = 140;
+            $this->widget_custom_starter_prompts = '';
         }
     }
 
@@ -107,7 +111,8 @@ class OrganizationManager extends Component
                 'supplementary_instruction' => 'nullable|string|max:2000',
                 'widget_skip_intent_on_affirmative_follow_up' => 'boolean',
                 'widget_skip_exact_match_on_affirmative_follow_up' => 'boolean',
-                'widget_affirmative_follow_up_max_tokens' => 'required|integer|min:80|max:300'
+                'widget_affirmative_follow_up_max_tokens' => 'required|integer|min:80|max:300',
+                'widget_custom_starter_prompts' => 'nullable|string|max:2000'
             ]);
             $settings = $this->organization->settings ?? [];
             $settings['faq_follow_up_enabled'] = (bool) $this->faq_follow_up_enabled;
@@ -121,6 +126,7 @@ class OrganizationManager extends Component
                 'skip_exact_match_on_affirmative_follow_up' => (bool) $this->widget_skip_exact_match_on_affirmative_follow_up,
                 'affirmative_follow_up_max_tokens' => max(80, min(300, (int) $this->widget_affirmative_follow_up_max_tokens)),
             ];
+            $settings['widget_custom_starter_prompts'] = $this->normalizePromptLines($this->widget_custom_starter_prompts);
             $this->organization->update([
                 'name' => $this->name,
                 'description' => $this->description,
@@ -145,6 +151,7 @@ class OrganizationManager extends Component
                     'skip_exact_match_on_affirmative_follow_up' => (bool) $this->widget_skip_exact_match_on_affirmative_follow_up,
                     'affirmative_follow_up_max_tokens' => max(80, min(300, (int) $this->widget_affirmative_follow_up_max_tokens)),
                 ],
+                'widget_custom_starter_prompts' => $this->normalizePromptLines($this->widget_custom_starter_prompts),
             ];
             $org = Organization::create([
                 'name' => $this->name,
@@ -216,6 +223,23 @@ class OrganizationManager extends Component
         }
 
         return implode("\n", $lines);
+    }
+
+    private function normalizePromptLines(?string $text): array
+    {
+        $lines = preg_split('/\r\n|\r|\n/', (string) $text) ?: [];
+        $clean = [];
+        foreach ($lines as $line) {
+            $value = trim((string) $line);
+            if ($value === '' || in_array($value, $clean, true)) {
+                continue;
+            }
+            $clean[] = $value;
+            if (count($clean) >= 6) {
+                break;
+            }
+        }
+        return $clean;
     }
 
     public function render()

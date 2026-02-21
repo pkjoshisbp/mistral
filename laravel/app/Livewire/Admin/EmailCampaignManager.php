@@ -430,14 +430,19 @@ class EmailCampaignManager extends Component
                         $message->getSymfonyMessage()
                             ->getHeaders()
                             ->addTextHeader('X-AICS-Tracking-Token', $recModel->tracking_token);
+                        $message->getSymfonyMessage()
+                            ->getHeaders()
+                            ->addTextHeader('X-Mailgun-Variables', json_encode([
+                                'tracking_token' => $recModel->tracking_token,
+                                'campaign_id' => $campaign->id,
+                            ]));
                         if (!empty($this->bccList)) { $message->bcc($this->bccList); }
                     });
                     $recModel->update([
                         'status'=>'sent',
                         'sent_at'=>now(),
-                        'delivered_at'=>now(),
                         'delivery_status'=>'sent',
-                        'last_event' => 'delivered',
+                        'last_event' => 'sent',
                         'last_event_at' => now(),
                     ]);
                     $sentCount++;

@@ -1306,7 +1306,7 @@ Route::prefix('reviews')->name('reviews.')->group(function () {
     // Auth required routes
     Route::middleware('auth')->group(function () {
         Route::get('/submit/{organizationId?}', function ($organizationId = null) {
-            return view('public.review-submit');
+            return view('public.review-submit', ['organizationId' => $organizationId]);
         })->name('submit');
     });
 });

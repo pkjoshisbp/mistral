@@ -23,6 +23,10 @@ class ImportOrganizationCsvData extends Command
         {--content-columns= : Comma-separated columns to build searchable content (default: all columns)}
         {--category-column= : Column to read category from}
         {--default-category=general : Fallback category when category-column is empty}
+        {--qdrant-batch-size=50 : Qdrant upsert batch size}
+        {--qdrant-timeout=180 : Qdrant upsert timeout (seconds) per batch}
+        {--qdrant-retries=2 : Retry attempts per failed Qdrant batch}
+        {--force-qdrant : Re-index unchanged rows to Qdrant for this dataset}
         {--skip-qdrant : Only sync DB, skip Qdrant upsert/delete}
         {--dry-run : Parse and diff only, no DB/Qdrant writes}';
 
@@ -30,10 +34,15 @@ class ImportOrganizationCsvData extends Command
 
     public function handle(): int
     {
+        $transformVersion = 2;
         $organizationArg = (string) $this->argument('organization');
         $fileArg = (string) $this->argument('file');
         $dryRun = (bool) $this->option('dry-run');
         $skipQdrant = (bool) $this->option('skip-qdrant');
+        $forceQdrant = (bool) $this->option('force-qdrant');
+        $qdrantBatchSize = max(1, (int) $this->option('qdrant-batch-size'));
+        $qdrantTimeout = max(30, (int) $this->option('qdrant-timeout'));
+        $qdrantRetries = max(0, (int) $this->option('qdrant-retries'));
 
         $organization = Organization::query()
             ->where('id', $organizationArg)
@@ -102,6 +111,26 @@ class ImportOrganizationCsvData extends Command
                 $category = trim((string) $row[$categoryColumn]);
             }
 
+            $sizeSignals = $this->extractSizeSignals($row, $name, $description, $content);
+            if (!empty($sizeSignals['pairs'])) {
+                $sizeLine = 'Size options (inches): ' . implode(', ', $sizeSignals['pairs']);
+                if (!str_contains($content, $sizeLine)) {
+                    $content = trim($content . "\n" . $sizeLine);
+                }
+                if (!empty($sizeSignals['primary'])) {
+                    $primaryLine = 'Primary size (inches): ' . $sizeSignals['primary'];
+                    if (!str_contains($content, $primaryLine)) {
+                        $content = trim($content . "\n" . $primaryLine);
+                    }
+                }
+                if (!empty($sizeSignals['orientation'])) {
+                    $orientationLine = 'Orientation: ' . $sizeSignals['orientation'];
+                    if (!str_contains($content, $orientationLine)) {
+                        $content = trim($content . "\n" . $orientationLine);
+                    }
+                }
+            }
+
             $rowHash = sha1(json_encode($row, JSON_UNESCAPED_UNICODE));
 
             $incoming[$externalKey] = [
@@ -119,7 +148,9 @@ class ImportOrganizationCsvData extends Command
                     'external_key' => $externalKey,
                     'source_file' => basename($csvPath),
                     'row_hash' => $rowHash,
+                    'transform_version' => $transformVersion,
                     'key_columns' => $keyColumns,
+                    'size_signals' => $sizeSignals,
                     'csv' => $row,
                 ],
             ];
@@ -149,6 +180,7 @@ class ImportOrganizationCsvData extends Command
         $toCreate = [];
         $toUpdate = [];
         $unchanged = 0;
+        $unchangedRows = [];
 
         foreach ($incoming as $externalKey => $data) {
             $existing = $existingMap[$externalKey] ?? null;
@@ -159,9 +191,12 @@ class ImportOrganizationCsvData extends Command
 
             $existingHash = (string) data_get($existing->metadata, 'row_hash', '');
             $incomingHash = (string) data_get($data, 'metadata.row_hash', '');
+            $existingTransformVersion = (int) data_get($existing->metadata, 'transform_version', 1);
+            $incomingTransformVersion = (int) data_get($data, 'metadata.transform_version', 1);
 
-            if ($existingHash !== '' && $existingHash === $incomingHash) {
+            if ($existingHash !== '' && $existingHash === $incomingHash && $existingTransformVersion === $incomingTransformVersion) {
                 $unchanged++;
+                $unchangedRows[] = $existing;
                 continue;
             }
 
@@ -234,7 +269,13 @@ class ImportOrganizationCsvData extends Command
         if (!$skipQdrant) {
             $aiService = new AiAgentService();
 
-            if (!empty($upsertedRows)) {
+            $rowsForQdrant = $upsertedRows;
+            if ($forceQdrant && !empty($unchangedRows)) {
+                $rowsForQdrant = array_merge($rowsForQdrant, $unchangedRows);
+                $this->line('Force Qdrant enabled. Re-indexing unchanged rows: ' . count($unchangedRows));
+            }
+
+            if (!empty($rowsForQdrant)) {
                 $items = array_map(function (OrganizationData $row) use ($defaultCategory): array {
                     $csvRow = data_get($row->metadata, 'csv', []);
                     $model = trim((string) data_get($csvRow, 'model', ''));
@@ -263,6 +304,14 @@ class ImportOrganizationCsvData extends Command
                     if ($onRoadPrice !== '') {
                         $metadata['approx_on_road_price_inr'] = $onRoadPrice;
                     }
+                    $sizeSignals = data_get($row->metadata, 'size_signals', []);
+                    if (!empty($sizeSignals['pairs'])) {
+                        $metadata['size_pairs'] = $sizeSignals['pairs'];
+                        $metadata['size_primary'] = $sizeSignals['primary'] ?? $sizeSignals['pairs'][0];
+                        if (!empty($sizeSignals['orientation'])) {
+                            $metadata['size_orientation'] = $sizeSignals['orientation'];
+                        }
+                    }
 
                     return [
                         'id' => data_get($row->metadata, 'qdrant_type', 'info') . '_' . $row->id,
@@ -271,21 +320,56 @@ class ImportOrganizationCsvData extends Command
                         'category' => data_get($row->metadata, 'category', $defaultCategory),
                         'metadata' => $metadata,
                     ];
-                }, $upsertedRows);
+                }, $rowsForQdrant);
 
-                $upsertResult = $aiService->updateDataToQdrant($organization->slug, data_get($upsertedRows[0]->metadata, 'qdrant_type', 'info'), $items);
-                if (!$upsertResult || !($upsertResult['success'] ?? false)) {
-                    $this->error('Qdrant upsert failed for one or more rows.');
-                } else {
-                    $this->info('Qdrant upsert success: ' . ($upsertResult['successful_stores'] ?? 0) . '/' . ($upsertResult['total_items'] ?? count($items)));
+                $chunks = array_chunk($items, $qdrantBatchSize);
+                $qdrantTypeForRows = data_get($rowsForQdrant[0]->metadata, 'qdrant_type', 'info');
+                $syncedRowIds = [];
+                $totalSuccess = 0;
+                $totalFailed = 0;
+
+                foreach ($chunks as $index => $chunk) {
+                    $attempt = 0;
+                    $chunkSuccess = false;
+                    $result = null;
+
+                    while ($attempt <= $qdrantRetries && !$chunkSuccess) {
+                        $attempt++;
+                        $result = $aiService->updateDataToQdrant($organization->slug, $qdrantTypeForRows, $chunk, $qdrantTimeout);
+                        $chunkSuccess = (bool) ($result['success'] ?? false);
+
+                        if (!$chunkSuccess && $attempt <= $qdrantRetries) {
+                            $this->warn('Qdrant batch ' . ($index + 1) . '/' . count($chunks) . ' failed (attempt ' . $attempt . '). Retrying...');
+                        }
+                    }
+
+                    if ($chunkSuccess) {
+                        $count = (int) ($result['successful_stores'] ?? count($chunk));
+                        $totalSuccess += $count;
+                        foreach ($chunk as $item) {
+                            $pointId = (string) ($item['id'] ?? '');
+                            if (preg_match('/^[a-z]+_(\d+)$/i', $pointId, $m)) {
+                                $syncedRowIds[] = (int) $m[1];
+                            }
+                        }
+                        $this->line('Qdrant batch ' . ($index + 1) . '/' . count($chunks) . ' synced (' . $count . ' items).');
+                    } else {
+                        $failedCount = count($chunk);
+                        $totalFailed += $failedCount;
+                        $this->error('Qdrant batch ' . ($index + 1) . '/' . count($chunks) . ' failed after retries (' . $failedCount . ' items).');
+                    }
                 }
 
-                OrganizationData::query()
-                    ->whereIn('id', array_map(fn (OrganizationData $row) => $row->id, $upsertedRows))
-                    ->update([
-                        'is_synced' => true,
-                        'last_synced_at' => now(),
-                    ]);
+                if (!empty($syncedRowIds)) {
+                    OrganizationData::query()
+                        ->whereIn('id', array_values(array_unique($syncedRowIds)))
+                        ->update([
+                            'is_synced' => true,
+                            'last_synced_at' => now(),
+                        ]);
+                }
+
+                $this->info('Qdrant upsert summary: success=' . $totalSuccess . ', failed=' . $totalFailed . ', total=' . count($items));
             }
 
             if (!empty($deletePointIds)) {
@@ -530,5 +614,69 @@ class ImportOrganizationCsvData extends Command
         }
 
         return implode("\n", $lines);
+    }
+
+    private function extractSizeSignals(array $row, string ...$segments): array
+    {
+        $parts = [];
+
+        foreach (['sku', 'name', 'title', 'short_description', 'description', 'additional_attributes'] as $key) {
+            $value = trim((string) ($row[$key] ?? ''));
+            if ($value !== '') {
+                $parts[] = $value;
+            }
+        }
+
+        foreach ($segments as $segment) {
+            $segment = trim((string) $segment);
+            if ($segment !== '') {
+                $parts[] = $segment;
+            }
+        }
+
+        if (empty($parts)) {
+            return ['pairs' => [], 'primary' => null, 'orientation' => null];
+        }
+
+        $text = implode("\n", $parts);
+        preg_match_all('/(?<!\d)(\d{1,3}(?:\.\d+)?)\s*(?:x|×)\s*(\d{1,3}(?:\.\d+)?)(?:\s*(?:inches|inch|in|\"))?/i', $text, $matches, PREG_SET_ORDER);
+
+        $pairs = [];
+        $primary = null;
+        $orientation = null;
+
+        foreach ($matches as $match) {
+            $width = (float) $match[1];
+            $height = (float) $match[2];
+
+            if ($width < 4 || $width > 120 || $height < 4 || $height > 120) {
+                continue;
+            }
+
+            $w = fmod($width, 1.0) === 0.0 ? (string) (int) $width : rtrim(rtrim(number_format($width, 1), '0'), '.');
+            $h = fmod($height, 1.0) === 0.0 ? (string) (int) $height : rtrim(rtrim(number_format($height, 1), '0'), '.');
+            $key = $w . 'x' . $h;
+
+            if (!in_array($key, $pairs, true)) {
+                $pairs[] = $key;
+            }
+
+            if ($primary === null) {
+                $primary = $key;
+                if (abs($width - $height) < 0.01) {
+                    $orientation = 'square';
+                } elseif ($width > $height) {
+                    $orientation = 'landscape';
+                } else {
+                    $orientation = 'portrait';
+                }
+            }
+        }
+
+        return [
+            'pairs' => $pairs,
+            'primary' => $primary,
+            'orientation' => $orientation,
+        ];
     }
 }

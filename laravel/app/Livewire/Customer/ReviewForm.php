@@ -40,12 +40,21 @@ class ReviewForm extends Component
             abort(403, 'You must be logged in to submit a review.');
         }
 
+        $user = Auth::user();
+
         if ($organizationId) {
             $this->organizationId = $organizationId;
             $this->organization = Organization::findOrFail($organizationId);
         } else {
-            // If no organization ID provided, use the first available organization
-            $this->organization = Organization::first();
+            $primaryOrganization = $user?->primaryOrganization();
+
+            if ($primaryOrganization) {
+                $this->organization = $primaryOrganization;
+            } else {
+                // Fallback for legacy users without organization mapping
+                $this->organization = Organization::first();
+            }
+
             if (!$this->organization) {
                 abort(404, 'No organization found.');
             }

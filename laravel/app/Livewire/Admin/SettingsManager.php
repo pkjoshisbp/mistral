@@ -52,6 +52,7 @@ class SettingsManager extends Component
     public $whatsapp_phone_number_id = '';
     public $whatsapp_access_token = '';
     public $whatsapp_verify_token = '';
+    public $whatsapp_default_seed_question = 'Would you like to know more about our services, products, pricing, or latest offers?';
     
     public function mount()
     {
@@ -175,6 +176,7 @@ class SettingsManager extends Component
         $this->whatsapp_phone_number_id = AdminSetting::get('whatsapp_phone_number_id', '');
         $this->whatsapp_access_token = AdminSetting::get('whatsapp_access_token', '');
         $this->whatsapp_verify_token = AdminSetting::get('whatsapp_verify_token', '');
+        $this->whatsapp_default_seed_question = AdminSetting::get('whatsapp_default_seed_question', 'Would you like to know more about our services, products, pricing, or latest offers?');
     }
 
     public function saveWhatsappSettings()
@@ -185,6 +187,7 @@ class SettingsManager extends Component
             'whatsapp_phone_number_id' => 'required|string',
             'whatsapp_access_token' => 'required|string',
             'whatsapp_verify_token' => 'required|string',
+            'whatsapp_default_seed_question' => 'nullable|string|max:500',
         ]);
 
         AdminSetting::set('whatsapp_api_version', $this->whatsapp_api_version, 'text', 'whatsapp', 'WhatsApp API Version');
@@ -192,6 +195,7 @@ class SettingsManager extends Component
         AdminSetting::set('whatsapp_phone_number_id', $this->whatsapp_phone_number_id, 'text', 'whatsapp', 'Phone Number ID');
         AdminSetting::set('whatsapp_access_token', $this->whatsapp_access_token, 'password', 'whatsapp', 'Access Token', null, true);
         AdminSetting::set('whatsapp_verify_token', $this->whatsapp_verify_token, 'password', 'whatsapp', 'Webhook Verify Token', null, true);
+        AdminSetting::set('whatsapp_default_seed_question', trim((string) $this->whatsapp_default_seed_question), 'textarea', 'whatsapp', 'Default Seed Question For Yes Replies');
 
         session()->flash('success', 'WhatsApp settings saved successfully!');
     }

@@ -20,7 +20,16 @@ class OrganizationFaq extends Model
         'category',
         'keywords',
         'sort_order',
-        'is_active'
+        'is_active',
+        'is_starter_prompt',
+        'starter_sort_order',
+    ];
+
+    protected $casts = [
+        'is_active' => 'boolean',
+        'is_starter_prompt' => 'boolean',
+        'sort_order' => 'integer',
+        'starter_sort_order' => 'integer',
     ];
 
     public function organization()

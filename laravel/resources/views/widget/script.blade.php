@@ -40,6 +40,8 @@
             this.wsPingTimer = null;
             this.wsShouldReconnect = true;
             this.contactFields = this.normalizeContactFields(this.config.contactFields);
+            this.starterPrompts = this.normalizeStarterPrompts(this.config.starterPrompts || []);
+            this.starterPromptsShown = false;
             this.init();
             this.detectLocation();
             // ISSUE 5B FIX: Load previous messages after init
@@ -80,7 +82,75 @@
             
             setTimeout(() => {
                 this.addMessage(message, 'bot');
+                this.showStarterPrompts();
             }, 500);
+        }
+
+        normalizeStarterPrompts(prompts) {
+            if (!Array.isArray(prompts)) {
+                return [];
+            }
+
+            const cleaned = [];
+            for (const prompt of prompts) {
+                const value = String(prompt || '').trim();
+                if (!value) {
+                    continue;
+                }
+                if (cleaned.includes(value)) {
+                    continue;
+                }
+                cleaned.push(value);
+                if (cleaned.length >= 6) {
+                    break;
+                }
+            }
+
+            return cleaned;
+        }
+
+        showStarterPrompts() {
+            if (this.starterPromptsShown || !Array.isArray(this.starterPrompts) || this.starterPrompts.length === 0) {
+                return;
+            }
+
+            const messagesContainer = document.getElementById(this.ids.messages);
+            if (!messagesContainer) {
+                return;
+            }
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'ai-chat-starter-prompts';
+            wrapper.id = 'ai-chat-starter-prompts-' + this.config.orgId;
+
+            const title = document.createElement('div');
+            title.className = 'ai-chat-starter-title';
+            title.textContent = 'Quick questions';
+            wrapper.appendChild(title);
+
+            const chips = document.createElement('div');
+            chips.className = 'ai-chat-starter-list';
+
+            this.starterPrompts.forEach((promptText) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'ai-chat-starter-chip';
+                btn.textContent = promptText;
+                btn.addEventListener('click', () => this.sendMessage(promptText));
+                chips.appendChild(btn);
+            });
+
+            wrapper.appendChild(chips);
+            messagesContainer.appendChild(wrapper);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            this.starterPromptsShown = true;
+        }
+
+        removeStarterPrompts() {
+            const node = document.getElementById('ai-chat-starter-prompts-' + this.config.orgId);
+            if (node) {
+                node.remove();
+            }
         }
 
         saveUserInfo() {
@@ -1453,7 +1523,7 @@
             });
         }
 
-        async sendMessage() {
+        async sendMessage(forcedMessage = null) {
             if (!this.leadCaptured) {
                 this.showLeadForm();
                 return;
@@ -1461,9 +1531,11 @@
             const input = document.getElementById(this.ids.input);
             if (!input) return;
             
-            const message = input.value.trim();
+            const message = (forcedMessage !== null ? String(forcedMessage) : input.value).trim();
 
             if (!message) return;
+
+            this.removeStarterPrompts();
 
             // Track chat message
             this.trackAnalytics('chat_message', {

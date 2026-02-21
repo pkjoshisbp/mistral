@@ -37,9 +37,7 @@ class PricingController extends Controller
                     'features' => $meta['features'] ?? [],
                     'is_active' => (bool) $row->is_active,
                     'sort_order' => $row->sort_order,
-                    'formatted_token_cap' => $tokenCap >= 1000000
-                        ? number_format($tokenCap / 1000000, 0) . 'M'
-                        : number_format($tokenCap / 1000, 0) . 'K',
+                    'formatted_token_cap' => PricingPlan::formatTokenCap($tokenCap),
                 ];
                 $grouped[$key] = $plan;
             }
@@ -132,11 +130,13 @@ class PricingController extends Controller
             'sort_order' => 'required|integer'
         ]);
 
-        // Handle features as array
         $features = [];
         if ($request->has('features')) {
             $features = array_filter(explode("\n", $request->features));
         }
+
+        $features = $this->synchronizeTokenCapFeature($features, (int) $validated['token_cap_monthly']);
+
         $monthlyId = $request->input('monthly_id');
         $yearlyId = $request->input('yearly_id');
 
@@ -177,6 +177,36 @@ class PricingController extends Controller
 
         return redirect()->route('admin.pricing.index')
             ->with('success', 'Subscription plan updated successfully!');
+    }
+
+    private function synchronizeTokenCapFeature(array $features, int $tokenCap): array
+    {
+        $targetLine = 'Up to ' . PricingPlan::formatTokenCap($tokenCap) . ' tokens/month';
+        $updated = [];
+        $replaced = false;
+
+        foreach ($features as $feature) {
+            $line = trim((string) $feature);
+            if ($line === '') {
+                continue;
+            }
+
+            if (preg_match('/^up\s*to\s+.*tokens\s*\/\s*month$/i', $line)) {
+                if (!$replaced) {
+                    $updated[] = $targetLine;
+                    $replaced = true;
+                }
+                continue;
+            }
+
+            $updated[] = $line;
+        }
+
+        if (!$replaced) {
+            $updated[] = $targetLine;
+        }
+
+        return array_values(array_unique($updated));
     }
 
     // Credit Package Methods

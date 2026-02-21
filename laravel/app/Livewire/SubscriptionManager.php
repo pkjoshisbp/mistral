@@ -55,9 +55,7 @@ class SubscriptionManager extends Component
                     'token_cap_monthly' => $tokenCap,
                     'overage_price_per_100k' => $plan->overage_price_per_100k,
                     'features' => $meta['features'] ?? [],
-                    'formatted_token_cap' => $tokenCap >= 1000000
-                        ? number_format($tokenCap / 1000000, 0) . 'M'
-                        : number_format($tokenCap / 1000, 0) . 'K',
+                    'formatted_token_cap' => PricingPlan::formatTokenCap($tokenCap),
                 ];
             }
 

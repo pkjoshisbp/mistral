@@ -125,9 +125,6 @@
                                         <div class="d-flex justify-content-between align-items-center">
                                             <div>
                                                 <small class="fw-semibold text-dark">{{ $review->user->name }}</small>
-                                                @if(!$organizationId)
-                                                    <br><small class="text-muted">{{ data_get($review, 'organization.name') }}</small>
-                                                @endif
                                             </div>
                                             <small class="text-muted">{{ $review->created_at->format('M j, Y') }}</small>
                                         </div>

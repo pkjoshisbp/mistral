@@ -894,3 +894,187 @@ Tracking last actionable prompt makes it reliable.
 If you'd like, I can outline:
 
 👉 Types of follow-ups worth tracking vs ignoring.
+
+Additional improvements points
+is it good to add template questions in the chat widget body, which when clicked by visitor - that question is sent for response?
+this will not be default for all orgs, but clients can set it if they like?
+I have seen some examples like that, hence asking?
+
+Yes — this is a very good idea, and it solves multiple problems at once.
+
+What you’re describing is often called:
+
+👉 Starter prompts
+👉 Suggested questions
+👉 Quick asks
+
+And for your use case, it’s not just UX — it’s also:
+
+✔ Cost control
+✔ Accuracy control
+✔ Intent clarity
+
+🚀 Why this helps YOU (not just the user)
+
+Right now your biggest challenges are:
+
+Entity detection
+
+Follow-up ambiguity
+
+RAG over-triggering
+
+Token bloat
+
+Starter questions fix all four.
+
+Because instead of user typing:
+
+tell me about that suv you mentioned yesterday
+
+They click:
+
+👉 "Tell me about Victoris"
+
+Which gives:
+
+✔ Clean entity
+✔ Clear intent
+✔ Predictable context
+✔ Lower retrieval noise
+
+📉 Token Benefit
+
+Typed queries are messy:
+
+what is price of grand vitara automatic version and is it safe
+
+Needs:
+
+parsing
+
+fuzzy match
+
+longer RAG
+
+Clicked prompt:
+
+Show Grand Vitara pricing
+
+Needs:
+
+👉 minimal retrieval
+
+🧠 Conversational Anchoring
+
+Starter prompts also create:
+
+👉 Topic grounding
+
+Once user starts from:
+
+Tell me about Victoris
+
+Your system can safely:
+
+✔ Pin entity
+✔ Store context
+✔ Handle follow-ups efficiently
+
+Without repeated search.
+
+🟢 Especially powerful for Trials
+
+Trial users usually don’t know:
+
+What to ask
+
+So they type vague things:
+
+hello
+details?
+pricing
+
+Which wastes tokens.
+
+Starter prompts guide them into:
+
+👉 Structured conversations
+
+✨ Best Practice
+
+Let orgs configure:
+
+3–6 starter questions
+
+Example (for car dealer):
+
+Tell me about Victoris
+
+Compare Grand Vitara vs Brezza
+
+Show pricing options
+
+Book test drive
+
+Safety features of SUVs
+
+🎯 Smart Implementation Tip
+
+When clicked:
+
+Send internally as:
+
+intent = "vehicle_info"
+entity = "Victoris"
+source = "starter_prompt"
+
+
+Instead of raw text.
+
+This avoids entity detection altogether.
+
+🟣 UX Benefit
+
+It also reduces:
+
+User hesitation.
+
+Blank chat box → low engagement
+Guided prompts → higher usage
+
+🟡 Should it be optional?
+
+Yes — exactly as you suggested.
+
+Some industries need it:
+
+✔ Auto
+✔ Real estate
+✔ Education
+✔ Clinics
+
+Others prefer open chat.
+
+🧭 Bonus
+
+Starter prompts also reduce hallucination risk.
+
+Because:
+
+You start from known knowledge areas.
+
+Verdict
+
+Yes — add it.
+
+It improves:
+
+✔ Accuracy
+✔ Cost efficiency
+✔ Engagement
+✔ Conversion
+
+If you'd like, I can suggest:
+
+👉 Industry-wise starter prompt templates.
