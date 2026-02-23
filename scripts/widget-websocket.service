@@ -1,0 +1,27 @@
+[Unit]
+Description=Laravel Widget WebSocket Server (Ratchet, TLS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/clients/client1/web64/web/laravel
+ExecStart=/usr/bin/php /var/www/clients/client1/web64/web/laravel/artisan widget:websocket --host=0.0.0.0 --port=8090 --tls=true --tls-cert=/var/www/clients/client1/web64/ssl/ai-chat.support-le.crt --tls-key=/var/www/clients/client1/web64/ssl/ai-chat.support-le.key
+User=web64
+Group=client1
+Restart=always
+RestartSec=5
+TimeoutStartSec=45
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+# Optional explicit envs; command flags above already force TLS cert/key.
+Environment=APP_ENV=production
+Environment=WIDGET_WEBSOCKET_ENABLED=true
+Environment=WIDGET_WEBSOCKET_HOST=0.0.0.0
+Environment=WIDGET_WEBSOCKET_PUBLIC_HOST=ai-chat.support
+Environment=WIDGET_WEBSOCKET_PORT=8090
+Environment=WIDGET_WEBSOCKET_TLS=true
+
+[Install]
+WantedBy=multi-user.target

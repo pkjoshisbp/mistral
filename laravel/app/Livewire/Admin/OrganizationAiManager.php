@@ -114,7 +114,20 @@ class OrganizationAiManager extends Component
         // Load organization-specific settings or fallback to global admin settings
         $this->aiBackendType = $settings['ai_backend_type'] ?? AdminSetting::get('ai_backend_type', 'ollama');
         $this->aiModelProvider = $settings['ai_model_provider'] ?? AdminSetting::get('ai_model_provider', 'llama');
-        $this->aiModel = $settings['ai_model'] ?? AdminSetting::get('ai_model', 'llama3:8b-instruct-q5_K_M');
+        $this->loadAvailableModels();
+        if ($this->aiModelProvider === 'openai') {
+            $this->aiModel = $settings['openai_model']
+                ?? $settings['ai_model']
+                ?? AdminSetting::get('openai_default_model', 'gpt-5-mini');
+        } else {
+            $defaultLlamaModel = $this->aiBackendType === 'llamacpp'
+                ? AdminSetting::get('llamacpp_model_repo', 'llama-3.2-3b-instruct-q4_k_m.gguf')
+                : AdminSetting::get('llama_default_model', 'llama3:8b-instruct-q5_K_M');
+            $this->aiModel = $settings['llama_model']
+                ?? $settings['ai_model']
+                ?? $defaultLlamaModel;
+        }
+        $this->syncAiModelSelection();
         $this->assistantDisplayName = $settings['assistant_display_name'] ?? 'AI Assistant';
 
         $this->orgType = $settings['org_type'] ?? null;
@@ -289,6 +302,8 @@ class OrganizationAiManager extends Component
 
     public function loadAvailableModels()
     {
+        $openAiModels = $this->getOpenAiModelOptions();
+
         // Define available models based on provider type
         $this->availableModels = [
             'ollama' => [
@@ -300,16 +315,60 @@ class OrganizationAiManager extends Component
                     'llama3.1:70b' => 'Llama 3.1 70B (Most Capable)',
                     'mistral:7b' => 'Mistral 7B',
                     'codellama:7b' => 'Code Llama 7B'
-                ]
+                ],
+                'openai' => $openAiModels,
             ],
             'llamacpp' => [
                 'llama' => [
                     'llama-3.2-3b-instruct-q4_k_m.gguf' => 'Llama 3.2 3B (Q4_K_M)',
                     'llama-3.2-1b-instruct-q4_k_m.gguf' => 'Llama 3.2 1B (Q4_K_M)',
                     'llama-3.1-8b-instruct-q4_k_m.gguf' => 'Llama 3.1 8B (Q4_K_M)'
-                ]
+                ],
+                'openai' => $openAiModels,
             ]
         ];
+    }
+
+    private function getOpenAiModelOptions(): array
+    {
+        $models = [
+            'gpt-5-mini' => 'GPT-5 mini (Recommended)',
+            'gpt-5' => 'GPT-5',
+            'gpt-4.1' => 'GPT-4.1',
+            'gpt-4.1-mini' => 'GPT-4.1 mini',
+            'gpt-4o' => 'GPT-4o',
+            'gpt-4o-mini' => 'GPT-4o mini',
+        ];
+
+        $configured = trim((string) AdminSetting::get('openai_default_model', 'gpt-5-mini'));
+        if ($configured !== '' && !isset($models[$configured])) {
+            $models = [$configured => $configured . ' (Configured Default)'] + $models;
+        }
+
+        return $models;
+    }
+
+    private function syncAiModelSelection(): void
+    {
+        $models = $this->getModelsForCurrentProvider();
+        if (empty($models)) {
+            $this->aiModel = '';
+            return;
+        }
+
+        if (!$this->aiModel || !array_key_exists($this->aiModel, $models)) {
+            $this->aiModel = array_key_first($models);
+        }
+    }
+
+    public function updatedAiModelProvider(): void
+    {
+        $this->syncAiModelSelection();
+    }
+
+    public function updatedAiBackendType(): void
+    {
+        $this->syncAiModelSelection();
     }
 
     public function saveAiSettings()
@@ -328,6 +387,13 @@ class OrganizationAiManager extends Component
             $currentSettings['ai_backend_type'] = $this->aiBackendType;
             $currentSettings['ai_model_provider'] = $this->aiModelProvider;
             $currentSettings['ai_model'] = $this->aiModel;
+            if ($this->aiModelProvider === 'openai') {
+                $currentSettings['openai_model'] = $this->aiModel;
+                unset($currentSettings['llama_model']);
+            } else {
+                $currentSettings['llama_model'] = $this->aiModel;
+                unset($currentSettings['openai_model']);
+            }
             // Assistant branding
             if ($this->assistantDisplayName !== null) {
                 $trimmed = trim($this->assistantDisplayName);
@@ -417,6 +483,8 @@ class OrganizationAiManager extends Component
             unset($currentSettings['ai_backend_type']);
             unset($currentSettings['ai_model_provider']);
             unset($currentSettings['ai_model']);
+            unset($currentSettings['openai_model']);
+            unset($currentSettings['llama_model']);
             unset($currentSettings['intent_strategy']);
             unset($currentSettings['intent_rule_threshold']);
             unset($currentSettings['intent_embedding_threshold']);

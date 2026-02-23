@@ -13,6 +13,7 @@ Before setting up the services, ensure that:
 ```bash
 sudo cp /var/www/clients/client1/web64/web/scripts/ai-fastapi.service /etc/systemd/system/
 sudo cp /var/www/clients/client1/web64/web/scripts/ai-ollama.service /etc/systemd/system/
+sudo cp /var/www/clients/client1/web64/web/scripts/widget-websocket.service /etc/systemd/system/
 ```
 
 ### 2. Reload systemd daemon
@@ -24,6 +25,7 @@ sudo systemctl daemon-reload
 ```bash
 sudo systemctl enable ai-ollama.service
 sudo systemctl enable ai-fastapi.service
+sudo systemctl enable widget-websocket.service
 ```
 
 ### 4. Start the services
@@ -34,12 +36,16 @@ sudo systemctl start ai-ollama.service
 # Wait a few seconds, then start FastAPI
 sleep 5
 sudo systemctl start ai-fastapi.service
+
+# Start widget websocket service (TLS / wss)
+sudo systemctl start widget-websocket.service
 ```
 
 ### 5. Check service status
 ```bash
 sudo systemctl status ai-ollama.service
 sudo systemctl status ai-fastapi.service
+sudo systemctl status widget-websocket.service
 ```
 
 ### 6. View service logs
@@ -49,6 +55,9 @@ sudo journalctl -u ai-ollama.service -f
 
 # View FastAPI logs
 sudo journalctl -u ai-fastapi.service -f
+
+# View widget websocket logs
+sudo journalctl -u widget-websocket.service -f
 ```
 
 ## Service Management Commands
@@ -57,24 +66,28 @@ sudo journalctl -u ai-fastapi.service -f
 ```bash
 sudo systemctl start ai-ollama.service
 sudo systemctl start ai-fastapi.service
+sudo systemctl start widget-websocket.service
 ```
 
 ### Stop services
 ```bash
 sudo systemctl stop ai-fastapi.service
 sudo systemctl stop ai-ollama.service
+sudo systemctl stop widget-websocket.service
 ```
 
 ### Restart services
 ```bash
 sudo systemctl restart ai-ollama.service
 sudo systemctl restart ai-fastapi.service
+sudo systemctl restart widget-websocket.service
 ```
 
 ### Check if services are running
 ```bash
 sudo systemctl is-active ai-ollama.service
 sudo systemctl is-active ai-fastapi.service
+sudo systemctl is-active widget-websocket.service
 ```
 
 ## Troubleshooting
@@ -84,6 +97,9 @@ sudo systemctl is-active ai-fastapi.service
 2. Verify file permissions: `ls -la /var/www/clients/client1/web64/web/scripts/`
 3. Check if ports are available: `netstat -tulpn | grep -E "8111|11434"`
 4. Verify virtual environment: `ls -la /var/www/clients/client1/web64/web/ai_backend/venv/`
+5. Verify websocket port and TLS cert access:
+	- `sudo ss -ltnp | grep 8090`
+	- `sudo ls -l /var/www/clients/client1/web64/ssl/ai-chat.support-le.crt /var/www/clients/client1/web64/ssl/ai-chat.support-le.key`
 
 ### Test endpoints manually:
 ```bash
@@ -92,6 +108,9 @@ curl http://localhost:11434/api/tags
 
 # Test FastAPI
 curl http://localhost:8111/docs
+
+# Test websocket TLS handshake
+openssl s_client -connect ai-chat.support:8090 -servername ai-chat.support
 ```
 
 ## Notes

@@ -409,8 +409,40 @@
         loadStyles() {
             const link = document.createElement('link');
             link.rel = 'stylesheet';
-            link.href = `${this.config.apiUrl}/widget/${this.config.orgId}/styles.css`;
+            const version = encodeURIComponent(String(this.config.scriptVersion || Date.now()));
+            link.href = `${this.config.apiUrl}/widget/${this.config.orgId}/styles.css?v=${version}`;
             document.head.appendChild(link);
+        }
+
+        getViewportHeight() {
+            const visualHeight = window.visualViewport && Number(window.visualViewport.height)
+                ? Number(window.visualViewport.height)
+                : 0;
+            const windowHeight = Number(window.innerHeight) || 0;
+            const docHeight = Number(document.documentElement?.clientHeight) || 0;
+            return Math.max(visualHeight, windowHeight, docHeight, 0);
+        }
+
+        applyViewportBounds() {
+            const chatWindow = document.getElementById(this.ids?.window);
+            if (!chatWindow) {
+                return;
+            }
+
+            const offsetY = Number(this.config?.offsetY || 20);
+            const launcherHeight = 60;
+            const breathingSpace = 12;
+            const viewportHeight = this.getViewportHeight();
+            const availableHeight = Math.max(320, viewportHeight - (launcherHeight + offsetY + breathingSpace));
+
+            chatWindow.style.setProperty('max-height', `${Math.floor(availableHeight)}px`, 'important');
+
+            if (this.isExpanded) {
+                const targetExpandedHeight = Math.min(900, availableHeight);
+                chatWindow.style.setProperty('height', `${Math.floor(targetExpandedHeight)}px`, 'important');
+            } else {
+                chatWindow.style.removeProperty('height');
+            }
         }
 
         createWidget() {
@@ -664,6 +696,12 @@
                 }
             });
 
+            window.addEventListener('resize', () => this.applyViewportBounds(), { passive: true });
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', () => this.applyViewportBounds(), { passive: true });
+                window.visualViewport.addEventListener('scroll', () => this.applyViewportBounds(), { passive: true });
+            }
+
             // Hide notification when opened
             button.addEventListener('click', () => {
                 const notification = document.getElementById(this.ids.notification);
@@ -682,6 +720,7 @@
             if (this.isOpen) {
                 window.style.setProperty('display', 'flex', 'important');
                 window.style.setProperty('visibility', 'visible', 'important');
+                this.applyViewportBounds();
                 button.style.transform = 'scale(0.9)';
                 
                 // Track widget open
@@ -775,10 +814,10 @@
         }
 
         toggleExpand() {
-            const window = document.getElementById(this.ids.window);
+            const chatWindow = document.getElementById(this.ids.window);
             const expandBtn = document.getElementById(this.ids.expand);
             
-            if (!window || !expandBtn) {
+            if (!chatWindow || !expandBtn) {
                 console.error('AI Chat Widget: Window or expand button not found');
                 return;
             }
@@ -786,7 +825,7 @@
             this.isExpanded = !this.isExpanded;
             
             if (this.isExpanded) {
-                window.classList.add('ai-chat-expanded');
+                chatWindow.classList.add('ai-chat-expanded');
                 expandBtn.innerHTML = `
                     <svg width="18" height="18" viewBox="0 0 18 18">
                         <path d="M7 3H3v4h2V5h2V3zm4 0v2h2v2h2V3h-4zM7 15v-2H5v-2H3v4h4zm4 0h4v-4h-2v2h-2v2z" fill="currentColor"/>
@@ -794,7 +833,7 @@
                 `;
                 expandBtn.title = 'Minimize chat';
             } else {
-                window.classList.remove('ai-chat-expanded');
+                chatWindow.classList.remove('ai-chat-expanded');
                 expandBtn.innerHTML = `
                     <svg width="18" height="18" viewBox="0 0 18 18">
                         <path d="M3 3h4v2H5v2H3V3zm8 0h4v4h-2V5h-2V3zM3 11v4h4v-2H5v-2H3zm10 0v2h-2v2h4v-4h-2z" fill="currentColor"/>
@@ -802,6 +841,8 @@
                 `;
                 expandBtn.title = 'Expand chat';
             }
+
+            this.applyViewportBounds();
         }
 
         linkify(text) {
@@ -1180,20 +1221,34 @@
         }
 
         async detectLocation() {
+            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            // Timezone-based baseline (always available, no network needed)
+            const tzCity = timezone.includes('/') ? timezone.split('/').pop().replace(/_/g, ' ') : '';
+            const tzRegion = timezone.includes('/') ? timezone.split('/')[0] : '';
+            this.locationInfo = { timezone, city: tzCity, region: tzRegion, country: '' };
+
             try {
-                // Only use browser timezone info, no external API calls
-                const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                this.locationInfo = { 
-                    timezone,
-                    // Extract basic region info from timezone if possible
-                    region: timezone.includes('/') ? timezone.split('/')[0] : '',
-                    city: timezone.includes('/') ? timezone.split('/').pop() : ''
-                };
-                console.log('Location detected (browser timezone):', this.locationInfo);
-            } catch (error) {
-                console.log('Could not detect location:', error);
-                // Fallback to empty location info
-                this.locationInfo = {};
+                // Proxy through our own server → no CSP issues
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 3000);
+                const resp = await fetch('/widget/geoip', {
+                    signal: controller.signal,
+                    headers: { 'Accept': 'application/json' }
+                });
+                clearTimeout(timeout);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.city || data.country) {
+                        this.locationInfo = {
+                            timezone,
+                            city: data.city || tzCity,
+                            region: data.region || tzRegion,
+                            country: data.country || '',
+                        };
+                    }
+                }
+            } catch (_e) {
+                // Network error or timeout — timezone baseline already set above
             }
         }
 
@@ -1327,7 +1382,10 @@
         }
 
         getWebSocketUrl() {
-            return null;
+            if (!this.config.enableWebsocket) {
+                return null;
+            }
+            return this.config.wsUrl || null;
         }
 
         initWebSocket() {

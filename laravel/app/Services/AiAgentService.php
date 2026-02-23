@@ -143,6 +143,11 @@ class AiAgentService
         if ($organizationId && class_exists(\App\Models\Organization::class)) {
             $organization = \App\Models\Organization::find($organizationId);
             if ($organization && $organization->settings) {
+                $provider = $organization->settings['ai_model_provider'] ?? $this->getAiProvider();
+                if ($provider === 'openai') {
+                    return $this->getLlamaModel();
+                }
+
                 // Check for organization-specific backend type
                 $backendType = $organization->settings['ai_backend_type'] ?? $this->getBackendType();
                 
@@ -617,6 +622,8 @@ PROMPT;
             ]);
 
             $useRewriteAndIntent = $this->useIntentAndRewrite();
+            $termBoostResults = $this->searchQdrantByTerms($collectionName, (string) $originalQuery, max((int) $limit, 8));
+
             if (!$useRewriteAndIntent) {
                 $embedding = $this->embed($originalQuery);
 
@@ -627,7 +634,16 @@ PROMPT;
                     return null;
                 }
 
-                $results = $this->searchQdrant($collectionName, $embedding, $limit);
+                $searchLimit = max((int) $limit, 15);
+                $results = $this->searchQdrant($collectionName, $embedding, $searchLimit);
+                $mergedResults = $this->mergeSearchResultsById([
+                    $termBoostResults['results'] ?? [],
+                    $results['results'] ?? [],
+                ]);
+                $rerankedResults = $this->applyExplicitTermReranking($mergedResults, (string) $originalQuery);
+                $results = [
+                    'results' => array_slice($rerankedResults, 0, (int) $limit),
+                ];
                 $searchElapsed = round((microtime(true) - $searchStartTime) * 1000, 2);
 
                 Log::info('Semantic search completed (rewrite/intent disabled)', [
@@ -737,32 +753,17 @@ PROMPT;
             }
             
             // Otherwise, merge results by best score per unique id (fallback)
-            $mergedResults = [];
-            $resultsIndex = [];
-
-            foreach ([$originalResults, $rewrittenResults] as $resultSet) {
-                if (!isset($resultSet['results']) || !is_array($resultSet['results'])) {
-                    continue;
-                }
-                foreach ($resultSet['results'] as $item) {
-                    $itemId = $item['id'] ?? null;
-                    if ($itemId === null) {
-                        continue;
-                    }
-                    if (!isset($resultsIndex[$itemId]) || ($item['score'] ?? 0) > ($mergedResults[$resultsIndex[$itemId]]['score'] ?? 0)) {
-                        if (isset($resultsIndex[$itemId])) {
-                            $mergedResults[$resultsIndex[$itemId]] = $item;
-                        } else {
-                            $resultsIndex[$itemId] = count($mergedResults);
-                            $mergedResults[] = $item;
-                        }
-                    }
-                }
-            }
+            $mergedResults = $this->mergeSearchResultsById([
+                $termBoostResults['results'] ?? [],
+                $originalResults['results'] ?? [],
+                $rewrittenResults['results'] ?? [],
+            ]);
 
             usort($mergedResults, function ($a, $b) {
                 return ($b['score'] ?? 0) <=> ($a['score'] ?? 0);
             });
+
+            $mergedResults = $this->applyExplicitTermReranking($mergedResults, (string) $originalQuery);
 
             $topMerged = array_slice($mergedResults, 0, 3);
             $topMergedSummary = array_map(function ($item) {
@@ -803,6 +804,207 @@ PROMPT;
             ]);
             return null;
         }
+    }
+
+    private function applyExplicitTermReranking(array $results, string $query): array
+    {
+        if (empty($results)) {
+            return $results;
+        }
+
+        $terms = $this->extractExplicitSearchTerms($query);
+        if (empty($terms)) {
+            return $results;
+        }
+
+        $reranked = [];
+        foreach ($results as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $payload = is_array($item['payload'] ?? null) ? $item['payload'] : [];
+            $title = $this->normalizeSearchText((string) ($payload['title'] ?? ''));
+            $content = $this->normalizeSearchText((string) ($payload['content'] ?? ''));
+
+            $boost = 0.0;
+            foreach ($terms as $term) {
+                $termNormalized = $this->normalizeSearchText($term);
+                if ($termNormalized === '') {
+                    continue;
+                }
+
+                if ($title !== '' && $title === $termNormalized) {
+                    $boost += 1.20;
+                } elseif ($title !== '' && str_contains($title, $termNormalized)) {
+                    $boost += 0.65;
+                } elseif ($content !== '' && str_contains($content, $termNormalized)) {
+                    $boost += 0.25;
+                }
+            }
+
+            $item['_boosted_score'] = ((float) ($item['score'] ?? 0.0)) + $boost;
+            $reranked[] = $item;
+        }
+
+        usort($reranked, function (array $a, array $b): int {
+            $scoreA = (float) ($a['_boosted_score'] ?? $a['score'] ?? 0.0);
+            $scoreB = (float) ($b['_boosted_score'] ?? $b['score'] ?? 0.0);
+            if ($scoreA === $scoreB) {
+                return ((float) ($b['score'] ?? 0.0)) <=> ((float) ($a['score'] ?? 0.0));
+            }
+
+            return $scoreB <=> $scoreA;
+        });
+
+        foreach ($reranked as &$item) {
+            unset($item['_boosted_score']);
+        }
+
+        Log::info('Applied explicit-term reranking for search results', [
+            'terms' => $terms,
+            'top_titles' => array_values(array_filter(array_map(function ($item) {
+                return $item['payload']['title'] ?? null;
+            }, array_slice($reranked, 0, 3))))
+        ]);
+
+        return $reranked;
+    }
+
+    private function mergeSearchResultsById(array $resultGroups): array
+    {
+        $mergedResults = [];
+        $resultsIndex = [];
+
+        foreach ($resultGroups as $items) {
+            if (!is_array($items)) {
+                continue;
+            }
+
+            foreach ($items as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                $itemId = $item['id'] ?? null;
+                if ($itemId === null) {
+                    continue;
+                }
+
+                if (!isset($resultsIndex[$itemId]) || ((float) ($item['score'] ?? 0.0)) > ((float) ($mergedResults[$resultsIndex[$itemId]]['score'] ?? 0.0))) {
+                    if (isset($resultsIndex[$itemId])) {
+                        $mergedResults[$resultsIndex[$itemId]] = $item;
+                    } else {
+                        $resultsIndex[$itemId] = count($mergedResults);
+                        $mergedResults[] = $item;
+                    }
+                }
+            }
+        }
+
+        return $mergedResults;
+    }
+
+    private function searchQdrantByTerms(string $collectionName, string $query, int $limit = 10): array
+    {
+        $terms = $this->extractExplicitSearchTerms($query);
+        if (empty($terms)) {
+            return ['results' => []];
+        }
+
+        try {
+            $response = Http::timeout(20)->post("{$this->baseUrl}/qdrant/search_by_terms", [
+                'collection_name' => $collectionName,
+                'terms' => $terms,
+                'limit' => max(3, min($limit, 20)),
+            ]);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                return [
+                    'results' => is_array($data['results'] ?? null) ? $data['results'] : [],
+                ];
+            }
+
+            Log::warning('Qdrant term search failed', [
+                'collection' => $collectionName,
+                'status' => $response->status(),
+                'body_preview' => substr((string) $response->body(), 0, 200),
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Qdrant term search exception', [
+                'collection' => $collectionName,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return ['results' => []];
+    }
+
+    private function extractExplicitSearchTerms(string $query): array
+    {
+        $terms = [];
+        $trimmed = trim($query);
+        if ($trimmed === '') {
+            return [];
+        }
+
+        if (preg_match_all('/"([^"\n]{2,100})"/', $trimmed, $matches)) {
+            foreach (($matches[1] ?? []) as $value) {
+                $candidate = trim((string) $value);
+                if ($candidate !== '') {
+                    $terms[] = $candidate;
+                }
+            }
+        }
+
+        if (preg_match_all('/\b(?:titled|called|named)\s+([a-z0-9][a-z0-9\s\-]{2,120})/i', $trimmed, $matches)) {
+            foreach (($matches[1] ?? []) as $value) {
+                $candidate = trim((string) $value, " \t\n\r\0\x0B.,;:!?\"'");
+                if ($candidate !== '') {
+                    $terms[] = $candidate;
+                }
+            }
+        }
+
+        if (preg_match_all('/https?:\/\/[^\s]+/i', $trimmed, $matches)) {
+            foreach (($matches[0] ?? []) as $rawUrl) {
+                $url = rtrim((string) $rawUrl, ".,;:!?)]}");
+                $path = (string) (parse_url($url, PHP_URL_PATH) ?? '');
+                $slug = trim((string) basename($path), '/');
+                if ($slug !== '') {
+                    $slugPhrase = trim(preg_replace('/[-_]+/', ' ', $slug) ?? $slug);
+                    if ($slugPhrase !== '') {
+                        $terms[] = $slugPhrase;
+                    }
+                }
+            }
+        }
+
+        $deduped = [];
+        foreach ($terms as $term) {
+            $normalized = $this->normalizeSearchText((string) $term);
+            if ($normalized === '' || mb_strlen($normalized) < 3) {
+                continue;
+            }
+            $deduped[$normalized] = trim((string) $term);
+        }
+
+        return array_values($deduped);
+    }
+
+    private function normalizeSearchText(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            return '';
+        }
+
+        $normalized = preg_replace('/https?:\/\/[^\s]+/i', ' ', $normalized) ?? $normalized;
+        $normalized = preg_replace('/[^a-z0-9]+/i', ' ', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
+
+        return trim($normalized);
     }
 
     /**
@@ -1113,20 +1315,18 @@ Rules:
             ]);
             
             $client = OpenAI::client($apiKey);
-            
+
             $result = $client->chat()->create([
                 'model' => $model,
                 'messages' => $messages,
-                'max_completion_tokens' => 300, // Limit response length to keep it concise
             ]);
 
             Log::info('OpenAI chat response', [
                 'id' => $result->id,
                 'model' => $result->model,
-                'usage' => $result->usage->toArray()
+                'usage' => $result->usage->toArray(),
             ]);
 
-            // Debug: Log the raw choices structure and full result
             Log::info('OpenAI choices debug', [
                 'choices_count' => count($result->choices),
                 'first_choice' => isset($result->choices[0]) ? [
@@ -1136,19 +1336,15 @@ Rules:
                     'finish_reason' => $result->choices[0]->finishReason ?? 'null',
                 ] : 'no_choices',
                 'raw_result_keys' => array_keys($result->toArray()),
-                'choices_structure' => $result->choices[0]->toArray()
+                'choices_structure' => isset($result->choices[0]) ? $result->choices[0]->toArray() : null,
             ]);
 
-            // Extract content from the response
-            $content = $result->choices[0]->message->content ?? '';
-            
-            // Handle empty content from reasoning models - use the search context intelligently
-            if (empty($content)) {
-                // Log that we're using fallback
-                Log::info('OpenAI returned empty content, using intelligent fallback');
-                
-                // For now, return null to let the caller handle it with context
-                // This allows the original search results to be used as fallback
+            $content = trim((string) ($result->choices[0]->message->content ?? ''));
+            if ($content === '') {
+                Log::warning('OpenAI returned empty content; falling back to local model', [
+                    'model' => $model,
+                    'finish_reason' => $result->choices[0]->finishReason ?? null,
+                ]);
                 return null;
             }
 
@@ -1181,7 +1377,8 @@ Rules:
                 'has_message' => isset($response['message']),
                 'message_content_length' => strlen($response['message']['content'] ?? ''),
                 'content_preview' => substr($response['message']['content'] ?? '', 0, 100),
-                'usage_tokens' => $response['usage']['total_tokens'] ?? 0
+                'usage_tokens' => $response['usage']['total_tokens'] ?? 0,
+                'selected_model' => $model,
             ]);
 
             return $response;

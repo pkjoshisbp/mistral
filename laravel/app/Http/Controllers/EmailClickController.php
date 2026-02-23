@@ -19,6 +19,8 @@ class EmailClickController extends Controller
         
         if ($recipient) {
             $now = now();
+            $recipient->delivered_at = $recipient->delivered_at ?: $now;
+            $recipient->delivery_status = $recipient->delivery_status ?: 'delivered';
             
             // Track the click
             $clickData = $recipient->click_data ?? [];

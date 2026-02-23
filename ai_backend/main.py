@@ -3,7 +3,7 @@ import httpx
 import logging
 from logging.handlers import RotatingFileHandler
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, MatchText
 import uuid
 import time
 import asyncio
@@ -887,6 +887,100 @@ async def search_qdrant_text(request: Request):
         search_ms = int((time.time() - search_start) * 1000)
         logging.info(f"qdrant_search_text collection={collection_name} limit={limit} elapsed_ms={search_ms}")
         return {"results": [{"id": r.id, "score": r.score, "payload": r.payload} for r in results]}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/qdrant/search_by_terms")
+async def search_qdrant_by_terms(request: Request):
+    data = await request.json()
+    collection_name = data["collection_name"]
+    terms = data.get("terms", [])
+    limit = int(data.get("limit", 10))
+
+    if not isinstance(terms, list):
+        raise HTTPException(status_code=422, detail="terms must be an array")
+
+    normalized_terms = []
+    for term in terms:
+        t = str(term).strip()
+        if len(t) >= 2:
+            normalized_terms.append(t)
+
+    if not normalized_terms:
+        return {"results": []}
+
+    try:
+        start_time = time.time()
+        by_id = {}
+
+        for term in normalized_terms[:8]:
+            term_variants = list(dict.fromkeys([
+                term,
+                term.lower(),
+                term.title(),
+            ]))
+
+            for variant in term_variants:
+                try:
+                    exact_points, _ = qdrant.scroll(
+                        collection_name=collection_name,
+                        scroll_filter=Filter(must=[
+                            FieldCondition(key="title", match=MatchValue(value=variant))
+                        ]),
+                        limit=max(limit, 20),
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                    for point in exact_points:
+                        point_id = str(point.id)
+                        payload = point.payload or {}
+                        existing = by_id.get(point_id)
+                        score = 1.0
+                        if existing is None or score > existing["score"]:
+                            by_id[point_id] = {
+                                "id": point.id,
+                                "score": score,
+                                "payload": payload,
+                            }
+                except Exception:
+                    continue
+
+            try:
+                text_points, _ = qdrant.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=Filter(should=[
+                        FieldCondition(key="title", match=MatchText(text=term)),
+                        FieldCondition(key="content", match=MatchText(text=term)),
+                    ]),
+                    limit=max(limit * 3, 30),
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in text_points:
+                    point_id = str(point.id)
+                    payload = point.payload or {}
+                    existing = by_id.get(point_id)
+                    score = 0.72
+                    if existing is None or score > existing["score"]:
+                        by_id[point_id] = {
+                            "id": point.id,
+                            "score": score,
+                            "payload": payload,
+                        }
+            except Exception:
+                # MatchText may not be available on older environments; exact-title path still works.
+                continue
+
+        results = list(by_id.values())
+        results.sort(key=lambda item: item.get("score", 0), reverse=True)
+        results = results[:limit]
+
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logging.info(
+            f"qdrant_search_by_terms collection={collection_name} terms={len(normalized_terms)} results={len(results)} elapsed_ms={elapsed_ms}"
+        )
+
+        return {"results": results}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

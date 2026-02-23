@@ -578,6 +578,26 @@ class ActionExecutorService
             $orderBy = $config['order_by'] ?? [];
             $limit = $config['limit'] ?? 100;
 
+            if (($action->action_type ?? null) === 'pricing' && $table === 'pricing_plans') {
+                if (empty($where)) {
+                    $where = [
+                        [
+                            'column' => 'is_active',
+                            'operator' => '=',
+                            'value' => 1,
+                        ],
+                    ];
+                }
+
+                if (empty($orderBy)) {
+                    $orderBy = [
+                        ['column' => 'plan_type', 'direction' => 'asc'],
+                        ['column' => 'sort_order', 'direction' => 'asc'],
+                        ['column' => 'id', 'direction' => 'asc'],
+                    ];
+                }
+            }
+
             $query = \DB::connection($connection)->table($table);
             
             // Handle columns with calculated fields
@@ -618,6 +638,14 @@ class ActionExecutorService
             }
 
             $results = $query->limit($limit)->get()->toArray();
+            $results = array_map(fn ($row) => (array) $row, $results);
+
+            if (($action->action_type ?? null) === 'pricing' && !empty($params['query'])) {
+                $filtered = $this->filterRowsByQuery($results, (string) $params['query']);
+                if (!empty($filtered)) {
+                    $results = $filtered;
+                }
+            }
 
             return [
                 'success' => true,
@@ -696,6 +724,13 @@ class ActionExecutorService
                     $result['pricing_type'] = $type;
                 }
                 
+                if (($type ?? null) === 'pricing' && !empty($params['query'])) {
+                    $filtered = $this->filterRowsByQuery($results, (string) $params['query']);
+                    if (!empty($filtered)) {
+                        $results = $filtered;
+                    }
+                }
+
                 $allResults = array_merge($allResults, $results);
                 $totalRows += count($results);
             }
@@ -757,6 +792,8 @@ class ActionExecutorService
 
     private function filterRowsByQuery(array $rows, string $query): array
     {
+        $rows = $this->normalizePricingRowsForQuery($rows, $query);
+
         $keywords = $this->extractQueryKeywords($query);
         if (empty($keywords) || empty($rows)) {
             return $rows;
@@ -777,6 +814,51 @@ class ActionExecutorService
         }
 
         return $filtered;
+    }
+
+    private function normalizePricingRowsForQuery(array $rows, string $query): array
+    {
+        if (empty($rows)) {
+            return $rows;
+        }
+
+        $allAssociative = !empty($rows) && collect($rows)->every(fn ($row) => is_array($row));
+        if (!$allAssociative) {
+            return $rows;
+        }
+
+        $queryLower = strtolower($query);
+        $wantsCredits = (bool) preg_match('/\b(credit|credits|top\s*up|token|tokens|one[-\s]*time|package|packages)\b/i', $queryLower);
+        $wantsBasic = (bool) preg_match('/\b(basic)\b/i', $queryLower);
+
+        if (!$wantsCredits) {
+            $subscriptionRows = array_values(array_filter($rows, function ($row) {
+                $type = strtolower((string) ($row['plan_type'] ?? ''));
+                return $type === 'subscription' || $type === '';
+            }));
+
+            if (!empty($subscriptionRows)) {
+                $rows = $subscriptionRows;
+            }
+        }
+
+        if (!$wantsBasic) {
+            $tierNames = array_values(array_unique(array_map(function ($row) {
+                return strtolower(trim((string) ($row['name'] ?? '')));
+            }, $rows)));
+
+            $hasMainThreeTiers = in_array('starter', $tierNames, true)
+                && in_array('business', $tierNames, true)
+                && in_array('enterprise', $tierNames, true);
+
+            if ($hasMainThreeTiers) {
+                $rows = array_values(array_filter($rows, function ($row) {
+                    return strtolower(trim((string) ($row['name'] ?? ''))) !== 'basic';
+                }));
+            }
+        }
+
+        return $rows;
     }
 
     private function extractQueryKeywords(string $query): array

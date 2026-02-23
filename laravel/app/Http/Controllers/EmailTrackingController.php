@@ -14,6 +14,8 @@ class EmailTrackingController extends Controller
         $recipient = EmailCampaignRecipient::where('tracking_token', $token)->first();
         if ($recipient) {
             $now = now();
+            $recipient->delivered_at = $recipient->delivered_at ?: $now;
+            $recipient->delivery_status = $recipient->delivery_status ?: 'delivered';
             $recipient->opened_at = $recipient->opened_at ?: $now;
             $recipient->last_opened_at = $now;
             $recipient->open_count = (int)($recipient->open_count ?? 0) + 1;

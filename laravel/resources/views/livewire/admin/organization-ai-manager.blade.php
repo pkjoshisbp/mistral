@@ -100,7 +100,7 @@
                                                     </label>
                                                     <select wire:model.live="aiModelProvider" class="form-select @error('aiModelProvider') is-invalid @enderror">
                                                         <option value="llama">Llama Models</option>
-                                                        <option value="openai">OpenAI (Future)</option>
+                                                        <option value="openai">OpenAI</option>
                                                     </select>
                                                     @error('aiModelProvider')
                                                         <div class="invalid-feedback">{{ $message }}</div>
@@ -594,15 +594,21 @@
                                         </h6>
                                     </div>
                                     <div class="card-body">
+                                        @php
+                                            $globalProvider = \App\Models\AdminSetting::get('ai_model_provider', 'llama');
+                                            $globalModel = $globalProvider === 'openai'
+                                                ? \App\Models\AdminSetting::get('openai_default_model', 'gpt-5-mini')
+                                                : \App\Models\AdminSetting::get('llama_default_model', 'llama3.2:3b');
+                                        @endphp
                                         <div class="row">
                                             <div class="col-md-4">
                                                 <strong>Backend:</strong> {{ \App\Models\AdminSetting::get('ai_backend_type', 'ollama') }}
                                             </div>
                                             <div class="col-md-4">
-                                                <strong>Provider:</strong> {{ \App\Models\AdminSetting::get('ai_model_provider', 'llama') }}
+                                                <strong>Provider:</strong> {{ $globalProvider }}
                                             </div>
                                             <div class="col-md-4">
-                                                <strong>Model:</strong> {{ \App\Models\AdminSetting::get('ai_model', 'llama3.2:3b') }}
+                                                <strong>Model:</strong> {{ $globalModel }}
                                             </div>
                                         </div>
                                         <small class="text-muted">Organizations without custom settings will use these defaults.</small>

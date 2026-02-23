@@ -245,50 +245,11 @@
 
   <!-- Content Wrapper -->
   <div class="content-wrapper">
-    <!-- Content Header -->
-    <div class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1 class="m-0">{{ $title ?? 'Dashboard' }}</h1>
-          </div>
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-              {{ $breadcrumbs ?? '' }}
-            </ol>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Main content -->
-    <section class="content">
-      <div class="container-fluid">
-        @if (session('status'))
-            <div class="alert alert-success alert-dismissible">
-                <button type="button" class="close" data-dismiss="alert">&times;</button>
-                {{ session('status') }}
-            </div>
-        @endif
-
-        @if ($errors->any())
-            <div class="alert alert-danger alert-dismissible">
-                <button type="button" class="close" data-dismiss="alert">&times;</button>
-                <ul class="mb-0">
-                    @foreach ($errors->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
-
-  @isset($slot)
-    {{ $slot }}
-  @else
-    @yield('content')
-  @endisset
-      </div>
-    </section>
+    @isset($slot)
+      {{ $slot }}
+    @else
+      @yield('content')
+    @endisset
   </div>
 
   <!-- Footer -->

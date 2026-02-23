@@ -127,13 +127,8 @@ class EmailComposer extends Component
                                     'tracking_token' => $trackingToken,
                                     'campaign_id' => $campaign->id,
                                 ]));
-
-                        // Add BCC if specified
-                        if (!empty($this->bccList)) {
-                            $message->bcc($this->bccList);
-                        }
                     });
-                    
+
                     $campaign->recipients()->create([
                         'organization_id' => null,
                         'recipient_email' => $recipient,
@@ -152,6 +147,23 @@ class EmailComposer extends Component
                 } catch (\Exception $e) {
                     $failedCount++;
                     \Log::error('Email sending failed: ' . $e->getMessage());
+                }
+            }
+
+            if (!empty($this->bccList) && $sentCount > 0) {
+                $untrackedContent = $this->applyEmailTypography($campaign->content);
+                try {
+                    Mail::send([], [], function ($message) use ($campaign, $untrackedContent) {
+                        $message->to($this->bccList)
+                            ->subject('[BCC Copy] ' . $campaign->subject)
+                            ->from($campaign->sender_email, $campaign->sender_name)
+                            ->html($untrackedContent);
+                        $message->getSymfonyMessage()
+                            ->getHeaders()
+                            ->addTextHeader('X-AICS-BCC-COPY', '1');
+                    });
+                } catch (\Exception $bccException) {
+                    \Log::warning('BCC copy failed: ' . $bccException->getMessage());
                 }
             }
 

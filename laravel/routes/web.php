@@ -882,6 +882,7 @@ Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class,
         $organization = \App\Models\Organization::findOrFail($orgId);
         return view('widget.test', compact('organization'));
     })->name('widget.test');
+    Route::get('geoip', [\App\Http\Controllers\WidgetController::class, 'geoip'])->name('widget.geoip');
 });
 
 // API Routes

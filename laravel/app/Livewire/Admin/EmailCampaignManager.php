@@ -436,8 +436,28 @@ class EmailCampaignManager extends Component
                                 'tracking_token' => $recModel->tracking_token,
                                 'campaign_id' => $campaign->id,
                             ]));
-                        if (!empty($this->bccList)) { $message->bcc($this->bccList); }
                     });
+
+                    if (!empty($this->bccList)) {
+                        $untrackedContent = $this->applyEmailTypography($personalContent);
+                        try {
+                            Mail::send([], [], function ($message) use ($campaign, $row, $personalSubject, $untrackedContent) {
+                                $message->to($this->bccList)
+                                    ->subject('[BCC Copy] ' . $personalSubject)
+                                    ->from($campaign->sender_email, $campaign->sender_name)
+                                    ->html($untrackedContent);
+                                $message->getSymfonyMessage()
+                                    ->getHeaders()
+                                    ->addTextHeader('X-AICS-BCC-COPY', '1');
+                                $message->getSymfonyMessage()
+                                    ->getHeaders()
+                                    ->addTextHeader('X-AICS-Original-Recipient', (string) ($row['email'] ?? ''));
+                            });
+                        } catch (\Exception $bccException) {
+                            \Log::warning('Campaign BCC copy failed: ' . $bccException->getMessage());
+                        }
+                    }
+
                     $recModel->update([
                         'status'=>'sent',
                         'sent_at'=>now(),

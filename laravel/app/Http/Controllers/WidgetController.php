@@ -66,6 +66,14 @@ class WidgetController
 
         $scriptVersion = now()->format('Ymd.His');
         $starterPrompts = $this->getWidgetStarterPrompts($organization);
+        $enableWebsocket = (bool) env('WIDGET_WEBSOCKET_ENABLED', false);
+        $configuredWsUrl = trim((string) env('WIDGET_WS_URL', ''));
+        $websocketHost = (string) env('WIDGET_WEBSOCKET_PUBLIC_HOST', parse_url(config('app.url'), PHP_URL_HOST));
+        $websocketPort = (int) env('WIDGET_WEBSOCKET_PORT', 8090);
+        $websocketScheme = (bool) env('WIDGET_WEBSOCKET_TLS', true) ? 'wss' : 'ws';
+        $derivedWsUrl = $websocketHost ? sprintf('%s://%s:%d', $websocketScheme, $websocketHost, $websocketPort) : null;
+        $wsUrl = $configuredWsUrl !== '' ? $configuredWsUrl : $derivedWsUrl;
+
         $widgetConfig = [
             'orgId' => $orgId,
             'orgName' => $organization->name,
@@ -76,7 +84,8 @@ class WidgetController
             'headerLogoUrl' => $settings['widget_header_logo_url'] ?? null,
             'showHeaderLogo' => (bool)($settings['show_header_logo'] ?? false),
             'brandingLogoUrl' => $settings['branding_logo_url'] ?? (rtrim(config('app.url'), '/') . '/images/ai-chat-logo.svg'),
-            'wsUrl' => env('WIDGET_WS_URL') ?: null,
+            'enableWebsocket' => $enableWebsocket,
+            'wsUrl' => $wsUrl,
             'scriptVersion' => $scriptVersion,
             'theme' => $settings['widget_theme'] ?? 'default',
             'position' => $settings['widget_position'] ?? 'bottom-right',
@@ -150,7 +159,9 @@ class WidgetController
         return response($css)
             ->header('Content-Type', 'text/css')
             ->header('Access-Control-Allow-Origin', '*')
-            ->header('Cache-Control', 'public, max-age=3600')
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+            ->header('Pragma', 'no-cache')
+            ->header('Expires', '0')
             ->header('X-Robots-Tag', 'noindex, nofollow');
     }
 
@@ -195,6 +206,7 @@ class WidgetController
             $country = $request->input('country') ?? $allUserInfo['country'] ?? null;
             $region = $request->input('region') ?? $allUserInfo['region'] ?? null;
             $location = $request->input('location') ?? $allUserInfo['location'] ?? null;
+            $city = $request->input('city') ?? $allUserInfo['city'] ?? null;
             $sessionMetadata = $this->buildLeadSessionMetadata($request, $allUserInfo);
             $intentResult = null;
 
@@ -253,7 +265,7 @@ class WidgetController
                     $message,
                     $handoffText,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -274,14 +286,14 @@ class WidgetController
                     'org_id' => $orgId,
                     'session_id' => $sessionId,
                     'user_info' => $allUserInfo,
-                    'location' => compact('country', 'region', 'location')
+                    'location' => compact('country', 'region', 'location', 'city')
                 ]);
                 
                 $this->upsertWidgetLead(
                     $organization->id,
                     $sessionId,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult,
                     $message,
                     $sessionMetadata
@@ -292,7 +304,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
                 Log::info('Lead upserted via widget', ['org_id' => $orgId, 'session_id' => $sessionId]);
@@ -307,7 +319,7 @@ class WidgetController
                     $message,
                     $clarifyResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -316,7 +328,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
 
@@ -327,7 +339,7 @@ class WidgetController
                         $message,
                         $clarifyResponse,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
                 }
@@ -525,7 +537,7 @@ class WidgetController
                 $searchResults = $this->aiAgentService->enhancedSearch(
                     $collectionName,
                     $searchQuery,
-                    2 // Get top 2 relevant results for faster processing
+                    6 // Use broader retrieval window to reduce false negatives on specific product queries
                 );
             }
             
@@ -627,6 +639,11 @@ class WidgetController
                 }
             }
 
+            $directCatalogContext = $this->buildDirectCatalogMatchContext($organization, (string) $searchQuery);
+            if ($directCatalogContext !== '') {
+                $context .= ($context !== '' ? "\n" : '') . $directCatalogContext . "\n";
+            }
+
             // Persist last context payloads for follow-up continuity (limit to top 5)
             $payloads = $this->buildContextPayloadCache($orderedResults);
             $this->persistLastContextPayloads(
@@ -634,7 +651,7 @@ class WidgetController
                 $sessionId,
                 $payloads,
                 $allUserInfo,
-                compact('country', 'region', 'location')
+                compact('country', 'region', 'location', 'city')
             );
 
             // Create concise system prompt with official org contact metadata
@@ -662,7 +679,7 @@ class WidgetController
                         $message,
                         $safeResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -671,7 +688,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -728,7 +745,7 @@ class WidgetController
                     $message,
                     $safeResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -737,7 +754,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
 
@@ -748,7 +765,7 @@ class WidgetController
                         $message,
                         $safeResponse,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
                 }
@@ -796,7 +813,7 @@ class WidgetController
                     $message,
                     $callbackResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -805,7 +822,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
 
@@ -825,7 +842,7 @@ class WidgetController
                     $message,
                     $contactResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -834,7 +851,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
 
@@ -899,7 +916,7 @@ class WidgetController
                     $organization,
                     $finalFaqResponse,
                     $exactFaqMatch['payload']['follow_up'] ?? null,
-                    $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location'))
+                    $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location', 'city'))
                 );
                 if ($faqFollowUp !== '' && !$this->responseHasQuestion($finalFaqResponse)) {
                     $finalFaqResponse = trim($finalFaqResponse) . "\n\n" . $faqFollowUp;
@@ -928,7 +945,7 @@ class WidgetController
                     $message,
                     $finalFaqResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -937,7 +954,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
 
@@ -948,7 +965,7 @@ class WidgetController
                         $message,
                         $finalFaqResponse,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
                 }
@@ -980,7 +997,7 @@ class WidgetController
                     $message,
                     $shortResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -989,7 +1006,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
 
@@ -1000,7 +1017,7 @@ class WidgetController
                         $message,
                         $shortResponse,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
                 }
@@ -1031,7 +1048,7 @@ class WidgetController
                     $message,
                     $lowConfidenceResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -1040,7 +1057,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
 
@@ -1051,7 +1068,7 @@ class WidgetController
                         $message,
                         $lowConfidenceResponse,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
                 }
@@ -1088,7 +1105,7 @@ class WidgetController
                     $message,
                     $shortResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
 
@@ -1097,7 +1114,7 @@ class WidgetController
                     $sessionId,
                     $intentResult,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
 
@@ -1108,7 +1125,7 @@ class WidgetController
                         $message,
                         $shortResponse,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
                 }
@@ -1197,6 +1214,9 @@ class WidgetController
                 $systemPrompt .= " " . $supplementaryInstruction;
             }
 
+            $systemPrompt .= "\n\nOUTPUT ENVELOPE: Return JSON ONLY with keys: response (string), entity (string), topics_covered (string array), follow_up (object|null with type and topic array).";
+            $systemPrompt .= " Keep response natural and concise for users. Set follow_up=null if not asking a follow-up question.";
+
             // Get AI response using llmChat for better token tracking
             $messages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $finalContext);
             Log::info('Widget LLM context prepared', [
@@ -1207,6 +1227,9 @@ class WidgetController
             ]);
             
             // Use organization-specific AI provider and model
+            $llmStartedAt = microtime(true);
+            $oneCallEnvelopeUsed = false;
+            $oneCallEnvelopeParseOk = false;
             $maxTokens = 220;
             $affirmativeMaxTokens = (int) ($rulePolicy['affirmative_follow_up_max_tokens'] ?? 140);
             if ($isAffirmativeContinuation) {
@@ -1234,6 +1257,9 @@ class WidgetController
             }
 
             $rawResponseText = null;
+            $structuredFollowUpState = null;
+            $oneCallEnvelopeRetryAttempted = false;
+            $oneCallEnvelopeRetrySucceeded = false;
             if (!$aiResponse || !isset($aiResponse['message']['content'])) {
                 // Fallback to old method
                 $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt);
@@ -1242,7 +1268,32 @@ class WidgetController
             } else {
                 $rawResponseText = $aiResponse['message']['content'];
                 $responseText = $rawResponseText;
+
+                $envelope = $this->extractOneCallEnvelope((string) $rawResponseText);
+                if (is_array($envelope)) {
+                    $oneCallEnvelopeParseOk = true;
+                    $responseText = (string) ($envelope['response'] ?? $responseText);
+                    $structuredFollowUpState = $envelope['structured_state'] ?? null;
+                    $oneCallEnvelopeUsed = is_array($structuredFollowUpState) && !empty($structuredFollowUpState);
+                } else {
+                    $oneCallEnvelopeRetryAttempted = true;
+                    $retryEnvelope = $this->retryStrictEnvelopeExtraction(
+                        (string) $rawResponseText,
+                        (string) $message,
+                        $organization,
+                        (int) $organization->id,
+                        $aiProvider
+                    );
+                    if (is_array($retryEnvelope)) {
+                        $oneCallEnvelopeRetrySucceeded = true;
+                        $oneCallEnvelopeParseOk = true;
+                        $responseText = (string) ($retryEnvelope['response'] ?? $responseText);
+                        $structuredFollowUpState = $retryEnvelope['structured_state'] ?? null;
+                        $oneCallEnvelopeUsed = is_array($structuredFollowUpState) && !empty($structuredFollowUpState);
+                    }
+                }
             }
+            $llmElapsedMs = round((microtime(true) - $llmStartedAt) * 1000, 2);
 
             if (!$responseText) {
                 throw new \Exception('Failed to get AI response');
@@ -1289,6 +1340,13 @@ class WidgetController
                 'org_id' => $orgId,
                 'session_id' => $sessionId,
                 'user_message' => $message,
+                'llm_elapsed_ms' => $llmElapsedMs,
+                'one_call_envelope_parse_ok' => $oneCallEnvelopeParseOk,
+                'one_call_envelope_used' => $oneCallEnvelopeUsed,
+                'one_call_envelope_retry_attempted' => $oneCallEnvelopeRetryAttempted,
+                'one_call_envelope_retry_succeeded' => $oneCallEnvelopeRetrySucceeded,
+                'extraction_call_skipped' => $oneCallEnvelopeUsed,
+                'estimated_saved_ms' => $oneCallEnvelopeUsed ? 1800 : 0,
                 'context_length' => strlen($finalContext),
                 'context_found' => !empty($finalContext),
                 'has_shopify_data' => !empty($shopifyContext),
@@ -1324,7 +1382,7 @@ class WidgetController
                         $organization,
                         $responseText,
                         null,
-                        $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location'))
+                        $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location', 'city'))
                     );
                     if ($faqFollowUp !== '') {
                         $responseText = trim($responseText) . "\n\n" . $faqFollowUp;
@@ -1338,7 +1396,16 @@ class WidgetController
             }
 
             // Save conversation to database
-            $conversation = $this->saveConversationToDatabase($organization, $sessionId, $message, $responseText, $allUserInfo, compact('country', 'region', 'location'), $intentResult);
+            $conversation = $this->saveConversationToDatabase(
+                $organization,
+                $sessionId,
+                $message,
+                $responseText,
+                $allUserInfo,
+                compact('country', 'region', 'location', 'city'),
+                $intentResult,
+                $structuredFollowUpState
+            );
 
             // Log intent distribution analytics
             $this->logIntentAnalytics(
@@ -1346,7 +1413,7 @@ class WidgetController
                 $sessionId,
                 $intentResult,
                 $request,
-                compact('country', 'region', 'location'),
+                compact('country', 'region', 'location', 'city'),
                 $sessionMetadata
             );
 
@@ -1357,7 +1424,7 @@ class WidgetController
                     $message,
                     $responseText,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
             }
@@ -1379,7 +1446,9 @@ class WidgetController
                 'org_id' => $orgId,
                 'session_id' => $sessionId,
                 'message' => $message,
-                'response' => $responseText
+                'response' => $responseText,
+                'one_call_envelope_used' => $oneCallEnvelopeUsed,
+                'llm_elapsed_ms' => $llmElapsedMs,
             ]);
 
             return response()->json([
@@ -1433,6 +1502,7 @@ class WidgetController
         $country = $request->input('country') ?? ($allUserInfo['country'] ?? null);
         $region = $request->input('region') ?? ($allUserInfo['region'] ?? null);
         $location = $request->input('location') ?? ($allUserInfo['location'] ?? null);
+        $city = $request->input('city') ?? ($allUserInfo['city'] ?? null);
         $sessionMetadata = $this->buildLeadSessionMetadata($request, $allUserInfo);
 
         $settings = $organization->settings ?? [];
@@ -1459,7 +1529,7 @@ class WidgetController
                 $message,
                 $clarifyResponse,
                 $allUserInfo,
-                compact('country', 'region', 'location'),
+                compact('country', 'region', 'location', 'city'),
                 null
             );
 
@@ -1468,7 +1538,7 @@ class WidgetController
                 $sessionId,
                 null,
                 $request,
-                compact('country', 'region', 'location'),
+                compact('country', 'region', 'location', 'city'),
                 $sessionMetadata
             );
 
@@ -1479,7 +1549,7 @@ class WidgetController
                     $message,
                     $clarifyResponse,
                     $request,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $sessionMetadata
                 );
             }
@@ -1519,7 +1589,7 @@ class WidgetController
                 $message,
                 $handoffText,
                 $allUserInfo,
-                compact('country', 'region', 'location'),
+                compact('country', 'region', 'location', 'city'),
                 null
             );
 
@@ -1556,7 +1626,7 @@ class WidgetController
                 $message,
                 $handoffText,
                 $allUserInfo,
-                compact('country', 'region', 'location'),
+                compact('country', 'region', 'location', 'city'),
                 null
             );
 
@@ -1565,7 +1635,7 @@ class WidgetController
                 $sessionId,
                 null,
                 $request,
-                compact('country', 'region', 'location'),
+                compact('country', 'region', 'location', 'city'),
                 $sessionMetadata
             );
 
@@ -1602,7 +1672,7 @@ class WidgetController
                 $message,
                 $safeResponse,
                 $allUserInfo,
-                compact('country', 'region', 'location'),
+                compact('country', 'region', 'location', 'city'),
                 null
             );
 
@@ -1611,7 +1681,7 @@ class WidgetController
                 $sessionId,
                 null,
                 $request,
-                compact('country', 'region', 'location'),
+                compact('country', 'region', 'location', 'city'),
                 $sessionMetadata
             );
 
@@ -1642,7 +1712,7 @@ class WidgetController
 
         $pendingFollowUpState = $this->followUpStateService->getPendingState($existingConversation);
 
-        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy, $pendingFollowUpState) {
+        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $city, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy, $pendingFollowUpState) {
             $this->initStreamOutput();
             
             $lastAssistantMessageForEnding = $this->getLastAssistantMessage($organization, $sessionId);
@@ -1669,7 +1739,7 @@ class WidgetController
                     $message,
                     $closingResponse,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     null
                 );
                 
@@ -1739,7 +1809,7 @@ class WidgetController
                     $organization->id,
                     $sessionId,
                     $allUserInfo,
-                    compact('country', 'region', 'location'),
+                    compact('country', 'region', 'location', 'city'),
                     $intentResult,
                     $message,
                     $sessionMetadata
@@ -1761,6 +1831,10 @@ class WidgetController
                         $context .= json_encode($liveData, JSON_PRETTY_PRINT) . "\n";
                         $context .= "[END LIVE DATA]\n\n";
                         if ($isPricingIntent) {
+                            $pricingHints = $this->buildPricingLiveDataHints($liveData);
+                            if ($pricingHints !== '') {
+                                $context .= $pricingHints . "\n\n";
+                            }
                             $pricingContext = $this->buildPricingContext($organization);
                             $context .= "IMPORTANT: Use the LIVE DATA above as primary. Also include PRICING CONTEXT below (credit packages + conversation estimates) if relevant. Format it in a user-friendly way.\n\n";
                             $context .= $this->buildLiveDataValidationRules($liveData);
@@ -1807,6 +1881,11 @@ class WidgetController
                             $context .= "\n";
                         }
                     }
+
+                    $directCatalogContext = $this->buildDirectCatalogMatchContext($organization, (string) $searchQuery);
+                    if ($directCatalogContext !== '') {
+                        $context .= "\n" . $directCatalogContext . "\n";
+                    }
                 }
 
                 if (!empty($resultsForPayloadCache)) {
@@ -1816,7 +1895,7 @@ class WidgetController
                         $sessionId,
                         $payloads,
                         $allUserInfo,
-                        compact('country', 'region', 'location')
+                        compact('country', 'region', 'location', 'city')
                     );
                 }
 
@@ -1841,7 +1920,7 @@ class WidgetController
                             $message,
                             $safeResponse,
                             $allUserInfo,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $intentResult
                         );
 
@@ -1850,7 +1929,7 @@ class WidgetController
                             $sessionId,
                             $intentResult,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
 
@@ -1861,7 +1940,7 @@ class WidgetController
                                 $message,
                                 $safeResponse,
                                 $request,
-                                compact('country', 'region', 'location'),
+                                compact('country', 'region', 'location', 'city'),
                                 $sessionMetadata
                             );
                         }
@@ -1897,7 +1976,7 @@ class WidgetController
                         $message,
                         $safeResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -1906,7 +1985,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -1917,7 +1996,7 @@ class WidgetController
                             $message,
                             $safeResponse,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
                     }
@@ -1947,7 +2026,7 @@ class WidgetController
                         $message,
                         $safeResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -1956,7 +2035,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -1967,7 +2046,7 @@ class WidgetController
                             $message,
                             $safeResponse,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
                     }
@@ -1993,7 +2072,7 @@ class WidgetController
                         $organization,
                         $directResponse,
                         $exactFaqMatch['payload']['follow_up'] ?? null,
-                        $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location'))
+                        $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location', 'city'))
                     );
                     if ($faqFollowUp !== '') {
                         $directResponse = trim($directResponse) . "\n\n" . $faqFollowUp;
@@ -2024,7 +2103,7 @@ class WidgetController
                         $message,
                         $directResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -2033,7 +2112,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -2044,7 +2123,7 @@ class WidgetController
                             $message,
                             $directResponse,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
                     }
@@ -2074,7 +2153,7 @@ class WidgetController
                         $message,
                         $safeResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -2083,7 +2162,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -2094,7 +2173,7 @@ class WidgetController
                             $message,
                             $safeResponse,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
                     }
@@ -2125,7 +2204,7 @@ class WidgetController
                         $message,
                         $shortResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -2134,7 +2213,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -2145,7 +2224,7 @@ class WidgetController
                             $message,
                             $shortResponse,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
                     }
@@ -2175,7 +2254,7 @@ class WidgetController
                         $message,
                         $lowConfidenceResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -2184,7 +2263,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -2195,7 +2274,7 @@ class WidgetController
                             $message,
                             $lowConfidenceResponse,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
                     }
@@ -2231,7 +2310,7 @@ class WidgetController
                         $message,
                         $shortResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -2240,7 +2319,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -2251,7 +2330,7 @@ class WidgetController
                             $message,
                             $shortResponse,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
                     }
@@ -2290,7 +2369,7 @@ class WidgetController
                         $message,
                         $callbackResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -2299,7 +2378,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -2342,15 +2421,36 @@ class WidgetController
                 if ($promotionContext) {
                     $systemPrompt .= "\n" . $promotionContext;
                 }
-                if ($context) {
-                    $systemPrompt .= "\nCURRENT CONTEXT:\n" . $context . "\n";
+                $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                $contextForPrompt = $aiProvider === 'openai'
+                    ? $this->compactContextForOpenAi((string) $context)
+                    : (string) $context;
+
+                if ($contextForPrompt) {
+                    $systemPrompt .= "\nCURRENT CONTEXT:\n" . $contextForPrompt . "\n";
                 }
                 if ($intentResult && isset($intentResult['intent'])) {
                     $systemPrompt .= "\nIntent: " . $intentResult['intent'] . ". Add a short follow-up question and one proactive suggestion if appropriate.";
                 }
 
+                $lowThinkingMode = $this->shouldUseLowThinkingMode(
+                    (string) $message,
+                    $intentResult,
+                    $isAffirmativeContinuation,
+                    (string) $contextForPrompt
+                );
+
+                if ($aiProvider === 'openai' && $lowThinkingMode) {
+                    $systemPrompt .= "\nFAST MODE: Low thinking for support queries. Use context-grounded, direct answering only. Do not over-reason. Prefer short factual output (1-3 concise lines) unless the user explicitly asks for detail.";
+                    Log::info('OpenAI low-thinking mode enabled', [
+                        'org_id' => $organization->id,
+                        'session_id' => $sessionId,
+                        'intent' => $intentResult['intent'] ?? null,
+                        'message_words' => str_word_count((string) $message),
+                    ]);
+                }
+
                 $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $context);
-                $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
                 $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage) || $aiProvider === 'openai';
                 $maxTokens = $contactQuickResponse ? 60 : 220;
                 $affirmativeMaxTokens = (int) ($rulePolicy['affirmative_follow_up_max_tokens'] ?? 140);
@@ -2539,33 +2639,47 @@ class WidgetController
                         ];
                     };
 
-                    $firstAttempt = $streamAttempt(true, $model, 'vast-primary');
-                    $streamBackendAttempts[] = [
-                        'attempt' => 'vast-primary',
-                        'model' => $model,
-                        'successful' => ($firstAttempt['had_output'] && $firstAttempt['had_done'] && !$firstAttempt['had_error'] && $firstAttempt['curl_errno'] === 0),
-                        'had_output' => $firstAttempt['had_output'],
-                        'had_done' => $firstAttempt['had_done'],
-                        'had_error' => $firstAttempt['had_error'],
-                        'curl_errno' => $firstAttempt['curl_errno'],
-                    ];
+                    $fallbackReason = null;
+                    if ($aiProvider === 'openai') {
+                        $fallbackReason = [
+                            'openai_failed_or_empty' => true,
+                            'skip_vast_for_openai_provider' => true,
+                        ];
+                    } else {
+                        $firstAttempt = $streamAttempt(true, $model, 'vast-primary');
+                        $streamBackendAttempts[] = [
+                            'attempt' => 'vast-primary',
+                            'model' => $model,
+                            'successful' => ($firstAttempt['had_output'] && $firstAttempt['had_done'] && !$firstAttempt['had_error'] && $firstAttempt['curl_errno'] === 0),
+                            'had_output' => $firstAttempt['had_output'],
+                            'had_done' => $firstAttempt['had_done'],
+                            'had_error' => $firstAttempt['had_error'],
+                            'curl_errno' => $firstAttempt['curl_errno'],
+                        ];
 
-                    $shouldRetryLocal = (
-                        !$firstAttempt['had_output']
-                        || !$firstAttempt['had_done']
-                        || $firstAttempt['had_error']
-                        || $firstAttempt['curl_errno'] !== 0
-                    );
+                        $shouldRetryLocal = (
+                            !$firstAttempt['had_output']
+                            || !$firstAttempt['had_done']
+                            || $firstAttempt['had_error']
+                            || $firstAttempt['curl_errno'] !== 0
+                        );
 
-                    if ($shouldRetryLocal) {
-                        $fullResponse = '';
-                        Log::warning('Widget stream retrying on local fallback model', [
-                            'reason' => [
+                        if (!$shouldRetryLocal) {
+                            $streamBackendUsed = 'vast_primary';
+                        } else {
+                            $fallbackReason = [
                                 'had_output' => $firstAttempt['had_output'],
                                 'had_done' => $firstAttempt['had_done'],
                                 'had_error' => $firstAttempt['had_error'],
                                 'curl_errno' => $firstAttempt['curl_errno'],
-                            ],
+                            ];
+                        }
+                    }
+
+                    if (!$streamBackendUsed) {
+                        $fullResponse = '';
+                        Log::warning('Widget stream retrying on local fallback model', [
+                            'reason' => $fallbackReason,
                             'fallback_model' => 'llama3.2:3b',
                             'session_id' => $sessionId,
                             'org_id' => $organization->id,
@@ -2591,8 +2705,6 @@ class WidgetController
                         } else {
                             $streamBackendUsed = 'local_fallback_llama3.2:3b';
                         }
-                    } else {
-                        $streamBackendUsed = 'vast_primary';
                     }
 
                     $responseElapsedMs = round((microtime(true) - $responseStartTime) * 1000, 2);
@@ -2651,7 +2763,7 @@ class WidgetController
                             $organization,
                             $finalResponse,
                             null,
-                            $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location'))
+                            $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location', 'city'))
                         );
                         if ($faqFollowUp !== '') {
                             $postfixParts[] = $faqFollowUp;
@@ -2698,7 +2810,7 @@ class WidgetController
                         $message,
                         $finalResponse,
                         $allUserInfo,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
 
@@ -2707,7 +2819,7 @@ class WidgetController
                         $sessionId,
                         $intentResult,
                         $request,
-                        compact('country', 'region', 'location'),
+                        compact('country', 'region', 'location', 'city'),
                         $sessionMetadata
                     );
 
@@ -2718,7 +2830,7 @@ class WidgetController
                             $message,
                             $finalResponse,
                             $request,
-                            compact('country', 'region', 'location'),
+                            compact('country', 'region', 'location', 'city'),
                             $sessionMetadata
                         );
                     }
@@ -3383,8 +3495,15 @@ class WidgetController
 
         foreach ($searchResults['results'] as $result) {
             $payload = $result['payload'] ?? [];
-            $dataType = $payload['data_type'] ?? '';
-            if (!in_array($dataType, ['faq', 'info'], true)) {
+            $dataType = strtolower((string) ($payload['data_type'] ?? ''));
+            $itemId = strtolower((string) ($payload['item_id'] ?? ''));
+            $type = strtolower((string) ($payload['type'] ?? ''));
+
+            $isFaqPayload = $dataType === 'faq'
+                || $type === 'faq'
+                || str_starts_with($itemId, 'faq_');
+
+            if (!$isFaqPayload) {
                 continue;
             }
 
@@ -3427,6 +3546,8 @@ class WidgetController
         $includeHistory = false;
         $historyLimit = 0;
         $isShortFollowUp = $this->isShortFollowUp($message);
+        $messageHasUrl = $this->containsUrl($message);
+        $referencesSharedLink = $this->referencesPreviouslySharedLink($message);
 
         $lastAssistant = $this->getLastAssistantMessage($organization, $sessionId);
         $lastAssistantAskedQuestion = $lastAssistant !== null && $this->responseHasQuestion($lastAssistant);
@@ -3447,6 +3568,11 @@ class WidgetController
             $historyLimit = max($historyLimit, 10);
         }
 
+        if ($messageHasUrl || $referencesSharedLink) {
+            $includeHistory = true;
+            $historyLimit = max($historyLimit, 8);
+        }
+
         if ($includeHistory) {
             $recentMessages = $this->getRecentConversationMessages($organization, $sessionId, $message, $historyLimit);
             if (!empty($recentMessages)) {
@@ -3454,6 +3580,17 @@ class WidgetController
                 foreach ($recentMessages as $rm) {
                     $label = $rm['role'] === 'user' ? 'User' : 'Assistant';
                     $systemPrompt .= $label . ": " . $rm['content'] . "\n";
+                }
+
+                $sharedLinks = $this->extractRecentSharedLinks($recentMessages);
+                if (!empty($sharedLinks)) {
+                    $systemPrompt .= "\nRECENT USER-SHARED LINKS:\n";
+                    foreach ($sharedLinks as $link) {
+                        $systemPrompt .= "- {$link}\n";
+                    }
+                    if ($referencesSharedLink) {
+                        $systemPrompt .= "If the user refers to 'the link' or 'shared link', use the RECENT USER-SHARED LINKS above and do not claim that no link was provided.\n";
+                    }
                 }
             }
         }
@@ -3502,6 +3639,69 @@ class WidgetController
         }
 
         return $messages;
+    }
+
+    private function containsUrl(string $text): bool
+    {
+        return (bool) preg_match('/https?:\/\/[^\s]+/i', $text);
+    }
+
+    private function referencesPreviouslySharedLink(string $text): bool
+    {
+        $normalized = strtolower(trim($text));
+        if ($normalized === '') {
+            return false;
+        }
+
+        if ($this->containsUrl($normalized)) {
+            return false;
+        }
+
+        $hasLinkWord = (bool) preg_match('/\b(link|url)\b/i', $normalized);
+        if (!$hasLinkWord) {
+            return false;
+        }
+
+        $hasReferenceCue = (bool) preg_match('/\b(shared|sent|provided|given|posted|above|earlier|before|previous|same|that)\b/i', $normalized)
+            || (bool) preg_match('/\b(i have|i\'ve|we have|we\'ve)\s+(shared|sent|provided|given)\b/i', $normalized);
+
+        return $hasReferenceCue;
+    }
+
+    private function extractUrlsFromText(string $text): array
+    {
+        if (!preg_match_all('/https?:\/\/[^\s]+/i', $text, $matches)) {
+            return [];
+        }
+
+        $links = [];
+        foreach (($matches[0] ?? []) as $url) {
+            $cleanUrl = rtrim((string) $url, ".,;:!?)]}");
+            if ($cleanUrl !== '') {
+                $links[] = $cleanUrl;
+            }
+        }
+
+        return array_values(array_unique($links));
+    }
+
+    private function extractRecentSharedLinks(array $recentMessages): array
+    {
+        $links = [];
+        foreach ($recentMessages as $message) {
+            if (!is_array($message) || ($message['role'] ?? null) !== 'user') {
+                continue;
+            }
+
+            $content = (string) ($message['content'] ?? '');
+            if ($content === '') {
+                continue;
+            }
+
+            $links = array_merge($links, $this->extractUrlsFromText($content));
+        }
+
+        return array_values(array_unique($links));
     }
 
     private function isPreviousUserAffirmative(Organization $organization, string $sessionId): bool
@@ -3581,6 +3781,40 @@ class WidgetController
     private function shouldUseOpenAiFallback(string $message, Organization $organization, string $responseLanguage): bool
     {
         return false;
+    }
+
+    private function shouldUseLowThinkingMode(string $message, ?array $intentResult, bool $isAffirmativeContinuation, string $context): bool
+    {
+        $text = trim(strtolower($message));
+        $wordCount = str_word_count($text);
+        $hasContext = trim($context) !== '';
+
+        if ($text === '') {
+            return false;
+        }
+
+        if ($isAffirmativeContinuation) {
+            return true;
+        }
+
+        if (preg_match('/^(yes|no|ok|okay|sure|haan|ha|hmm|continue|go ahead|proceed)\b/i', $text)) {
+            return true;
+        }
+
+        $complexSignals = preg_match('/\b(why|how|analyze|analysis|compare|detailed|detail|strategy|architect|design|step by step|explain)\b/i', $text);
+        if ($complexSignals) {
+            return false;
+        }
+
+        $intent = strtolower((string) ($intentResult['intent'] ?? ''));
+        $simpleIntents = ['pricing', 'booking', 'lookup', 'realtime_data', 'static_info', 'follow_up'];
+        $contextGrounded = str_contains($context, '[LIVE DATA') || str_contains($context, 'CURRENT CONTEXT');
+
+        if ($hasContext && $contextGrounded && $wordCount <= 24 && in_array($intent, $simpleIntents, true)) {
+            return true;
+        }
+
+        return $hasContext && $wordCount <= 8;
     }
 
     private function buildPricingContext(Organization $organization): string
@@ -4575,6 +4809,169 @@ class WidgetController
         return "I didn't understand that. Could you please rephrase or share what that number is about?";
     }
 
+    private function buildDirectCatalogMatchContext(Organization $organization, string $query): string
+    {
+        $terms = $this->extractExplicitCatalogTerms($query);
+        if (empty($terms)) {
+            return '';
+        }
+
+        $rows = OrganizationData::query()
+            ->where('organization_id', $organization->id)
+            ->whereIn('type', ['product', 'info', 'service'])
+            ->where(function ($where) use ($terms) {
+                foreach ($terms as $term) {
+                    $like = '%' . $term . '%';
+                    $where->orWhere('name', 'like', $like)
+                        ->orWhere('description', 'like', $like)
+                        ->orWhere('content', 'like', $like);
+                }
+            })
+            ->orderByDesc('updated_at')
+            ->limit(8)
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return '';
+        }
+
+        $normalizedTerms = array_map(fn ($t) => $this->normalizeEntityText((string) $t), $terms);
+
+        $scored = $rows->map(function (OrganizationData $row) use ($normalizedTerms) {
+            $name = trim((string) ($row->name ?? ''));
+            $description = trim((string) ($row->description ?? ''));
+            $content = trim((string) ($row->content ?? ''));
+
+            $nameNormalized = $this->normalizeEntityText($name);
+            $descriptionNormalized = $this->normalizeEntityText($description);
+            $contentNormalized = $this->normalizeEntityText($content);
+
+            $score = 0.0;
+            foreach ($normalizedTerms as $term) {
+                if ($term === '') {
+                    continue;
+                }
+
+                if ($nameNormalized !== '' && $nameNormalized === $term) {
+                    $score += 5.0;
+                } elseif ($nameNormalized !== '' && str_contains($nameNormalized, $term)) {
+                    $score += 3.0;
+                } elseif ($descriptionNormalized !== '' && str_contains($descriptionNormalized, $term)) {
+                    $score += 1.5;
+                } elseif ($contentNormalized !== '' && str_contains($contentNormalized, $term)) {
+                    $score += 1.0;
+                }
+            }
+
+            return ['row' => $row, 'score' => $score];
+        })->filter(fn ($item) => ($item['score'] ?? 0) > 0)
+          ->sortByDesc('score')
+          ->values();
+
+        if ($scored->isEmpty()) {
+            return '';
+        }
+
+        $lines = [
+            '[DIRECT CATALOG MATCHES from synced database]:',
+        ];
+
+        foreach ($scored->take(3) as $item) {
+            /** @var OrganizationData $row */
+            $row = $item['row'];
+            $name = trim((string) ($row->name ?? ''));
+            $description = trim((string) ($row->description ?? ''));
+            $content = trim((string) ($row->content ?? ''));
+            $summary = Str::limit($description !== '' ? $description : $content, 220, '...');
+            $url = $this->extractCatalogUrlFromRow($row);
+
+            $line = '- Title: ' . ($name !== '' ? $name : 'Catalog Item');
+            if ($summary !== '') {
+                $line .= ' | Details: ' . $summary;
+            }
+            if ($url !== '') {
+                $line .= ' | Link: ' . $url;
+            }
+
+            $lines[] = $line;
+        }
+
+        $lines[] = 'Use DIRECT CATALOG MATCHES as authoritative item presence when answering availability/customization questions.';
+
+        Log::info('Direct catalog match context added', [
+            'org_id' => $organization->id,
+            'terms' => $terms,
+            'matches' => $scored->take(3)->map(function ($item) {
+                return $item['row']->name ?? null;
+            })->filter()->values()->all(),
+        ]);
+
+        return implode("\n", $lines);
+    }
+
+    private function extractExplicitCatalogTerms(string $query): array
+    {
+        $terms = [];
+        $trimmed = trim($query);
+        if ($trimmed === '') {
+            return [];
+        }
+
+        if (preg_match_all('/"([^"\n]{2,100})"/', $trimmed, $matches)) {
+            foreach (($matches[1] ?? []) as $value) {
+                $candidate = trim((string) $value);
+                if ($candidate !== '') {
+                    $terms[] = $candidate;
+                }
+            }
+        }
+
+        if (preg_match_all('/https?:\/\/[^\s]+/i', $trimmed, $matches)) {
+            foreach (($matches[0] ?? []) as $rawUrl) {
+                $url = rtrim((string) $rawUrl, ".,;:!?)]}");
+                $path = (string) (parse_url($url, PHP_URL_PATH) ?? '');
+                $slug = trim((string) basename($path), '/');
+                if ($slug !== '') {
+                    $terms[] = trim((string) (preg_replace('/[-_]+/', ' ', $slug) ?? $slug));
+                }
+            }
+        }
+
+        if (preg_match('/\b(?:painting|artwork|product)\s+(?:titled|called|named)?\s*([a-z0-9][a-z0-9\s\-]{2,120})/i', $trimmed, $match)) {
+            $candidate = trim((string) ($match[1] ?? ''), " \t\n\r\0\x0B.,;:!?\"'");
+            if ($candidate !== '') {
+                $terms[] = $candidate;
+            }
+        }
+
+        $deduped = [];
+        foreach ($terms as $term) {
+            $normalized = $this->normalizeEntityText((string) $term);
+            if ($normalized === '' || mb_strlen($normalized) < 3) {
+                continue;
+            }
+            $deduped[$normalized] = trim((string) $term);
+        }
+
+        return array_values($deduped);
+    }
+
+    private function extractCatalogUrlFromRow(OrganizationData $row): string
+    {
+        $metadata = is_array($row->metadata ?? null) ? $row->metadata : [];
+        foreach (['url', 'link', 'product_url', 'website_url'] as $key) {
+            $value = trim((string) ($metadata[$key] ?? ''));
+            if ($value !== '' && preg_match('/^https?:\/\//i', $value)) {
+                return $value;
+            }
+        }
+
+        $combined = trim((string) ($row->description ?? '')) . "\n" . trim((string) ($row->content ?? ''));
+        $urls = $this->extractUrlsFromText($combined);
+
+        return $urls[0] ?? '';
+    }
+
     private function isVeryShortQuery(?string $message): bool
     {
         if (!is_string($message)) {
@@ -5422,7 +5819,7 @@ class WidgetController
     /**
      * Save conversation to database
      */
-    private function saveConversationToDatabase($organization, $sessionId, $userMessage, $aiResponse, $userInfo = [], $locationInfo = [], $intentResult = null)
+    private function saveConversationToDatabase($organization, $sessionId, $userMessage, $aiResponse, $userInfo = [], $locationInfo = [], $intentResult = null, ?array $structuredFollowUpState = null)
     {
         try {
             // Find or create conversation
@@ -5475,7 +5872,8 @@ class WidgetController
                     'organization_name' => $organization->name,
                     'intent' => $intentResult['intent'] ?? null,
                     'intent_confidence' => $intentResult['confidence'] ?? null,
-                    'intent_method' => $intentResult['method'] ?? null
+                    'intent_method' => $intentResult['method'] ?? null,
+                    'one_call_envelope_state' => $structuredFollowUpState,
                 ]
             ]);
 
@@ -5493,7 +5891,8 @@ class WidgetController
             $this->followUpStateService->updatePendingState(
                 $conversation,
                 (string) $aiResponse,
-                is_array($contextPayloads) ? $contextPayloads : []
+                is_array($contextPayloads) ? $contextPayloads : [],
+                is_array($structuredFollowUpState) ? $structuredFollowUpState : null
             );
 
             // Generate conversation title from first message if not set
@@ -5520,11 +5919,216 @@ class WidgetController
         return null;
     }
 
+    private function extractOneCallEnvelope(string $rawResponseText): ?array
+    {
+        $raw = trim($rawResponseText);
+        if ($raw === '') {
+            return null;
+        }
+
+        if (preg_match('/```(?:json)?\s*(\{.*\})\s*```/is', $raw, $m)) {
+            $raw = trim((string) ($m[1] ?? ''));
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            if (preg_match('/\{.*\}/s', $raw, $matches)) {
+                $decoded = json_decode((string) $matches[0], true);
+            }
+        }
+
+        if (!is_array($decoded)) {
+            $pseudo = $this->parsePseudoEnvelope($raw);
+            if (is_array($pseudo)) {
+                return $pseudo;
+            }
+            return null;
+        }
+
+        $response = trim((string) ($decoded['response'] ?? $decoded['answer'] ?? ''));
+        if ($response === '') {
+            return null;
+        }
+
+        $state = [
+            'entity' => trim((string) ($decoded['entity'] ?? '')),
+            'topics_covered' => is_array($decoded['topics_covered'] ?? null) ? $decoded['topics_covered'] : [],
+            'follow_up' => is_array($decoded['follow_up'] ?? null) ? $decoded['follow_up'] : null,
+        ];
+
+        return [
+            'response' => $response,
+            'structured_state' => $state,
+        ];
+    }
+
+    private function retryStrictEnvelopeExtraction(string $rawResponseText, string $userMessage, Organization $organization, int $organizationId, string $aiProvider): ?array
+    {
+        try {
+            $system = 'Convert assistant output into strict JSON only. Return exactly one JSON object with keys: response (string), entity (string), topics_covered (array of strings), follow_up (object|null with keys type and topic array). No markdown, no extra text.';
+            $user = "User message:\n{$userMessage}\n\nAssistant output:\n{$rawResponseText}";
+
+            if ($aiProvider === 'openai') {
+                $model = $this->aiAgentService->getOpenAiModelForOrganization($organizationId);
+                $retry = $this->aiAgentService->openAiChat(
+                    [
+                        ['role' => 'system', 'content' => $system],
+                        ['role' => 'user', 'content' => $user],
+                    ],
+                    $model,
+                    null,
+                    $organizationId
+                );
+            } else {
+                $model = $this->aiAgentService->getLlamaModelForOrganization($organizationId);
+                $retry = $this->aiAgentService->smartLlmChat(
+                    [
+                        ['role' => 'system', 'content' => $system],
+                        ['role' => 'user', 'content' => $user],
+                    ],
+                    $model,
+                    null,
+                    $organizationId,
+                    [
+                        'num_predict' => 140,
+                        'temperature' => 0.0,
+                        'use_vastai' => true,
+                    ]
+                );
+            }
+
+            $retryText = trim((string) ($retry['message']['content'] ?? ''));
+            if ($retryText === '') {
+                return null;
+            }
+
+            return $this->extractOneCallEnvelope($retryText);
+        } catch (\Throwable $e) {
+            Log::warning('One-call envelope strict retry failed', [
+                'org_id' => $organization->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    private function parsePseudoEnvelope(string $raw): ?array
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $raw) ?? $raw);
+        if ($text === '') {
+            return null;
+        }
+
+        if (!preg_match('/\bresponse\s*:/i', $text)) {
+            return null;
+        }
+
+        $response = '';
+        $entity = '';
+        $topicsCovered = [];
+        $followUp = null;
+
+        if (preg_match('/response\s*:\s*(.*?)(?=\bentity\s*:|\btopics_covered\s*:|\bfollow_up\s*:|$)/i', $text, $m)) {
+            $response = trim((string) ($m[1] ?? ''));
+            $response = trim($response, "\"' ");
+        }
+
+        if (preg_match('/entity\s*:\s*(.*?)(?=\btopics_covered\s*:|\bfollow_up\s*:|$)/i', $text, $m)) {
+            $entity = trim((string) ($m[1] ?? ''));
+            $entity = trim($entity, "\"' ");
+        }
+
+        if (preg_match('/topics_covered\s*:\s*(\[[^\]]*\])/i', $text, $m)) {
+            $rawTopics = (string) ($m[1] ?? '[]');
+            $decodedTopics = json_decode($rawTopics, true);
+            if (!is_array($decodedTopics)) {
+                $fallback = trim($rawTopics, '[] ');
+                $decodedTopics = array_filter(array_map('trim', explode(',', $fallback)));
+                $decodedTopics = array_map(function ($item) {
+                    return trim((string) $item, "\"' ");
+                }, $decodedTopics);
+            }
+            $topicsCovered = is_array($decodedTopics) ? array_values($decodedTopics) : [];
+        }
+
+        if (preg_match('/follow_up\s*:\s*(\{.*\}|null)/i', $text, $m)) {
+            $rawFollowUp = trim((string) ($m[1] ?? ''));
+            if (strtolower($rawFollowUp) !== 'null') {
+                $decodedFollowUp = json_decode($rawFollowUp, true);
+                if (is_array($decodedFollowUp)) {
+                    $followUp = $decodedFollowUp;
+                }
+            }
+        }
+
+        if ($response === '') {
+            return null;
+        }
+
+        return [
+            'response' => $response,
+            'structured_state' => [
+                'entity' => $entity,
+                'topics_covered' => is_array($topicsCovered) ? $topicsCovered : [],
+                'follow_up' => is_array($followUp) ? $followUp : null,
+            ],
+        ];
+    }
+
     private function isPricingFollowUp(string $message): bool
     {
         $msg = strtolower($message);
         return (bool) preg_match('/\b(price|pricing|quote|estimate|breakdown|cost|range)\b/', $msg)
             && str_word_count($msg) <= 8;
+    }
+
+    private function buildPricingLiveDataHints($liveData): string
+    {
+        if (!is_array($liveData) || empty($liveData)) {
+            return '';
+        }
+
+        $rows = $this->isListArray($liveData) ? $liveData : [$liveData];
+        $creditRows = [];
+        $subscriptionRows = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $planType = strtolower((string) ($row['plan_type'] ?? ''));
+            if ($planType === 'credit') {
+                $creditRows[] = $row;
+            } elseif ($planType === 'subscription' || $planType === '') {
+                $subscriptionRows[] = $row;
+            }
+        }
+
+        $lines = [];
+        $lines[] = 'PRICING INTERPRETATION HINTS:';
+        $lines[] = '- Treat plan_type="credit" rows as credit-based one-time packs.';
+        $lines[] = '- Treat plan_type="subscription" rows as recurring plans.';
+
+        if (!empty($creditRows)) {
+            $lines[] = '- CREDIT-BASED PLANS ARE AVAILABLE in LIVE DATA. Do not say unavailable.';
+            foreach (array_slice($creditRows, 0, 5) as $row) {
+                $name = (string) ($row['name'] ?? 'Credit Plan');
+                $price = (string) ($row['price'] ?? 'N/A');
+                $currency = (string) ($row['currency'] ?? 'USD');
+                $credits = isset($row['credits']) && $row['credits'] !== null ? number_format((int) $row['credits']) : 'N/A';
+                $lines[] = "  - {$name}: {$currency} {$price}, {$credits} tokens";
+            }
+        } else {
+            $lines[] = '- CREDIT-BASED PLANS are not present in this LIVE DATA set.';
+        }
+
+        if (!empty($subscriptionRows)) {
+            $lines[] = '- Subscription rows are also present; separate them clearly from credit packs.';
+        }
+
+        return implode("\n", $lines);
     }
 
     private function getLastUserMessageForSession(int $organizationId, string $sessionId): ?string
@@ -5907,6 +6511,227 @@ class WidgetController
         return "When CURRENT CONTEXT includes a line starting with 'Supplementary:', include one short, relevant final sentence using that data. Treat supplementary data as optional context, never invent missing values, and only include it when it helps answer the user's query.";
     }
 
+    private function compactContextForOpenAi(string $context): string
+    {
+        $normalized = trim($context);
+        if ($normalized === '') {
+            return '';
+        }
+
+        if (preg_match('/\[LIVE DATA from[^\]]*\]:\s*(.*?)\s*\[END LIVE DATA\]/s', $normalized, $matches)) {
+            $rawLiveData = trim((string) ($matches[1] ?? ''));
+            $decoded = json_decode($rawLiveData, true);
+
+            if (is_array($decoded)) {
+                $summaryPayload = $this->summarizeLiveDataForPrompt($decoded);
+                $summaryJson = json_encode($summaryPayload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+                $replacement = "[LIVE DATA SUMMARY]:\n" . ($summaryJson ?: '{}') . "\n[END LIVE DATA SUMMARY]";
+                $normalized = str_replace($matches[0], $replacement, $normalized);
+            } else {
+                $snippet = mb_substr($rawLiveData, 0, 1800);
+                $replacement = "[LIVE DATA SNIPPET]:\n{$snippet}\n[END LIVE DATA SNIPPET]";
+                $normalized = str_replace($matches[0], $replacement, $normalized);
+            }
+        }
+
+        if (mb_strlen($normalized) > 7000) {
+            $normalized = mb_substr($normalized, 0, 7000) . "\n[Context truncated for token control.]";
+        }
+
+        return $normalized;
+    }
+
+    private function summarizeLiveDataForPrompt(array $liveData): array
+    {
+        if (!$this->isListArray($liveData)) {
+            return $this->sanitizePromptArray($liveData);
+        }
+
+        $items = $this->selectLiveDataItemsForSummary($liveData);
+        $summary = [];
+
+        foreach ($items as $item) {
+            if (is_array($item)) {
+                $summary[] = $this->summarizeLiveDataRow($item);
+            } else {
+                $summary[] = $item;
+            }
+        }
+
+        return [
+            'items_count' => count($liveData),
+            'items_shown' => count($summary),
+            'items' => $summary,
+        ];
+    }
+
+    private function selectLiveDataItemsForSummary(array $liveData): array
+    {
+        if (empty($liveData)) {
+            return [];
+        }
+
+        $isPricingRows = collect($liveData)->every(function ($item) {
+            if (!is_array($item)) {
+                return false;
+            }
+
+            return array_key_exists('plan_type', $item)
+                || array_key_exists('billing_period', $item)
+                || array_key_exists('credits', $item)
+                || array_key_exists('token_cap', $item);
+        });
+
+        if (!$isPricingRows) {
+            return array_slice($liveData, 0, 8);
+        }
+
+        $creditRows = [];
+        $subscriptionRows = [];
+        $otherRows = [];
+
+        foreach ($liveData as $row) {
+            if (!is_array($row)) {
+                $otherRows[] = $row;
+                continue;
+            }
+
+            $planType = strtolower((string) ($row['plan_type'] ?? ''));
+            if ($planType === 'credit') {
+                $creditRows[] = $row;
+            } elseif ($planType === 'subscription' || $planType === '') {
+                $subscriptionRows[] = $row;
+            } else {
+                $otherRows[] = $row;
+            }
+        }
+
+        $sortRows = function (array $rows): array {
+            usort($rows, function ($a, $b) {
+                $aSort = (int) ($a['sort_order'] ?? 9999);
+                $bSort = (int) ($b['sort_order'] ?? 9999);
+                if ($aSort !== $bSort) {
+                    return $aSort <=> $bSort;
+                }
+
+                $aName = strtolower((string) ($a['name'] ?? $a['title'] ?? ''));
+                $bName = strtolower((string) ($b['name'] ?? $b['title'] ?? ''));
+                if ($aName !== $bName) {
+                    return $aName <=> $bName;
+                }
+
+                $aPeriod = strtolower((string) ($a['billing_period'] ?? ''));
+                $bPeriod = strtolower((string) ($b['billing_period'] ?? ''));
+                return $aPeriod <=> $bPeriod;
+            });
+
+            return $rows;
+        };
+
+        $creditRows = $sortRows($creditRows);
+        $subscriptionRows = $sortRows($subscriptionRows);
+
+        $selected = [];
+        if (!empty($creditRows)) {
+            $selected = array_merge($selected, array_slice($creditRows, 0, 8));
+        }
+        if (!empty($subscriptionRows)) {
+            $selected = array_merge($selected, array_slice($subscriptionRows, 0, 8));
+        }
+        if (!empty($otherRows)) {
+            $selected = array_merge($selected, array_slice($otherRows, 0, 4));
+        }
+
+        return array_slice($selected, 0, 16);
+    }
+
+    private function summarizeLiveDataRow(array $row): array
+    {
+        $preferredKeys = [
+            'id', 'name', 'title', 'slug', 'description',
+            'price', 'currency', 'plan_type', 'billing_period', 'token_cap', 'credits', 'tokens',
+            'is_active', 'sort_order'
+        ];
+
+        $picked = [];
+        foreach ($preferredKeys as $key) {
+            if (array_key_exists($key, $row) && $this->isScalarOrNull($row[$key])) {
+                $picked[$key] = $this->sanitizeScalarForPrompt($row[$key]);
+            }
+        }
+
+        if (count($picked) < 8) {
+            foreach ($row as $key => $value) {
+                if (isset($picked[$key])) {
+                    continue;
+                }
+                if (!$this->isScalarOrNull($value)) {
+                    continue;
+                }
+                $picked[$key] = $this->sanitizeScalarForPrompt($value);
+                if (count($picked) >= 8) {
+                    break;
+                }
+            }
+        }
+
+        return $picked;
+    }
+
+    private function sanitizePromptArray(array $data): array
+    {
+        $result = [];
+        $count = 0;
+        foreach ($data as $key => $value) {
+            if ($count >= 25) {
+                break;
+            }
+
+            if (is_array($value)) {
+                $result[$key] = $this->isListArray($value)
+                    ? array_slice(array_map(fn ($item) => is_array($item) ? $this->summarizeLiveDataRow($item) : $this->sanitizeScalarForPrompt($item), $value), 0, 5)
+                    : $this->sanitizePromptArray($value);
+            } else {
+                $result[$key] = $this->sanitizeScalarForPrompt($value);
+            }
+
+            $count++;
+        }
+
+        return $result;
+    }
+
+    private function sanitizeScalarForPrompt($value)
+    {
+        if (is_string($value)) {
+            $clean = trim((string) preg_replace('/\s+/', ' ', $value));
+            if (mb_strlen($clean) > 220) {
+                return mb_substr($clean, 0, 220) . '…';
+            }
+            return $clean;
+        }
+
+        if (is_scalar($value) || $value === null) {
+            return $value;
+        }
+
+        return null;
+    }
+
+    private function isScalarOrNull($value): bool
+    {
+        return is_scalar($value) || $value === null;
+    }
+
+    private function isListArray(array $array): bool
+    {
+        if (function_exists('array_is_list')) {
+            return array_is_list($array);
+        }
+
+        return array_keys($array) === range(0, count($array) - 1);
+    }
+
     private function getWidgetRulePolicy(Organization $organization): array
     {
         $defaults = [
@@ -5967,5 +6792,40 @@ class WidgetController
         }
         
         return false;
+    }
+
+    /**
+     * Server-side IP geolocation proxy — avoids CSP issues when called from widget JS.
+     * Calls ip-api.com from the server using the visitor's real IP.
+     */
+    public function geoip(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $clientIp = $request->ip();
+        // Skip lookup for private/loopback IPs (local dev)
+        if (!$clientIp || filter_var($clientIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+            return response()->json(['city' => '', 'region' => '', 'country' => '']);
+        }
+
+        try {
+            $resp = \Illuminate\Support\Facades\Http::timeout(3)
+                ->get("http://ip-api.com/json/{$clientIp}", [
+                    'fields' => 'status,country,regionName,city',
+                ]);
+
+            if ($resp->successful()) {
+                $data = $resp->json();
+                if (($data['status'] ?? '') === 'success') {
+                    return response()->json([
+                        'city'    => $data['city'] ?? '',
+                        'region'  => $data['regionName'] ?? '',
+                        'country' => $data['country'] ?? '',
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            // Silently fail — widget will use timezone fallback
+        }
+
+        return response()->json(['city' => '', 'region' => '', 'country' => '']);
     }
 }

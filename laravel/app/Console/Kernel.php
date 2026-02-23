@@ -13,6 +13,7 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\ResendUnopenedEmails::class,
         \App\Console\Commands\SendScheduledEmailCampaigns::class,
         \App\Console\Commands\SyncWhatsappTemplates::class,
+        \App\Console\Commands\RunWidgetWebSocketServer::class,
     ];
 
     /**
