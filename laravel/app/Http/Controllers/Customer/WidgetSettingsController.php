@@ -30,6 +30,7 @@ class WidgetSettingsController extends Controller
             'requireContactForGuests' => 'nullable|boolean',
             'widgetAllowedDomains' => 'nullable|string|max:3000',
             'widgetContactFields' => 'nullable|string|max:5000',
+            'queryTranslationMap' => 'nullable|string|max:12000',
         ]);
 
         $settings = $org->settings ?? [];
@@ -107,6 +108,15 @@ class WidgetSettingsController extends Controller
                 }
 
                 $settings['widget_contact_fields'] = array_values($fields);
+            }
+        }
+
+        if (array_key_exists('queryTranslationMap', $data)) {
+            $raw = trim((string) $data['queryTranslationMap']);
+            if ($raw === '') {
+                unset($settings['query_translation_map']);
+            } else {
+                $settings['query_translation_map'] = $raw;
             }
         }
 

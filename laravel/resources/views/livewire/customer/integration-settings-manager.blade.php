@@ -134,6 +134,15 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label for="query_translation_map">Query Translation Map (optional)</label>
+                                    <textarea wire:model.defer="query_translation_map" class="form-control @error('query_translation_map') is-invalid @enderror" id="query_translation_map" rows="5" placeholder="mehr infos = more information&#10;prix = price&#10;servicio = service"></textarea>
+                                    @error('query_translation_map')
+                                        <span class="invalid-feedback">{{ $message }}</span>
+                                    @enderror
+                                    <small class="form-text text-muted">One mapping per line in format <strong>source = target</strong> (or <strong>source =&gt; target</strong>). Add frequent user terms from any language to improve multilingual FAQ matching.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <div class="custom-control custom-switch">
                                         <input type="checkbox" class="custom-control-input" id="verified_only_mode" wire:model="verified_only_mode">
                                         <label class="custom-control-label" for="verified_only_mode">Verified-only answers (use KB/live data only)</label>

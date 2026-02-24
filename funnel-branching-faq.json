@@ -1,0 +1,170 @@
+[
+  {
+    "question": "Will AI reduce my team's workload?",
+    "answer": "<p>AI handles repetitive queries so your team can focus on meaningful customer interactions.</p>",
+    "follow_up_question": "Would saving time on basic queries help your team focus on sales?",
+    "category": "Funnel-Discovery",
+    "keywords": "workload, save time, efficiency, team bandwidth"
+  },
+  {
+    "question": "yes",
+    "answer": "<p>Great 👍 How are customer enquiries currently handled in your business?</p>",
+    "follow_up_question": "Roughly how many enquiries do you receive daily?",
+    "category": "Funnel-Discovery",
+    "keywords": "yes, sure, ok, okay, definitely, go ahead, continue, sounds good"
+  },
+  {
+    "question": "maybe",
+    "answer": "<p>Fair enough 👍 Let’s quickly estimate impact so you can decide confidently.</p>",
+    "follow_up_question": "Approximately how many enquiries do you get per day right now?",
+    "category": "Funnel-Discovery",
+    "keywords": "maybe, not sure, depends, perhaps, could be"
+  },
+  {
+    "question": "no",
+    "answer": "<p>No problem 👍 May I ask what concerns you most about using AI?</p>",
+    "follow_up_question": "Is your main concern cost, accuracy, implementation, or data privacy?",
+    "category": "Funnel-Objection",
+    "keywords": "no, not sure, unsure, not now"
+  },
+  {
+    "question": "manual handling",
+    "answer": "<p>Manual handling is common, but it usually slows first response time as enquiries increase.</p>",
+    "follow_up_question": "Do delayed responses currently affect conversion or follow-up quality?",
+    "category": "Funnel-Discovery",
+    "keywords": "manual, by team, staff handles, office handles, reception"
+  },
+  {
+    "question": "whatsapp handling",
+    "answer": "<p>WhatsApp-first support works, but important queries can get buried during busy hours.</p>",
+    "follow_up_question": "Would instant auto-replies on WhatsApp help reduce missed opportunities?",
+    "category": "Funnel-Discovery",
+    "keywords": "whatsapp, wa, chat inbox, messages, dm"
+  },
+  {
+    "question": "phone call handling",
+    "answer": "<p>Phone-heavy support often creates wait time and missed calls during peak periods.</p>",
+    "follow_up_question": "Would it help if routine pre-sales queries were handled instantly before calls?",
+    "category": "Funnel-Discovery",
+    "keywords": "phone, calls, call center, missed calls"
+  },
+  {
+    "question": "email handling",
+    "answer": "<p>Email works for detailed cases, but response lag can reduce lead intent.</p>",
+    "follow_up_question": "Would faster first responses improve your enquiry-to-conversion ratio?",
+    "category": "Funnel-Discovery",
+    "keywords": "email, mailbox, inbox, support mail"
+  },
+  {
+    "question": "many enquiries",
+    "answer": "<p>Handling many queries manually can slow response time and increase drop-offs.</p>",
+    "follow_up_question": "If these were answered instantly, do you think customer experience would improve?",
+    "category": "Funnel-Qualification",
+    "keywords": "many, lot, high, frequent, heavy, daily"
+  },
+  {
+    "question": "few enquiries",
+    "answer": "<p>Even with fewer enquiries, quick responses can improve trust and capture high-intent leads.</p>",
+    "follow_up_question": "Would faster replies still be valuable for your team?",
+    "category": "Funnel-Qualification",
+    "keywords": "few, low, small, limited"
+  },
+  {
+    "question": "20 to 50 enquiries",
+    "answer": "<p>At that range, an AI assistant can remove a large chunk of repetitive effort every day.</p>",
+    "follow_up_question": "Would you like to see an example setup for this enquiry volume?",
+    "category": "Funnel-Qualification",
+    "keywords": "20, 30, 40, 50, medium volume"
+  },
+  {
+    "question": "more than 50 enquiries",
+    "answer": "<p>At 50+ daily enquiries, instant triage and auto-responses usually create strong ROI quickly.</p>",
+    "follow_up_question": "Would you like a quick estimate of potential time savings?",
+    "category": "Funnel-Qualification",
+    "keywords": "50+, 100, high volume, large volume, very high"
+  },
+  {
+    "question": "response delay issue",
+    "answer": "<p>That’s a key signal that automation can help — speed directly impacts conversion.</p>",
+    "follow_up_question": "Would reducing response time to near-instant improve your outcomes?",
+    "category": "Funnel-Qualification",
+    "keywords": "delay, slow response, late reply, waiting time"
+  },
+  {
+    "question": "missed leads issue",
+    "answer": "<p>Missed enquiries often mean hidden revenue leakage.</p>",
+    "follow_up_question": "Would 24x7 first response help you capture more of those leads?",
+    "category": "Funnel-Qualification",
+    "keywords": "missed leads, dropped leads, lost leads, no response"
+  },
+  {
+    "question": "after hours issue",
+    "answer": "<p>After-hours gaps are one of the easiest wins for AI chat automation.</p>",
+    "follow_up_question": "Would you like AI to handle enquiries even when your team is offline?",
+    "category": "Funnel-Qualification",
+    "keywords": "after hours, weekend, night, outside working hours"
+  },
+  {
+    "question": "cost concern",
+    "answer": "<p>Totally valid. Most teams compare this against one support hire and usually find AI more cost-efficient for repetitive queries.</p>",
+    "follow_up_question": "Would you like a rough monthly cost comparison based on your enquiry volume?",
+    "category": "Funnel-Objection",
+    "keywords": "cost, pricing, budget, expensive, price"
+  },
+  {
+    "question": "accuracy concern",
+    "answer": "<p>Great question. Accuracy improves with your business-specific FAQs, and uncertain cases can be routed to humans.</p>",
+    "follow_up_question": "Would you prefer a human handoff whenever confidence is low?",
+    "category": "Funnel-Objection",
+    "keywords": "accuracy, wrong answer, mistakes, hallucination, reliability"
+  },
+  {
+    "question": "implementation concern",
+    "answer": "<p>Implementation is usually lightweight — we start with your existing FAQs and refine from real conversations.</p>",
+    "follow_up_question": "Do you already have FAQ or service content ready for onboarding?",
+    "category": "Funnel-Objection",
+    "keywords": "implementation, setup, technical, integration, difficult"
+  },
+  {
+    "question": "data privacy concern",
+    "answer": "<p>Data safety is important. Responses are controlled by your approved business knowledge, and scope can be restricted.</p>",
+    "follow_up_question": "Would you like us to configure strict answer boundaries by topic?",
+    "category": "Funnel-Objection",
+    "keywords": "privacy, security, data, confidential, compliance"
+  },
+  {
+    "question": "yes it will",
+    "answer": "<p>Perfect 👍 That indicates automation can create immediate value for your team.</p>",
+    "follow_up_question": "Would you like to see how AI handles this in a real business scenario?",
+    "category": "Funnel-Conversion",
+    "keywords": "yes, will help, agree, absolutely"
+  },
+  {
+    "question": "show demo",
+    "answer": "<p>You can explore a live example here: https://ai-chat.support/demo</p>",
+    "follow_up_question": "Would you like help setting this up for your business?",
+    "category": "Funnel-Conversion",
+    "keywords": "demo, show, example, preview, live demo"
+  },
+  {
+    "question": "not now",
+    "answer": "<p>No worries 👍 I can share a short summary and you can review it later.</p>",
+    "follow_up_question": "Should I send key points on ROI, setup, and pricing in one message?",
+    "category": "Funnel-Conversion",
+    "keywords": "not now, later, maybe later, sometime"
+  },
+  {
+    "question": "send details",
+    "answer": "<p>Sure — here’s the quick summary: faster response, reduced repetitive workload, better lead capture, and measurable conversion uplift.</p>",
+    "follow_up_question": "Would you like to schedule a guided walkthrough next?",
+    "category": "Funnel-Conversion",
+    "keywords": "send details, share details, summary, info"
+  },
+  {
+    "question": "talk to expert",
+    "answer": "<p>Absolutely. A specialist can help map the best setup for your workflow and enquiry volume.</p>",
+    "follow_up_question": "Would you like to connect via call or WhatsApp?",
+    "category": "Funnel-Conversion",
+    "keywords": "expert, consultant, specialist, human help"
+  }
+]

@@ -1,0 +1,142 @@
+[
+  {
+    "question": "Why should I use AI Chat for my business?",
+    "answer": "<p>AI Chat handles repetitive customer queries instantly, works 24x7, captures leads automatically, and improves response consistency without increasing manpower.</p>",
+    "follow_up_question": "Do you currently receive many repetitive customer queries?",
+    "category": "Value",
+    "keywords": "benefits, why ai, automation"
+  },
+  {
+    "question": "What extra benefit do I get over normal live chat?",
+    "answer": "<p>Unlike live chat, AI responds instantly even when your team is offline and can handle multiple enquiries simultaneously without delay.</p>",
+    "follow_up_question": "Do you miss enquiries outside working hours?",
+    "category": "Value",
+    "keywords": "live chat, advantage, automation"
+  },
+  {
+    "question": "Will AI replace my staff?",
+    "answer": "<p>No. AI reduces repetitive workload so your team can focus on meaningful conversations and closing deals.</p>",
+    "follow_up_question": "Would saving time on basic queries help your team focus on sales?",
+    "category": "Concerns",
+    "keywords": "replace staff, automation fear"
+  },
+  {
+    "question": "How does AI compare with human agents?",
+    "answer": "<p>AI responds instantly, never forgets information, and stays consistent. Humans can then focus on complex and high-value interactions.</p>",
+    "follow_up_question": "Would consistency in responses improve customer trust?",
+    "category": "Comparison",
+    "keywords": "human vs ai, comparison"
+  },
+  {
+    "question": "What will be my monthly cost?",
+    "answer": "<p>Most businesses find AI Chat costs significantly less than hiring even one support staff while handling far more enquiries.</p>",
+    "follow_up_question": "Roughly how many enquiries do you receive daily?",
+    "category": "Pricing",
+    "keywords": "cost, pricing, monthly"
+  },
+  {
+    "question": "Is it really economical?",
+    "answer": "<p>Many businesses recover cost simply by capturing missed leads and reducing manual follow-ups.</p>",
+    "follow_up_question": "Do delayed responses currently affect your conversions?",
+    "category": "ROI",
+    "keywords": "roi, savings"
+  },
+  {
+    "question": "What if AI gives wrong answers?",
+    "answer": "<p>AI continuously improves. When new questions arise, its knowledge base can be updated, making it increasingly accurate over time.</p>",
+    "follow_up_question": "Would you like AI to transfer uncertain queries to a human?",
+    "category": "Trust",
+    "keywords": "accuracy, wrong answer"
+  },
+  {
+    "question": "Can it be customized for my business?",
+    "answer": "<p>Yes. AI is trained on your business data and responds in your preferred tone and style.</p>",
+    "follow_up_question": "Would you like it to sound formal or friendly?",
+    "category": "Customization",
+    "keywords": "custom, branding"
+  },
+  {
+    "question": "Is this like ChatGPT?",
+    "answer": "<p>No. ChatGPT is general-purpose. This AI is trained specifically for your business and acts like your digital assistant.</p>",
+    "follow_up_question": "Would you prefer AI trained for your specific services?",
+    "category": "Positioning",
+    "keywords": "difference, chatgpt"
+  },
+  {
+    "question": "Can AI help generate leads?",
+    "answer": "<p>Yes. AI can collect customer details, understand requirements, and qualify prospects automatically.</p>",
+    "follow_up_question": "Would qualifying serious buyers help your sales process?",
+    "category": "Sales",
+    "keywords": "lead generation"
+  },
+  {
+    "question": "Is setup complicated?",
+    "answer": "<p>No coding required. AI can be trained using your FAQs, website content, or documents.</p>",
+    "follow_up_question": "Do you already have FAQs or product details available?",
+    "category": "Setup",
+    "keywords": "implementation"
+  },
+  {
+    "question": "Can I control what AI says?",
+    "answer": "<p>Yes. You define what it knows, how it responds, and when it escalates to humans.</p>",
+    "follow_up_question": "Would you prefer AI to avoid answering outside your scope?",
+    "category": "Control",
+    "keywords": "control, moderation"
+  },
+  {
+    "question": "Will it work for my industry?",
+    "answer": "<p>AI works best where customers ask questions before deciding, such as services, retail, healthcare, education, and more.</p>",
+    "follow_up_question": "Do your customers usually ask questions before purchasing?",
+    "category": "Fit",
+    "keywords": "industry"
+  },
+  {
+    "question": "Can it increase sales?",
+    "answer": "<p>Faster responses and 24x7 availability typically improve enquiry-to-sale conversion.</p>",
+    "follow_up_question": "Would instant responses improve your customer experience?",
+    "category": "Outcome",
+    "keywords": "sales growth"
+  },
+  {
+    "question": "What if it doesn't work for me?",
+    "answer": "<p>You can start small and refine based on real customer interactions.</p>",
+    "follow_up_question": "Would you like to test it for a specific use case first?",
+    "category": "Risk",
+    "keywords": "trial"
+  },
+  {
+    "question": "Is my data safe?",
+    "answer": "<p>Your AI uses only your defined business knowledge and does not expose internal data publicly.</p>",
+    "follow_up_question": "Do you handle sensitive customer interactions?",
+    "category": "Security",
+    "keywords": "privacy"
+  },
+  {
+    "question": "Will it reduce my team's workload?",
+    "answer": "<p>Yes. AI handles first-level queries so your team focuses only on meaningful conversations.</p>",
+    "follow_up_question": "Would reducing repetitive queries benefit your operations?",
+    "category": "Efficiency",
+    "keywords": "productivity"
+  },
+  {
+    "question": "Will this improve my brand image?",
+    "answer": "<p>Instant and consistent responses create a more professional customer experience.</p>",
+    "follow_up_question": "Would you like your business to respond instantly even after hours?",
+    "category": "Brand",
+    "keywords": "professional"
+  },
+  {
+    "question": "Does AI work 24x7?",
+    "answer": "<p>Yes, it responds to enquiries even when your team is unavailable.</p>",
+    "follow_up_question": "Do you receive enquiries outside working hours?",
+    "category": "Availability",
+    "keywords": "24x7"
+  },
+  {
+    "question": "Would you like to see a demo?",
+    "answer": "<p>You can explore a live example here: https://ai-chat.support/demo</p>",
+    "follow_up_question": "Would you like assistance setting it up for your business?",
+    "category": "Sales",
+    "keywords": "demo"
+  }
+]

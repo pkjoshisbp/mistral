@@ -1,0 +1,338 @@
+I think we lack some continuity in your provided json example
+Ai ask follow up quesiton
+Would saving time on basic queries help your team focus on sales?
+and visitor says - yes
+what will AI do next?
+
+Excellent observation ✅
+Right now your FAQs are Q → A → Follow-up, but conversion needs:
+
+👉 Q → A → Follow-up → Branch → Next Step
+
+Otherwise the AI hits a dead-end after user says Yes.
+
+You need continuity logic.
+
+What should happen when visitor says “YES”?
+
+Example flow:
+
+AI asks:
+
+Would saving time on basic queries help your team focus on sales?
+
+Visitor:
+
+Yes
+
+Now AI should not stop.
+It should progress conversation toward discovery → qualification → demo
+
+Correct Continuity Flow
+Step 1 — Confirm Pain
+
+AI:
+
+That makes sense 👍
+May I ask how your team currently handles customer enquiries?
+
+Now user starts describing reality.
+
+Step 2 — Identify Volume
+
+Next AI move:
+
+Roughly how many customer queries do you receive daily?
+
+Now you unlock:
+
+✔ ROI
+✔ Need
+✔ Urgency
+
+Step 3 — Introduce Outcome
+
+Then AI:
+
+If those queries were handled instantly, do you think it could improve response speed?
+
+User says Yes → they are self-convincing.
+
+Step 4 — Move to Demo
+
+Now AI transitions:
+
+Would you like to see how this works in a real business scenario?
+
+→ Send demo link
+
+So you need this chain
+
+Instead of:
+
+Q → A → Follow-up ❌
+
+You need:
+
+Q → A → Follow-up → YES path → Next Q → YES path → Next Q → Demo CTA ✅
+
+Example Continuity Chain
+
+Let’s build one:
+
+FAQ Entry 1
+
+Question:
+Will AI reduce my team's workload?
+
+Answer:
+AI handles repetitive queries so your team focuses on meaningful conversations.
+
+Follow-up:
+Would saving time on basic queries help your team focus on sales?
+
+When user says YES → AI should respond:
+
+👉 Next Step:
+
+Great 👍
+How are customer enquiries currently handled in your business?
+
+If user answers → Next AI:
+
+Roughly how many enquiries do you receive daily?
+
+If user answers → Next AI:
+
+If these were answered instantly, do you think it would improve customer experience?
+
+If YES → AI:
+
+Would you like to see how AI handles this in real-time?
+
+Send Demo
+This is called:
+
+👉 Progressive Qualification Flow
+
+Not static FAQ.
+
+You can implement this using
+
+Instead of 1 FAQ
+Create Follow-up Trigger FAQs
+
+Example:
+
+FAQ 1
+
+Question: Would saving time on basic queries help your team focus on sales?
+Expected Intent: Yes
+
+Next FAQ Trigger:
+
+FAQ 2
+
+Question: Yes
+Answer:
+
+Great 👍 How are customer enquiries currently handled in your business?
+
+Follow-up:
+Roughly how many enquiries do you receive daily?
+
+FAQ 3
+
+Question: 10-50 enquiries per day / Many / Few
+(Use keyword match)
+
+Answer:
+
+Instant responses could significantly improve efficiency.
+
+Follow-up:
+Would you like to see how AI manages such enquiries?
+
+FAQ 4
+
+Question: Yes
+Answer:
+
+You can explore a live demo here: https://ai-chat.support/demo
+
+This converts FAQ into guided sales.
+What you are building is NOT FAQ
+
+You are building:
+
+👉 Conversational Funnel
+
+If you want, I can generate:
+
+✔ Continuity-enabled JSON
+✔ With YES/NO branching
+✔ Demo-driven flow
+
+Ready to import.
+
+Just say: Generate funnel JSON 🚀
+
+yes please and do I need to have a separate module to handle this?
+not possible with the current faq setup?
+
+Short answer:
+
+👉 You do NOT need a separate module
+👉 You CAN do this with your current FAQ system
+…but only if you structure FAQs like a conversation tree, not standalone answers.
+
+Right now your FAQ system is:
+
+Static Q → A → Follow-up
+
+What we need is:
+
+Q → A → Follow-up → Intent Match → Next FAQ
+
+This is achievable using:
+
+follow_up_question
+
+keywords
+
+short intent-based entries like:
+
+yes
+
+sure
+
+okay
+
+sounds good
+
+So your AI naturally flows forward.
+
+How continuity works using current FAQ
+
+After AI asks:
+
+Would saving time on basic queries help your team focus on sales?
+
+User says:
+
+Yes
+
+AI should match this with an FAQ:
+
+Question:
+Yes
+
+Keywords:
+yes, sure, okay, sounds good, definitely
+
+Then respond with next stage.
+
+This way you create decision branching without new module.
+
+Funnel Flow JSON (Continuity Enabled)
+
+You can import this 👇
+
+[
+  {
+    "question": "Will AI reduce my team's workload?",
+    "answer": "<p>AI handles repetitive queries so your team can focus on meaningful customer interactions.</p>",
+    "follow_up_question": "Would saving time on basic queries help your team focus on sales?",
+    "category": "Funnel",
+    "keywords": "workload, save time, efficiency"
+  },
+  {
+    "question": "yes",
+    "answer": "<p>Great 👍 How are customer enquiries currently handled in your business?</p>",
+    "follow_up_question": "Roughly how many enquiries do you receive daily?",
+    "category": "Funnel",
+    "keywords": "yes, sure, ok, okay, definitely"
+  },
+  {
+    "question": "many enquiries",
+    "answer": "<p>Handling many queries manually can slow response time.</p>",
+    "follow_up_question": "If these were answered instantly, do you think it would improve customer experience?",
+    "category": "Funnel",
+    "keywords": "many, lot, high, frequent, daily"
+  },
+  {
+    "question": "few enquiries",
+    "answer": "<p>Even a few missed enquiries can impact conversions.</p>",
+    "follow_up_question": "Would responding instantly help capture more leads?",
+    "category": "Funnel",
+    "keywords": "few, low, small"
+  },
+  {
+    "question": "yes it will",
+    "answer": "<p>Instant responses often improve trust and engagement.</p>",
+    "follow_up_question": "Would you like to see how AI handles this in real-time?",
+    "category": "Funnel",
+    "keywords": "yes, will help, agree"
+  },
+  {
+    "question": "show demo",
+    "answer": "<p>You can explore a live example here: https://ai-chat.support/demo</p>",
+    "follow_up_question": "Would you like help setting this up for your business?",
+    "category": "Funnel",
+    "keywords": "demo, show, example"
+  },
+  {
+    "question": "no",
+    "answer": "<p>No problem 👍 May I ask what concerns you the most about using AI?</p>",
+    "follow_up_question": "Is it cost, accuracy, or implementation?",
+    "category": "Funnel",
+    "keywords": "no, not sure, unsure"
+  }
+]
+Why this works
+
+You are turning:
+
+FAQ system ➜ into ➜ Conversation Engine
+
+Using:
+
+✔ Follow-ups
+✔ Keyword intent
+✔ Micro questions
+
+When DO you need separate module?
+
+Only if you want:
+
+Multi-path scoring
+
+Lead qualification scoring
+
+Dynamic logic
+
+CRM syncing
+
+Smart stage tracking
+
+But for now → your system is enough ✅
+
+One Small Recommendation
+
+Add 1 extra FAQ like:
+
+Question:
+Tell me more
+
+Keywords:
+more, explain, how, details
+
+Answer:
+
+AI can be customized for your business and trained using your existing FAQs or website content.
+
+Follow-up:
+
+Would you like to explore how it works for your industry?
+
+This prevents conversation dead-ends.

@@ -29,6 +29,8 @@ class FaqsManager extends Component
     public $keywords = '';
     public $uploadFile; // JSON upload
     public $importing = false;
+    public $branchPreviewInput = '';
+    public $branchPreviewResult = null;
 
     protected $rules = [
         'selectedOrganization' => 'required|exists:organizations,id',
@@ -113,6 +115,11 @@ class FaqsManager extends Component
         return $q->get();
     }
 
+    public function updatedSelectedOrganization()
+    {
+        $this->branchPreviewResult = null;
+    }
+
     public function resetForm()
     {
         $this->editingId = null;
@@ -121,6 +128,208 @@ class FaqsManager extends Component
         $this->sort_order = 0;
         $this->is_starter_prompt = false;
         $this->starter_sort_order = 0;
+    }
+
+    public function previewFunnelBranch()
+    {
+        $this->branchPreviewResult = null;
+
+        if (!$this->selectedOrganization) {
+            session()->flash('error', 'Please select an organization first.');
+            return;
+        }
+
+        $cleanMessage = trim(mb_strtolower(strip_tags((string) $this->branchPreviewInput)));
+        if ($cleanMessage === '') {
+            session()->flash('error', 'Please enter a sample user message for preview.');
+            return;
+        }
+
+        if (!$this->isShortFollowUp($cleanMessage) && !$this->isOneOrTwoWordReply($cleanMessage)) {
+            $this->branchPreviewResult = [
+                'matched' => false,
+                'reason' => 'Input is too long for short follow-up branch matching.',
+                'input' => $this->branchPreviewInput,
+            ];
+            return;
+        }
+
+        $branchType = null;
+        if ($this->isAffirmativeFollowUp($cleanMessage)) {
+            $branchType = 'affirmative';
+        } elseif ($this->isNegativeFollowUp($cleanMessage)) {
+            $branchType = 'negative';
+        }
+
+        $affirmativeTriggers = ['yes', 'yeah', 'yup', 'yep', 'sure', 'okay', 'ok', 'definitely', 'go ahead', 'continue'];
+        $negativeTriggers = ['no', 'nope', 'nah', 'not now', 'dont', "don't", 'do not', 'not really', 'no thanks', 'no thank you'];
+        $triggers = $branchType === 'affirmative'
+            ? $affirmativeTriggers
+            : ($branchType === 'negative' ? $negativeTriggers : []);
+
+        $neutralTriggerTerms = [];
+        if ($branchType === null) {
+            if (str_word_count($cleanMessage) > 4) {
+                $this->branchPreviewResult = [
+                    'matched' => false,
+                    'reason' => 'Neutral branch preview supports up to 4 words.',
+                    'input' => $this->branchPreviewInput,
+                ];
+                return;
+            }
+
+            $normalized = preg_replace('/[^a-z0-9\s]/', ' ', $cleanMessage);
+            $neutralTriggerTerms = array_values(array_filter(array_unique(array_map(
+                static fn ($part) => trim((string) $part),
+                preg_split('/\s+/', (string) $normalized) ?: []
+            )), static fn ($part) => $part !== '' && mb_strlen($part) >= 2));
+
+            if (empty($neutralTriggerTerms)) {
+                $this->branchPreviewResult = [
+                    'matched' => false,
+                    'reason' => 'No usable terms found in input.',
+                    'input' => $this->branchPreviewInput,
+                ];
+                return;
+            }
+        }
+
+        $candidateFaqs = OrganizationFaq::query()
+            ->where('organization_id', $this->selectedOrganization)
+            ->where('is_active', true)
+            ->get(['id', 'question', 'answer', 'follow_up', 'keywords', 'category', 'updated_at']);
+
+        $best = null;
+        foreach ($candidateFaqs as $faq) {
+            $questionNorm = trim(mb_strtolower((string) $faq->question));
+            $keywordsNorm = trim(mb_strtolower((string) ($faq->keywords ?? '')));
+            $categoryNorm = trim(mb_strtolower((string) ($faq->category ?? '')));
+            $isFunnelCategory = str_starts_with($categoryNorm, 'funnel');
+            $score = 0.0;
+
+            if ($branchType !== null) {
+                if (in_array($questionNorm, $triggers, true)) {
+                    $score += 1.35;
+                }
+
+                foreach ($triggers as $trigger) {
+                    if ($keywordsNorm !== '' && str_contains($keywordsNorm, $trigger)) {
+                        $score += 0.9;
+                        break;
+                    }
+                }
+
+                if ($branchType === 'affirmative' && preg_match('/\b(yes|yeah|yup|yep|sure|okay|ok|definitely)\b/i', $questionNorm)) {
+                    $score += 0.8;
+                }
+
+                if ($branchType === 'negative' && preg_match('/\b(no|nope|nah|not now|not really|no thanks|no thank you)\b/i', $questionNorm)) {
+                    $score += 0.8;
+                }
+            } else {
+                if (!$isFunnelCategory) {
+                    continue;
+                }
+
+                foreach ($neutralTriggerTerms as $term) {
+                    if ($questionNorm === $term) {
+                        $score += 1.15;
+                    }
+
+                    if (preg_match('/\b' . preg_quote($term, '/') . '\b/i', $questionNorm)) {
+                        $score += 0.55;
+                    }
+
+                    if ($keywordsNorm !== '' && preg_match('/\b' . preg_quote($term, '/') . '\b/i', $keywordsNorm)) {
+                        $score += 0.95;
+                    }
+                }
+            }
+
+            if ($isFunnelCategory) {
+                $score += 0.35;
+            }
+
+            if (trim((string) ($faq->follow_up ?? '')) !== '') {
+                $score += 0.1;
+            }
+
+            if ($score <= 0) {
+                continue;
+            }
+
+            if (
+                $best === null
+                || $score > $best['score']
+                || ($score === $best['score'] && (string) $faq->updated_at > (string) ($best['updated_at'] ?? ''))
+            ) {
+                $best = [
+                    'id' => $faq->id,
+                    'score' => $score,
+                    'updated_at' => (string) $faq->updated_at,
+                    'question' => $faq->question,
+                    'answer' => trim(strip_tags((string) $faq->answer)),
+                    'follow_up' => (string) ($faq->follow_up ?? ''),
+                    'category' => $faq->category,
+                    'keywords' => $faq->keywords,
+                ];
+            }
+        }
+
+        $minimumScore = $branchType === null ? 0.8 : 0.9;
+        if (!$best || ($best['score'] ?? 0) < $minimumScore) {
+            $this->branchPreviewResult = [
+                'matched' => false,
+                'reason' => 'No branch FAQ crossed the minimum confidence threshold.',
+                'input' => $this->branchPreviewInput,
+                'branch_type' => $branchType,
+            ];
+            return;
+        }
+
+        unset($best['updated_at']);
+        $this->branchPreviewResult = [
+            'matched' => true,
+            'input' => $this->branchPreviewInput,
+            'branch_type' => $branchType,
+            'match' => $best,
+        ];
+    }
+
+    private function isShortFollowUp(string $message): bool
+    {
+        $trimmed = trim($message);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        if (mb_strlen($trimmed) > 80) {
+            return false;
+        }
+
+        return str_word_count($trimmed) <= 7;
+    }
+
+    private function isOneOrTwoWordReply(string $message): bool
+    {
+        $trimmed = trim($message);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        $words = preg_split('/\s+/', $trimmed) ?: [];
+        $wordCount = count(array_filter($words, fn ($w) => $w !== ''));
+        return $wordCount > 0 && $wordCount <= 2;
+    }
+
+    private function isAffirmativeFollowUp(string $text): bool
+    {
+        return preg_match('/\b(yes|yeah|yup|yep|sure|okay|ok|definitely|go ahead|continue)\b/i', $text) === 1;
+    }
+
+    private function isNegativeFollowUp(string $text): bool
+    {
+        return preg_match('/\b(no|nope|nah|not now|dont|do not|not really|no thanks|no thank you|stop|skip)\b/i', $text) === 1;
     }
 
     public function create()

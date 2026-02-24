@@ -862,7 +862,86 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization);
+            $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
+            if ($branchFaqMatch && !$hasShopifyData) {
+                Log::info('Widget funnel branch FAQ match response', [
+                    'org_id' => $organization->id,
+                    'session_id' => $sessionId,
+                    'faq_id' => $branchFaqMatch['payload']['item_id'] ?? null,
+                    'title' => $branchFaqMatch['payload']['title'] ?? null,
+                ]);
+
+                $branchResponse = $branchFaqMatch['response'];
+                $branchFollowUp = $this->faqFollowUpService->getFollowUpText(
+                    $organization,
+                    $branchResponse,
+                    $branchFaqMatch['payload']['follow_up'] ?? null,
+                    $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location', 'city'))
+                );
+                if ($branchFollowUp !== '' && !$this->responseHasQuestion($branchResponse)) {
+                    $branchResponse = trim($branchResponse) . "\n\n" . $branchFollowUp;
+                }
+
+                $tokenMessages = [
+                    ['role' => 'user', 'content' => $message],
+                ];
+                $this->aiAgentService->logWidgetTokenUsage(
+                    $organization->id,
+                    $tokenMessages,
+                    $branchResponse,
+                    'faq_direct'
+                );
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $branchResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location', 'city'),
+                    $sessionMetadata
+                );
+
+                if ($this->isUnansweredResponse($branchResponse)) {
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $branchResponse,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+                }
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $branchResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                return response()->json([
+                    'response' => $branchResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization, (string) $message);
             if ($exactFaqMatch && !$hasShopifyData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                 Log::info('Widget exact FAQ match response', [
                     'org_id' => $organization->id,
@@ -870,45 +949,49 @@ class WidgetController
                     'score' => $exactFaqMatch['score'] ?? null,
                     'title' => $exactFaqMatch['payload']['title'] ?? null,
                     'item_id' => $exactFaqMatch['payload']['item_id'] ?? null,
+                    'source' => $exactFaqMatch['match_source'] ?? 'semantic',
                 ]);
 
                 $directResponse = $exactFaqMatch['response'];
                 $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
                 $paraphrasedResponse = null;
+                $skipParaphrase = (($exactFaqMatch['match_source'] ?? '') === 'keyword_fallback');
 
-                try {
-                    $paraphrasePrompt = "You are {$assistantName} for {$organization->name}. "
-                        . "Tone: {$responseTone}. Language: {$responseLanguage}. "
-                        . "Rewrite the following FAQ answer in 1-2 concise sentences. "
-                        . "Use first-person plural (we/our). Do not add new information. "
-                        . "If the answer includes contact details, keep them. "
-                        . "Answer only with the rewritten response.\n\n"
-                        . "FAQ Answer: \"{$directResponse}\"";
+                if (!$skipParaphrase) {
+                    try {
+                        $paraphrasePrompt = "You are {$assistantName} for {$organization->name}. "
+                            . "Tone: {$responseTone}. Language: {$responseLanguage}. "
+                            . "Rewrite the following FAQ answer in 1-2 concise sentences. "
+                            . "Use first-person plural (we/our). Do not add new information. "
+                            . "If the answer includes contact details, keep them. "
+                            . "Answer only with the rewritten response.\n\n"
+                            . "FAQ Answer: \"{$directResponse}\"";
 
-                    $paraphraseMessages = [
-                        ['role' => 'system', 'content' => $paraphrasePrompt],
-                        ['role' => 'user', 'content' => $message]
-                    ];
+                        $paraphraseMessages = [
+                            ['role' => 'system', 'content' => $paraphrasePrompt],
+                            ['role' => 'user', 'content' => $message]
+                        ];
 
-                    $paraphraseOptions = ['num_predict' => 120, 'temperature' => 0.4];
-                    $paraphraseModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
-                    $paraphraseResponse = $this->aiAgentService->llmChat(
-                        $paraphraseMessages,
-                        $paraphraseModel,
-                        null,
-                        $organization->id,
-                        $paraphraseOptions
-                    );
+                        $paraphraseOptions = ['num_predict' => 120, 'temperature' => 0.4];
+                        $paraphraseModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                        $paraphraseResponse = $this->aiAgentService->llmChat(
+                            $paraphraseMessages,
+                            $paraphraseModel,
+                            null,
+                            $organization->id,
+                            $paraphraseOptions
+                        );
 
-                    if ($paraphraseResponse && isset($paraphraseResponse['message']['content'])) {
-                        $paraphrasedResponse = trim($paraphraseResponse['message']['content']);
+                        if ($paraphraseResponse && isset($paraphraseResponse['message']['content'])) {
+                            $paraphrasedResponse = trim($paraphraseResponse['message']['content']);
+                        }
+                    } catch (\Throwable $e) {
+                        Log::warning('Widget FAQ paraphrase failed', [
+                            'org_id' => $organization->id,
+                            'session_id' => $sessionId,
+                            'error' => $e->getMessage()
+                        ]);
                     }
-                } catch (\Throwable $e) {
-                    Log::warning('Widget FAQ paraphrase failed', [
-                        'org_id' => $organization->id,
-                        'session_id' => $sessionId,
-                        'error' => $e->getMessage()
-                    ]);
                 }
 
                 $finalFaqResponse = $paraphrasedResponse ?: $directResponse;
@@ -2065,7 +2148,85 @@ class WidgetController
                     return;
                 }
 
-                $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization);
+                $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
+                if ($branchFaqMatch && !$liveData) {
+                    $directResponse = $branchFaqMatch['response'];
+                    $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
+                        $organization,
+                        $directResponse,
+                        $branchFaqMatch['payload']['follow_up'] ?? null,
+                        $this->buildFaqFollowUpContext($allUserInfo, compact('country', 'region', 'location', 'city'))
+                    );
+                    if ($faqFollowUp !== '') {
+                        $directResponse = trim($directResponse) . "\n\n" . $faqFollowUp;
+                    }
+
+                    Log::info('Widget stream funnel branch FAQ response', [
+                        'org_id' => $organization->id,
+                        'session_id' => $sessionId,
+                        'title' => $branchFaqMatch['payload']['title'] ?? null,
+                        'item_id' => $branchFaqMatch['payload']['item_id'] ?? null,
+                    ]);
+
+                    $tokenMessages = [
+                        ['role' => 'user', 'content' => $message],
+                    ];
+                    $this->aiAgentService->logWidgetTokenUsage(
+                        $organization->id,
+                        $tokenMessages,
+                        $directResponse,
+                        'faq_direct'
+                    );
+
+                    echo "data: " . json_encode(['content' => $directResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $directResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location', 'city'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($directResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $directResponse,
+                            $request,
+                            compact('country', 'region', 'location', 'city'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $directResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
+                }
+
+                $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization, (string) $message);
                 if ($exactFaqMatch && !$liveData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                     $directResponse = $exactFaqMatch['response'];
                     $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
@@ -2082,6 +2243,7 @@ class WidgetController
                         'session_id' => $sessionId,
                         'score' => $exactFaqMatch['score'] ?? null,
                         'title' => $exactFaqMatch['payload']['title'] ?? null,
+                        'source' => $exactFaqMatch['match_source'] ?? 'semantic',
                     ]);
 
                     $tokenMessages = [
@@ -3484,10 +3646,10 @@ class WidgetController
         return 'You can reach us at ' . implode(' | ', $parts) . '.';
     }
 
-    private function getExactFaqMatchResponse(?array $searchResults, Organization $organization): ?array
+    private function getExactFaqMatchResponse(?array $searchResults, Organization $organization, string $message = ''): ?array
     {
         if (!$searchResults || empty($searchResults['results']) || !is_array($searchResults['results'])) {
-            return null;
+            return $this->getKeywordFaqMatchResponse($organization, $message);
         }
 
         $threshold = 0.82;
@@ -3521,7 +3683,7 @@ class WidgetController
         }
 
         if (!$best) {
-            return null;
+            return $this->getKeywordFaqMatchResponse($organization, $message);
         }
 
         $payload = $best['payload'] ?? [];
@@ -3537,7 +3699,405 @@ class WidgetController
             'response' => $response,
             'score' => $best['score'],
             'payload' => $payload,
+            'match_source' => 'semantic',
         ];
+    }
+
+    private function getKeywordFaqMatchResponse(Organization $organization, string $message): ?array
+    {
+        $translationMap = $this->getOrganizationQueryTranslationMap($organization);
+        $query = $this->normalizeKeywordMatchText($message, $translationMap);
+        if ($query === '') {
+            return null;
+        }
+
+        $queryTerms = $this->extractKeywordTerms($query);
+        if (empty($queryTerms)) {
+            return null;
+        }
+
+        $careerTerms = [
+            'career', 'careers', 'job', 'jobs', 'vacancy', 'vacancies', 'opening', 'openings',
+            'post', 'posts', 'recruitment', 'hiring', 'naukri', 'chakri', 'niyukti',
+            'appointment', 'staff', 'teacher', 'teachers', 'hr', 'resume', 'cv', 'khali'
+        ];
+        $hasCareerIntent = $this->containsAnyKeywordTerm($queryTerms, $careerTerms);
+
+        $faqs = OrganizationFaq::query()
+            ->where('organization_id', $organization->id)
+            ->where('is_active', true)
+            ->get(['id', 'question', 'answer', 'follow_up', 'keywords', 'category', 'updated_at']);
+
+        $best = null;
+        foreach ($faqs as $faq) {
+            $questionNorm = $this->normalizeKeywordMatchText((string) $faq->question);
+            $categoryNorm = $this->normalizeKeywordMatchText((string) ($faq->category ?? ''));
+            $keywordsNorm = $this->normalizeKeywordMatchText((string) ($faq->keywords ?? ''));
+            $faqTerms = $this->extractKeywordTerms(trim($questionNorm . ' ' . $keywordsNorm . ' ' . $categoryNorm));
+
+            $score = 0.0;
+            $strongKeywordHit = false;
+
+            $keywordParts = preg_split('/[,|]/', (string) ($faq->keywords ?? '')) ?: [];
+            foreach ($keywordParts as $keywordPart) {
+                $keywordNorm = $this->normalizeKeywordMatchText((string) $keywordPart);
+                if ($keywordNorm === '' || mb_strlen($keywordNorm) < 2) {
+                    continue;
+                }
+
+                if (str_contains($query, $keywordNorm)) {
+                    $score += 2.25;
+                    $strongKeywordHit = true;
+                    continue;
+                }
+
+                $keywordTerms = $this->extractKeywordTerms($keywordNorm);
+                if (!empty($keywordTerms) && empty(array_diff($keywordTerms, $queryTerms))) {
+                    $score += 1.5;
+                }
+            }
+
+            $overlapCount = count(array_intersect($queryTerms, $faqTerms));
+            if ($overlapCount > 0) {
+                $score += min(1.8, $overlapCount * 0.42);
+            }
+
+            if ($questionNorm !== '' && str_contains($query, $questionNorm)) {
+                $score += 0.9;
+            }
+
+            if ($hasCareerIntent && $this->containsAnyKeywordTerm($faqTerms, $careerTerms)) {
+                $score += 1.05;
+            }
+
+            if ($hasCareerIntent && str_contains($categoryNorm, 'career')) {
+                $score += 0.9;
+            }
+
+            if (!$strongKeywordHit && $score < 2.3) {
+                continue;
+            }
+
+            if (
+                $best === null
+                || $score > $best['score']
+                || ($score === $best['score'] && (string) $faq->updated_at > (string) ($best['updated_at'] ?? ''))
+            ) {
+                $answer = trim($this->htmlToPlainWithLinks((string) $faq->answer));
+                if ($answer === '') {
+                    continue;
+                }
+
+                $best = [
+                    'score' => $score,
+                    'updated_at' => (string) $faq->updated_at,
+                    'response' => $answer,
+                    'payload' => [
+                        'item_id' => 'faq_' . $faq->id,
+                        'data_type' => 'faq',
+                        'type' => 'faq',
+                        'title' => $faq->question,
+                        'content' => $answer,
+                        'follow_up' => $faq->follow_up,
+                        'category' => $faq->category,
+                        'keywords' => $faq->keywords,
+                    ],
+                ];
+            }
+        }
+
+        if (!$best || ($best['score'] ?? 0) < 2.6) {
+            return null;
+        }
+
+        unset($best['updated_at']);
+        $best['match_source'] = 'keyword_fallback';
+        return $best;
+    }
+
+    private function normalizeKeywordMatchText(string $value, array $extraReplacements = []): string
+    {
+        $normalized = strtolower(trim(strip_tags($value)));
+        if ($normalized === '') {
+            return '';
+        }
+
+        $phraseReplacements = [
+            'post khali' => 'vacancy',
+            'khali post' => 'vacancy',
+            'job khali' => 'vacancy',
+            'kensi' => 'which',
+            'kon si' => 'which',
+            'konsi' => 'which',
+            'kaunsi' => 'which',
+            'keun' => 'which',
+            'keunsi' => 'which',
+            'yaa' => 'or',
+            'ya' => 'or',
+            'kii' => 'is',
+            'kii' => 'is',
+            'achhe' => 'available',
+            'achi' => 'available',
+            'naukri' => 'job',
+            'chakri' => 'job',
+            'niyukti' => 'recruitment',
+        ];
+
+        if (!empty($extraReplacements)) {
+            $phraseReplacements = array_merge($phraseReplacements, $extraReplacements);
+        }
+
+        foreach ($phraseReplacements as $from => $to) {
+            $normalized = str_replace($from, $to, $normalized);
+        }
+
+        $normalized = preg_replace('/[^a-z0-9\s]+/i', ' ', $normalized) ?? $normalized;
+        return trim(preg_replace('/\s+/', ' ', $normalized) ?? $normalized);
+    }
+
+    private function extractKeywordTerms(string $value): array
+    {
+        if ($value === '') {
+            return [];
+        }
+
+        $parts = preg_split('/\s+/', $value) ?: [];
+        $stopWords = [
+            'a', 'an', 'the', 'is', 'are', 'am', 'to', 'for', 'of', 'in', 'on', 'at',
+            'this', 'that', 'it', 'we', 'you', 'i', 'me', 'my', 'our', 'your', 'or', 'and',
+            'which', 'what', 'please', 'can', 'could', 'would', 'should', 'with', 'from'
+        ];
+
+        $terms = [];
+        foreach ($parts as $part) {
+            $part = trim((string) $part);
+            if ($part === '' || mb_strlen($part) < 2) {
+                continue;
+            }
+            if (in_array($part, $stopWords, true)) {
+                continue;
+            }
+            $terms[] = $part;
+        }
+
+        return array_values(array_unique($terms));
+    }
+
+    private function containsAnyKeywordTerm(array $sourceTerms, array $expectedTerms): bool
+    {
+        if (empty($sourceTerms) || empty($expectedTerms)) {
+            return false;
+        }
+
+        return !empty(array_intersect($sourceTerms, $expectedTerms));
+    }
+
+    private function getOrganizationQueryTranslationMap(Organization $organization): array
+    {
+        $settings = $organization->settings ?? [];
+        $configured = $settings['query_translation_map'] ?? [];
+
+        $map = [];
+
+        if (is_string($configured)) {
+            $rows = preg_split('/\r\n|\r|\n/', $configured) ?: [];
+            foreach ($rows as $row) {
+                $line = trim((string) $row);
+                if ($line === '' || str_starts_with($line, '#')) {
+                    continue;
+                }
+
+                $parts = preg_split('/=>|=|\|/', $line, 2) ?: [];
+                if (count($parts) < 2) {
+                    continue;
+                }
+
+                $from = trim((string) ($parts[0] ?? ''));
+                $to = trim((string) ($parts[1] ?? ''));
+                if ($from === '' || $to === '') {
+                    continue;
+                }
+
+                $from = strtolower(trim(preg_replace('/\s+/', ' ', $from) ?? $from));
+                $to = strtolower(trim(preg_replace('/\s+/', ' ', $to) ?? $to));
+
+                if ($from !== '' && $to !== '') {
+                    $map[$from] = $to;
+                }
+            }
+
+            return $map;
+        }
+
+        if (is_array($configured)) {
+            foreach ($configured as $from => $to) {
+                if (is_int($from) && is_string($to)) {
+                    $parts = preg_split('/=>|=|\|/', $to, 2) ?: [];
+                    if (count($parts) >= 2) {
+                        $from = (string) ($parts[0] ?? '');
+                        $to = (string) ($parts[1] ?? '');
+                    } else {
+                        continue;
+                    }
+                }
+
+                $fromNorm = strtolower(trim((string) $from));
+                $toNorm = strtolower(trim((string) $to));
+
+                if ($fromNorm !== '' && $toNorm !== '') {
+                    $map[$fromNorm] = $toNorm;
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    private function getFunnelBranchFaqMatchResponse(Organization $organization, ?array $pendingFollowUpState, string $message): ?array
+    {
+        if (!is_array($pendingFollowUpState) || empty($pendingFollowUpState)) {
+            return null;
+        }
+
+        $cleanMessage = trim(mb_strtolower(strip_tags($message)));
+        if ($cleanMessage === '') {
+            return null;
+        }
+
+        if (!$this->isShortFollowUp($cleanMessage) && !$this->isOneOrTwoWordReply($cleanMessage)) {
+            return null;
+        }
+
+        $branchType = null;
+        if ($this->isAffirmativeFollowUp($cleanMessage)) {
+            $branchType = 'affirmative';
+        } elseif ($this->isNegativeFollowUp($cleanMessage)) {
+            $branchType = 'negative';
+        }
+
+        $affirmativeTriggers = ['yes', 'yeah', 'yup', 'yep', 'sure', 'okay', 'ok', 'definitely', 'go ahead', 'continue'];
+        $negativeTriggers = ['no', 'nope', 'nah', 'not now', 'dont', "don't", 'do not', 'not really', 'no thanks', 'no thank you'];
+        $triggers = $branchType === 'affirmative'
+            ? $affirmativeTriggers
+            : ($branchType === 'negative' ? $negativeTriggers : []);
+
+        $neutralTriggerTerms = [];
+        if ($branchType === null) {
+            if (str_word_count($cleanMessage) > 4) {
+                return null;
+            }
+
+            $normalized = preg_replace('/[^a-z0-9\s]/', ' ', $cleanMessage);
+            $neutralTriggerTerms = array_values(array_filter(array_unique(array_map(
+                static fn ($part) => trim((string) $part),
+                preg_split('/\s+/', (string) $normalized) ?: []
+            )), static fn ($part) => $part !== '' && mb_strlen($part) >= 2));
+
+            if (empty($neutralTriggerTerms)) {
+                return null;
+            }
+        }
+
+        $candidateFaqs = OrganizationFaq::query()
+            ->where('organization_id', $organization->id)
+            ->where('is_active', true)
+            ->get(['id', 'question', 'answer', 'follow_up', 'keywords', 'category', 'updated_at']);
+
+        $best = null;
+        foreach ($candidateFaqs as $faq) {
+            $questionNorm = trim(mb_strtolower((string) $faq->question));
+            $keywordsNorm = trim(mb_strtolower((string) ($faq->keywords ?? '')));
+            $categoryNorm = trim(mb_strtolower((string) ($faq->category ?? '')));
+
+            $isFunnelCategory = str_starts_with($categoryNorm, 'funnel');
+            $score = 0.0;
+
+            if ($branchType !== null) {
+                if (in_array($questionNorm, $triggers, true)) {
+                    $score += 1.35;
+                }
+
+                foreach ($triggers as $trigger) {
+                    if ($keywordsNorm !== '' && str_contains($keywordsNorm, $trigger)) {
+                        $score += 0.9;
+                        break;
+                    }
+                }
+
+                if ($branchType === 'affirmative' && preg_match('/\b(yes|yeah|yup|yep|sure|okay|ok|definitely)\b/i', $questionNorm)) {
+                    $score += 0.8;
+                }
+
+                if ($branchType === 'negative' && preg_match('/\b(no|nope|nah|not now|not really|no thanks|no thank you)\b/i', $questionNorm)) {
+                    $score += 0.8;
+                }
+            } else {
+                if (!$isFunnelCategory) {
+                    continue;
+                }
+
+                foreach ($neutralTriggerTerms as $term) {
+                    if ($questionNorm === $term) {
+                        $score += 1.15;
+                    }
+
+                    if (preg_match('/\b' . preg_quote($term, '/') . '\b/i', $questionNorm)) {
+                        $score += 0.55;
+                    }
+
+                    if ($keywordsNorm !== '' && preg_match('/\b' . preg_quote($term, '/') . '\b/i', $keywordsNorm)) {
+                        $score += 0.95;
+                    }
+                }
+            }
+
+            if ($isFunnelCategory) {
+                $score += 0.35;
+            }
+
+            if (trim((string) ($faq->follow_up ?? '')) !== '') {
+                $score += 0.1;
+            }
+
+            if ($score <= 0) {
+                continue;
+            }
+
+            if (
+                $best === null
+                || $score > $best['score']
+                || ($score === $best['score'] && (string) $faq->updated_at > (string) ($best['updated_at'] ?? ''))
+            ) {
+                $answer = trim($this->htmlToPlainWithLinks((string) $faq->answer));
+                if ($answer === '') {
+                    continue;
+                }
+
+                $best = [
+                    'score' => $score,
+                    'updated_at' => (string) $faq->updated_at,
+                    'response' => $answer,
+                    'payload' => [
+                        'item_id' => 'faq_' . $faq->id,
+                        'data_type' => 'faq',
+                        'type' => 'faq',
+                        'title' => $faq->question,
+                        'content' => $answer,
+                        'follow_up' => $faq->follow_up,
+                        'category' => $faq->category,
+                        'keywords' => $faq->keywords,
+                    ],
+                ];
+            }
+        }
+
+        $minimumScore = $branchType === null ? 0.8 : 0.9;
+        if (!$best || ($best['score'] ?? 0) < $minimumScore) {
+            return null;
+        }
+
+        unset($best['updated_at']);
+        return $best;
     }
 
     private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message, string $context = ''): array
@@ -5362,6 +5922,28 @@ class WidgetController
         }
         // Also treat short confirmations under 16 chars as affirmative if contain yes/ok/sure
         if (mb_strlen($t) < 16 && preg_match('/\b(yes|yeah|yup|yep|ya|yah|ok|okay|sure|please)\b/', $t)) return true;
+        return false;
+    }
+
+    private function isNegativeFollowUp(string $text): bool
+    {
+        $t = trim(mb_strtolower($text));
+        if ($t === '') {
+            return false;
+        }
+
+        $negatives = [
+            'no', 'nope', 'nah', 'not now', 'dont', "don't", 'do not', 'not really', 'no thanks', 'no thank you', 'maybe later'
+        ];
+
+        if (in_array($t, $negatives, true)) {
+            return true;
+        }
+
+        if (mb_strlen($t) < 20 && preg_match('/\b(no|nope|nah|not now|no thanks|not really)\b/', $t)) {
+            return true;
+        }
+
         return false;
     }
 

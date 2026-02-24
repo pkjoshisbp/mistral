@@ -16,7 +16,7 @@ class FaqSyncController extends Controller
      * Route: POST /api/organizations/{slug}/faqs/import
      * Auth: Bearer {api_token} or X-Api-Token header must match organization.api_token (if set)
      * Accepts:
-     * - JSON body: { faqs: [ {question, answer, category?, keywords?(string|array), is_active?, sort_order?}, ... ] }
+    * - JSON body: { faqs: [ {question, answer, follow_up_question?|follow_up?|followUpQuestion?, category?, keywords?(string|array), is_active?, sort_order?}, ... ] }
      * - Multipart: 'upload' file containing JSON array
      * - File param: 'file' => name in storage/app/data/{file}
      */
@@ -98,6 +98,15 @@ class FaqSyncController extends Controller
         foreach ($faqs as $idx => $row) {
             $question = trim((string)($row['question'] ?? ''));
             $answerRaw = (string)($row['answer'] ?? '');
+            $followUpProvided =
+                array_key_exists('follow_up_question', $row) ||
+                array_key_exists('follow_up', $row) ||
+                array_key_exists('followUpQuestion', $row) ||
+                array_key_exists('followUp', $row) ||
+                array_key_exists('followup_question', $row) ||
+                array_key_exists('followup', $row);
+            $followUpRaw = data_get($row, 'follow_up_question', data_get($row, 'follow_up', data_get($row, 'followUpQuestion', data_get($row, 'followUp', data_get($row, 'followup_question', data_get($row, 'followup', null))))));
+            $followUp = is_string($followUpRaw) ? trim($followUpRaw) : '';
             $category = isset($row['category']) ? trim((string)$row['category']) : null;
             $keywords = $row['keywords'] ?? null;
             $isActive = isset($row['is_active']) ? (bool)$row['is_active'] : true;
@@ -129,6 +138,9 @@ class FaqSyncController extends Controller
             $wasExisting = $faq->exists;
             $faq->answer = $answerHtml;
             $faq->answer_markdown = null;
+            if ($followUpProvided) {
+                $faq->follow_up = $followUp !== '' ? $followUp : null;
+            }
             $faq->category = $category;
             $faq->keywords = $keywords;
             $faq->sort_order = $sortOrder;
@@ -151,6 +163,7 @@ class FaqSyncController extends Controller
                     'table_id' => $faq->id,
                     'updated_at' => $faq->updated_at ? $faq->updated_at->toISOString() : now()->toISOString(),
                     'keywords' => $faq->keywords,
+                    'follow_up' => $faq->follow_up,
                     'links' => method_exists($faq, 'getLinksAttribute') ? $faq->links : []
                 ]
             ];

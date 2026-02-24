@@ -110,6 +110,22 @@
                                         <textarea id="widgetAllowedDomains" name="widgetAllowedDomains" class="form-control" rows="3" placeholder="example.com&#10;www.example.com">{{ is_array($custOrg->settings['widget_allowed_domains'] ?? null) ? implode("\n", $custOrg->settings['widget_allowed_domains']) : ($custOrg->settings['widget_allowed_domains'] ?? '') }}</textarea>
                                         <small class="text-muted">If set, widget chat requests will only be accepted from these domains (including subdomains).</small>
                                     </div>
+                                    @php
+                                        $queryTranslationMap = $custOrg->settings['query_translation_map'] ?? '';
+                                        if (is_array($queryTranslationMap)) {
+                                            $queryTranslationMap = implode("\n", array_map(function ($to, $from) {
+                                                if (is_int($from)) {
+                                                    return (string) $to;
+                                                }
+                                                return trim((string) $from) . ' => ' . trim((string) $to);
+                                            }, $queryTranslationMap, array_keys($queryTranslationMap)));
+                                        }
+                                    @endphp
+                                    <div class="mb-3">
+                                        <label class="form-label">Query Translation Map (optional)</label>
+                                        <textarea id="queryTranslationMap" name="queryTranslationMap" class="form-control" rows="6" placeholder="mehr infos = more information&#10;prix = price&#10;servicio = service">{{ $queryTranslationMap }}</textarea>
+                                        <small class="text-muted">Use one mapping per line in format <strong>source = target</strong> (or <strong>source =&gt; target</strong>). Add commonly used terms from any language (for example Indic, German, French, Spanish, Tamil, Telugu) to improve multilingual FAQ matching.</small>
+                                    </div>
                                     <button type="submit" class="btn btn-success">Save Settings</button>
                                 </form>
                             </div>
@@ -197,6 +213,7 @@ document.getElementById('widgetSettingsForm').addEventListener('submit', async f
         requireContactForGuests: document.getElementById('requireContactForGuests').checked,
         widgetContactFields: document.getElementById('widgetContactFields').value,
         widgetAllowedDomains: document.getElementById('widgetAllowedDomains').value,
+        queryTranslationMap: document.getElementById('queryTranslationMap').value,
         _token: form.querySelector('input[name="_token"]').value
     };
     try {

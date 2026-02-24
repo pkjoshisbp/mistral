@@ -22,6 +22,43 @@
                     </div>
                 </div>
             </div>
+
+            <div class="mb-3 p-3 border rounded bg-white">
+                <h6 class="mb-2"><i class="fas fa-project-diagram"></i> Funnel Branch Preview</h6>
+                <div class="row align-items-end">
+                    <div class="col-md-8 mb-2">
+                        <label class="form-label">Sample User Reply</label>
+                        <input type="text" class="form-control" wire:model.defer="branchPreviewInput" placeholder="e.g., yes / not now / send details">
+                        <small class="text-muted">Tests short follow-up branch matching against active funnel FAQs for selected organization.</small>
+                    </div>
+                    <div class="col-md-4 mb-2">
+                        <label class="form-label d-block">&nbsp;</label>
+                        <button class="btn btn-info" wire:click="previewFunnelBranch" @disabled(!$selectedOrganization)>
+                            <span wire:loading.remove wire:target="previewFunnelBranch">Preview Match</span>
+                            <span wire:loading wire:target="previewFunnelBranch"><i class="fas fa-spinner fa-spin"></i> Checking…</span>
+                        </button>
+                    </div>
+                </div>
+
+                @if(is_array($branchPreviewResult))
+                    @if(!empty($branchPreviewResult['matched']))
+                        <div class="alert alert-success mt-3 mb-0">
+                            <div><strong>Matched FAQ #{{ $branchPreviewResult['match']['id'] }}</strong> (Score: {{ number_format((float) ($branchPreviewResult['match']['score'] ?? 0), 2) }})</div>
+                            <div class="mt-1"><strong>Question:</strong> {{ $branchPreviewResult['match']['question'] ?? '-' }}</div>
+                            <div><strong>Category:</strong> {{ $branchPreviewResult['match']['category'] ?? '-' }}</div>
+                            <div><strong>Branch Type:</strong> {{ $branchPreviewResult['branch_type'] ?? 'neutral' }}</div>
+                            <div class="mt-1"><strong>Answer Preview:</strong> {{ $branchPreviewResult['match']['answer'] ?? '-' }}</div>
+                            @if(!empty($branchPreviewResult['match']['follow_up']))
+                                <div><strong>Follow-up:</strong> {{ $branchPreviewResult['match']['follow_up'] }}</div>
+                            @endif
+                        </div>
+                    @else
+                        <div class="alert alert-warning mt-3 mb-0">
+                            <strong>No match.</strong> {{ $branchPreviewResult['reason'] ?? 'No branch selected.' }}
+                        </div>
+                    @endif
+                @endif
+            </div>
             
             <div class="mb-3">
                 <div class="input-group">

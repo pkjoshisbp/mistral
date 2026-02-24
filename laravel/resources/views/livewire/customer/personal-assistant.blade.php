@@ -1,4 +1,362 @@
 <div>
+
+    {{-- ============================================================
+         PERSONAL ASSISTANT – INTRO / GET STARTED MODAL
+    ============================================================ --}}
+    <div class="modal fade" id="paIntroModal" tabindex="-1" aria-labelledby="paIntroModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg,#17a2b8,#0062cc); color:#fff;">
+                    <h5 class="modal-title" id="paIntroModalLabel">
+                        <i class="fas fa-robot mr-2"></i> Your AI Personal Assistant — Get Started
+                    </h5>
+                    <button type="button" class="close text-white ml-auto" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body p-0">
+
+                    {{-- Tab nav --}}
+                    <ul class="nav nav-tabs nav-fill border-bottom-0 px-3 pt-3" id="paIntroTabs" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active font-weight-bold" id="tab-what-tab" data-toggle="tab" href="#tab-what" role="tab">
+                                <i class="fas fa-magic mr-1"></i> What It Can Do
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link font-weight-bold" id="tab-start-tab" data-toggle="tab" href="#tab-start" role="tab">
+                                <i class="fas fa-play-circle mr-1"></i> Getting Started
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link font-weight-bold" id="tab-future-tab" data-toggle="tab" href="#tab-future" role="tab">
+                                <i class="fas fa-lightbulb mr-1"></i> Coming Soon
+                            </a>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content px-4 py-3" id="paIntroTabContent">
+
+                        {{-- Tab 1: What It Can Do --}}
+                        <div class="tab-pane fade show active" id="tab-what" role="tabpanel">
+                            <p class="text-muted mb-3">Your AI Personal Assistant understands <strong>voice and text commands</strong> and helps you manage your workday hands-free.</p>
+                            <div class="row">
+                                <div class="col-md-4 mb-4">
+                                    <div class="card h-100 border-0 shadow-sm">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3" style="font-size:2.2rem; color:#17a2b8;"><i class="fas fa-microphone-alt"></i></div>
+                                            <h6 class="font-weight-bold">Voice &amp; Text Commands</h6>
+                                            <p class="small text-muted">Speak or type naturally. The assistant transcribes your voice, understands your intent and acts instantly.</p>
+                                            <div class="text-left mt-2">
+                                                <span class="badge badge-light border d-block mb-1 p-2">"Add a note about the client meeting"</span>
+                                                <span class="badge badge-light border d-block mb-1 p-2">"Remind me to follow up at 3 PM"</span>
+                                                <span class="badge badge-light border d-block p-2">"Create a task: send invoice Friday"</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 mb-4">
+                                    <div class="card h-100 border-0 shadow-sm">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3" style="font-size:2.2rem; color:#28a745;"><i class="fas fa-tasks"></i></div>
+                                            <h6 class="font-weight-bold">Notes, Reminders &amp; Tasks</h6>
+                                            <p class="small text-muted">Instantly save notes, set time-based reminders and create to-do tasks — all in one place, searchable any time.</p>
+                                            <div class="text-left mt-2">
+                                                <span class="badge badge-light border d-block mb-1 p-2"><i class="fas fa-sticky-note text-warning mr-1"></i> Notes</span>
+                                                <span class="badge badge-light border d-block mb-1 p-2"><i class="fas fa-bell text-danger mr-1"></i> Reminders with due times</span>
+                                                <span class="badge badge-light border d-block p-2"><i class="fas fa-check-square text-success mr-1"></i> Action tasks with status</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 mb-4">
+                                    <div class="card h-100 border-0 shadow-sm">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3" style="font-size:2.2rem; color:#6f42c1;"><i class="fas fa-user-graduate"></i></div>
+                                            <h6 class="font-weight-bold">Personalised Voice Training</h6>
+                                            <p class="small text-muted">Train the assistant on your accent, vocabulary and industry terms so it understands you accurately every time.</p>
+                                            <div class="text-left mt-2">
+                                                <span class="badge badge-light border d-block mb-1 p-2"><i class="fas fa-language text-primary mr-1"></i> Multi-language support</span>
+                                                <span class="badge badge-light border d-block mb-1 p-2"><i class="fas fa-book text-info mr-1"></i> Custom vocabulary / brand names</span>
+                                                <span class="badge badge-light border d-block p-2"><i class="fas fa-spell-check text-secondary mr-1"></i> Correction mapping</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 mb-4">
+                                    <div class="card h-100 border-0 shadow-sm">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3" style="font-size:2.2rem; color:#fd7e14;"><i class="fas fa-history"></i></div>
+                                            <h6 class="font-weight-bold">Interaction History</h6>
+                                            <p class="small text-muted">Every command and reply is logged so you can review what was said, check decisions and pick up where you left off.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 mb-4">
+                                    <div class="card h-100 border-0 shadow-sm">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3" style="font-size:2.2rem; color:#e83e8c;"><i class="fas fa-volume-up"></i></div>
+                                            <h6 class="font-weight-bold">Text-to-Speech Replies</h6>
+                                            <p class="small text-muted">The assistant can read replies aloud using XTTS or multilingual TTS providers — ideal for hands-free or eyes-free situations.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 mb-4">
+                                    <div class="card h-100 border-0 shadow-sm">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3" style="font-size:2.2rem; color:#20c997;"><i class="fas fa-file-upload"></i></div>
+                                            <h6 class="font-weight-bold">Audio File Upload</h6>
+                                            <p class="small text-muted">No mic? Record a voice memo on your phone and upload it directly to transcribe and run as a command.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Tab 2: Getting Started --}}
+                        <div class="tab-pane fade" id="tab-start" role="tabpanel">
+                            <p class="text-muted mb-4">Follow these steps to get the most from your assistant. The whole setup takes about 5 minutes.</p>
+                            <div class="row">
+                                <div class="col-md-6 mb-4">
+                                    <div class="d-flex">
+                                        <div class="mr-3 flex-shrink-0">
+                                            <span class="d-flex align-items-center justify-content-center rounded-circle text-white font-weight-bold" style="width:2.5rem;height:2.5rem;background:#17a2b8;font-size:1.1rem;">1</span>
+                                        </div>
+                                        <div>
+                                            <h6 class="font-weight-bold mb-1">Set Up Your Voice Profile</h6>
+                                            <p class="small text-muted mb-1">Choose your preferred language, pick a TTS provider, and add custom words the assistant should recognize — product names, client names, and abbreviations.</p>
+                                            <a href="#tab-what" data-toggle="tab" class="small text-primary"><i class="fas fa-arrow-right mr-1"></i> See Voice Profile panel on the left</a>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-4">
+                                    <div class="d-flex">
+                                        <div class="mr-3 flex-shrink-0">
+                                            <span class="d-flex align-items-center justify-content-center rounded-circle text-white font-weight-bold" style="width:2.5rem;height:2.5rem;background:#6f42c1;font-size:1.1rem;">2</span>
+                                        </div>
+                                        <div>
+                                            <h6 class="font-weight-bold mb-1">Complete Voice Training (3 samples)</h6>
+                                            <p class="small text-muted mb-1">Read each provided sentence aloud, click <strong>Start Mic → Stop → Transcribe Sample</strong>, correct any errors, then <strong>Save Correction</strong>. Repeat for all 3 samples to unlock the Assistant Console.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-4">
+                                    <div class="d-flex">
+                                        <div class="mr-3 flex-shrink-0">
+                                            <span class="d-flex align-items-center justify-content-center rounded-circle text-white font-weight-bold" style="width:2.5rem;height:2.5rem;background:#28a745;font-size:1.1rem;">3</span>
+                                        </div>
+                                        <div>
+                                            <h6 class="font-weight-bold mb-1">Give Your First Voice Command</h6>
+                                            <p class="small text-muted mb-1">Once training is done, go to the <strong>Assistant Console</strong> on the right. Click <strong>Start Mic</strong>, say a command, then click <strong>Stop → Transcribe → Run Command</strong>.</p>
+                                            <div class="mt-2">
+                                                <span class="badge badge-secondary p-2 mr-1">"Remind me at 2 PM to call supplier"</span>
+                                                <span class="badge badge-secondary p-2">"Add note: client wants delivery by Monday"</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-4">
+                                    <div class="d-flex">
+                                        <div class="mr-3 flex-shrink-0">
+                                            <span class="d-flex align-items-center justify-content-center rounded-circle text-white font-weight-bold" style="width:2.5rem;height:2.5rem;background:#fd7e14;font-size:1.1rem;">4</span>
+                                        </div>
+                                        <div>
+                                            <h6 class="font-weight-bold mb-1">Review Your Saved Items</h6>
+                                            <p class="small text-muted mb-1">All your notes, reminders and tasks appear in the <strong>Saved Items</strong> panel on the right. Check due dates and statuses there.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-4">
+                                    <div class="d-flex">
+                                        <div class="mr-3 flex-shrink-0">
+                                            <span class="d-flex align-items-center justify-content-center rounded-circle text-white font-weight-bold" style="width:2.5rem;height:2.5rem;background:#e83e8c;font-size:1.1rem;">5</span>
+                                        </div>
+                                        <div>
+                                            <h6 class="font-weight-bold mb-1">No Microphone? Use Audio File Upload</h6>
+                                            <p class="small text-muted mb-1">Record a voice note on your mobile and click <strong>Use Audio File</strong> to upload and transcribe it. Works for both training samples and commands.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-4">
+                                    <div class="d-flex">
+                                        <div class="mr-3 flex-shrink-0">
+                                            <span class="d-flex align-items-center justify-content-center rounded-circle text-white font-weight-bold" style="width:2.5rem;height:2.5rem;background:#20c997;font-size:1.1rem;">6</span>
+                                        </div>
+                                        <div>
+                                            <h6 class="font-weight-bold mb-1">Type Commands Too</h6>
+                                            <p class="small text-muted mb-1">Prefer typing? Use <strong>Manual Command Input</strong> in the Assistant Console — just type your command and hit <strong>Run Command</strong> without any microphone.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="alert alert-light border mt-2">
+                                <strong><i class="fas fa-terminal mr-1 text-dark"></i> Sample commands you can try right now:</strong>
+                                <div class="row mt-2">
+                                    <div class="col-sm-6">
+                                        <ul class="small mb-0 pl-3">
+                                            <li>"Add note: project budget approved"</li>
+                                            <li>"Remind me tomorrow at 9 AM to submit report"</li>
+                                            <li>"Create task: follow up with client by Friday"</li>
+                                            <li>"Find my recent notes about the diagnostic clinic"</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-sm-6">
+                                        <ul class="small mb-0 pl-3">
+                                            <li>"Schedule a reminder for next Monday at 10 AM"</li>
+                                            <li>"Note that our monthly plan starts at twelve dollars"</li>
+                                            <li>"Add a task to review invoices before Friday evening"</li>
+                                            <li>"Send an update email to our client about pending proposal"</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Tab 3: Coming Soon --}}
+                        <div class="tab-pane fade" id="tab-future" role="tabpanel">
+                            <p class="text-muted mb-3">Here is what's planned next to make this a complete AI productivity tool for business owners.</p>
+                            <div class="row">
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card border-left-primary h-100 shadow-sm" style="border-left:4px solid #0062cc !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-calendar-alt text-primary mr-2" style="font-size:1.4rem;"></i>
+                                                <h6 class="font-weight-bold mb-0">Smart Calendar &amp; Scheduling</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">Connect Google / Outlook calendar. Say "Schedule a meeting with Priya next Tuesday at 2 PM" and it books it automatically with conflict detection.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card h-100 shadow-sm" style="border-left:4px solid #28a745 !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-envelope-open-text text-success mr-2" style="font-size:1.4rem;"></i>
+                                                <h6 class="font-weight-bold mb-0">Email Drafting &amp; Sending</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">Dictate emails hands-free. "Draft an email to Rajesh confirming tomorrow's meeting and send it" — the AI composes and dispatches.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card h-100 shadow-sm" style="border-left:4px solid #fd7e14 !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-file-invoice-dollar text-warning mr-2" style="font-size:1.4rem;"></i>
+                                                <h6 class="font-weight-bold mb-0">Invoice &amp; Expense Assistant</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">Say "Create invoice for ABC Pharma for ₹45,000 — Lab Tests + Consultation" and the system generates a PDF invoice ready to send.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card h-100 shadow-sm" style="border-left:4px solid #6f42c1 !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-chart-line text-purple mr-2" style="font-size:1.4rem; color:#6f42c1;"></i>
+                                                <h6 class="font-weight-bold mb-0">Business Analytics Briefing</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">Each morning ask "What's my sales summary for this week?" and get an AI-narrated briefing of leads, revenue, chat volume and top queries.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card h-100 shadow-sm" style="border-left:4px solid #e83e8c !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-users text-danger mr-2" style="font-size:1.4rem; color:#e83e8c;"></i>
+                                                <h6 class="font-weight-bold mb-0">CRM &amp; Lead Follow-up</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">Voice-log follow-up notes against leads. "Update lead Anita Sharma — called today, interested in Gold plan, call back Wednesday." Synced to your CRM.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card h-100 shadow-sm" style="border-left:4px solid #17a2b8 !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-whatsapp text-info mr-2" style="font-size:1.4rem; color:#25D366;"></i>
+                                                <h6 class="font-weight-bold mb-0">WhatsApp &amp; SMS Integration</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">Send WhatsApp messages or SMS by voice. "Send WhatsApp to +91 98765 43210: Your test results are ready for collection."</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card h-100 shadow-sm" style="border-left:4px solid #20c997 !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-file-alt text-teal mr-2" style="font-size:1.4rem; color:#20c997;"></i>
+                                                <h6 class="font-weight-bold mb-0">Document Dictation &amp; Summary</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">Dictate reports, meeting minutes or SOP notes. Summarise uploaded PDFs by asking "What are the key points in this document?"</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card h-100 shadow-sm" style="border-left:4px solid #dc3545 !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-mobile-alt text-danger mr-2" style="font-size:1.4rem;"></i>
+                                                <h6 class="font-weight-bold mb-0">Mobile App / PWA</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">A mobile-optimised progressive web app so you can speak commands while on-site at a client, in a clinic, or on the go — without a laptop.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-lg-4 col-md-6 mb-4">
+                                    <div class="card h-100 shadow-sm" style="border-left:4px solid #6c757d !important;">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-bell text-secondary mr-2" style="font-size:1.4rem;"></i>
+                                                <h6 class="font-weight-bold mb-0">Smart Reminder Notifications</h6>
+                                            </div>
+                                            <p class="small text-muted mb-0">Browser push notifications and email alerts when a saved reminder is due — so you never miss a follow-up, deadline or appointment.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+
+                    </div>{{-- end tab-content --}}
+                </div>
+
+                <div class="modal-footer justify-content-between">
+                    <div class="custom-control custom-checkbox">
+                        <input type="checkbox" class="custom-control-input" id="paDontShowAgain">
+                        <label class="custom-control-label text-muted small" for="paDontShowAgain">Don't show this again</label>
+                    </div>
+                    <button type="button" class="btn btn-primary" data-dismiss="modal">
+                        <i class="fas fa-rocket mr-1"></i> Let's Get Started
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {{-- / intro modal --}}
+
+    {{-- Page header bar with help button --}}
+    <div class="d-flex align-items-center justify-content-between mb-3 p-3 rounded" style="background:linear-gradient(135deg,#e8f4fd,#d1ecf1);">
+        <div>
+            <h5 class="mb-1 text-dark font-weight-bold"><i class="fas fa-robot mr-2 text-info"></i> AI Personal Assistant</h5>
+            <p class="mb-0 small text-muted">Voice &amp; text commands · Notes · Reminders · Tasks · Voice training</p>
+        </div>
+        <button type="button" class="btn btn-info btn-sm" data-toggle="modal" data-target="#paIntroModal">
+            <i class="fas fa-question-circle mr-1"></i> What can this do?
+        </button>
+    </div>
+
     @if($hasAssistantAccess)
         <div class="alert alert-success">
             <strong>Plan Status:</strong> {{ $assistantPlanMessage }}
@@ -381,6 +739,34 @@
                 if (liveEl) liveEl.classList.add('d-none');
                 if (statusEl) statusEl.textContent = 'Processing recording...';
             }
+
+            // Auto-show intro modal on first visit
+            document.addEventListener('DOMContentLoaded', function () {
+                if (!localStorage.getItem('pa_intro_seen')) {
+                    var modal = new bootstrap.Modal(document.getElementById('paIntroModal'), {});
+                    // Fallback for AdminLTE (jQuery)
+                    if (typeof $ !== 'undefined') {
+                        $('#paIntroModal').modal('show');
+                    } else {
+                        modal.show();
+                    }
+                }
+
+                // Mark as seen when modal is hidden
+                document.getElementById('paIntroModal').addEventListener('hidden.bs.modal', function () {
+                    if (document.getElementById('paDontShowAgain').checked) {
+                        localStorage.setItem('pa_intro_seen', '1');
+                    }
+                });
+                // Support jQuery modal hidden event too
+                if (typeof $ !== 'undefined') {
+                    $('#paIntroModal').on('hidden.bs.modal', function () {
+                        if (document.getElementById('paDontShowAgain').checked) {
+                            localStorage.setItem('pa_intro_seen', '1');
+                        }
+                    });
+                }
+            });
         </script>
     @endonce
 </div>
