@@ -69,6 +69,7 @@ class PricingController extends Controller
                 $row->usd_price = $row->price;
                 $row->inr_price = $meta['inr_price'] ?? 0;
                 $row->tokens = $row->credits;
+                $row->credit_validity_months = $row->credit_validity_months ?? 12;
                 $row->features = $meta['features'] ?? [];
                 return $row;
             });
@@ -217,8 +218,11 @@ class PricingController extends Controller
         $package->usd_price = $package->price;
         $package->inr_price = $meta['inr_price'] ?? 0;
         $package->tokens = $package->credits;
+        $package->credit_validity_months = $package->credit_validity_months ?? 12;
         $package->features = $meta['features'] ?? [];
-        return view('admin.pricing.edit-credit-package', compact('package'));
+        $validityOptions = $this->creditValidityOptions();
+
+        return view('admin.pricing.edit-credit-package', compact('package', 'validityOptions'));
     }
 
     public function updateCreditPackage(Request $request, $id)
@@ -231,6 +235,7 @@ class PricingController extends Controller
             'usd_price' => 'required|numeric|min:0',
             'inr_price' => 'required|numeric|min:0',
             'tokens' => 'required|integer|min:0',
+            'credit_validity_months' => 'required|integer|in:' . implode(',', PricingPlan::CREDIT_VALIDITY_OPTIONS),
             'is_active' => 'boolean',
             'sort_order' => 'required|integer'
         ]);
@@ -240,6 +245,7 @@ class PricingController extends Controller
         if ($request->has('features')) {
             $features = array_filter(explode("\n", $request->features));
         }
+        $features = $this->synchronizeCreditValidityFeature($features, (int) $validated['credit_validity_months']);
         $meta = is_array($package->metadata) ? $package->metadata : [];
         $meta['inr_price'] = $validated['inr_price'];
         $meta['features'] = $features;
@@ -249,6 +255,7 @@ class PricingController extends Controller
             'description' => $validated['description'],
             'price' => $validated['usd_price'],
             'credits' => $validated['tokens'],
+            'credit_validity_months' => $validated['credit_validity_months'],
             'is_active' => (bool) ($validated['is_active'] ?? false),
             'sort_order' => $validated['sort_order'],
             'metadata' => $meta,
@@ -260,7 +267,9 @@ class PricingController extends Controller
 
     public function createCreditPackage()
     {
-        return view('admin.pricing.create-credit-package');
+        $validityOptions = $this->creditValidityOptions();
+
+        return view('admin.pricing.create-credit-package', compact('validityOptions'));
     }
 
     public function storeCreditPackage(Request $request)
@@ -272,6 +281,7 @@ class PricingController extends Controller
             'usd_price' => 'required|numeric|min:0',
             'inr_price' => 'required|numeric|min:0',
             'tokens' => 'required|integer|min:0',
+            'credit_validity_months' => 'required|integer|in:' . implode(',', PricingPlan::CREDIT_VALIDITY_OPTIONS),
             'is_active' => 'boolean',
             'sort_order' => 'required|integer'
         ]);
@@ -281,6 +291,7 @@ class PricingController extends Controller
         if ($request->has('features')) {
             $features = array_filter(explode("\n", $request->features));
         }
+        $features = $this->synchronizeCreditValidityFeature($features, (int) $validated['credit_validity_months']);
         $meta = [
             'inr_price' => $validated['inr_price'],
             'features' => $features,
@@ -295,6 +306,7 @@ class PricingController extends Controller
             'currency' => 'USD',
             'billing_period' => 'one_time',
             'credits' => $validated['tokens'],
+            'credit_validity_months' => $validated['credit_validity_months'],
             'is_active' => (bool) ($validated['is_active'] ?? false),
             'sort_order' => $validated['sort_order'],
             'metadata' => $meta,
@@ -302,5 +314,54 @@ class PricingController extends Controller
 
         return redirect()->route('admin.pricing.index')
             ->with('success', 'Credit package created successfully!');
+    }
+
+    private function creditValidityOptions(): array
+    {
+        $options = [];
+        foreach (PricingPlan::CREDIT_VALIDITY_OPTIONS as $months) {
+            if ($months % 12 === 0) {
+                $years = (int) ($months / 12);
+                $label = $years === 1 ? '1 year' : ($years . ' years');
+            } else {
+                $label = $months . ' months';
+            }
+            $options[$months] = $label;
+        }
+
+        return $options;
+    }
+
+    private function synchronizeCreditValidityFeature(array $features, int $validityMonths): array
+    {
+        $targetLine = "Credits remain active for {$validityMonths} months and can be carried forward on timely renewal.";
+        $updated = [];
+        $replaced = false;
+
+        foreach ($features as $feature) {
+            $line = trim((string) $feature);
+            if ($line === '') {
+                continue;
+            }
+
+            if (
+                preg_match('/never\s*expire|no\s*expiration|lifetime\s*validity/i', $line) ||
+                preg_match('/credits\s*remain\s*active\s*for\s*\d+\s*months?.*carry\s*forward/i', $line)
+            ) {
+                if (!$replaced) {
+                    $updated[] = $targetLine;
+                    $replaced = true;
+                }
+                continue;
+            }
+
+            $updated[] = $line;
+        }
+
+        if (!$replaced) {
+            $updated[] = $targetLine;
+        }
+
+        return array_values(array_unique($updated));
     }
 }

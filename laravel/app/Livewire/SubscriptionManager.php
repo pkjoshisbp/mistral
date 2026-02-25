@@ -7,6 +7,7 @@ use App\Models\Subscription;
 use App\Models\PricingPlan;
 use App\Models\TokenUsageLog;
 use Illuminate\Support\Facades\Auth;
+use App\Services\ShopifyBillingService;
 
 class SubscriptionManager extends Component
 {
@@ -14,12 +15,49 @@ class SubscriptionManager extends Component
     public $availablePlans;
     public $tokenUsageCurrentPeriod = 0;
     public $tokenUsageHistory = [];
+    public $hasShopifyIntegration = false;
+    public $shopifyShopDomain = null;
+    public $shopifyOrganizationId = null;
 
     public function mount()
     {
+        $this->detectShopifyIntegration();
         $this->loadSubscriptionData();
         $this->loadAvailablePlans();
         $this->loadTokenUsage();
+    }
+
+    public function detectShopifyIntegration()
+    {
+        $user = Auth::user();
+        $organizations = $user?->organizations;
+
+        if (!$organizations || $organizations->isEmpty()) {
+            $this->hasShopifyIntegration = false;
+            $this->shopifyShopDomain = null;
+            $this->shopifyOrganizationId = null;
+            return;
+        }
+
+        $shopifyOrg = null;
+        $integration = null;
+
+        foreach ($organizations as $organization) {
+            $candidate = $organization->integrations()
+                ->where('provider', 'shopify')
+                ->where('active', true)
+                ->first();
+
+            if ($candidate) {
+                $shopifyOrg = $organization;
+                $integration = $candidate;
+                break;
+            }
+        }
+
+        $this->hasShopifyIntegration = (bool) $integration;
+        $this->shopifyShopDomain = $integration?->shop;
+        $this->shopifyOrganizationId = $shopifyOrg?->id;
     }
 
     public function loadSubscriptionData()
@@ -39,6 +77,17 @@ class SubscriptionManager extends Component
         foreach ($rows as $plan) {
             $meta = is_array($plan->metadata) ? $plan->metadata : [];
             $baseSlug = $meta['original_slug'] ?? $plan->slug;
+
+            if ($this->hasShopifyIntegration) {
+                $shopifyAvailable = array_key_exists('shopify_available', $meta)
+                    ? (bool) $meta['shopify_available']
+                    : !in_array($baseSlug, ['enterprise', 'payg'], true);
+
+                if (!$shopifyAvailable) {
+                    continue;
+                }
+            }
+
             $key = $baseSlug ?: $plan->name;
 
             if (!isset($grouped[$key])) {
@@ -137,10 +186,42 @@ class SubscriptionManager extends Component
 
     public function cancelSubscription()
     {
-        // This would integrate with PayPal to cancel the subscription
-        // For now, we'll just update the local status
         if ($this->currentSubscription) {
-            $this->currentSubscription->update(['status' => 'cancelled']);
+            if ($this->hasShopifyIntegration && $this->currentSubscription->payment_provider === 'shopify' && $this->currentSubscription->shopify_subscription_gid) {
+                $user = Auth::user();
+                $organizationIds = $user?->organizations()->pluck('organizations.id');
+
+                if ($organizationIds && $organizationIds->isEmpty()) {
+                    $primary = $user?->primaryOrganization();
+                    $organizationIds = $primary ? collect([$primary->id]) : collect();
+                }
+
+                $integration = $organizationIds && $organizationIds->isNotEmpty()
+                    ? \App\Models\Integration::whereIn('organization_id', $organizationIds)
+                    ->where('provider', 'shopify')
+                    ->where('active', true)
+                    ->orderByDesc('id')
+                    ->first()
+                    : null;
+
+                if (!$integration) {
+                    session()->flash('error', 'Shopify integration not found.');
+                    return;
+                }
+
+                $cancelled = app(ShopifyBillingService::class)
+                    ->cancelAppSubscription($integration, $this->currentSubscription->shopify_subscription_gid);
+
+                if (!$cancelled) {
+                    session()->flash('error', 'Unable to cancel Shopify subscription right now.');
+                    return;
+                }
+            }
+
+            $this->currentSubscription->update([
+                'status' => 'cancelled',
+                'cancelled_at' => now(),
+            ]);
             $this->loadSubscriptionData();
             
             session()->flash('success', 'Subscription cancelled successfully. You can continue using the service until the end of your current billing period.');

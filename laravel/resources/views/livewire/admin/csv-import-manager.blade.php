@@ -142,6 +142,64 @@
 
             <div class="card mt-3">
                 <div class="card-header">
+                    <h3 class="card-title mb-0">Already Imported CSV Datasets</h3>
+                </div>
+                <div class="card-body">
+                    @if(!$organizationId)
+                        <p class="text-muted mb-0">Select an organization to view/edit imported datasets.</p>
+                    @elseif($this->importedDatasets->isEmpty())
+                        <p class="text-muted mb-0">No imported CSV datasets found yet for this organization.</p>
+                    @else
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Dataset</th>
+                                        <th>Type</th>
+                                        <th>Qdrant Type</th>
+                                        <th>Rows</th>
+                                        <th>Source File</th>
+                                        <th>Last Updated</th>
+                                        <th style="width: 230px;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($this->importedDatasets as $dataset)
+                                        <tr>
+                                            <td>{{ $dataset['dataset'] }}</td>
+                                            <td>{{ $dataset['type'] }}</td>
+                                            <td>{{ $dataset['qdrant_type'] }}</td>
+                                            <td>{{ $dataset['row_count'] }}</td>
+                                            <td>{{ $dataset['source_file'] ?: '-' }}</td>
+                                            <td>{{ $dataset['last_updated_at'] ?: '-' }}</td>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm btn-primary"
+                                                    wire:click='openDatasetEditor(@json($dataset["dataset"]), @json($dataset["type"]))'
+                                                >
+                                                    <i class="fas fa-edit"></i> View / Edit
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm btn-danger"
+                                                    wire:click='deleteDataset(@json($dataset["dataset"]), @json($dataset["type"]))'
+                                                    onclick="return confirm('Delete this full dataset and its vector records?')"
+                                                >
+                                                    <i class="fas fa-trash"></i> Delete
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    @endif
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-header">
                     <h3 class="card-title mb-0">CSV Type Hints</h3>
                 </div>
                 <div class="card-body">
@@ -164,6 +222,92 @@
                     </div>
                     <div class="card-body">
                         <pre class="mb-0" style="white-space: pre-wrap;">{{ $importOutput }}</pre>
+                    </div>
+                </div>
+            @endif
+
+            @if($showEditorModal)
+                <div class="modal fade show d-block" tabindex="-1" role="dialog" style="background: rgba(0,0,0,0.5);">
+                    <div class="modal-dialog modal-xl" role="document">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    Edit Imported CSV Data
+                                    <small class="text-muted d-block">
+                                        Dataset: {{ $selectedDataset }} | Type: {{ $selectedType }} | Source: {{ $selectedSourceFile ?: '-' }}
+                                    </small>
+                                </h5>
+                                <button type="button" class="close" wire:click="closeEditorModal" aria-label="Close">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                            <div class="modal-body p-0">
+                                <div class="d-flex justify-content-between align-items-center p-2 border-bottom">
+                                    <small class="text-muted">You can edit existing rows, add new rows, and remove rows here.</small>
+                                    <button type="button" class="btn btn-sm btn-success" wire:click="addEditorRow">
+                                        <i class="fas fa-plus"></i> Add Row
+                                    </button>
+                                </div>
+                                <div class="table-responsive" style="max-height: 70vh; overflow: auto;">
+                                    <table class="table table-sm table-bordered mb-0">
+                                        <thead class="thead-light" style="position: sticky; top: 0; z-index: 2;">
+                                            <tr>
+                                                <th style="min-width: 80px;">ID</th>
+                                                <th style="min-width: 210px;">External Key</th>
+                                                <th style="min-width: 200px;">Name</th>
+                                                <th style="min-width: 140px;">Category</th>
+                                                <th style="min-width: 280px;">Description</th>
+                                                <th style="min-width: 360px;">Content</th>
+                                                <th style="min-width: 90px;">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach($editorRows as $index => $row)
+                                                <tr>
+                                                    <td>
+                                                        {{ $row['id'] ?: 'new' }}
+                                                        <input type="hidden" wire:model="editorRows.{{ $index }}.id">
+                                                        <input type="hidden" wire:model="editorRows.{{ $index }}.external_key">
+                                                        <input type="hidden" wire:model="editorRows.{{ $index }}.qdrant_type">
+                                                    </td>
+                                                    <td>
+                                                        <small>{{ $row['external_key'] }}</small>
+                                                    </td>
+                                                    <td>
+                                                        <input type="text" class="form-control form-control-sm" wire:model.defer="editorRows.{{ $index }}.name">
+                                                    </td>
+                                                    <td>
+                                                        <input type="text" class="form-control form-control-sm" wire:model.defer="editorRows.{{ $index }}.category">
+                                                    </td>
+                                                    <td>
+                                                        <textarea class="form-control form-control-sm" rows="3" wire:model.defer="editorRows.{{ $index }}.description"></textarea>
+                                                    </td>
+                                                    <td>
+                                                        <textarea class="form-control form-control-sm" rows="4" wire:model.defer="editorRows.{{ $index }}.content"></textarea>
+                                                    </td>
+                                                    <td>
+                                                        <button
+                                                            type="button"
+                                                            class="btn btn-sm btn-outline-danger"
+                                                            wire:click="removeEditorRow({{ $index }})"
+                                                            onclick="return confirm('Delete this row?')"
+                                                        >
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" wire:click="closeEditorModal">Close</button>
+                                <button type="button" class="btn btn-primary" wire:click="saveEditedRows">
+                                    <i class="fas fa-save"></i> Save Changes
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             @endif

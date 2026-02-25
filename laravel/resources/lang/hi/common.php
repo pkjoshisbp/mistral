@@ -3,6 +3,11 @@ return [
     // Pricing Plan Features & Buttons
     'plan_starter_title' => 'स्टार्टर',
     'plan_starter_desc' => 'एआई चैट के साथ शुरुआत करने वाले छोटे व्यवसायों के लिए बिल्कुल सही',
+    'plan_free_title' => 'मुफ्त',
+    'plan_free_desc' => 'Shopify उपयोगकर्ताओं के लिए मुफ्त ट्रायल प्लान',
+    'plan_free_button' => 'मुफ्त ट्रायल शुरू करें',
+    'plan_free_feature_20k_tokens_for_free_trial' => 'मुफ्त ट्रायल के लिए 20K टोकन',
+    'plan_free_feature_try_before_you_buy' => 'खरीदने से पहले आज़माएँ',
     'ai_is_typing' => 'एआई टाइप कर रहा है...',
     'admin_panel' => 'एडमिन पैनल पर जाएं',
     'dashboard' => 'डैशबोर्ड पर जाएं',

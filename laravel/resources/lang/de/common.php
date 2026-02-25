@@ -37,6 +37,12 @@ return [
     'plan_payg_feature_no_monthly_commitment' => 'Keine monatliche Bindung',
     'plan_payg_button' => 'Pay-as-you-go wählen',
 
+    'plan_free_title' => 'Kostenlos',
+    'plan_free_desc' => 'Kostenloser Testplan für Shopify-Nutzer',
+    'plan_free_button' => 'Kostenlose Testversion starten',
+    'plan_free_feature_20k_tokens_for_free_trial' => '20K Tokens für kostenlose Testversion',
+    'plan_free_feature_try_before_you_buy' => 'Vor dem Kauf testen',
+
     'plan_enterprise_title' => 'Enterprise',
     'plan_enterprise_desc' => 'Individuelle Lösungen für große Organisationen',
     'plan_enterprise_tokens' => '50 Mio. Tokens/Monat',

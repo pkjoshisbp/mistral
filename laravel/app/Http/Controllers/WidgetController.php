@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Organization;
+use App\Models\Integration;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\Analytics;
@@ -37,6 +38,49 @@ class WidgetController
         $this->aiAgentService = $aiAgentService;
         $this->faqFollowUpService = $faqFollowUpService;
         $this->followUpStateService = $followUpStateService;
+    }
+
+    /**
+     * Resolve Shopify shop domain to organization widget config.
+     */
+    public function resolveShopifyOrganization(Request $request)
+    {
+        $shop = strtolower(trim((string) $request->query('shop')));
+
+        if ($shop === '') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Missing shop domain',
+            ], 422);
+        }
+
+        if (!str_ends_with($shop, '.myshopify.com')) {
+            $shop .= '.myshopify.com';
+        }
+
+        $integration = Integration::with('organization')
+            ->where('provider', 'shopify')
+            ->where('shop', $shop)
+            ->where('active', true)
+            ->first();
+
+        if (!$integration || !$integration->organization || !$integration->organization->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No active organization found for this Shopify shop',
+            ], 404);
+        }
+
+        $organization = $integration->organization;
+
+        return response()->json([
+            'success' => true,
+            'organization_id' => $organization->id,
+            'organization_slug' => $organization->slug,
+            'script_url' => url('/widget/' . $organization->slug . '/script.js'),
+        ])->header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+            ->header('Pragma', 'no-cache')
+            ->header('Expires', '0');
     }
 
     /**
@@ -105,6 +149,7 @@ class WidgetController
             'brandingText' => trim((string)($settings['branding_text'] ?? 'AI Chat Support')) ?: 'AI Chat Support',
             // Shopify integration flag
             'isShopify' => $hasShopifyIntegration,
+            'customJs' => $this->sanitizeWidgetCustomCode($settings['widget_custom_js'] ?? null),
         ];
 
         $script = view('widget.script', compact('widgetConfig'))->render();
@@ -153,8 +198,9 @@ class WidgetController
             'textColor' => $settings['text_color'] ?? '#333333',
             'borderRadius' => $settings['border_radius'] ?? '10px'
         ];
+        $customCss = $this->sanitizeWidgetCustomCode($settings['widget_custom_css'] ?? null);
 
-        $css = view('widget.styles', compact('theme'))->render();
+        $css = view('widget.styles', compact('theme', 'customCss'))->render();
 
         return response($css)
             ->header('Content-Type', 'text/css')
@@ -163,6 +209,18 @@ class WidgetController
             ->header('Pragma', 'no-cache')
             ->header('Expires', '0')
             ->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    private function sanitizeWidgetCustomCode($code): string
+    {
+        if (!is_string($code)) {
+            return '';
+        }
+
+        $clean = str_replace(["\0", "\r\0", "\x1A"], '', $code);
+        $clean = trim($clean);
+
+        return $clean;
     }
 
     /**
@@ -6904,7 +6962,7 @@ class WidgetController
         // Always consider user credits as a fallback funding source
         $creditBalance = 0;
         try {
-            $creditBalance = optional(\App\Models\UserCredit::getOrCreateForUser($user->id))->balance ?? 0;
+            $creditBalance = optional(\App\Models\UserCredit::getOrCreateForUser($user->id))->getUsableCreditBalance() ?? 0;
         } catch (\Throwable $e) {
             Log::error('Failed to load user credit balance', ['user_id' => $user->id, 'error' => $e->getMessage()]);
         }

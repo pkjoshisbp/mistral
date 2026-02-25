@@ -193,30 +193,132 @@
                                 @error('features') <div class="text-danger">{{ $message }}</div> @enderror
                             </div>
 
-                            <!-- Sample Questions Section -->
+                            <!-- Demo FAQs Section -->
                             <div class="mb-4">
-                                <label class="form-label">Sample Questions *</label>
-                                <div class="input-group mb-2">
-                                    <input type="text" class="form-control" wire:model="questionInput" 
-                                           placeholder="Add a sample question users can try">
-                                    <button type="button" class="btn btn-outline-primary" wire:click="addQuestion">
-                                        <i class="fas fa-plus"></i> Add
-                                    </button>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <label class="form-label mb-0 fw-semibold">
+                                        <i class="fas fa-question-circle me-1 text-primary"></i> Demo FAQs *
+                                    </label>
+                                    @if(!$showFaqForm)
+                                        <button type="button" class="btn btn-primary btn-sm" wire:click="$set('showFaqForm', true)">
+                                            <i class="fas fa-plus me-1"></i> Add FAQ
+                                        </button>
+                                    @endif
                                 </div>
-                                @if(!empty($sample_questions))
-                                    <div class="border rounded p-2 max-height-200 overflow-auto">
-                                        @foreach($sample_questions as $index => $question)
-                                            <div class="d-flex justify-content-between align-items-center border-bottom py-1">
-                                                <small>{{ $question }}</small>
-                                                <button type="button" class="btn btn-sm btn-outline-danger" 
-                                                        wire:click="removeQuestion({{ $index }})">
-                                                    <i class="fas fa-times"></i>
+
+                                @error('sample_questions') <div class="alert alert-danger py-1 px-2 mb-2 small">{{ $message }}</div> @enderror
+
+                                {{-- Inline FAQ Form (add new or edit existing) --}}
+                                @if($showFaqForm)
+                                    <div class="border rounded p-3 mb-3 bg-light">
+                                        <h6 class="mb-3 text-primary">
+                                            <i class="fas fa-{{ $editingQuestionIndex !== null ? 'edit' : 'plus-circle' }} me-1"></i>
+                                            {{ $editingQuestionIndex !== null ? 'Edit FAQ' : 'Add New FAQ' }}
+                                        </h6>
+
+                                        <div class="mb-2">
+                                            <label class="form-label form-label-sm mb-1">Question <span class="text-danger">*</span></label>
+                                            @if($editingQuestionIndex !== null)
+                                                <input type="text" class="form-control" wire:model="editingQuestionValue" placeholder="Enter the question">
+                                            @else
+                                                <input type="text" class="form-control" wire:model="questionInput" placeholder="Enter the question">
+                                            @endif
+                                        </div>
+
+                                        <div class="mb-2">
+                                            <label class="form-label form-label-sm mb-1">Answer <span class="text-danger">*</span></label>
+                                            @if($editingQuestionIndex !== null)
+                                                <textarea class="form-control" wire:model="editingQuestionAnswer" rows="4" placeholder="Enter the answer that the AI will use for this question"></textarea>
+                                            @else
+                                                <textarea class="form-control" wire:model="questionAnswerInput" rows="4" placeholder="Enter the answer that the AI will use for this question"></textarea>
+                                            @endif
+                                            <small class="text-muted">This answer will be stored in the vector database and used as context for the AI response.</small>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label class="form-label form-label-sm mb-1">Keywords <span class="text-muted">(optional)</span></label>
+                                            @if($editingQuestionIndex !== null)
+                                                <input type="text" class="form-control" wire:model="editingQuestionKeywords" placeholder="e.g., maternity, pediatric, care (comma separated)">
+                                            @else
+                                                <input type="text" class="form-control" wire:model="questionKeywordsInput" placeholder="e.g., appointment, schedule, booking (comma separated)">
+                                            @endif
+                                            <small class="text-muted">Keywords improve search matching. Use comma-separated values.</small>
+                                        </div>
+
+                                        <div class="d-flex gap-2">
+                                            @if($editingQuestionIndex !== null)
+                                                <button type="button" class="btn btn-success btn-sm" wire:click="saveQuestionEdit">
+                                                    <i class="fas fa-save me-1"></i> Update FAQ
                                                 </button>
-                                            </div>
-                                        @endforeach
+                                            @else
+                                                <button type="button" class="btn btn-success btn-sm" wire:click="addQuestion">
+                                                    <i class="fas fa-save me-1"></i> Save FAQ
+                                                </button>
+                                            @endif
+                                            <button type="button" class="btn btn-secondary btn-sm" wire:click="cancelQuestionEdit">
+                                                <i class="fas fa-times me-1"></i> Cancel
+                                            </button>
+                                        </div>
                                     </div>
                                 @endif
-                                @error('sample_questions') <div class="text-danger">{{ $message }}</div> @enderror
+
+                                {{-- FAQ List --}}
+                                @if(!empty($sample_questions))
+                                    <div class="border rounded overflow-hidden">
+                                        <table class="table table-sm table-hover mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th style="width:35%">Question</th>
+                                                    <th style="width:45%">Answer Preview</th>
+                                                    <th style="width:12%">Keywords</th>
+                                                    <th style="width:8%" class="text-end">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach($sample_questions as $index => $questionEntry)
+                                                    <tr class="{{ ($editingQuestionIndex === $index) ? 'table-warning' : '' }}">
+                                                        <td class="align-top">
+                                                            <span class="fw-medium small">{{ $questionEntry['question'] ?? '' }}</span>
+                                                        </td>
+                                                        <td class="align-top">
+                                                            @if(!empty($questionEntry['answer']))
+                                                                <span class="text-muted small">{{ \Illuminate\Support\Str::limit($questionEntry['answer'], 120) }}</span>
+                                                            @else
+                                                                <span class="badge bg-warning text-dark"><i class="fas fa-exclamation-triangle me-1"></i>No answer yet</span>
+                                                            @endif
+                                                        </td>
+                                                        <td class="align-top">
+                                                            @if(!empty($questionEntry['keywords']))
+                                                                <small class="text-muted">{{ \Illuminate\Support\Str::limit($questionEntry['keywords'], 30) }}</small>
+                                                            @else
+                                                                <span class="text-muted small">—</span>
+                                                            @endif
+                                                        </td>
+                                                        <td class="align-top text-end">
+                                                            <div class="btn-group btn-group-sm">
+                                                                <button type="button" class="btn btn-outline-primary" wire:click="startQuestionEdit({{ $index }})" title="Edit FAQ">
+                                                                    <i class="fas fa-edit"></i>
+                                                                </button>
+                                                                <button type="button" class="btn btn-outline-danger" wire:click="removeQuestion({{ $index }})" title="Remove FAQ"
+                                                                        onclick="if(!confirm('Remove this FAQ?')) { event.preventDefault(); event.stopImmediatePropagation(); }">
+                                                                    <i class="fas fa-trash"></i>
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <small class="text-muted d-block mt-1">{{ count($sample_questions) }} FAQ(s). After saving, click "Sync to Qdrant" to update the demo AI search database.</small>
+                                @else
+                                    @if(!$showFaqForm)
+                                        <div class="border rounded p-4 text-center text-muted bg-light">
+                                            <i class="fas fa-question-circle fa-2x mb-2 d-block"></i>
+                                            No demo FAQs added yet. Click <strong>Add FAQ</strong> to get started.
+                                        </div>
+                                    @endif
+                                @endif
                             </div>
 
                             <!-- AI Responses Section -->

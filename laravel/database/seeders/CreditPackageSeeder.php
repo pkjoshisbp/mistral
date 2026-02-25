@@ -15,7 +15,7 @@ class CreditPackageSeeder extends Seeder
      * - Pro Plan: $199/month for 10M tokens = $19.90 per 1M tokens (monthly)
      * - PAYG: $5 for 100K tokens = $50 per 1M tokens
      * 
-     * Credit packages should be more expensive than subscriptions since they never expire
+    * Credit packages should be more expensive than subscriptions due to fixed validity and carry-forward flexibility
      * Premium: 20-30% more than subscription equivalent
      */
     public function run(): void
@@ -30,7 +30,7 @@ class CreditPackageSeeder extends Seeder
                 'tokens' => 500000, // 500K tokens
                 'features' => [
                     '500 Thousand tokens',
-                    'Never expires',
+                    'Credits remain active for 12 months and can be carried forward on timely renewal.',
                     'Easy entry, no commitment',
                     'Perfect for testing',
                     'Email support'
@@ -41,13 +41,13 @@ class CreditPackageSeeder extends Seeder
             [
                 'name' => 'Basic Credits',
                 'slug' => 'basic-credits',
-                'description' => 'Perfect for occasional usage with no expiration',
+                'description' => 'Perfect for occasional usage with 12-month validity',
                 'usd_price' => 69.00, // ~40% more than Starter monthly rate per 1M
                 'inr_price' => 5730.00, // 5730 INR (~83x conversion)
                 'tokens' => 1000000, // 1M tokens
                 'features' => [
                     '1 Million tokens',
-                    'Never expires',
+                    'Credits remain active for 12 months and can be carried forward on timely renewal.',
                     'Pay once, use anytime',
                     'Perfect for small projects',
                     'Email support'
@@ -58,13 +58,13 @@ class CreditPackageSeeder extends Seeder
             [
                 'name' => 'Standard Credits', 
                 'slug' => 'standard-credits',
-                'description' => 'Great value for regular usage with lifetime validity',
+                'description' => 'Great value for regular usage with 12-month validity',
                 'usd_price' => 129.00, // ~30% more than Starter for 2M
                 'inr_price' => 10700.00,
                 'tokens' => 2000000, // 2M tokens 
                 'features' => [
                     '2 Million tokens',
-                    'Never expires',
+                    'Credits remain active for 12 months and can be carried forward on timely renewal.',
                     'Better value per token',
                     'Priority support',
                     'Usage analytics'
@@ -81,7 +81,7 @@ class CreditPackageSeeder extends Seeder
                 'tokens' => 5000000, // 5M tokens
                 'features' => [
                     '5 Million tokens',
-                    'Never expires',
+                    'Credits remain active for 12 months and can be carried forward on timely renewal.',
                     'Best value per token',
                     'Dedicated support',
                     'Advanced analytics',

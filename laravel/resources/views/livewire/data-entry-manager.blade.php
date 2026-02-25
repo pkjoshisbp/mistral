@@ -39,6 +39,7 @@
                     <label for="dataType">Data Type</label>
                     <select wire:model.live="dataType" class="form-control" id="dataType">
                         <option value="service">Services/Tests</option>
+                        <option value="doctor">Doctors</option>
                         <option value="product">Products</option>
                         <option value="faq">FAQ</option>
                         <option value="info">General Information</option>
@@ -165,6 +166,18 @@
                                 <li><strong>Requirements:</strong> Fasting, preparation needed</li>
                                 <li><strong>Duration:</strong> How long the test takes</li>
                                 <li><strong>Availability:</strong> When it's available</li>
+                            </ul>
+                            @break
+
+                        @case('doctor')
+                            <p><strong>Doctors:</strong> Add doctor profiles with specialization and schedule.</p>
+                            <ul>
+                                <li><strong>Doctor Name:</strong> Full name (e.g., "Dr. N.K. Jajodia")</li>
+                                <li><strong>Qualification/Profile:</strong> Degrees and short profile (e.g., "MD Pathology")</li>
+                                <li><strong>Specialization:</strong> Clinical specialization (e.g., Radiology)</li>
+                                <li><strong>Department:</strong> Department/Unit</li>
+                                <li><strong>Timing:</strong> OPD/availability timing</li>
+                                <li><strong>On Leave:</strong> Optional leave period (e.g., 7 Mar 2026 - 13 Mar 2026)</li>
                             </ul>
                             @break
 

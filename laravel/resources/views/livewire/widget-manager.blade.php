@@ -95,6 +95,20 @@
                         </select>
                     </div>
 
+                    <div class="form-group">
+                        <label>Custom Widget CSS (optional)</label>
+                        <textarea wire:model="settings.widget_custom_css" class="form-control" rows="6" placeholder="/* Example */&#10;.ai-chat-window {&#10;  max-width: 460px !important;&#10;}"></textarea>
+                        @error('settings.widget_custom_css') <span class="text-danger">{{ $message }}</span> @enderror
+                        <small class="text-muted">Applied only to selected organization's widget stylesheet.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Custom Widget JS (optional)</label>
+                        <textarea wire:model="settings.widget_custom_js" class="form-control" rows="6" placeholder="// Example&#10;console.log('Widget ready', config.orgId);"></textarea>
+                        @error('settings.widget_custom_js') <span class="text-danger">{{ $message }}</span> @enderror
+                        <small class="text-muted">Executed in widget context for selected organization only.</small>
+                    </div>
+
                     <hr>
                     <h6>Branding</h6>
                     <div class="form-check mb-2">

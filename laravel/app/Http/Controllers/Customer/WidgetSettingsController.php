@@ -31,6 +31,8 @@ class WidgetSettingsController extends Controller
             'widgetAllowedDomains' => 'nullable|string|max:3000',
             'widgetContactFields' => 'nullable|string|max:5000',
             'queryTranslationMap' => 'nullable|string|max:12000',
+            'widgetCustomCss' => 'nullable|string|max:20000',
+            'widgetCustomJs' => 'nullable|string|max:20000',
         ]);
 
         $settings = $org->settings ?? [];
@@ -117,6 +119,24 @@ class WidgetSettingsController extends Controller
                 unset($settings['query_translation_map']);
             } else {
                 $settings['query_translation_map'] = $raw;
+            }
+        }
+
+        if (array_key_exists('widgetCustomCss', $data)) {
+            $raw = trim((string) $data['widgetCustomCss']);
+            if ($raw === '') {
+                unset($settings['widget_custom_css']);
+            } else {
+                $settings['widget_custom_css'] = $raw;
+            }
+        }
+
+        if (array_key_exists('widgetCustomJs', $data)) {
+            $raw = trim((string) $data['widgetCustomJs']);
+            if ($raw === '') {
+                unset($settings['widget_custom_js']);
+            } else {
+                $settings['widget_custom_js'] = $raw;
             }
         }
 

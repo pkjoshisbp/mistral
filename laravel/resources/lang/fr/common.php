@@ -35,6 +35,12 @@ return [
     'plan_payg_feature_no_monthly_commitment' => 'Aucun engagement mensuel',
     'plan_payg_button' => 'Choisir Paiement à l\'usage',
 
+    'plan_free_title' => 'Gratuit',
+    'plan_free_desc' => 'Plan d\'essai gratuit pour les utilisateurs Shopify',
+    'plan_free_button' => 'Démarrer l\'essai gratuit',
+    'plan_free_feature_20k_tokens_for_free_trial' => '20K tokens pour essai gratuit',
+    'plan_free_feature_try_before_you_buy' => 'Essayez avant d\'acheter',
+
     'plan_enterprise_title' => 'Entreprise',
     'plan_enterprise_desc' => 'Solutions personnalisées pour les grandes organisations',
     'plan_enterprise_tokens' => '50M tokens/mois',

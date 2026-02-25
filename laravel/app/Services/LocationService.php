@@ -12,8 +12,26 @@ class LocationService
      */
     public function getUserCountry($ip = null)
     {
+        $cfCountry = strtoupper((string) (
+            request()->header('CF-IPCountry')
+            ?? request()->server('HTTP_CF_IPCOUNTRY')
+            ?? ''
+        ));
+        if (preg_match('/^[A-Z]{2}$/', $cfCountry)) {
+            return $cfCountry;
+        }
+
+        $proxyCountry = strtoupper((string) (
+            request()->header('X-Country-Code')
+            ?? request()->server('HTTP_X_COUNTRY_CODE')
+            ?? ''
+        ));
+        if (preg_match('/^[A-Z]{2}$/', $proxyCountry)) {
+            return $proxyCountry;
+        }
+
         if (!$ip) {
-            $ip = request()->ip();
+            $ip = request()->ip() ?: request()->getClientIp();
         }
 
         // Skip for local IPs

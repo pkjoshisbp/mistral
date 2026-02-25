@@ -55,6 +55,12 @@ return [
     'plan_payg_feature_no_monthly_commitment' => 'No monthly commitment',
     'plan_payg_button' => 'Choose Pay-as-you-go',
 
+    'plan_free_title' => 'Free',
+    'plan_free_desc' => 'Free trial plan for Shopify users',
+    'plan_free_button' => 'Start Free Trial',
+    'plan_free_feature_20k_tokens_for_free_trial' => '20K tokens for free trial',
+    'plan_free_feature_try_before_you_buy' => 'Try before you buy',
+
     'plan_enterprise_title' => 'Enterprise',
     'plan_enterprise_desc' => 'Custom solutions for large organizations',
     'plan_enterprise_tokens' => '50M tokens/month',

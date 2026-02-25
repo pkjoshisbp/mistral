@@ -36,6 +36,7 @@ class CsvImportManager extends Component
     public $selectedType = '';
     public $selectedSourceFile = '';
     public $editorRows = [];
+    public $editorDeletedRowIds = [];
 
     protected $rules = [
         'csvFile' => 'required|file|mimes:csv,txt|max:10240',
@@ -111,6 +112,7 @@ class CsvImportManager extends Component
         $this->selectedDataset = $dataset;
         $this->selectedType = $type;
         $this->selectedSourceFile = (string) data_get($rows->first()->metadata, 'source_file', '');
+        $this->editorDeletedRowIds = [];
 
         $this->editorRows = $rows->map(function (OrganizationData $row): array {
             return [
@@ -128,6 +130,39 @@ class CsvImportManager extends Component
         $this->showEditorModal = true;
     }
 
+    public function addEditorRow(): void
+    {
+        if (!$this->showEditorModal) {
+            return;
+        }
+
+        $this->editorRows[] = [
+            'id' => null,
+            'external_key' => 'manual_' . now()->format('YmdHis') . '_' . substr((string) microtime(true), -4),
+            'qdrant_type' => $this->qdrantType ?: 'info',
+            'name' => '',
+            'description' => '',
+            'content' => '',
+            'category' => 'general',
+            'is_synced' => false,
+        ];
+    }
+
+    public function removeEditorRow(int $index): void
+    {
+        if (!isset($this->editorRows[$index])) {
+            return;
+        }
+
+        $rowId = (int) ($this->editorRows[$index]['id'] ?? 0);
+        if ($rowId > 0 && !in_array($rowId, $this->editorDeletedRowIds, true)) {
+            $this->editorDeletedRowIds[] = $rowId;
+        }
+
+        unset($this->editorRows[$index]);
+        $this->editorRows = array_values($this->editorRows);
+    }
+
     public function closeEditorModal(): void
     {
         $this->showEditorModal = false;
@@ -135,6 +170,49 @@ class CsvImportManager extends Component
         $this->selectedType = '';
         $this->selectedSourceFile = '';
         $this->editorRows = [];
+        $this->editorDeletedRowIds = [];
+    }
+
+    public function deleteDataset(string $dataset, string $type): void
+    {
+        $organization = $this->organization;
+        if (!$organization) {
+            session()->flash('error', 'No organization found for this account.');
+            return;
+        }
+
+        $rows = OrganizationData::query()
+            ->where('organization_id', $organization->id)
+            ->where('type', $type)
+            ->where('metadata->source', 'csv_import')
+            ->where('metadata->dataset', $dataset)
+            ->get();
+
+        if ($rows->isEmpty()) {
+            session()->flash('error', 'No rows found for selected dataset.');
+            return;
+        }
+
+        $qdrantIds = $rows->map(function (OrganizationData $row): string {
+            $qdrantType = (string) data_get($row->metadata, 'qdrant_type', 'info');
+            if (!in_array($qdrantType, ['faq', 'info', 'service'], true)) {
+                $qdrantType = 'info';
+            }
+            return $qdrantType . '_' . $row->id;
+        })->values()->all();
+
+        OrganizationData::query()->whereIn('id', $rows->pluck('id')->all())->delete();
+
+        if (!empty($qdrantIds)) {
+            $aiService = new AiAgentService();
+            $aiService->deleteDataFromQdrant($organization->slug, $qdrantIds);
+        }
+
+        session()->flash('message', 'Dataset deleted successfully.');
+
+        if ($this->showEditorModal && $this->selectedDataset === $dataset && $this->selectedType === $type) {
+            $this->closeEditorModal();
+        }
     }
 
     public function saveEditedRows(): void
@@ -145,8 +223,8 @@ class CsvImportManager extends Component
             return;
         }
 
-        if (empty($this->editorRows)) {
-            session()->flash('error', 'No rows to save.');
+        if (empty($this->editorRows) && empty($this->editorDeletedRowIds)) {
+            session()->flash('error', 'No changes to save.');
             return;
         }
 
@@ -170,27 +248,48 @@ class CsvImportManager extends Component
 
         foreach ($this->editorRows as $edited) {
             $id = (int) ($edited['id'] ?? 0);
-            if ($id <= 0 || !$existingRows->has($id)) {
-                continue;
+            $isExisting = $id > 0 && $existingRows->has($id);
+
+            if ($isExisting) {
+                $row = $existingRows->get($id);
+                $metadata = is_array($row->metadata) ? $row->metadata : [];
+            } else {
+                $metadata = [];
             }
-
-            $row = $existingRows->get($id);
-            $metadata = is_array($row->metadata) ? $row->metadata : [];
             $metadata['category'] = trim((string) ($edited['category'] ?? 'general'));
+            $metadata['source'] = 'csv_import';
+            $metadata['dataset'] = $this->selectedDataset;
+            $metadata['source_file'] = $this->selectedSourceFile;
+            $metadata['external_key'] = trim((string) ($edited['external_key'] ?? data_get($metadata, 'external_key', '')));
 
-            $row->update([
-                'name' => trim((string) ($edited['name'] ?? '')),
-                'description' => trim((string) ($edited['description'] ?? '')),
-                'content' => trim((string) ($edited['content'] ?? '')),
-                'metadata' => $metadata,
-                'is_synced' => false,
-                'last_synced_at' => null,
-            ]);
+            if ($isExisting) {
+                $row->update([
+                    'name' => trim((string) ($edited['name'] ?? '')),
+                    'description' => trim((string) ($edited['description'] ?? '')),
+                    'content' => trim((string) ($edited['content'] ?? '')),
+                    'metadata' => $metadata,
+                    'is_synced' => false,
+                    'last_synced_at' => null,
+                ]);
+            } else {
+                $row = OrganizationData::create([
+                    'organization_id' => $organization->id,
+                    'type' => $this->selectedType,
+                    'name' => trim((string) ($edited['name'] ?? '')),
+                    'description' => trim((string) ($edited['description'] ?? '')),
+                    'content' => trim((string) ($edited['content'] ?? '')),
+                    'metadata' => $metadata,
+                    'is_synced' => false,
+                    'last_synced_at' => null,
+                ]);
+            }
 
             $qdrantType = trim((string) ($edited['qdrant_type'] ?? data_get($metadata, 'qdrant_type', 'info')));
             if (!in_array($qdrantType, ['faq', 'info', 'service'], true)) {
                 $qdrantType = 'info';
             }
+            $metadata['qdrant_type'] = $qdrantType;
+            $row->update(['metadata' => $metadata]);
 
             $csvRow = data_get($row->metadata, 'csv', []);
             $model = trim((string) data_get($csvRow, 'model', ''));
@@ -231,9 +330,33 @@ class CsvImportManager extends Component
             $updatedIds[] = $row->id;
         }
 
-        if (empty($updatedIds)) {
-            session()->flash('error', 'No valid rows found to update.');
-            return;
+        if (!empty($this->editorDeletedRowIds)) {
+            $rowsToDelete = OrganizationData::query()
+                ->where('organization_id', $organization->id)
+                ->whereIn('id', $this->editorDeletedRowIds)
+                ->get();
+
+            $qdrantDeleteIds = $rowsToDelete->map(function (OrganizationData $row): string {
+                $qdrantType = (string) data_get($row->metadata, 'qdrant_type', 'info');
+                if (!in_array($qdrantType, ['faq', 'info', 'service'], true)) {
+                    $qdrantType = 'info';
+                }
+                return $qdrantType . '_' . $row->id;
+            })->values()->all();
+
+            OrganizationData::query()
+                ->where('organization_id', $organization->id)
+                ->whereIn('id', $this->editorDeletedRowIds)
+                ->delete();
+
+            if (!empty($qdrantDeleteIds)) {
+                $aiService = new AiAgentService();
+                $deleteResult = $aiService->deleteDataFromQdrant($organization->slug, $qdrantDeleteIds);
+                if (!$deleteResult) {
+                    session()->flash('error', 'Rows were deleted in DB, but Qdrant delete failed.');
+                    return;
+                }
+            }
         }
 
         $aiService = new AiAgentService();
@@ -256,7 +379,7 @@ class CsvImportManager extends Component
                 'last_synced_at' => now(),
             ]);
 
-        session()->flash('message', 'CSV rows updated and synced successfully.');
+        session()->flash('message', 'CSV rows saved and synced successfully.');
         $this->openDatasetEditor($this->selectedDataset, $this->selectedType);
     }
 

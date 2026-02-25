@@ -24,6 +24,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('email:resend-unopened')->hourly();
         $schedule->command('email:send-scheduled')->everyMinute();
         $schedule->command('whatsapp:sync-templates')->dailyAt('02:00')->withoutOverlapping();
+        $schedule->command('credits:scan-expiry --days=7')->dailyAt('01:30')->withoutOverlapping();
     }
 
     /**

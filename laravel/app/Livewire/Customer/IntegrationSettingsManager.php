@@ -36,6 +36,8 @@ class IntegrationSettingsManager extends Component
     public $widget_offset_x = 20;
     public $widget_offset_y = 20;
     public $chat_history_ttl_hours = 24;
+    public $widget_custom_css = '';
+    public $widget_custom_js = '';
 
     // Intent keywords & org type
     public $org_type;
@@ -82,6 +84,8 @@ class IntegrationSettingsManager extends Component
         'widget_offset_x' => 'required|integer|min:0|max:200',
         'widget_offset_y' => 'required|integer|min:0|max:200',
         'chat_history_ttl_hours' => 'required|integer|min:1|max:168',
+        'widget_custom_css' => 'nullable|string|max:20000',
+        'widget_custom_js' => 'nullable|string|max:20000',
         'org_type' => 'nullable|string|max:50',
         'notify_chat_email_enabled' => 'boolean',
         'notify_chat_emails' => 'nullable|string|max:1000',
@@ -127,6 +131,8 @@ class IntegrationSettingsManager extends Component
         $this->widget_offset_x = $settings['widget_offset_x'] ?? 20;
         $this->widget_offset_y = $settings['widget_offset_y'] ?? 20;
         $this->chat_history_ttl_hours = (int) ($settings['chat_history_ttl_hours'] ?? 24);
+        $this->widget_custom_css = (string) ($settings['widget_custom_css'] ?? '');
+        $this->widget_custom_js = (string) ($settings['widget_custom_js'] ?? '');
 
         $this->org_type = $settings['org_type'] ?? null;
         $storedKeywords = $settings['intent_keywords'] ?? [];
@@ -191,6 +197,8 @@ class IntegrationSettingsManager extends Component
             $settings['widget_offset_x'] = $this->widget_offset_x;
             $settings['widget_offset_y'] = $this->widget_offset_y;
             $settings['chat_history_ttl_hours'] = $this->chat_history_ttl_hours;
+            $settings['widget_custom_css'] = trim((string) $this->widget_custom_css) ?: null;
+            $settings['widget_custom_js'] = trim((string) $this->widget_custom_js) ?: null;
 
             $settings['org_type'] = $this->org_type;
             $settings['intent_keywords'] = [

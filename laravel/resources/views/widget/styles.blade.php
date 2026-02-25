@@ -16,7 +16,7 @@
 .ai-chat-notification { position:absolute !important; top:-4px !important; right:-4px !important; width:20px !important; height:20px !important; background:#ff424d !important; color:#fff !important; border-radius:50% !important; font-size:11px !important; font-weight:600 !important; display:flex !important; align-items:center !important; justify-content:center !important; }
 
 /* Window */
-.ai-chat-window { position:absolute !important; bottom:calc(60px + 0px) !important; right:0 !important; width:427px !important; height:min(833px, calc(100dvh - (60px + var(--ai-offset-y) + 12px))) !important; max-height:calc(100dvh - (60px + var(--ai-offset-y) + 12px)) !important; background:#fff !important; border-radius:18px !important; box-shadow:0 18px 48px -8px rgba(20,20,40,.22),0 6px 18px -4px rgba(20,20,40,.18) !important; display:none !important; overflow:hidden !important; border:1px solid #e5e9ef !important; display:flex !important; flex-direction:column !important; transition:all .3s ease !important; }
+.ai-chat-window { position:absolute !important; bottom:calc(60px + 0px) !important; right:0 !important; width:427px !important; height:min(833px, calc(100dvh - (60px + var(--ai-offset-y) + 12px))) !important; max-height:calc(100dvh - (60px + var(--ai-offset-y) + 12px)) !important; background:#fff !important; border-radius:18px !important; box-shadow:0 18px 48px -8px rgba(20,20,40,.22),0 6px 18px -4px rgba(20,20,40,.18) !important; overflow:hidden !important; border:1px solid #e5e9ef !important; display:none !important; flex-direction:column !important; transition:all .3s ease !important; }
 /* Adjust chat window vertical position depending on top/bottom with offset */
 .ai-chat-widget.bottom-right .ai-chat-window,
 .ai-chat-widget.bottom-left .ai-chat-window { bottom: calc(60px + var(--ai-offset-y)) !important; }
@@ -42,16 +42,16 @@
 .ai-chat-close:hover { transform:rotate(90deg) !important; }
 
 /* Scroll / Messages */
-.ai-chat-messages { flex:1 !important; padding:22px 22px 12px 22px !important; overflow-y:auto !important; display:flex !important; flex-direction:column !important; gap:14px !important; background:linear-gradient(180deg,#f7f9fb 0%,#f2f5f8 120%) !important; }
+.ai-chat-messages { flex:1 !important; width:100% !important; padding:22px 22px 12px 22px !important; overflow-y:auto !important; display:flex !important; flex-direction:column !important; gap:14px !important; background:linear-gradient(180deg,#f7f9fb 0%,#f2f5f8 120%) !important; align-items:flex-start !important; }
 .ai-chat-messages::-webkit-scrollbar { width:6px !important; }
 .ai-chat-messages::-webkit-scrollbar-track { background:transparent !important; }
 .ai-chat-messages::-webkit-scrollbar-thumb { background:#c3ccd6 !important; border-radius:3px !important; }
 
 /* Message Blocks */
-.ai-chat-message { max-width:82% !important; display:flex !important; flex-direction:column !important; }
-.ai-chat-message-user { align-self:flex-end !important; }
-.ai-chat-message-bot { align-self:flex-start !important; }
-.ai-chat-message-agent { align-self:flex-start !important; }
+.ai-chat-message { max-width:82% !important; display:flex !important; flex-direction:column !important; margin:0 !important; padding:0 !important; border:0 !important; outline:0 !important; background:transparent !important; }
+.ai-chat-message-user { align-self:flex-end !important; margin-left:auto !important; margin-right:0 !important; }
+.ai-chat-message-bot { align-self:flex-start !important; margin-left:0 !important; margin-right:auto !important; }
+.ai-chat-message-agent { align-self:flex-start !important; margin-left:0 !important; margin-right:auto !important; }
 .ai-chat-message-content { padding:12px 15px !important; border-radius:18px !important; font-size:14px !important; line-height:1.5 !important; box-shadow:0 1px 2px rgba(0,0,0,.08) !important; position:relative !important; }
 .ai-chat-message-user .ai-chat-message-content { background:{{ $theme['primaryColor'] }} !important; color:#fff !important; }
 .ai-chat-message-bot .ai-chat-message-content { background:#ffffff !important; color:{{ $theme['textColor'] }} !important; border:1px solid #e3e7ec !important; }
@@ -130,4 +130,11 @@
         width: auto;
         display: block;
     }
+
+@if(!empty($customCss))
+
+/* Organization-specific custom CSS */
+{!! $customCss !!}
+
+@endif
 

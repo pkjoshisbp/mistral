@@ -40,6 +40,7 @@
                     <div>
                         <select wire:model.live="dataType" class="form-control">
                             <option value="service">Service/Test</option>
+                            <option value="doctor">Doctor</option>
                             <option value="product">Product</option>
                             <option value="faq">FAQ</option>
                             <option value="info">General Info</option>

@@ -86,7 +86,7 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">
-                    <i class="fas fa-coins"></i> Credit Packages (Never Expire)
+                    <i class="fas fa-coins"></i> Credit Packages (Fixed Validity)
                 </h3>
                 <div class="card-tools">
                     <a href="{{ route('admin.pricing.credit-packages.create') }}" class="btn btn-success btn-sm">
@@ -103,6 +103,7 @@
                                 <th>USD Price</th>
                                 <th>INR Price</th>
                                 <th>Tokens</th>
+                                <th>Validity</th>
                                 <th>Cost per 1M Tokens</th>
                                 <th>Status</th>
                                 <th>Sort Order</th>
@@ -119,6 +120,7 @@
                                     <td>${{ number_format($package->usd_price, 2) }}</td>
                                     <td>₹{{ number_format($package->inr_price, 2) }}</td>
                                     <td>{{ $package->formatted_credits ?? number_format($package->tokens) }} tokens</td>
+                                    <td>{{ $package->credit_validity_label ?? (($package->credit_validity_months ?? 12) . ' months') }}</td>
                                     <td>
                                         ${{ number_format(($package->usd_price / $package->tokens) * 1000000, 2) }}
                                         <br><small class="text-muted">₹{{ number_format(($package->inr_price / $package->tokens) * 1000000, 2) }}</small>
@@ -138,7 +140,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="8" class="text-center text-muted">
+                                    <td colspan="9" class="text-center text-muted">
                                         No credit packages found. <a href="{{ route('admin.pricing.credit-packages.create') }}">Create one now</a>
                                     </td>
                                 </tr>
@@ -166,7 +168,7 @@
                         <h6>Credit Package Strategy:</h6>
                         <ul>
                             <li>Should be <strong>20-40% more expensive</strong> than subscription rates</li>
-                            <li>Never expire - premium for flexibility</li>
+                            <li>Fixed validity with carry-forward on timely renewal</li>
                             <li>Recommended: $60-80 per 1M tokens for credits</li>
                             <li>Use INR conversion rate: ~100x USD price (includes all taxes)</li>
                         </ul>

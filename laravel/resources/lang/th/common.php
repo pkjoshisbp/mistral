@@ -35,6 +35,12 @@ return [
     'plan_payg_feature_no_monthly_commitment' => 'ไม่มีข้อผูกมัดรายเดือน',
     'plan_payg_button' => 'เลือกจ่ายตามการใช้งาน',
 
+    'plan_free_title' => 'ฟรี',
+    'plan_free_desc' => 'แผนทดลองใช้ฟรีสำหรับผู้ใช้ Shopify',
+    'plan_free_button' => 'เริ่มทดลองใช้ฟรี',
+    'plan_free_feature_20k_tokens_for_free_trial' => '20K โทเค็นสำหรับทดลองใช้ฟรี',
+    'plan_free_feature_try_before_you_buy' => 'ลองใช้ก่อนตัดสินใจซื้อ',
+
     'plan_enterprise_title' => 'องค์กร',
     'plan_enterprise_desc' => 'โซลูชันที่กำหนดเองสำหรับองค์กรขนาดใหญ่',
     'plan_enterprise_tokens' => '50M โทเค็น/เดือน',

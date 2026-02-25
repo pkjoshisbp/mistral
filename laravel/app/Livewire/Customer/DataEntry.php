@@ -254,6 +254,13 @@ class DataEntry extends Component
                 'duration' => $this->duration,
                 'availability' => $this->availability
             ]),
+            'doctor' => array_merge($base, [
+                'content' => "Doctor: {$this->name}\nQualification/Profile: {$this->description}\nSpecialization: {$this->category}\nDepartment: {$this->requirements}\nTiming: {$this->availability}\nOn Leave: {$this->duration}",
+                'specialization' => $this->category,
+                'department' => $this->requirements,
+                'timing' => $this->availability,
+                'leave_period' => $this->duration,
+            ]),
             'product' => array_merge($base, [
                 'content' => "Product: {$this->name}\nDescription: {$this->description}\nPrice: {$this->price}\nCategory: {$this->category}",
                 'price' => $this->price
@@ -286,6 +293,14 @@ class DataEntry extends Component
                 'requirements' => 'Requirements/Preparation',
                 'duration' => 'Duration',
                 'availability' => 'Availability/Timing'
+            ],
+            'doctor' => [
+                'name' => 'Doctor Name',
+                'description' => 'Qualification/Profile',
+                'category' => 'Specialization',
+                'requirements' => 'Department',
+                'availability' => 'Timing (e.g. Mon-Sat 9:00 AM-2:30 PM)',
+                'duration' => 'On Leave (optional date range)'
             ],
             'product' => [
                 'name' => 'Product Name',

@@ -4,11 +4,15 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class UserCredit extends Model
 {
     use HasFactory;
+
+    private const DEFAULT_VALIDITY_MONTHS = 12;
+    private const GRACE_PERIOD_MONTHS = 1;
 
     protected $fillable = [
         'user_id',
@@ -94,7 +98,7 @@ class UserCredit extends Model
     public function deductCredits($amount, $reason = 'Usage', array $extra = [])
     {
         return DB::transaction(function () use ($amount, $reason, $extra) {
-            if ($this->balance < $amount) {
+            if ($this->getUsableCreditBalance() < $amount) {
                 return false; // Insufficient credits
             }
             
@@ -144,6 +148,130 @@ class UserCredit extends Model
      */
     public function hasSufficientCredits($amount)
     {
-        return $this->balance >= $amount;
+        return $this->getUsableCreditBalance() >= $amount;
+    }
+
+    public function getUsableCreditBalance(): float
+    {
+        $summary = $this->getUsableCreditSummary();
+
+        return (float) ($summary['usable_balance'] ?? 0);
+    }
+
+    public function getUsableCreditSummary(?Carbon $asOf = null): array
+    {
+        $asOf = $asOf ?: now();
+
+        $transactions = CreditTransaction::where('user_id', $this->user_id)
+            ->whereIn('type', ['credit', 'debit'])
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get(['id', 'type', 'amount', 'credit_package_id', 'created_at']);
+
+        $planIds = $transactions
+            ->where('type', 'credit')
+            ->pluck('credit_package_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $validityByPlanId = PricingPlan::whereIn('id', $planIds)
+            ->pluck('credit_validity_months', 'id');
+
+        $lots = [];
+        $totalCredited = 0.0;
+        $totalDebited = 0.0;
+
+        foreach ($transactions as $tx) {
+            $amount = (float) ($tx->amount ?? 0);
+            if ($amount <= 0) {
+                continue;
+            }
+
+            if ($tx->type === 'credit') {
+                $validityMonths = (int) ($validityByPlanId[$tx->credit_package_id] ?? self::DEFAULT_VALIDITY_MONTHS);
+                if ($validityMonths <= 0) {
+                    $validityMonths = self::DEFAULT_VALIDITY_MONTHS;
+                }
+
+                $creditedAt = Carbon::parse($tx->created_at);
+                $expiryAt = $creditedAt->copy()->addMonthsNoOverflow($validityMonths)->endOfDay();
+                $graceEndsAt = $expiryAt->copy()->addMonthsNoOverflow(self::GRACE_PERIOD_MONTHS)->endOfDay();
+
+                $lots[] = [
+                    'remaining' => $amount,
+                    'expiry_at' => $expiryAt,
+                    'grace_ends_at' => $graceEndsAt,
+                ];
+                $totalCredited += $amount;
+                continue;
+            }
+
+            if ($tx->type === 'debit') {
+                $toConsume = $amount;
+                $totalDebited += $amount;
+
+                foreach ($lots as &$lot) {
+                    if ($toConsume <= 0) {
+                        break;
+                    }
+                    if ($lot['remaining'] <= 0) {
+                        continue;
+                    }
+
+                    $used = min($lot['remaining'], $toConsume);
+                    $lot['remaining'] -= $used;
+                    $toConsume -= $used;
+                }
+                unset($lot);
+            }
+        }
+
+        $usableBalance = 0.0;
+        $expiredBalance = 0.0;
+        $inGraceBalance = 0.0;
+        $nextExpiryAt = null;
+        $nextGraceEndAt = null;
+
+        foreach ($lots as $lot) {
+            $remaining = (float) ($lot['remaining'] ?? 0);
+            if ($remaining <= 0) {
+                continue;
+            }
+
+            $expiryAt = $lot['expiry_at'];
+            $graceEndsAt = $lot['grace_ends_at'];
+
+            if ($asOf->gt($graceEndsAt)) {
+                $expiredBalance += $remaining;
+                continue;
+            }
+
+            $usableBalance += $remaining;
+
+            if ($asOf->gt($expiryAt)) {
+                $inGraceBalance += $remaining;
+                if ($nextGraceEndAt === null || $graceEndsAt->lt($nextGraceEndAt)) {
+                    $nextGraceEndAt = $graceEndsAt->copy();
+                }
+                continue;
+            }
+
+            if ($nextExpiryAt === null || $expiryAt->lt($nextExpiryAt)) {
+                $nextExpiryAt = $expiryAt->copy();
+            }
+        }
+
+        $computedRawBalance = max(0, $totalCredited - $totalDebited);
+
+        return [
+            'usable_balance' => round($usableBalance, 4),
+            'expired_balance' => round($expiredBalance, 4),
+            'in_grace_balance' => round($inGraceBalance, 4),
+            'raw_balance' => round($computedRawBalance, 4),
+            'next_expiry_at' => $nextExpiryAt,
+            'next_grace_end_at' => $nextGraceEndAt,
+            'grace_period_months' => self::GRACE_PERIOD_MONTHS,
+        ];
     }
 }

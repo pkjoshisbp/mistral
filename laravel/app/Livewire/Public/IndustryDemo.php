@@ -12,6 +12,7 @@ class IndustryDemo extends Component
     public $messages = [];
     public $query = '';
     public $isLoading = false;
+    public $isStreaming = false;
     public $demoData = [];
     public $selectedDemo = null;
 
@@ -45,7 +46,7 @@ class IndustryDemo extends Component
                     'organization' => $demoOrg->name,
                     'description' => $demoOrg->description,
                     'features' => $demoOrg->features ?: [],
-                    'sample_questions' => $demoOrg->sample_questions ?: []
+                    'sample_questions' => $this->normalizeSampleQuestions($demoOrg->sample_questions ?: [])
                 ];
                 return;
             }
@@ -192,6 +193,8 @@ class IndustryDemo extends Component
         if (!isset($this->selectedDemo)) {
             $this->selectedDemo = $this->demoData[$this->industry] ?? $this->demoData['healthcare'];
         }
+
+        $this->selectedDemo['sample_questions'] = $this->normalizeSampleQuestions($this->selectedDemo['sample_questions'] ?? []);
     }
 
     public function initializeChat()
@@ -223,6 +226,8 @@ class IndustryDemo extends Component
             'timestamp' => now(),
         ];
 
+        $this->dispatch('demo:scroll-bottom');
+
         // Trigger processing on the client after this render cycle
     $this->dispatch('demo:process', $userMessage);
     }
@@ -238,6 +243,7 @@ class IndustryDemo extends Component
             'content' => $question,
             'timestamp' => now(),
         ];
+        $this->dispatch('demo:scroll-bottom');
         // Dispatch event to process in a separate request (for smooth UX)
     $this->dispatch('demo:process', $question);
     }
@@ -287,48 +293,72 @@ class IndustryDemo extends Component
 
             $isOpenAI = $aiService->isOpenAiProvider();
             $systemPrompt = $isOpenAI
-                ? "You are {$orgName}'s AI assistant. Use only the Context below. Answer as {$orgName} with 'we/our'. Be brief and direct."
-                : "You are {$orgName}'s AI assistant. Use provided context. Answer as {$orgName} with 'we/our'. Keep responses brief.";
+                ? "You are {$orgName}'s AI assistant. Use only the Context below. Answer as {$orgName} with 'we/our'. Be brief and direct. Do not copy FAQ answers verbatim; rewrite naturally while preserving meaning."
+                : "You are {$orgName}'s AI assistant. Use provided context. Answer as {$orgName} with 'we/our'. Keep responses brief. Do not copy FAQ answers verbatim; rewrite naturally while preserving meaning.";
 
             $chatMessages = [
                 ['role' => 'system', 'content' => $systemPrompt . "\n\nContext:\n" . $context],
                 ['role' => 'user', 'content' => $message]
             ];
 
-            \Log::info('Demo context being sent to AI', [
+            \Log::info('Demo context being sent to AI (streaming)', [
                 'context_length' => strlen($context),
                 'system_message_length' => strlen($systemPrompt . "\n\nContext:\n" . $context),
                 'search_results_count' => isset($searchResults['results']) ? count($searchResults['results']) : 0,
-                'user_message' => $message
+                'user_message' => $message,
+                'use_vastai' => true,
             ]);
 
-            $response = $aiService->smartLlmChat($chatMessages);
+            // Keep isLoading=true so three-dot animation continues during the stream
+            $this->isLoading  = true;
+            $this->isStreaming = true;
 
-            if ($response && isset($response['message']['content']) && !empty($response['message']['content'])) {
-                $aiResponse = $response['message']['content'];
-            } elseif (!empty($searchResults)) {
-                $bestResult = $searchResults[0];
-                $payload = $bestResult['payload'] ?? $bestResult;
-                $aiResponse = $payload['answer'] ?? $payload['content'] ?? 'I found some relevant information but need more details to provide a complete answer.';
-            } else {
-                $aiResponse = "I'd be happy to help you! Could you please provide more specific details about what you're looking for?";
-            }
+            // Dispatch browser event — JS fetches /demo/stream-chat, accumulates tokens,
+            // then calls finalizeStream() to push the complete message into Livewire
+            $this->dispatch('demo:start-stream', messages: $chatMessages);
 
-            $this->messages[] = [
-                'role' => 'assistant',
-                'content' => $aiResponse,
-                'timestamp' => now()
-            ];
         } catch (\Exception $e) {
-            \Log::error('Demo chat error: ' . $e->getMessage());
+            \Log::error('Demo chat error in processQueuedMessage: ' . $e->getMessage());
             $this->messages[] = [
-                'role' => 'assistant',
-                'content' => 'Sorry, I encountered an error. Please try again.',
-                'timestamp' => now()
+                'role'      => 'assistant',
+                'content'   => 'Sorry, I encountered an error. Please try again.',
+                'timestamp' => now(),
             ];
-        } finally {
-            $this->isLoading = false;
+            $this->isLoading  = false;
+            $this->isStreaming = false;
         }
+    }
+
+    /**
+     * Called by JS when the SSE stream completes successfully.
+     */
+    public function finalizeStream(string $content): void
+    {
+        // Add the completed message to the chat
+        $this->messages[] = [
+            'role'      => 'assistant',
+            'content'   => $content,
+            'timestamp' => now(),
+        ];
+        $this->dispatch('demo:scroll-bottom');
+        $this->isStreaming = false;
+        $this->isLoading  = false;
+    }
+
+    /**
+     * Called by JS when the SSE stream encounters an error.
+     */
+    public function streamError(?string $error = null): void
+    {
+        \Log::error('Demo stream error reported by client', ['error' => $error]);
+        $this->messages[] = [
+            'role'      => 'assistant',
+            'content'   => 'Sorry, I encountered an error. Please try again.',
+            'timestamp' => now(),
+        ];
+        $this->dispatch('demo:scroll-bottom');
+        $this->isStreaming = false;
+        $this->isLoading  = false;
     }
 
     private function generateDemoResponse($message)
@@ -402,7 +432,7 @@ class IndustryDemo extends Component
                             ['role' => 'user', 'content' => $message]
                         ];
                         
-                        $response = $aiService->smartLlmChat($messages);
+                        $response = $aiService->llmChat($messages, 'llama3:8b-instruct-q5_K_M', null, null, ['use_vastai' => true]);
                         
                         if ($response && isset($response['message']['content'])) {
                             \Log::info('Hybrid response generated successfully', [
@@ -434,7 +464,7 @@ class IndustryDemo extends Component
                                     ['role' => 'user', 'content' => $message]
                                 ];
                                 
-                                $response = $aiService->smartLlmChat($messages);
+                                $response = $aiService->llmChat($messages, 'llama3:8b-instruct-q5_K_M', null, null, ['use_vastai' => true]);
                                 
                                 if ($response && isset($response['message']['content'])) {
                                     return $response['message']['content'];
@@ -463,7 +493,7 @@ class IndustryDemo extends Component
                         ['role' => 'user', 'content' => $message]
                     ];
                     
-                    $response = $aiService->smartLlmChat($messages);
+                    $response = $aiService->llmChat($messages, 'llama3:8b-instruct-q5_K_M', null, null, ['use_vastai' => true]);
                     
                     if ($response && isset($response['message']['content'])) {
                         return $response['message']['content'];
@@ -523,5 +553,42 @@ class IndustryDemo extends Component
     {
         return view('livewire.public.industry-demo')
             ->layout('layouts.public');
+    }
+
+    private function normalizeSampleQuestions(array $questions): array
+    {
+        $normalized = [];
+
+        foreach ($questions as $entry) {
+            if (is_array($entry)) {
+                $question = trim((string) ($entry['question'] ?? ''));
+                $answer = trim((string) ($entry['answer'] ?? ''));
+                $keywords = trim((string) ($entry['keywords'] ?? ''));
+
+                if ($question === '') {
+                    continue;
+                }
+
+                $normalized[] = [
+                    'question' => $question,
+                    'answer' => $answer,
+                    'keywords' => $keywords,
+                ];
+                continue;
+            }
+
+            $question = trim((string) $entry);
+            if ($question === '') {
+                continue;
+            }
+
+            $normalized[] = [
+                'question' => $question,
+                'answer' => '',
+                'keywords' => '',
+            ];
+        }
+
+        return array_values($normalized);
     }
 }

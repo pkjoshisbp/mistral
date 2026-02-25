@@ -20,6 +20,7 @@ class PricingPlan extends Model
         'token_cap',
         'overage_price_per_100k',
         'credits',
+        'credit_validity_months',
         'is_active',
         'sort_order',
         'metadata',
@@ -30,9 +31,12 @@ class PricingPlan extends Model
         'overage_price_per_100k' => 'decimal:2',
         'token_cap' => 'integer',
         'credits' => 'integer',
+        'credit_validity_months' => 'integer',
         'is_active' => 'boolean',
         'metadata' => 'array',
     ];
+
+    public const CREDIT_VALIDITY_OPTIONS = [3, 6, 12, 24, 36];
 
     public function scopeActive($query)
     {
@@ -114,5 +118,19 @@ class PricingPlan extends Model
         }
 
         return number_format($this->credits);
+    }
+
+    public function getCreditValidityLabelAttribute(): ?string
+    {
+        if ($this->credit_validity_months === null || $this->credit_validity_months <= 0) {
+            return null;
+        }
+
+        if ($this->credit_validity_months % 12 === 0) {
+            $years = (int) ($this->credit_validity_months / 12);
+            return $years === 1 ? '1 year' : ($years . ' years');
+        }
+
+        return $this->credit_validity_months . ' months';
     }
 }

@@ -131,19 +131,23 @@ class DemoQdrantService
     {
         $baseQuestions = $demo->sample_questions ?: [];
         $features = $demo->features ?: [];
+        $responseMap = $demo->ai_responses ?: [];
+        $normalizedQuestions = $this->normalizeSampleQuestions($baseQuestions, $responseMap);
         
         $faqData = [];
         
         // Create FAQ entries based on sample questions and features
         $industrySpecificFAQs = $this->getIndustrySpecificFAQs($demo->industry, $demo->name);
         
-        foreach ($baseQuestions as $index => $question) {
-            $answer = $industrySpecificFAQs[$question] ?? $this->generateGenericAnswer($question, $demo);
+        foreach ($normalizedQuestions as $index => $entry) {
+            $question = $entry['question'];
+            $answer = $entry['answer'] ?: ($industrySpecificFAQs[$question] ?? $this->generateGenericAnswer($question, $demo));
             
             $faqData[] = [
                 'id' => "demo_{$demo->industry}_{$index}",
                 'question' => $question,
                 'answer' => $answer,
+                'keywords' => $entry['keywords'] ?? '',
                 'category' => $demo->industry,
                 'organization' => $demo->name,
                 'features' => $features
@@ -166,6 +170,47 @@ class DemoQdrantService
         }
         
         return $faqData;
+    }
+
+    private function normalizeSampleQuestions(array $questions, array $responseMap = []): array
+    {
+        $normalized = [];
+
+        foreach ($questions as $entry) {
+            if (is_array($entry)) {
+                $question = trim((string) ($entry['question'] ?? ''));
+                $answer = trim((string) ($entry['answer'] ?? ''));
+                $keywords = trim((string) ($entry['keywords'] ?? ''));
+            } else {
+                $question = trim((string) $entry);
+                $answer = trim((string) ($responseMap[$question] ?? ''));
+                $keywords = '';
+            }
+
+            if ($question === '') {
+                continue;
+            }
+
+            $exists = false;
+            foreach ($normalized as $item) {
+                if (strcasecmp($item['question'], $question) === 0) {
+                    $exists = true;
+                    break;
+                }
+            }
+
+            if ($exists) {
+                continue;
+            }
+
+            $normalized[] = [
+                'question' => $question,
+                'answer' => $answer,
+                'keywords' => $keywords,
+            ];
+        }
+
+        return array_values($normalized);
     }
 
     /**

@@ -71,24 +71,33 @@
                             <h5>No Active Subscription</h5>
                             <p class="text-muted">Choose a plan below to get started</p>
                             
-                            <div class="alert alert-success mt-3">
-                                <h6><i class="fas fa-coins"></i> Alternative: Credit Packages (No Expiration)</h6>
-                                <p class="mb-2">Not ready for a monthly subscription? Try our flexible credit packages that never expire!</p>
-                                <a href="{{ route('credits-and-services') }}" class="btn btn-success btn-sm">
-                                    <i class="fas fa-coins"></i> View Credit Packages
-                                </a>
-                                <small class="d-block mt-2 text-muted">Perfect for testing or low-volume usage</small>
-                            </div>
-                            
-                            <div class="alert alert-info mt-3">
-                                <h6><i class="fas fa-info-circle"></i> Subscription Payment Options</h6>
-                                <ul class="mb-0 text-start">
-                                    <li><strong>Recurring Payment:</strong> Automatic monthly/yearly billing (requires supported bank cards)</li>
-                                    <li><strong>One-time Payment:</strong> Manual payment option if recurring payment is not supported by your bank</li>
-                                    <li><strong>PayPal:</strong> Available for international customers</li>
-                                </ul>
-                                <small class="text-muted">If you experience issues with recurring payments, you'll be offered a one-time payment option.</small>
-                            </div>
+                            @if(!$hasShopifyIntegration)
+                                <div class="alert alert-success mt-3">
+                                    <h6><i class="fas fa-coins"></i> Alternative: Credit Packages (12-Month Validity)</h6>
+                                    <p class="mb-2">Not ready for a monthly subscription? Try our flexible credit packages — credits rollover on renewal.</p>
+                                    <a href="{{ route('credits-and-services') }}" class="btn btn-success btn-sm">
+                                        <i class="fas fa-coins"></i> View Credit Packages
+                                    </a>
+                                    <small class="d-block mt-2 text-muted">Perfect for testing or low-volume usage</small>
+                                </div>
+                            @endif
+
+                            @if($hasShopifyIntegration)
+                                <div class="alert alert-info mt-3">
+                                    <h6><i class="fab fa-shopify"></i> Shopify Managed Billing</h6>
+                                    <p class="mb-0">All subscription charges are processed through Shopify Billing API. Choose any plan from the right panel to start, upgrade, or downgrade your plan.</p>
+                                </div>
+                            @else
+                                <div class="alert alert-info mt-3">
+                                    <h6><i class="fas fa-info-circle"></i> Subscription Payment Options</h6>
+                                    <ul class="mb-0 text-start">
+                                        <li><strong>Recurring Payment:</strong> Automatic monthly/yearly billing (requires supported bank cards)</li>
+                                        <li><strong>One-time Payment:</strong> Manual payment option if recurring payment is not supported by your bank</li>
+                                        <li><strong>PayPal:</strong> Available for international customers</li>
+                                    </ul>
+                                    <small class="text-muted">If you experience issues with recurring payments, you'll be offered a one-time payment option.</small>
+                                </div>
+                            @endif
                         </div>
                     @endif
                 </div>
@@ -188,8 +197,14 @@
                             <div class="card-body p-3">
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
-                                        <h6 class="card-title mb-1">{{ __('common.plan_' . $plan->slug . '_title') }}</h6>
-                                        <p class="card-text small text-muted mb-2">{{ __('common.plan_' . $plan->slug . '_desc') }}</p>
+                                        @php
+                                            $titleKey = 'common.plan_' . $plan->slug . '_title';
+                                            $descKey = 'common.plan_' . $plan->slug . '_desc';
+                                            $translatedTitle = __($titleKey);
+                                            $translatedDesc = __($descKey);
+                                        @endphp
+                                        <h6 class="card-title mb-1">{{ $translatedTitle === $titleKey ? $plan->name : $translatedTitle }}</h6>
+                                        <p class="card-text small text-muted mb-2">{{ $translatedDesc === $descKey ? $plan->description : $translatedDesc }}</p>
                                         
                                         @if($plan->monthly_price > 0)
                                             @php 
@@ -217,6 +232,10 @@
                                             <div class="text-primary">
                                                 <strong>{{ __('common.plan_payg_title') }}</strong>
                                             </div>
+                                        @elseif($plan->slug === 'free')
+                                            <div class="text-success">
+                                                <strong>Free Trial</strong>
+                                            </div>
                                         @else
                                             <div class="text-primary">
                                                 <strong>{{ __('common.plan_enterprise_title') }}</strong>
@@ -224,7 +243,9 @@
                                         @endif
                                         
                                         <small class="text-muted">
-                                            @if($plan->token_cap_monthly > 0)
+                                            @if($plan->slug === 'free' && $plan->token_cap_monthly > 0)
+                                                {{ $plan->formatted_token_cap }} tokens (one-time trial)
+                                            @elseif($plan->token_cap_monthly > 0)
                                                 {{ $plan->formatted_token_cap }} tokens/month
                                             @else
                                                 {{ __('common.unlimited_tokens') }}
@@ -233,7 +254,11 @@
 
                                         <ul class="list-unstyled mt-2">
                                             @foreach($plan->features as $feature)
-                                                <li>{{ __('common.plan_' . $plan->slug . '_feature_' . Str::slug($feature, '_')) }}</li>
+                                                @php
+                                                    $featureKey = 'common.plan_' . $plan->slug . '_feature_' . Str::slug($feature, '_');
+                                                    $translatedFeature = __($featureKey);
+                                                @endphp
+                                                <li>{{ $translatedFeature === $featureKey ? $feature : $translatedFeature }}</li>
                                             @endforeach
                                         </ul>
                                     </div>
@@ -241,7 +266,34 @@
                                     @if($currentSubscription && $currentSubscription->subscription_plan_id === $plan->id)
                                         <span class="badge badge-primary">{{ __('common.current_plan') }}</span>
                                     @else
-                                        @if($plan->slug === 'enterprise')
+                                        @if($hasShopifyIntegration)
+                                            @if($plan->slug === 'free')
+                                                @php
+                                                    $freePlanId = $plan->monthly_id ?: $plan->id;
+                                                @endphp
+                                                @if($freePlanId)
+                                                    <a href="{{ route('shopify.billing.subscribe', ['plan' => $freePlanId]) }}" class="btn btn-success btn-sm">
+                                                        <i class="fab fa-shopify"></i>
+                                                        Activate Free Trial
+                                                    </a>
+                                                @endif
+                                            @else
+                                                <div class="btn-group-vertical" style="width: 100%;">
+                                                    @if($plan->monthly_id)
+                                                        <a href="{{ route('shopify.billing.subscribe', ['plan' => $plan->monthly_id]) }}" class="btn btn-primary btn-sm mb-1">
+                                                            <i class="fab fa-shopify"></i>
+                                                            {{ $currentSubscription ? 'Switch to Monthly' : 'Subscribe Monthly' }}
+                                                        </a>
+                                                    @endif
+                                                    @if($plan->yearly_id)
+                                                        <a href="{{ route('shopify.billing.subscribe', ['plan' => $plan->yearly_id]) }}" class="btn btn-outline-primary btn-sm">
+                                                            <i class="fab fa-shopify"></i>
+                                                            {{ $currentSubscription ? 'Switch to Yearly' : 'Subscribe Yearly' }}
+                                                        </a>
+                                                    @endif
+                                                </div>
+                                            @endif
+                                        @elseif($plan->slug === 'enterprise')
                                             <a href="mailto:sales@ai-chat.support" class="btn btn-outline-primary btn-sm">
                                                 {{ __('common.plan_enterprise_button') }}
                                             </a>
@@ -311,26 +363,28 @@
             </div>
             
             <!-- Credit Packages Card -->
-            <div class="card mt-4 border-success">
-                <div class="card-header bg-success text-white">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-coins"></i>
-                        Credit Packages
-                    </h5>
+            @if(!$hasShopifyIntegration)
+                <div class="card mt-4 border-success">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-coins"></i>
+                            Credit Packages
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Prefer pay-as-you-go? Credits rollover on renewal.</p>
+                        <ul class="list-unstyled mb-3">
+                            <li><i class="fas fa-check text-success"></i> No monthly commitments</li>
+                            <li><i class="fas fa-check text-success"></i> 12-month credit validity</li>
+                            <li><i class="fas fa-check text-success"></i> Perfect for testing</li>
+                            <li><i class="fas fa-check text-success"></i> Full access to all features</li>
+                        </ul>
+                        <a href="{{ route('credits-and-services') }}" class="btn btn-success btn-block">
+                            <i class="fas fa-coins"></i> View Credit Packages
+                        </a>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <p class="text-muted">Prefer pay-as-you-go? Our credit packages never expire!</p>
-                    <ul class="list-unstyled mb-3">
-                        <li><i class="fas fa-check text-success"></i> No monthly commitments</li>
-                        <li><i class="fas fa-check text-success"></i> Credits never expire</li>
-                        <li><i class="fas fa-check text-success"></i> Perfect for testing</li>
-                        <li><i class="fas fa-check text-success"></i> Full access to all features</li>
-                    </ul>
-                    <a href="{{ route('credits-and-services') }}" class="btn btn-success btn-block">
-                        <i class="fas fa-coins"></i> View Credit Packages
-                    </a>
-                </div>
-            </div>
+            @endif
         </div>
     </div>
 </div>

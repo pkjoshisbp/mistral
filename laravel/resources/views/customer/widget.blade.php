@@ -126,6 +126,16 @@
                                         <textarea id="queryTranslationMap" name="queryTranslationMap" class="form-control" rows="6" placeholder="mehr infos = more information&#10;prix = price&#10;servicio = service">{{ $queryTranslationMap }}</textarea>
                                         <small class="text-muted">Use one mapping per line in format <strong>source = target</strong> (or <strong>source =&gt; target</strong>). Add commonly used terms from any language (for example Indic, German, French, Spanish, Tamil, Telugu) to improve multilingual FAQ matching.</small>
                                     </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Custom Widget CSS (optional)</label>
+                                        <textarea id="widgetCustomCss" name="widgetCustomCss" class="form-control" rows="6" placeholder="/* Example */&#10;.ai-chat-window {&#10;  max-width: 460px !important;&#10;}">{{ $custOrg->settings['widget_custom_css'] ?? '' }}</textarea>
+                                        <small class="text-muted">Applies only to this organization's widget.</small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Custom Widget JS (optional)</label>
+                                        <textarea id="widgetCustomJs" name="widgetCustomJs" class="form-control" rows="6" placeholder="// Example&#10;console.log('Widget ready', config.orgId);">{{ $custOrg->settings['widget_custom_js'] ?? '' }}</textarea>
+                                        <small class="text-muted">Executes in widget context for this organization only.</small>
+                                    </div>
                                     <button type="submit" class="btn btn-success">Save Settings</button>
                                 </form>
                             </div>
@@ -214,6 +224,8 @@ document.getElementById('widgetSettingsForm').addEventListener('submit', async f
         widgetContactFields: document.getElementById('widgetContactFields').value,
         widgetAllowedDomains: document.getElementById('widgetAllowedDomains').value,
         queryTranslationMap: document.getElementById('queryTranslationMap').value,
+        widgetCustomCss: document.getElementById('widgetCustomCss').value,
+        widgetCustomJs: document.getElementById('widgetCustomJs').value,
         _token: form.querySelector('input[name="_token"]').value
     };
     try {

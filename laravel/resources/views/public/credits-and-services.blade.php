@@ -8,7 +8,7 @@
     <div class="text-center mb-5">
         <h1 class="display-4 mb-3">Credits & Professional Services</h1>
         <p class="lead text-muted">
-            Flexible credit packages that never expire and professional services to get you up and running faster
+            Flexible credit packages with fixed validity and professional services to get you up and running faster
         </p>
     </div>
 
@@ -18,19 +18,61 @@
             <div class="card mb-5">
                 <div class="card-header bg-primary text-white">
                     <h3 class="mb-0">
-                        <i class="fas fa-coins"></i> Credit Packages (No Expiration)
+                        <i class="fas fa-coins"></i> Credit Packages
                     </h3>
-                    <small>Pay once, use anytime - Credits never expire!</small>
+                    <small>Credits rollover on renewal.</small>
                 </div>
                 <div class="card-body">
+                    @php
+                        $isShopifyUser = auth()->check() && auth()->user()->organizations()
+                            ->whereHas('integrations', function($q) {
+                                $q->where('provider', 'shopify')->where('active', true);
+                            })
+                            ->exists();
+                    @endphp
+
+                    @if($isShopifyUser)
+                        <div class="alert alert-info">
+                            <strong>Shopify merchants:</strong> Credit packages are not purchased on this website. Please manage your subscription and billing through the Shopify app dashboard.
+                        </div>
+                    @endif
+
                     <div class="row">
                         @php 
-                            $isFromIndia = request()->header('CF-IPCountry') === 'IN' || 
-                                          str_contains(request()->ip(), '127.') ||
-                                          str_contains(request()->ip(), '192.168.') ||
-                                          in_array(request()->ip(), ['::1', '127.0.0.1']);
+                            $locationService = app()->bound(\App\Services\LocationService::class)
+                                ? app(\App\Services\LocationService::class)
+                                : null;
+
+                            $isFromIndia = $locationService && method_exists($locationService, 'isFromIndia')
+                                ? (bool) $locationService->isFromIndia()
+                                : false;
+
+                            $cfCountry = strtoupper((string) (
+                                request()->header('CF-IPCountry')
+                                ?? request()->server('HTTP_CF_IPCOUNTRY')
+                                ?? ''
+                            ));
+
+                            if (!$isFromIndia) {
+                                $isFromIndia = $cfCountry === 'IN'
+                                    || str_contains(request()->ip(), '127.')
+                                    || str_contains(request()->ip(), '192.168.')
+                                    || in_array(request()->ip(), ['::1', '127.0.0.1']);
+                            }
+
                             $currency = $isFromIndia ? 'INR' : 'USD';
                             $colors = ['success', 'primary', 'info', 'warning'];
+
+                            \Illuminate\Support\Facades\Log::info('Credits page currency detection', [
+                                'path' => request()->path(),
+                                'ip' => request()->ip(),
+                                'client_ip' => request()->getClientIp(),
+                                'cf_ip_country' => $cfCountry,
+                                'x_forwarded_for' => request()->header('X-Forwarded-For'),
+                                'user_agent' => request()->userAgent(),
+                                'is_from_india' => $isFromIndia,
+                                'currency' => $currency,
+                            ]);
                         @endphp
                         
                         @foreach($creditPackages as $index => $package)
@@ -53,41 +95,45 @@
                                         <div class="mb-3">
                                             @if($currency === 'INR')
                                                 <span class="h3 text-{{ $colors[$index % count($colors)] }}">₹{{ number_format($inrPrice ?? 0, 0) }}</span>
-                                                <div><small class="text-muted">${{ number_format($package->price ?? 0, 0) }}</small></div>
                                             @else
                                                 <span class="h3 text-{{ $colors[$index % count($colors)] }}">${{ number_format($package->price ?? 0, 0) }}</span>
-                                                <div><small class="text-muted">₹{{ number_format($inrPrice ?? 0, 0) }}</small></div>
                                             @endif
                                         </div>
-                                        <ul class="list-unstyled mb-4">
+                                        <ul class="list-unstyled mb-4 text-left d-inline-block">
                                             @if($features)
                                                 @foreach($features as $feature)
-                                                    <li>{{ $feature }}</li>
+                                                    <li class="mb-1"><i class="fas fa-check text-success mr-2"></i>{{ trim($feature) }}</li>
                                                 @endforeach
                                             @endif
                                         </ul>
                                         @auth
-                                            <div class="btn-group-vertical w-100">
-                                                @if($isFromIndia)
-                                                    <a href="#" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2"
-                                                       onclick="return startRazorpayCredit({ packageId: {{ $package->id }} });">
-                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                    </a>
-                                                                         <a href="{{ route('paypal.credit-checkout', ['packageId' => $package->id]) }}" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
-                                                                             onclick="return startPaypalCredit(event, { packageId: {{ $package->id }} });">
-                                                        <i class="fab fa-paypal"></i> Pay with PayPal
-                                                    </a>
-                                                @else
-                                                                         <a href="{{ route('paypal.credit-checkout', ['packageId' => $package->id]) }}" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2"
-                                                                             onclick="return startPaypalCredit(event, { packageId: {{ $package->id }} });">
-                                                        <i class="fab fa-paypal"></i> Pay with PayPal
-                                                    </a>
-                                                    <a href="#" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
-                                                       onclick="return startRazorpayCredit({ packageId: {{ $package->id }} });">
-                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                    </a>
-                                                @endif
-                                            </div>
+                                            @if($isShopifyUser)
+                                                <a href="{{ route('customer.subscription') }}" class="btn btn-outline-primary btn-block">
+                                                    Manage Billing in Shopify Dashboard
+                                                </a>
+                                            @else
+                                                <div class="btn-group-vertical w-100">
+                                                    @if($isFromIndia)
+                                                        <a href="#" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2"
+                                                           onclick="return startRazorpayCredit({ packageId: {{ $package->id }} });">
+                                                            <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                        </a>
+                                                        <a href="{{ route('paypal.credit-checkout', ['packageId' => $package->id]) }}" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
+                                                           onclick="return startPaypalCredit(event, { packageId: {{ $package->id }} });">
+                                                            <i class="fab fa-paypal"></i> Pay with PayPal
+                                                        </a>
+                                                    @else
+                                                        <a href="{{ route('paypal.credit-checkout', ['packageId' => $package->id]) }}" class="btn btn-{{ $colors[$index % count($colors)] }} mb-2"
+                                                           onclick="return startPaypalCredit(event, { packageId: {{ $package->id }} });">
+                                                            <i class="fab fa-paypal"></i> Pay with PayPal
+                                                        </a>
+                                                        <a href="#" class="btn btn-outline-{{ $colors[$index % count($colors)] }}"
+                                                           onclick="return startRazorpayCredit({ packageId: {{ $package->id }} });">
+                                                            <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                        </a>
+                                                    @endif
+                                                </div>
+                                            @endif
                                         @else
                                             <a href="{{ route('login', ['redirect' => url()->current()]) }}" class="btn btn-{{ $colors[$index % count($colors)] }} btn-block">
                                                 Login to Purchase
@@ -236,8 +282,8 @@
                     <div class="row mt-4">
                         <div class="col-md-3">
                             <i class="fas fa-infinity fa-3x text-primary mb-3"></i>
-                            <h6>Never Expire</h6>
-                            <small class="text-muted">Credits remain valid forever</small>
+                            <h6>12-Month Validity</h6>
+                            <small class="text-muted">Carry forward available on timely renewal</small>
                         </div>
                         <div class="col-md-3">
                             <i class="fas fa-users fa-3x text-success mb-3"></i>

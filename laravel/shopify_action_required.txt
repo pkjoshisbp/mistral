@@ -1,0 +1,39 @@
+ Hello there,
+
+We're reaching out to let you know about some issues we spotted with AI CHAT SUPPORT.
+
+What you need to do
+
+Please fix these issues right away:
+
+    5.1.2. Properly show theme app extension in the storefront. Your app widget must be displayed properly and without any errors in the Theme Editor and Online Store. We enabled the app's embed but we observed that it is not appearing. We did not received any error message about the behavior as well. See this screencast for additional details. 
+    1.2.1. Use Shopify Managed Pricing or the Shopify Billing API. Apps that use off-platform billing cannot be distributed through the Shopify App store. Your app must use Managed Pricing or the Shopify Billing API for any app charges. We observed that your app goes through PayPal. All app charges must go through managed pricing or Billing API. See this screencast for additional details. 
+    1.2.3. Allow pricing plan changes. Your app must allow merchants to upgrade and downgrade their pricing plan without having to contact your support team or having to reinstall the app. This includes ensuring that the charges are successfully processed in the application charge history page in the merchant admin. We observed that your app has an enterprise plan within its UI. We require you to provide link where we can test the plan without reaching out to you.  We require you as well to provide a screencast on how the enterprise plan works. See this screencast for additional details. 
+    4.2.1. Provide accurate and complete pricing information. Ensure your pricing information includes all pricing options such as, free trial time and charge details. Your app proposes an enterprise plan within its UI and on the pricing link within its listing but the enterprise plan is nowhere to be found on the listing itself. Ensure that all pricing information matches to avoid confusion. See this screencast for additional details. 
+    Reply to this email and let us know when everything's fixed so we can resume the review process.
+
+What happens if you don't take action
+
+If we don't hear back from you within 14 days, your application will be paused and you'll need to re-submit your app for review, which can cause delays.
+
+Why these fixes are so important
+
+We know how frustrating it can be to not have your app approved, but these requirements are how we make sure each app meets the high-quality bar that Shopify merchants have learned to trust.
+
+Thanks for your understanding,
+
+The Shopify App Store Team
+
+App name: AI CHAT SUPPORT
+
+Current app status: In review
+
+Visibility settings: Fully visible
+
+Reference: 93967 
+
+some screencast link is provided if you can view and understand it.
+https://screenshot.click/24-55-76809-90894.webm
+https://screenshot.click/24-40-17659-91416.webm
+https://screenshot.click/24-46-86393-80127.webm
+https://screenshot.click/24-02-72161-48757.webm

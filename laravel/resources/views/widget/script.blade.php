@@ -394,6 +394,7 @@
             this.loadStyles();
             this.createWidget();
             this.bindEvents();
+            this.applyCustomWidgetJs();
             
             // Detect and apply Shopify theme colors if available
             if (this.config.isShopify) {
@@ -507,7 +508,7 @@
                     </div>
                 `;
             }).join('');
-            
+
             // Create widget container
             const widgetHTML = `
                 <div id="${widgetId}" class="ai-chat-widget ${this.config.position}" style="--ai-offset-x: ${this.config.offsetX || 20}px; --ai-offset-y: ${this.config.offsetY || 20}px;">
@@ -533,20 +534,20 @@
                     <!-- Chat Window -->
                     <div id="${windowId}" class="ai-chat-window" style="display: none;">
                         <!-- Header -->
-                        <div class="ai-chat-header">
+                        <div class="ai-chat-header" style="display:flex!important;align-items:center!important;flex-wrap:nowrap!important;width:100%!important;margin:0!important;padding:calc(18px + env(safe-area-inset-top)) 22px 18px 22px!important;gap:14px!important;box-sizing:border-box!important;">
                             ${this.config.showHeaderLogo && this.config.headerLogoUrl ? `
-                                <div class="ai-chat-logo">
+                                <div class="ai-chat-logo" style="margin:0!important;padding:0!important;flex-shrink:0!important;">
                                     <img src="${this.config.headerLogoUrl}" alt="${this.config.orgName} logo" onerror="this.style.display='none'" />
                                 </div>
                             ` : ''}
-                            <div class="ai-chat-header-info">
-                                <div class="ai-chat-title">${this.config.orgName}</div>
-                                <div class="ai-chat-status">
-                                    <span class="ai-chat-status-dot"></span>
+                            <div class="ai-chat-header-info" style="display:flex!important;flex-direction:column!important;flex:1 1 auto!important;min-width:0!important;margin:0!important;padding:0!important;overflow:hidden!important;">
+                                <div class="ai-chat-title" style="margin:0 0 4px 0!important;padding:0!important;">${this.config.orgName}</div>
+                                <div class="ai-chat-status" style="display:flex!important;align-items:center!important;gap:6px!important;margin:0!important;padding:0!important;">
+                                    <span class="ai-chat-status-dot" style="margin:0!important;padding:0!important;flex-shrink:0!important;"></span>
                                     Online
                                 </div>
                             </div>
-                            <div class="ai-chat-header-actions">
+                            <div class="ai-chat-header-actions" style="display:flex!important;align-items:center!important;gap:8px!important;flex:0 0 auto!important;margin:0!important;padding:0!important;">
                                 <button id="${this.ids.expand}" class="ai-chat-expand" title="Expand chat">
                                     <svg width="18" height="18" viewBox="0 0 18 18">
                                         <path d="M3 3h4v2H5v2H3V3zm8 0h4v4h-2V5h-2V3zM3 11v4h4v-2H5v-2H3zm10 0v2h-2v2h4v-4h-2z" fill="currentColor"/>
@@ -561,7 +562,7 @@
                         </div>
 
                         <!-- Messages -->
-                        <div id="${messagesId}" class="ai-chat-messages">
+                        <div id="${messagesId}" class="ai-chat-messages" style="display:flex!important;flex-direction:column!important;width:100%!important;margin:0!important;padding:16px!important;box-sizing:border-box!important;align-items:flex-start!important;">
                         </div>
 
                         <!-- Lead Capture Form -->
@@ -587,8 +588,8 @@
                         </div>
 
                         <!-- Input -->
-                        <div class="ai-chat-input-container">
-                            <textarea id="${inputId}" class="ai-chat-input" placeholder="Type your message..." rows="1"></textarea>
+                        <div class="ai-chat-input-container" style="display:flex!important;align-items:center!important;width:100%!important;margin:0!important;padding:12px 16px!important;box-sizing:border-box!important;gap:8px!important;">
+                            <textarea id="${inputId}" class="ai-chat-input" placeholder="Type your message..." rows="1" style="margin:0!important;"></textarea>
                             <button type="button" id="${sendId}" class="ai-chat-send-button">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                                     <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0M4.5 7.5a.5.5 0 0 0 0 1h5.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 1 0-.708.708L10.293 7.5z"/>
@@ -609,6 +610,95 @@
             `;
 
             document.body.insertAdjacentHTML('beforeend', widgetHTML);
+            this.applyHostCSSResetFixes();
+        }
+
+        /**
+         * Apply inline styles to all critical widget elements to counter hostile
+         * host-site CSS resets (e.g. reset.css: margin:auto + background:transparent on all divs).
+         * Inline styles set via setProperty(...,'important') beat ALL external stylesheets.
+         */
+        applyHostCSSResetFixes() {
+            const widget = document.getElementById(this.ids.widget);
+            if (!widget) return;
+
+            // Helper: apply map of property->value with !important
+            const fix = (selector, props) => {
+                const el = widget.querySelector(selector);
+                if (!el) return;
+                for (const [prop, val] of Object.entries(props)) {
+                    el.style.setProperty(prop, val, 'important');
+                }
+            };
+
+            // Header wrapper
+            fix('.ai-chat-header', {
+                'display': 'flex',
+                'align-items': 'center',
+                'flex-wrap': 'nowrap',
+                'width': '100%',
+                'margin': '0',
+                'padding': 'calc(18px + env(safe-area-inset-top)) 22px 18px 22px',
+                'gap': '14px',
+                'box-sizing': 'border-box',
+            });
+
+            // Header info (title + status column)
+            fix('.ai-chat-header-info', {
+                'display': 'flex',
+                'flex-direction': 'column',
+                'flex': '1 1 auto',
+                'min-width': '0',
+                'margin': '0',
+                'padding': '0',
+                'overflow': 'hidden',
+            });
+
+            // Title
+            fix('.ai-chat-title', {
+                'margin': '0 0 4px 0',
+                'padding': '0',
+                'display': 'block',
+            });
+
+            // Status row (dot + "Online")
+            fix('.ai-chat-status', {
+                'display': 'flex',
+                'align-items': 'center',
+                'gap': '6px',
+                'margin': '0',
+                'padding': '0',
+            });
+
+            // Header actions (expand/close buttons)
+            fix('.ai-chat-header-actions', {
+                'display': 'flex',
+                'align-items': 'center',
+                'gap': '8px',
+                'flex': '0 0 auto',
+                'margin': '0',
+                'padding': '0',
+            });
+
+            // Messages container
+            const msgContainer = document.getElementById(this.ids.messages);
+            if (msgContainer) {
+                msgContainer.style.setProperty('width', '100%', 'important');
+                msgContainer.style.setProperty('align-items', 'flex-start', 'important');
+                msgContainer.style.setProperty('margin', '0', 'important');
+                msgContainer.style.setProperty('padding', '22px 22px 12px 22px', 'important');
+            }
+
+            // Input container
+            fix('.ai-chat-input-container', {
+                'display': 'flex',
+                'align-items': 'center',
+                'width': '100%',
+                'margin': '0',
+                'padding': '18px 20px 20px 20px',
+                'flex': '0 0 auto',
+                'box-sizing': 'border-box',
+            });
         }
 
         bindEvents() {
@@ -667,11 +757,11 @@
             if (input) {
                                    // Debug: Widget created
                                    console.log('[AI Widget] Widget created, forcing chat window hidden');
-                                   const window = document.getElementById(this.ids.window);
-                                   if (window) {
-                                       window.style.display = 'none';
-                                       window.style.visibility = 'hidden';
-                                       console.log('[AI Widget] Chat window hidden on load:', window.style.display, window.style.visibility);
+                                   const chatWindow = document.getElementById(this.ids.window);
+                                   if (chatWindow) {
+                                       chatWindow.style.setProperty('display', 'none', 'important');
+                                       chatWindow.style.setProperty('visibility', 'hidden', 'important');
+                                       console.log('[AI Widget] Chat window hidden on load:', chatWindow.style.display, chatWindow.style.visibility);
                                    }
                 // Setup input auto-resize
                 input.addEventListener('input', () => {
@@ -713,13 +803,13 @@
 
         toggle() {
             const button = document.getElementById(this.ids.button);
-            const window = document.getElementById(this.ids.window);
+            const chatWindow = document.getElementById(this.ids.window);
             
             this.isOpen = !this.isOpen;
             
             if (this.isOpen) {
-                window.style.setProperty('display', 'flex', 'important');
-                window.style.setProperty('visibility', 'visible', 'important');
+                chatWindow.style.setProperty('display', 'flex', 'important');
+                chatWindow.style.setProperty('visibility', 'visible', 'important');
                 this.applyViewportBounds();
                 button.style.transform = 'scale(0.9)';
                 
@@ -729,7 +819,7 @@
                 // Check if user is logged in by looking for auth indicators
                 const isLoggedIn = document.querySelector('meta[name="user-authenticated"]') || 
                                   document.body.classList.contains('logged-in') ||
-                                  window.Laravel && window.Laravel.user;
+                                  (globalThis.window && globalThis.window.Laravel && globalThis.window.Laravel.user);
                 
                 // Show lead form if not captured yet AND user is not logged in
                 if (!this.leadCaptured && !isLoggedIn) {
@@ -755,8 +845,8 @@
 
                 this.startAgentPolling();
             } else {
-                window.style.setProperty('display', 'none', 'important');
-                window.style.setProperty('visibility', 'hidden', 'important');
+                chatWindow.style.setProperty('display', 'none', 'important');
+                chatWindow.style.setProperty('visibility', 'hidden', 'important');
                 button.style.transform = 'scale(1)';
                 this.stopAgentPolling();
             }
@@ -958,13 +1048,38 @@
             return processed.replace(/\n/g, '<br>');
         }
 
+        applyMessageInlineStyles(el, sender) {
+            // Inline styles beat ALL external CSS including hostile reset.css (margin:auto on div)
+            el.style.setProperty('margin', '0', 'important');
+            el.style.setProperty('padding', '0', 'important');
+            el.style.setProperty('border', '0', 'important');
+            el.style.setProperty('outline', '0', 'important');
+            el.style.setProperty('background', 'transparent', 'important');
+            el.style.setProperty('display', 'flex', 'important');
+            el.style.setProperty('flex-direction', 'column', 'important');
+            el.style.setProperty('max-width', '82%', 'important');
+            el.style.setProperty('width', 'auto', 'important');
+            if (sender === 'user') {
+                el.style.setProperty('align-self', 'flex-end', 'important');
+                el.style.setProperty('margin-left', 'auto', 'important');
+                el.style.setProperty('margin-right', '0', 'important');
+            } else {
+                el.style.setProperty('align-self', 'flex-start', 'important');
+                el.style.setProperty('margin-left', '0', 'important');
+                el.style.setProperty('margin-right', 'auto', 'important');
+            }
+        }
+
         renderMessage(content, sender = 'user', timestamp = null, senderName = null) {
             const messagesContainer = document.getElementById(this.ids.messages);
             if (!messagesContainer) {
                 console.error('AI Chat Widget: Messages container not found');
                 return;
             }
-            
+            // Ensure messages container layout is not overridden by host CSS (e.g. reset.css margin:auto on divs)
+            messagesContainer.style.setProperty('width', '100%', 'important');
+            messagesContainer.style.setProperty('align-items', 'flex-start', 'important');
+
             const messageElement = document.createElement('div');
             messageElement.className = `ai-chat-message ai-chat-message-${sender}`;
             
@@ -982,8 +1097,9 @@
                     ${senderLabel}
                     ${safeContent}
                 </div>
-                <div class="ai-chat-message-time">${time}</div>
+                <div class="ai-chat-message-time" style="margin:4px 0 0 0!important;padding:0!important;display:block!important;">${time}</div>
             `;
+            this.applyMessageInlineStyles(messageElement, sender);
 
             messagesContainer.appendChild(messageElement);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -1000,14 +1116,17 @@
         addStreamingMessage(fullContent) {
             const messagesContainer = document.getElementById(this.ids.messages);
             if (!messagesContainer) return;
+            messagesContainer.style.setProperty('width', '100%', 'important');
+            messagesContainer.style.setProperty('align-items', 'flex-start', 'important');
 
             const messageElement = document.createElement('div');
             messageElement.className = 'ai-chat-message ai-chat-message-bot';
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             messageElement.innerHTML = `
                 <div class="ai-chat-message-content"></div>
-                <div class="ai-chat-message-time">${time}</div>
+                <div class="ai-chat-message-time" style="margin:4px 0 0 0!important;padding:0!important;display:block!important;">${time}</div>
             `;
+            this.applyMessageInlineStyles(messageElement, 'bot');
             const contentEl = messageElement.querySelector('.ai-chat-message-content');
             messagesContainer.appendChild(messageElement);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -1042,10 +1161,13 @@
         addTypingIndicator() {
             const messagesContainer = document.getElementById(this.ids.messages);
             if (!messagesContainer) return;
-            
+            messagesContainer.style.setProperty('width', '100%', 'important');
+            messagesContainer.style.setProperty('align-items', 'flex-start', 'important');
+
             const typingElement = document.createElement('div');
             typingElement.className = 'ai-chat-message ai-chat-message-bot ai-chat-typing';
             typingElement.id = 'ai-chat-typing-' + this.config.orgId;
+            this.applyMessageInlineStyles(typingElement, 'bot');
             
             typingElement.innerHTML = `
                 <div class="ai-chat-message-content">
@@ -1329,6 +1451,21 @@
             document.head.appendChild(style);
         }
 
+        applyCustomWidgetJs() {
+            const customJs = String(this.config.customJs || '').trim();
+            if (!customJs) {
+                return;
+            }
+
+            try {
+                const widget = document.getElementById(this.ids.widget);
+                const run = new Function('widget', 'config', 'instance', customJs);
+                run(widget, this.config, this);
+            } catch (error) {
+                console.error('[AI Widget] Custom JS execution failed:', error);
+            }
+        }
+
         trackAnalytics(eventType, data = {}) {
             // Track widget interactions in analytics
             try {
@@ -1491,7 +1628,7 @@
                     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     stream.botMessageElement.innerHTML = `
                         <div class="ai-chat-message-content"></div>
-                        <div class="ai-chat-message-time">${time}</div>
+                        <div class="ai-chat-message-time" style="margin:4px 0 0 0!important;padding:0!important;display:block!important;">${time}</div>
                     `;
                     messagesContainer.appendChild(stream.botMessageElement);
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -1786,7 +1923,7 @@
                                         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                                         botMessageElement.innerHTML = `
                                             <div class="ai-chat-message-content"></div>
-                                            <div class="ai-chat-message-time">${time}</div>
+                                            <div class="ai-chat-message-time" style="margin:4px 0 0 0!important;padding:0!important;display:block!important;">${time}</div>
                                         `;
                                         messagesContainer.appendChild(botMessageElement);
                                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -1851,7 +1988,7 @@
                                     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                                     botMessageElement.innerHTML = `
                                         <div class="ai-chat-message-content"></div>
-                                        <div class="ai-chat-message-time">${time}</div>
+                                        <div class="ai-chat-message-time" style="margin:4px 0 0 0!important;padding:0!important;display:block!important;">${time}</div>
                                     `;
                                     messagesContainer.appendChild(botMessageElement);
                                     messagesContainer.scrollTop = messagesContainer.scrollHeight;

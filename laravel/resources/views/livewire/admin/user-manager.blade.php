@@ -20,8 +20,89 @@
                     </div>
                 </div>
             </div>
+            <div class="d-flex justify-content-end mt-2">
+                <button type="button" class="btn btn-primary" wire:click="openCreateModal">
+                    <i class="fas fa-user-plus"></i> Add User
+                </button>
+            </div>
         </div>
     </div>
+
+    <!-- Create User Modal -->
+    @if($showCreateModal)
+        <div class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Add User</h5>
+                        <button type="button" class="close" wire:click="closeModals">
+                            <span>&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <form wire:submit.prevent="createUser">
+                            <div class="form-group mb-3">
+                                <label for="name">Name</label>
+                                <input type="text" class="form-control @error('name') is-invalid @enderror"
+                                       wire:model="name">
+                                @error('name')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                            </div>
+
+                            <div class="form-group mb-3">
+                                <label for="email">Email</label>
+                                <input type="email" class="form-control @error('email') is-invalid @enderror"
+                                       wire:model="email">
+                                @error('email')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                            </div>
+
+                            <div class="form-group mb-3">
+                                <label for="role">Role</label>
+                                <select class="form-control @error('role') is-invalid @enderror" wire:model="role">
+                                    <option value="">Select Role</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="customer">Customer</option>
+                                </select>
+                                @error('role')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                            </div>
+
+                            <div class="form-group mb-3">
+                                <label for="password">Password</label>
+                                <input type="password" class="form-control @error('password') is-invalid @enderror"
+                                       wire:model="password">
+                                @error('password')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                            </div>
+
+                            @if($role === 'customer')
+                                <div class="form-group mb-3">
+                                    <label for="organizations">Organizations</label>
+                                    @foreach($organizations as $org)
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox"
+                                                   wire:model="selectedOrganizations" value="{{ $org->id }}"
+                                                   id="create_org_{{ $org->id }}">
+                                            <label class="form-check-label" for="create_org_{{ $org->id }}">
+                                                {{ $org->name }}
+                                            </label>
+                                        </div>
+                                    @endforeach
+                                    @error('selectedOrganizations')<div class="text-danger mt-1">{{ $message }}</div>@enderror
+                                </div>
+                            @endif
+
+                            <div class="d-flex justify-content-end">
+                                <button type="button" class="btn btn-secondary me-2" wire:click="closeModals">
+                                    Cancel
+                                </button>
+                                <button type="submit" class="btn btn-primary">
+                                    Create User
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
 
     <!-- Users Table -->
     <div class="card mt-4">
@@ -118,7 +199,7 @@
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">Edit User</h5>
-                        <button type="button" class="close" wire:click="$set('showEditModal', false)">
+                        <button type="button" class="close" wire:click="closeModals">
                             <span>&times;</span>
                         </button>
                     </div>
@@ -172,7 +253,7 @@
                             @endif
                             
                             <div class="d-flex justify-content-end">
-                                <button type="button" class="btn btn-secondary me-2" wire:click="$set('showEditModal', false)">
+                                <button type="button" class="btn btn-secondary me-2" wire:click="closeModals">
                                     Cancel
                                 </button>
                                 <button type="submit" class="btn btn-primary">

@@ -119,8 +119,9 @@
     if (!container) return;
     
     var shop = container.getAttribute('data-shop');
+    var fallbackOrgSlug = shop.replace('.myshopify.com', '');
     var config = {
-      orgSlug: shop.replace('.myshopify.com', ''),
+      orgSlug: fallbackOrgSlug,
       primaryColor: container.getAttribute('data-primary-color'),
       position: container.getAttribute('data-position'),
       size: parseInt(container.getAttribute('data-size')),
@@ -130,20 +131,38 @@
       autoOpenDelay: parseInt(container.getAttribute('data-auto-open-delay')) * 1000,
       isShopify: true
     };
-    
-    // Load the widget script dynamically
-    var script = document.createElement('script');
-    script.src = 'https://ai-chat.support/widget/' + config.orgSlug + '/script.js';
-    script.onload = function() {
-      // Widget script loaded, it will initialize automatically
-      console.log('[AI Chat] Widget loaded for:', shop);
+
+    var loadWidgetScript = function(scriptUrl) {
+      var script = document.createElement('script');
+      script.src = scriptUrl;
+      script.onload = function() {
+        console.log('[AI Chat] Widget loaded for:', shop);
+      };
+      script.onerror = function() {
+        console.error('[AI Chat] Failed to load widget script');
+      };
+      document.body.appendChild(script);
     };
-    script.onerror = function() {
-      console.error('[AI Chat] Failed to load widget script');
-    };
     
-    // Append to body
-    document.body.appendChild(script);
+    fetch('https://ai-chat.support/widget/shopify/resolve?shop=' + encodeURIComponent(shop))
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('Resolver returned ' + response.status);
+        }
+        return response.json();
+      })
+      .then(function(data) {
+        if (data && data.success && data.script_url) {
+          config.orgSlug = data.organization_slug || config.orgSlug;
+          loadWidgetScript(data.script_url);
+          return;
+        }
+
+        loadWidgetScript('https://ai-chat.support/widget/' + config.orgSlug + '/script.js');
+      })
+      .catch(function() {
+        loadWidgetScript('https://ai-chat.support/widget/' + config.orgSlug + '/script.js');
+      });
   })();
 </script>
 {% endif %}

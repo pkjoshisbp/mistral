@@ -168,6 +168,14 @@
                                                 >
                                                     <i class="fas fa-edit"></i> View / Edit
                                                 </button>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm btn-danger"
+                                                    wire:click='deleteDataset(@json($dataset["dataset"]), @json($dataset["type"]))'
+                                                    onclick="return confirm('Delete this full dataset and its vector records?')"
+                                                >
+                                                    <i class="fas fa-trash"></i> Delete
+                                                </button>
                                             </td>
                                         </tr>
                                     @endforeach
@@ -206,6 +214,12 @@
                                 </button>
                             </div>
                             <div class="modal-body p-0">
+                                <div class="d-flex justify-content-between align-items-center p-2 border-bottom">
+                                    <small class="text-muted">You can edit existing rows, add new rows, and remove rows here.</small>
+                                    <button type="button" class="btn btn-sm btn-success" wire:click="addEditorRow">
+                                        <i class="fas fa-plus"></i> Add Row
+                                    </button>
+                                </div>
                                 <div class="table-responsive" style="max-height: 70vh; overflow: auto;">
                                     <table class="table table-sm table-bordered mb-0">
                                         <thead class="thead-light" style="position: sticky; top: 0; z-index: 2;">
@@ -216,13 +230,14 @@
                                                 <th style="min-width: 140px;">Category</th>
                                                 <th style="min-width: 280px;">Description</th>
                                                 <th style="min-width: 360px;">Content</th>
+                                                <th style="min-width: 90px;">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             @foreach($editorRows as $index => $row)
                                                 <tr>
                                                     <td>
-                                                        {{ $row['id'] }}
+                                                        {{ $row['id'] ?: 'new' }}
                                                         <input type="hidden" wire:model="editorRows.{{ $index }}.id">
                                                         <input type="hidden" wire:model="editorRows.{{ $index }}.external_key">
                                                         <input type="hidden" wire:model="editorRows.{{ $index }}.qdrant_type">
@@ -241,6 +256,16 @@
                                                     </td>
                                                     <td>
                                                         <textarea class="form-control form-control-sm" rows="4" wire:model.defer="editorRows.{{ $index }}.content"></textarea>
+                                                    </td>
+                                                    <td>
+                                                        <button
+                                                            type="button"
+                                                            class="btn btn-sm btn-outline-danger"
+                                                            wire:click="removeEditorRow({{ $index }})"
+                                                            onclick="return confirm('Delete this row?')"
+                                                        >
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
                                                     </td>
                                                 </tr>
                                             @endforeach

@@ -178,6 +178,9 @@
             <div class="text-center mb-5">
                 <h2>{{ __('common.pricing_title') }}</h2>
                 <p class="lead">{{ __('common.pricing_subtitle') }}</p>
+                <div class="alert alert-info mt-3 mb-0">
+                    <strong>Shopify merchants:</strong> App subscriptions are managed through Shopify Billing inside the app dashboard. Website checkout options are for non-Shopify customers.
+                </div>
                 
                 <!-- Billing Toggle -->
                 <div class="billing-toggle mb-4">
@@ -213,10 +216,13 @@
                                     'id' => null,
                                     'monthly_id' => null,
                                     'yearly_id' => null,
+                                    'one_time_id' => null,
                                     'name' => $plan->name,
+                                    'description' => $plan->description,
                                     'slug' => $baseSlug ?: $plan->slug,
                                     'monthly_price' => null,
                                     'yearly_price' => null,
+                                    'one_time_price' => null,
                                     'token_cap_monthly' => $tokenCap,
                                     'overage_price_per_100k' => $plan->overage_price_per_100k,
                                     'features' => $meta['features'] ?? [],
@@ -236,6 +242,16 @@
                                 $grouped[$key]->yearly_id = $plan->id;
                                 $grouped[$key]->yearly_price = $plan->price;
                             }
+                            if ($plan->billing_period === 'one_time') {
+                                if (!$grouped[$key]->id) {
+                                    $grouped[$key]->id = $plan->id;
+                                }
+                                $grouped[$key]->one_time_id = $plan->id;
+                                $grouped[$key]->one_time_price = $plan->price;
+                                if ($grouped[$key]->monthly_price === null) {
+                                    $grouped[$key]->monthly_price = $plan->price;
+                                }
+                            }
                         }
 
                         $plans = collect(array_values($grouped));
@@ -243,12 +259,40 @@
                         $plans = collect();
                     }
                     $locationService = app()->bound(\App\Services\LocationService::class) ? app(\App\Services\LocationService::class) : null;
-                    $isFromIndia = $locationService && method_exists($locationService, 'isFromIndia') ? $locationService->isFromIndia() : false;
-                    $currency = $locationService && method_exists($locationService, 'getUserCurrency') ? $locationService->getUserCurrency() : 'USD';
+                    $isFromIndia = $locationService && method_exists($locationService, 'isFromIndia')
+                        ? (bool) $locationService->isFromIndia()
+                        : false;
+
+                    if (!$isFromIndia) {
+                        $isFromIndia = request()->header('CF-IPCountry') === 'IN'
+                            || str_contains(request()->ip(), '127.')
+                            || str_contains(request()->ip(), '192.168.')
+                            || in_array(request()->ip(), ['::1', '127.0.0.1']);
+                    }
+
+                    $currency = $isFromIndia ? 'INR' : 'USD';
                 @endphp
 
                 @php if(!isset($plans) || !($plans instanceof \Illuminate\Support\Collection)) { $plans = collect(); } @endphp
                 @forelse($plans as $plan)
+                    @php
+                        $titleKey = 'common.plan_' . $plan->slug . '_title';
+                        $descKey = 'common.plan_' . $plan->slug . '_desc';
+                        $translatedTitle = __($titleKey);
+                        $translatedDesc = __($descKey);
+                        $planTitle = $translatedTitle === $titleKey ? $plan->name : $translatedTitle;
+                        $planDesc = $translatedDesc === $descKey ? $plan->description : $translatedDesc;
+                        $buttonKey = 'common.plan_' . $plan->slug . '_button';
+                        $translatedButton = __($buttonKey);
+                        $planButton = $translatedButton === $buttonKey ? 'Get Started' : $translatedButton;
+                        $isShopifyUser = auth()->check() && auth()->user()->organizations()
+                            ->whereHas('integrations', function($q) {
+                                $q->where('provider', 'shopify')->where('active', true);
+                            })
+                            ->exists();
+                        $subscriptionPlanId = $plan->monthly_id ?: $plan->id;
+                        $oneTimePlanId = $plan->one_time_id ?: $plan->id;
+                    @endphp
                     <div class="col-lg-3 col-md-6 mb-4">
                         <div class="card h-100 {{ $plan->slug === 'pro' ? 'border-primary' : '' }}">
                             @if($plan->slug === 'pro')
@@ -257,12 +301,12 @@
                                 </div>
                             @endif
                             <div class="card-body text-center">
-                                <h4 class="card-title">{{ __('common.plan_' . $plan->slug . '_title') }}</h4>
+                                <h4 class="card-title">{{ $planTitle }}</h4>
                                 <div class="price-section mb-3">
                                     @php
                                         $currencySymbol = $currency === 'INR' ? '₹' : '$';
                                     @endphp
-                                    @if($plan->monthly_price > 0)
+                                    @if((float) $plan->monthly_price > 0)
                                         <div class="monthly-price price-display" data-cycle="monthly">
                                             @php
                                                 $monthlyPrice = $plan->monthly_price;
@@ -311,6 +355,9 @@
                                     @elseif($plan->slug === 'payg')
                                         <div class="h3">{{ $currencySymbol }}5</div>
                                         <small class="text-muted">Minimum charge (100k tokens)</small>
+                                    @elseif($plan->slug === 'free')
+                                        <div class="h3 text-success">Free</div>
+                                        <small class="text-muted">20K tokens for trial</small>
                                     @else
                                         <div class="h3">Custom</div>
                                         @php
@@ -323,7 +370,7 @@
                                     @endif
                                 </div>
                                 
-                                <p class="text-muted">{{ __('common.plan_' . $plan->slug . '_desc') }}</p>
+                                <p class="text-muted">{{ $planDesc }}</p>
                                 
                                 <div class="mb-3">
                                     @if($plan->token_cap_monthly > 0)
@@ -359,57 +406,71 @@
                             <div class="card-footer">
                                 @guest
                                     <a href="{{ route('register', ['plan' => $plan->slug]) }}" class="btn {{ $plan->slug === 'pro' ? 'btn-primary' : 'btn-outline-primary' }} btn-block w-100">
-                                        {{ __('common.plan_' . $plan->slug . '_button') }}
+                                        {{ $planButton }}
                                     </a>
                                 @else
-                                    @if($plan->slug === 'enterprise')
+                                    @if($isShopifyUser)
+                                        <a href="{{ route('customer.subscription') }}" class="btn btn-outline-primary btn-block w-100">
+                                            Manage Plan in Shopify Dashboard
+                                        </a>
+                                    @elseif($plan->slug === 'free')
+                                        <a href="{{ route('customer.subscription') }}" class="btn btn-outline-success btn-block w-100">
+                                            {{ __('common.plan_free_button') }}
+                                        </a>
+                                    @elseif($plan->slug === 'enterprise')
                                         <a href="mailto:sales@ai-chat.support" class="btn btn-outline-primary btn-block w-100">
                                             {{ __('common.plan_enterprise_button') }}
                                         </a>
                                     @elseif($plan->slug === 'payg')
                                         <div class="btn-group-vertical w-100">
                                             @if($isFromIndia)
-                                                <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $oneTimePlanId, 'cycle' => 'monthly']) }}" 
                                                    class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
                                                     <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                 </a>
-                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $subscriptionPlanId, 'cycle' => 'monthly']) }}" 
                                                    class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
                                                     <i class="fab fa-paypal"></i> Pay with PayPal
                                                 </a>
                                             @else
-                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $subscriptionPlanId, 'cycle' => 'monthly']) }}" 
                                                    class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
                                                     <i class="fab fa-paypal"></i> Pay with PayPal
                                                 </a>
-                                                <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
+                                                <a href="{{ route('razorpay.create-onetime-direct', ['planId' => $oneTimePlanId, 'cycle' => 'monthly']) }}" 
                                                    class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
                                                     <i class="fas fa-credit-card"></i> Pay with Razorpay
                                                 </a>
                                             @endif
                                         </div>
                                     @else
-                                        <div class="btn-group-vertical w-100">
-                                            @if($isFromIndia)
-                                                <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
-                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                </a>
-                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
-                                                    <i class="fab fa-paypal"></i> Pay with PayPal
-                                                </a>
-                                            @else
-                                                <a href="{{ route('paypal.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
-                                                    <i class="fab fa-paypal"></i> Pay with PayPal
-                                                </a>
-                                                <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $plan->id, 'cycle' => 'monthly']) }}" 
-                                                   class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
-                                                    <i class="fas fa-credit-card"></i> Pay with Razorpay
-                                                </a>
-                                            @endif
-                                        </div>
+                                        @if($subscriptionPlanId)
+                                            <div class="btn-group-vertical w-100">
+                                                @if($isFromIndia)
+                                                    <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $subscriptionPlanId, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
+                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                    </a>
+                                                    <a href="{{ route('paypal.create-subscription-direct', ['planId' => $subscriptionPlanId, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
+                                                        <i class="fab fa-paypal"></i> Pay with PayPal
+                                                    </a>
+                                                @else
+                                                    <a href="{{ route('paypal.create-subscription-direct', ['planId' => $subscriptionPlanId, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-primary mb-2 payment-btn" data-plan-id="{{ $plan->id }}" data-provider="paypal">
+                                                        <i class="fab fa-paypal"></i> Pay with PayPal
+                                                    </a>
+                                                    <a href="{{ route('razorpay.create-subscription-direct', ['planId' => $subscriptionPlanId, 'cycle' => 'monthly']) }}" 
+                                                       class="btn btn-outline-primary payment-btn" data-plan-id="{{ $plan->id }}" data-provider="razorpay">
+                                                        <i class="fas fa-credit-card"></i> Pay with Razorpay
+                                                    </a>
+                                                @endif
+                                            </div>
+                                        @else
+                                            <a href="{{ route('customer.subscription') }}" class="btn btn-outline-primary btn-block w-100">
+                                                Manage Subscription
+                                            </a>
+                                        @endif
                                     @endif
                                 @endguest
                             </div>
@@ -792,7 +853,7 @@
                     "@type": "UnitPriceSpecification",
                     "price": "19.00",
                     "priceCurrency": "USD",
-                    "unitText": "500,000 tokens - never expires"
+                    "unitText": "500,000 tokens - valid for 12 months"
                 },
                 "availability": "https://schema.org/InStock",
                 "url": "{{ url('/credits-and-services') }}"
@@ -800,14 +861,14 @@
             {
                 "@type": "Offer",
                 "name": "Basic Credits Package",
-                "description": "Perfect for occasional usage with no expiration",
+                "description": "Perfect for occasional usage with 12-month validity",
                 "price": "69.00",
                 "priceCurrency": "USD",
                 "priceSpecification": {
                     "@type": "UnitPriceSpecification",
                     "price": "69.00",
                     "priceCurrency": "USD",
-                    "unitText": "2 million tokens - never expires"
+                    "unitText": "2 million tokens - valid for 12 months"
                 },
                 "availability": "https://schema.org/InStock",
                 "url": "{{ url('/credits-and-services') }}"
@@ -815,14 +876,14 @@
             {
                 "@type": "Offer",
                 "name": "Standard Credits Package",
-                "description": "Great value for regular usage with lifetime validity",
+                "description": "Great value for regular usage with 12-month validity",
                 "price": "129.00",
                 "priceCurrency": "USD",
                 "priceSpecification": {
                     "@type": "UnitPriceSpecification",
                     "price": "129.00",
                     "priceCurrency": "USD",
-                    "unitText": "4 million tokens - never expires"
+                    "unitText": "4 million tokens - valid for 12 months"
                 },
                 "availability": "https://schema.org/InStock",
                 "url": "{{ url('/credits-and-services') }}"
@@ -837,7 +898,7 @@
                     "@type": "UnitPriceSpecification",
                     "price": "299.00",
                     "priceCurrency": "USD",
-                    "unitText": "5 million tokens - never expires"
+                    "unitText": "5 million tokens - valid for 12 months"
                 },
                 "availability": "https://schema.org/InStock",
                 "url": "{{ url('/credits-and-services') }}"

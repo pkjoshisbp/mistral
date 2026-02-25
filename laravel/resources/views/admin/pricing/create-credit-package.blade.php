@@ -97,6 +97,17 @@
                             </div>
 
                             <div class="form-group">
+                                <label for="credit_validity_months">Credit Validity</label>
+                                <select class="form-control @error('credit_validity_months') is-invalid @enderror" id="credit_validity_months" name="credit_validity_months" required>
+                                    @foreach($validityOptions as $months => $label)
+                                        <option value="{{ $months }}" {{ (int) old('credit_validity_months', 12) === (int) $months ? 'selected' : '' }}>{{ $label }}</option>
+                                    @endforeach
+                                </select>
+                                <small class="form-text text-muted">Credits remain active for the selected period and can be carried forward on timely renewal.</small>
+                                @error('credit_validity_months')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                            </div>
+
+                            <div class="form-group">
                                 <label for="features">Features (one per line)</label>
                                 <textarea class="form-control @error('features') is-invalid @enderror" id="features" name="features" rows="6">{{ old('features') }}</textarea>
                                 @error('features')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -151,7 +162,7 @@
                         <h3 class="card-title">⚠️ Pricing Strategy</h3>
                     </div>
                     <div class="card-body">
-                        <p><strong>Credit packages should be MORE expensive than subscriptions since they never expire.</strong></p>
+                        <p><strong>Credit packages should be priced at a premium over subscriptions due to longer validity and carry-forward flexibility.</strong></p>
                         <p>Recommended range: <strong>$60-80 per 1M tokens</strong></p>
                     </div>
                 </div>

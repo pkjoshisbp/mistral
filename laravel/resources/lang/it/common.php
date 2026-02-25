@@ -35,6 +35,12 @@ return [
     'plan_payg_feature_no_monthly_commitment' => 'Nessun impegno mensile',
     'plan_payg_button' => 'Scegli Pagamento a consumo',
 
+    'plan_free_title' => 'Gratis',
+    'plan_free_desc' => 'Piano di prova gratuito per utenti Shopify',
+    'plan_free_button' => 'Avvia prova gratuita',
+    'plan_free_feature_20k_tokens_for_free_trial' => '20K token per prova gratuita',
+    'plan_free_feature_try_before_you_buy' => 'Prova prima di acquistare',
+
     'plan_enterprise_title' => 'Enterprise',
     'plan_enterprise_desc' => 'Soluzioni personalizzate per grandi organizzazioni',
     'plan_enterprise_tokens' => '50M token/mese',

@@ -117,6 +117,12 @@ class User extends Authenticatable
         return $credit->balance;
     }
 
+    public function getUsableCreditBalance()
+    {
+        $credit = $this->userCredit ?? UserCredit::getOrCreateForUser($this->id);
+        return $credit->getUsableCreditBalance();
+    }
+
     /**
      * Check if user can access premium features
      * Returns true if user has active subscription OR sufficient credits
@@ -134,7 +140,7 @@ class User extends Authenticatable
         }
 
         // Check for sufficient credits
-        return $this->getCreditBalance() >= $minimumCredits;
+        return $this->getUsableCreditBalance() >= $minimumCredits;
     }
 
     /**

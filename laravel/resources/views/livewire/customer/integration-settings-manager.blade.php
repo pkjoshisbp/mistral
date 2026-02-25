@@ -283,6 +283,26 @@
                                 </div>
                                 <small class="d-block mt-2 text-muted">Position: {{ ucwords(str_replace('-', ' ', $widget_position)) }}</small>
                             </div>
+
+                            <hr>
+
+                            <div class="form-group">
+                                <label for="widget_custom_css">Custom Widget CSS (optional)</label>
+                                <textarea wire:model="widget_custom_css" class="form-control @error('widget_custom_css') is-invalid @enderror" id="widget_custom_css" rows="6" placeholder="/* Example */&#10;.ai-chat-window {&#10;  max-width: 460px !important;&#10;}"></textarea>
+                                @error('widget_custom_css')
+                                    <span class="invalid-feedback">{{ $message }}</span>
+                                @enderror
+                                <small class="form-text text-muted">Applied only to this organization's widget stylesheet.</small>
+                            </div>
+
+                            <div class="form-group mb-0">
+                                <label for="widget_custom_js">Custom Widget JS (optional)</label>
+                                <textarea wire:model="widget_custom_js" class="form-control @error('widget_custom_js') is-invalid @enderror" id="widget_custom_js" rows="6" placeholder="// Example&#10;console.log('Widget loaded for org:', config.orgId);"></textarea>
+                                @error('widget_custom_js')
+                                    <span class="invalid-feedback">{{ $message }}</span>
+                                @enderror
+                                <small class="form-text text-muted">Executed safely inside widget context for this organization only.</small>
+                            </div>
                         </div>
                     </div>
                 </div>

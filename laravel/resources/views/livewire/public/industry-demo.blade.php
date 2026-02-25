@@ -37,10 +37,16 @@
                     <div class="card-body">
                         <h3 class="h5 fw-bold mb-3 text-dark">💬 Try These Questions</h3>
                         <div class="d-grid gap-2">
-                            @foreach($selectedDemo['sample_questions'] as $question)
-                                @php $qJson = json_encode($question); @endphp
-                                <button type="button" wire:click='sendSampleQuestion({{ $qJson }})' class="btn btn-outline-secondary text-start">
-                                    "{{ $question }}"
+                            @foreach($selectedDemo['sample_questions'] as $questionEntry)
+                                @php
+                                    $questionText = is_array($questionEntry)
+                                        ? ($questionEntry['question'] ?? '')
+                                        : (string) $questionEntry;
+                                    $qJson = json_encode($questionText);
+                                @endphp
+                                @continue(empty($questionText))
+                                <button type="button" wire:click.prevent='sendSampleQuestion({{ $qJson }})' data-demo-question-btn="1" class="btn btn-outline-secondary text-start" {{ ($isLoading || $isStreaming) ? 'disabled' : '' }}>
+                                    "{{ $questionText }}"
                                 </button>
                             @endforeach
                         </div>
@@ -50,7 +56,7 @@
 
             <!-- Chat Interface -->
             <div class="col-lg-8">
-                <div class="card shadow-sm">
+                <div class="card shadow-sm demo-chat-card">
                     <!-- Chat Header -->
                     <div class="card-header text-white" style="background: linear-gradient(90deg, #3b82f6, #2563eb);">
                         <div class="d-flex align-items-center">
@@ -65,7 +71,7 @@
                     </div>
 
                     <!-- Chat Messages -->
-                    <div class="card-body bg-light" style="height: 24rem; overflow-y: auto;" id="chatMessages" wire:key="chat-messages-{{ count($messages) }}">
+                    <div class="card-body bg-light demo-chat-body" id="chatMessages" wire:key="chat-messages-{{ count($messages) }}">
                         @foreach($messages as $index => $message)
                             <div class="mb-3" wire:key="message-{{ $index }}-{{ $message['timestamp']->timestamp }}">
                                 <div class="d-flex {{ $message['role'] === 'user' ? 'justify-content-end' : 'justify-content-start' }}">
@@ -79,7 +85,7 @@
                             </div>
                         @endforeach
 
-                        @if($isLoading)
+                        @if($isLoading || $isStreaming)
                         <div class="mb-3">
                             <div class="d-flex justify-content-start">
                                 <div class="p-3 bg-white border rounded-3">
@@ -92,26 +98,13 @@
                             </div>
                         </div>
                         @endif
-
-                        <!-- Real-time loading indicator -->
-                        <div wire:loading.delay wire:target="sendMessage" class="mb-3">
-                            <div class="d-flex justify-content-start">
-                                <div class="p-3 bg-white border rounded-3">
-                                    <div class="typing-indicator d-flex align-items-center gap-1">
-                                        <span></span>
-                                        <span></span>
-                                        <span></span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
 
                     <!-- Chat Input -->
                     <div class="card-footer bg-white">
                         <div class="input-group">
-                            <input type="text" class="form-control" placeholder="Type your message here..." wire:model.live="query" wire:keydown.enter="sendMessage" {{ $isLoading ? 'disabled' : '' }}>
-                            <button class="btn btn-primary" type="button" wire:click="sendMessage" {{ $isLoading ? 'disabled' : '' }}>
+                            <input type="text" class="form-control" placeholder="Type your message here..." wire:model.live="query" wire:keydown.enter="sendMessage" {{ ($isLoading || $isStreaming) ? 'disabled' : '' }}>
+                            <button class="btn btn-primary" type="button" wire:click="sendMessage" {{ ($isLoading || $isStreaming) ? 'disabled' : '' }}>
                                 <span wire:loading.remove wire:target="sendMessage"><i class="fa-solid fa-paper-plane"></i></span>
                                 <span wire:loading wire:target="sendMessage"><i class="fa-solid fa-spinner fa-spin"></i></span>
                             </button>
@@ -177,25 +170,157 @@
         0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
         30% { transform: translateY(-8px); opacity: 1; }
     }
+    .demo-chat-card {
+        height: 90vh;
+        display: flex;
+        flex-direction: column;
+    }
+    .demo-chat-body {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        min-height: 0;
+    }
     #chatMessages { scroll-behavior: smooth; }
     </style>
 
     <script>
-    document.addEventListener('livewire:load', function () {
+    const scrollDemoChatToBottom = (smooth = false) => {
         const chatContainer = document.getElementById('chatMessages');
-        if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+        if (!chatContainer) return;
+
+        if (smooth) {
+            chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
+            return;
+        }
+
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    };
+
+    document.addEventListener('livewire:load', function () {
+        scrollDemoChatToBottom(false);
     });
     document.addEventListener('livewire:update', function () {
-        setTimeout(() => {
-            const chatContainer = document.getElementById('chatMessages');
-            if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
-        }, 50);
+        setTimeout(() => scrollDemoChatToBottom(false), 50);
     });
     document.addEventListener('livewire:component:update', function () {
+        setTimeout(() => scrollDemoChatToBottom(false), 10);
+    });
+
+    document.addEventListener('click', function (event) {
+        const trigger = event.target.closest('[data-demo-question-btn]');
+        if (!trigger) return;
+
         setTimeout(() => {
-            const chatContainer = document.getElementById('chatMessages');
-            if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
-        }, 10);
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+            scrollDemoChatToBottom(true);
+        }, 20);
+    });
+
+    // --- SSE Streaming Handler ---
+    document.addEventListener('livewire:initialized', () => {
+        Livewire.on('demo:scroll-bottom', () => {
+            setTimeout(() => scrollDemoChatToBottom(true), 20);
+        });
+
+        Livewire.on('demo:start-stream', (eventData) => {
+            const messages  = eventData.messages || [];
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+            let fullContent = '';
+            let streamCompleted = false;
+
+            const finalizeOnce = () => {
+                if (streamCompleted) return;
+                streamCompleted = true;
+
+                if (fullContent.trim()) {
+                    @this.call('finalizeStream', fullContent);
+                } else {
+                    @this.call('streamError', 'Empty response');
+                }
+
+                setTimeout(() => scrollDemoChatToBottom(true), 20);
+            };
+
+            fetch('/demo/stream-chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                    'Accept': 'text/event-stream',
+                },
+                body: JSON.stringify({ messages: messages }),
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                const reader  = response.body.getReader();
+                const decoder = new TextDecoder();
+                let   buffer  = '';
+
+                function readChunk() {
+                    return reader.read().then(({ done, value }) => {
+                        if (done) {
+                            finalizeOnce();
+                            return;
+                        }
+
+                        buffer += decoder.decode(value, { stream: true });
+
+                        const parts = buffer.split('\n\n');
+                        buffer = parts.pop() || '';
+
+                        parts.forEach(part => {
+                            part = part.trim();
+                            if (!part) return;
+
+                            part.split('\n').forEach(line => {
+                                line = line.trim();
+                                if (!line.startsWith('data: ')) return;
+
+                                const jsonStr = line.slice(6).trim();
+                                if (!jsonStr || jsonStr === '[DONE]') return;
+
+                                try {
+                                    const data = JSON.parse(jsonStr);
+
+                                    if (data.content) {
+                                        fullContent += data.content;
+                                    }
+
+                                    if (data.done === true) {
+                                        finalizeOnce();
+                                        return;
+                                    }
+
+                                    if (data.error) {
+                                        if (streamCompleted) return;
+                                        streamCompleted = true;
+                                        @this.call('streamError', data.error);
+                                        return;
+                                    }
+                                } catch (e) {
+                                    // ignore malformed lines
+                                }
+                            });
+                        });
+
+                        return readChunk();
+                    });
+                }
+
+                return readChunk();
+            })
+            .catch(err => {
+                console.error('Demo stream error:', err);
+                if (streamCompleted) return;
+                streamCompleted = true;
+                @this.call('streamError', err.message || 'Network error');
+            });
+        });
     });
     </script>
 </div>

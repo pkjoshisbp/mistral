@@ -527,6 +527,9 @@ Route::get('/demo-test', function() {
 
 Route::get('/demo/{industry?}', \App\Livewire\Public\IndustryDemo::class)->name('demo');
 
+// Demo streaming endpoint - proxies FastAPI /llm/chat/stream with Vast.ai routing
+Route::post('/demo/stream-chat', [\App\Http\Controllers\DemoStreamController::class, 'stream'])->name('demo.stream');
+
 // Affiliate Registration Route
 Route::get('/affiliate/register', \App\Livewire\AffiliateRegistration::class)->name('affiliate.register');
 
@@ -865,6 +868,7 @@ Route::middleware(['auth', 'affiliate'])->prefix('affiliate')->name('affiliate.'
 
 // Widget Routes (Public - no auth required)
 Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class, 'noindex'])->group(function () {
+    Route::get('shopify/resolve', [\App\Http\Controllers\WidgetController::class, 'resolveShopifyOrganization'])->name('widget.shopify.resolve');
     Route::get('{orgId}/script.js', [\App\Http\Controllers\WidgetController::class, 'getWidgetScript'])->name('widget.script');
     Route::get('{orgId}/styles.css', [\App\Http\Controllers\WidgetController::class, 'getWidgetCSS'])->name('widget.styles');
     Route::post('{orgId}/chat', [\App\Http\Controllers\WidgetController::class, 'chat'])
@@ -888,6 +892,17 @@ Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class,
 // API Routes
 Route::prefix('api')->middleware('noindex')->group(function () {
     // WhatsApp Webhook (handled in routes/api.php as /api/webhooks/whatsapp)
+});
+
+// Shopify Billing Routes
+Route::get('/shopify/billing/callback', [\App\Http\Controllers\ShopifyBillingController::class, 'callback'])
+    ->name('shopify.billing.callback');
+
+Route::middleware(['auth', 'customer'])->group(function () {
+    Route::get('/shopify/billing/subscribe/{plan}', [\App\Http\Controllers\ShopifyBillingController::class, 'subscribe'])
+        ->name('shopify.billing.subscribe');
+    Route::post('/shopify/billing/cancel', [\App\Http\Controllers\ShopifyBillingController::class, 'cancel'])
+        ->name('shopify.billing.cancel');
 });
 
 // PayPal Routes

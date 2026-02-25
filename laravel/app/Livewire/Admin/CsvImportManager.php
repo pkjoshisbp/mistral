@@ -2,7 +2,9 @@
 
 namespace App\Livewire\Admin;
 
+use App\Models\OrganizationData;
 use App\Models\Organization;
+use App\Services\AiAgentService;
 use Illuminate\Support\Facades\Artisan;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\WithFileUploads;
@@ -31,6 +33,14 @@ class CsvImportManager extends Component
     public $importOutput = '';
     public $importExitCode = null;
 
+    public $showEditorModal = false;
+    public $selectedDataset = '';
+    public $selectedType = '';
+    public $selectedSourceFile = '';
+    public $selectedQdrantType = 'info';
+    public $editorRows = [];
+    public $editorDeletedRowIds = [];
+
     protected $rules = [
         'organizationId' => 'required|exists:organizations,id',
         'csvFile' => 'required|file|mimes:csv,txt|max:10240',
@@ -50,6 +60,334 @@ class CsvImportManager extends Component
     public function getOrganizationsProperty()
     {
         return Organization::query()->orderBy('name')->get();
+    }
+
+    public function getSelectedOrganizationProperty()
+    {
+        if (!$this->organizationId) {
+            return null;
+        }
+
+        return Organization::query()->find($this->organizationId);
+    }
+
+    public function getImportedDatasetsProperty()
+    {
+        if (!$this->organizationId) {
+            return collect();
+        }
+
+        return OrganizationData::query()
+            ->where('organization_id', $this->organizationId)
+            ->where('metadata->source', 'csv_import')
+            ->get()
+            ->groupBy(function (OrganizationData $row): string {
+                return (string) data_get($row->metadata, 'dataset', 'unknown');
+            })
+            ->map(function ($rows, $dataset) {
+                $first = $rows->first();
+
+                return [
+                    'dataset' => (string) $dataset,
+                    'type' => (string) ($first->type ?? 'info'),
+                    'qdrant_type' => (string) data_get($first->metadata, 'qdrant_type', 'info'),
+                    'source_file' => (string) data_get($first->metadata, 'source_file', ''),
+                    'row_count' => (int) $rows->count(),
+                    'last_updated_at' => optional($rows->max('updated_at'))->format('Y-m-d H:i'),
+                ];
+            })
+            ->sortByDesc('last_updated_at')
+            ->values();
+    }
+
+    public function updatedOrganizationId(): void
+    {
+        $this->closeEditorModal();
+    }
+
+    public function openDatasetEditor(string $dataset, string $type): void
+    {
+        if (!$this->organizationId) {
+            session()->flash('error', 'Please select an organization first.');
+            return;
+        }
+
+        $rows = OrganizationData::query()
+            ->where('organization_id', $this->organizationId)
+            ->where('type', $type)
+            ->where('metadata->source', 'csv_import')
+            ->where('metadata->dataset', $dataset)
+            ->orderBy('id')
+            ->get();
+
+        if ($rows->isEmpty()) {
+            session()->flash('error', 'No imported rows found for selected dataset.');
+            return;
+        }
+
+        $this->selectedDataset = $dataset;
+        $this->selectedType = $type;
+        $this->selectedSourceFile = (string) data_get($rows->first()->metadata, 'source_file', '');
+        $this->selectedQdrantType = (string) data_get($rows->first()->metadata, 'qdrant_type', 'info');
+        $this->editorDeletedRowIds = [];
+
+        $this->editorRows = $rows->map(function (OrganizationData $row): array {
+            return [
+                'id' => $row->id,
+                'external_key' => (string) data_get($row->metadata, 'external_key', ''),
+                'qdrant_type' => (string) data_get($row->metadata, 'qdrant_type', 'info'),
+                'name' => (string) $row->name,
+                'description' => (string) ($row->description ?? ''),
+                'content' => (string) ($row->content ?? ''),
+                'category' => (string) data_get($row->metadata, 'category', 'general'),
+                'is_synced' => (bool) $row->is_synced,
+            ];
+        })->toArray();
+
+        $this->showEditorModal = true;
+    }
+
+    public function addEditorRow(): void
+    {
+        if (!$this->showEditorModal) {
+            return;
+        }
+
+        $this->editorRows[] = [
+            'id' => null,
+            'external_key' => 'manual_' . now()->format('YmdHis') . '_' . substr((string) microtime(true), -4),
+            'qdrant_type' => $this->selectedQdrantType ?: 'info',
+            'name' => '',
+            'description' => '',
+            'content' => '',
+            'category' => 'general',
+            'is_synced' => false,
+        ];
+    }
+
+    public function removeEditorRow(int $index): void
+    {
+        if (!isset($this->editorRows[$index])) {
+            return;
+        }
+
+        $rowId = (int) ($this->editorRows[$index]['id'] ?? 0);
+        if ($rowId > 0 && !in_array($rowId, $this->editorDeletedRowIds, true)) {
+            $this->editorDeletedRowIds[] = $rowId;
+        }
+
+        unset($this->editorRows[$index]);
+        $this->editorRows = array_values($this->editorRows);
+    }
+
+    public function closeEditorModal(): void
+    {
+        $this->showEditorModal = false;
+        $this->selectedDataset = '';
+        $this->selectedType = '';
+        $this->selectedSourceFile = '';
+        $this->selectedQdrantType = 'info';
+        $this->editorRows = [];
+        $this->editorDeletedRowIds = [];
+    }
+
+    public function deleteDataset(string $dataset, string $type): void
+    {
+        if (!$this->organizationId) {
+            session()->flash('error', 'Please select an organization first.');
+            return;
+        }
+
+        $organization = $this->selectedOrganization;
+        if (!$organization) {
+            session()->flash('error', 'Selected organization not found.');
+            return;
+        }
+
+        $rows = OrganizationData::query()
+            ->where('organization_id', $this->organizationId)
+            ->where('type', $type)
+            ->where('metadata->source', 'csv_import')
+            ->where('metadata->dataset', $dataset)
+            ->get();
+
+        if ($rows->isEmpty()) {
+            session()->flash('error', 'No rows found for selected dataset.');
+            return;
+        }
+
+        $qdrantIds = $rows->map(function (OrganizationData $row): string {
+            $qdrantType = (string) data_get($row->metadata, 'qdrant_type', 'info');
+            if (!in_array($qdrantType, ['faq', 'info', 'service'], true)) {
+                $qdrantType = 'info';
+            }
+            return $qdrantType . '_' . $row->id;
+        })->values()->all();
+
+        OrganizationData::query()->whereIn('id', $rows->pluck('id')->all())->delete();
+
+        if (!empty($qdrantIds)) {
+            $aiService = new AiAgentService();
+            $aiService->deleteDataFromQdrant($organization->slug, $qdrantIds);
+        }
+
+        session()->flash('message', 'Dataset deleted successfully.');
+
+        if ($this->showEditorModal && $this->selectedDataset === $dataset && $this->selectedType === $type) {
+            $this->closeEditorModal();
+        }
+    }
+
+    public function saveEditedRows(): void
+    {
+        if (!$this->organizationId) {
+            session()->flash('error', 'Please select an organization first.');
+            return;
+        }
+
+        $organization = $this->selectedOrganization;
+        if (!$organization) {
+            session()->flash('error', 'Selected organization not found.');
+            return;
+        }
+
+        if (empty($this->editorRows) && empty($this->editorDeletedRowIds)) {
+            session()->flash('error', 'No changes to save.');
+            return;
+        }
+
+        $this->validate([
+            'editorRows.*.name' => 'required|string|max:255',
+            'editorRows.*.description' => 'nullable|string',
+            'editorRows.*.content' => 'nullable|string',
+            'editorRows.*.category' => 'required|string|max:100',
+        ]);
+
+        $existingIds = array_values(array_filter(array_map(fn ($row) => (int) ($row['id'] ?? 0), $this->editorRows)));
+
+        $existingRows = OrganizationData::query()
+            ->where('organization_id', $this->organizationId)
+            ->whereIn('id', $existingIds)
+            ->get()
+            ->keyBy('id');
+
+        $qdrantItemsByType = [];
+        $updatedOrCreatedIds = [];
+
+        foreach ($this->editorRows as $edited) {
+            $id = (int) ($edited['id'] ?? 0);
+            $isExisting = $id > 0 && $existingRows->has($id);
+
+            if ($isExisting) {
+                $row = $existingRows->get($id);
+                $metadata = is_array($row->metadata) ? $row->metadata : [];
+            } else {
+                $metadata = [];
+            }
+
+            $metadata['source'] = 'csv_import';
+            $metadata['dataset'] = $this->selectedDataset;
+            $metadata['source_file'] = $this->selectedSourceFile;
+            $metadata['category'] = trim((string) ($edited['category'] ?? 'general'));
+            $metadata['external_key'] = trim((string) ($edited['external_key'] ?? ''));
+
+            $qdrantType = trim((string) ($edited['qdrant_type'] ?? $this->selectedQdrantType ?? 'info'));
+            if (!in_array($qdrantType, ['faq', 'info', 'service'], true)) {
+                $qdrantType = 'info';
+            }
+            $metadata['qdrant_type'] = $qdrantType;
+
+            if ($isExisting) {
+                $row->update([
+                    'name' => trim((string) ($edited['name'] ?? '')),
+                    'description' => trim((string) ($edited['description'] ?? '')),
+                    'content' => trim((string) ($edited['content'] ?? '')),
+                    'metadata' => $metadata,
+                    'is_synced' => false,
+                    'last_synced_at' => null,
+                ]);
+            } else {
+                $row = OrganizationData::create([
+                    'organization_id' => $this->organizationId,
+                    'type' => $this->selectedType ?: $this->type,
+                    'name' => trim((string) ($edited['name'] ?? '')),
+                    'description' => trim((string) ($edited['description'] ?? '')),
+                    'content' => trim((string) ($edited['content'] ?? '')),
+                    'metadata' => $metadata,
+                    'is_synced' => false,
+                    'last_synced_at' => null,
+                ]);
+            }
+
+            $qdrantItemsByType[$qdrantType][] = [
+                'id' => $qdrantType . '_' . $row->id,
+                'title' => $row->name,
+                'content' => $row->content ?: ($row->description ?? ''),
+                'category' => data_get($row->metadata, 'category', 'general'),
+                'metadata' => [
+                    'table_id' => $row->id,
+                    'updated_at' => optional($row->updated_at)->toISOString(),
+                    'source' => 'csv_import',
+                    'dataset' => data_get($row->metadata, 'dataset'),
+                    'external_key' => data_get($row->metadata, 'external_key'),
+                    'type' => $row->type,
+                ],
+            ];
+
+            $updatedOrCreatedIds[] = $row->id;
+        }
+
+        if (!empty($this->editorDeletedRowIds)) {
+            $rowsToDelete = OrganizationData::query()
+                ->where('organization_id', $this->organizationId)
+                ->whereIn('id', $this->editorDeletedRowIds)
+                ->get();
+
+            $qdrantDeleteIds = $rowsToDelete->map(function (OrganizationData $row): string {
+                $qdrantType = (string) data_get($row->metadata, 'qdrant_type', 'info');
+                if (!in_array($qdrantType, ['faq', 'info', 'service'], true)) {
+                    $qdrantType = 'info';
+                }
+                return $qdrantType . '_' . $row->id;
+            })->values()->all();
+
+            OrganizationData::query()
+                ->where('organization_id', $this->organizationId)
+                ->whereIn('id', $this->editorDeletedRowIds)
+                ->delete();
+
+            if (!empty($qdrantDeleteIds)) {
+                $aiService = new AiAgentService();
+                $deleteResult = $aiService->deleteDataFromQdrant($organization->slug, $qdrantDeleteIds);
+                if (!$deleteResult) {
+                    session()->flash('error', 'Rows were deleted in DB, but Qdrant delete failed.');
+                    return;
+                }
+            }
+        }
+
+        if (!empty($qdrantItemsByType)) {
+            $aiService = new AiAgentService();
+            foreach ($qdrantItemsByType as $qdrantType => $items) {
+                $result = $aiService->updateDataToQdrant($organization->slug, $qdrantType, $items);
+                if (!$result || !($result['success'] ?? false)) {
+                    session()->flash('error', 'Rows saved, but Qdrant sync failed for type: ' . $qdrantType);
+                    return;
+                }
+            }
+        }
+
+        if (!empty($updatedOrCreatedIds)) {
+            OrganizationData::query()
+                ->whereIn('id', $updatedOrCreatedIds)
+                ->update([
+                    'is_synced' => true,
+                    'last_synced_at' => now(),
+                ]);
+        }
+
+        session()->flash('message', 'CSV rows saved and synced successfully.');
+        $this->openDatasetEditor($this->selectedDataset, $this->selectedType);
     }
 
     public function runImport(): void

@@ -17,7 +17,9 @@ class WidgetManager extends Component
         'settings.primary_color' => 'required|string',
         'settings.widget_position' => 'required|string',
         'settings.widget_theme' => 'required|string',
-        'settings.chat_history_ttl_hours' => 'required|integer|min:1|max:168'
+        'settings.chat_history_ttl_hours' => 'required|integer|min:1|max:168',
+        'settings.widget_custom_css' => 'nullable|string|max:20000',
+        'settings.widget_custom_js' => 'nullable|string|max:20000'
     ];
 
     public function mount()
@@ -42,6 +44,8 @@ class WidgetManager extends Component
             'branding_text_enabled' => true,
             'branding_text' => 'AI Chat Support',
             'chat_history_ttl_hours' => 24,
+            'widget_custom_css' => '',
+            'widget_custom_js' => '',
         ];
     }
 
