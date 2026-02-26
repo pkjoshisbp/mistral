@@ -641,6 +641,12 @@ class WidgetController
                     // For specific questions, use both service and FAQ results
                     $orderedResults = array_merge($serviceResults, $faqResults);
                 }
+
+                // Compute max relevance score to detect low-quality / off-topic context
+                $maxResultScore = 0.0;
+                foreach ($searchResults['results'] as $_r) {
+                    $maxResultScore = max($maxResultScore, (float) ($_r['score'] ?? 0));
+                }
                 
                 $collectedLinks = [];
                 foreach ($orderedResults as $result) {
@@ -668,7 +674,7 @@ class WidgetController
 
                         $supplementaryInfo = $this->extractSupplementaryInfoFromPayload($payload);
                         if ($supplementaryInfo !== '') {
-                            $context .= "Supplementary: " . $supplementaryInfo . "\n";
+                            $context .= "Details: " . $supplementaryInfo . "\n";
                         }
 
                         $modelPricing = $this->extractModelPricingFromPayload($payload);
@@ -1295,6 +1301,7 @@ class WidgetController
             $promotionContext = $this->buildPromotionContext($organization);
             $faqFollowUpInstruction = $this->faqFollowUpService->getFollowUpInstruction($organization);
             $supplementaryInstruction = $this->buildSupplementaryInstruction($organization);
+            $vacancyInstruction = $this->buildVacancyInstruction($organization);
 
             // Build smart system prompt
             if ($hasShopifyData) {
@@ -1307,6 +1314,7 @@ class WidgetController
                 $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question.\n";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n";
                 $systemPrompt .= $supplementaryInstruction . "\n";
+                $systemPrompt .= $vacancyInstruction . "\n";
                 $systemPrompt .= "If the user clearly ends the conversation (for example: 'goodbye', 'that's all', 'nothing else'), respond with a brief, friendly closing message (1 sentence max). If the user says 'no' as an answer to your clarifying question, continue helping with their original request instead of ending the chat.\n\n";
                 $systemPrompt .= "\nCURRENT CONTEXT:\n" . $finalContext . "\n";
                 if ($businessContext) {
@@ -1343,13 +1351,25 @@ class WidgetController
                 if ($promotionContext) {
                     $systemPrompt .= "\n" . $promotionContext . "\n";
                 }
-                
-                if ($context) {
-                    $systemPrompt .= "\nCURRENT CONTEXT:\n{$context}\n";
+
+                // Add low-relevance warning if context scores are poor (query is off-topic)
+                $lowRelevanceWarning = '';
+                if (isset($maxResultScore) && $maxResultScore < 0.55 && $context !== '') {
+                    $lowRelevanceWarning = "[NOTE: No specific knowledge base entry matched this query. The context below is the nearest available result but may not be directly relevant. Do NOT invent or assume any information not explicitly present here.]\n";
                 }
+
+                if ($context) {
+                    $systemPrompt .= "\nCURRENT CONTEXT:\n" . $lowRelevanceWarning . $context . "\n";
+                } elseif (isset($maxResultScore)) {
+                    $systemPrompt .= "\n[NOTE: No relevant knowledge base content was found for this query.]\n";
+                }
+
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\". ";
                 $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. Avoid long lists; if a list is necessary, keep it very short. If the answer is not in the provided context, say so and ask one clarifying question. ";
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
+                $systemPrompt .= "CRITICAL: NEVER invent or assume URLs, phone numbers, email addresses, prices, or factual details not explicitly stated in this system prompt or CURRENT CONTEXT. ";
+                $systemPrompt .= $vacancyInstruction . " ";
+                $systemPrompt .= "For other completely off-topic queries (personal requests or services we clearly do not offer at all), apologise briefly, state what we specialise in, and direct the user to our official contact. Do NOT fabricate any information. ";
                 $systemPrompt .= "If the user clearly ends the conversation (for example: 'goodbye', 'that's all', 'nothing else'), respond with a brief, friendly closing message (1 sentence max). If the user says 'no' as an answer to your clarifying question, continue helping with their original request instead of ending the chat. ";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
                 $systemPrompt .= " " . $supplementaryInstruction;
@@ -2008,7 +2028,7 @@ class WidgetController
 
                             $supplementaryInfo = $this->extractSupplementaryInfoFromPayload($payload);
                             if ($supplementaryInfo !== '') {
-                                $context .= "Supplementary: " . $supplementaryInfo . "\n";
+                                $context .= "Details: " . $supplementaryInfo . "\n";
                             }
 
                             $modelPricing = $this->extractModelPricingFromPayload($payload);
@@ -7148,7 +7168,32 @@ class WidgetController
             return $customInstruction;
         }
 
-        return "When CURRENT CONTEXT includes a line starting with 'Supplementary:', include one short, relevant final sentence using that data. Treat supplementary data as optional context, never invent missing values, and only include it when it helps answer the user's query.";
+        return "When CURRENT CONTEXT includes a line starting with 'Details:', include one short, relevant final sentence using that data. Treat it as optional context, never invent missing values, and only include it when it helps answer the user's query.";
+    }
+
+    private function buildVacancyInstruction(Organization $organization): string
+    {
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+
+        // Allow per-org override from settings
+        $custom = trim((string) ($settings['vacancy_instruction'] ?? ''));
+        if ($custom !== '') {
+            return $custom;
+        }
+
+        // Determine best contact channel for resume submission
+        $email = trim((string) ($organization->email ?? $settings['contact_email'] ?? ''));
+        $phone = trim((string) ($organization->phone ?? $settings['contact_phone'] ?? ''));
+
+        if ($email !== '') {
+            $contact = "send their resume / biodata to {$email}";
+        } elseif ($phone !== '') {
+            $contact = "reach out via phone / WhatsApp at {$phone}";
+        } else {
+            $contact = "contact us through our official website";
+        }
+
+        return "If the user asks about job openings, vacancies, recruitment, employment or career opportunities, and the CURRENT CONTEXT does not contain specific vacancy information: politely acknowledge the query, say that specific vacancy details are not available through this assistant right now, and invite them to {$contact} — the team will review and get back to them. Do NOT say we are not a recruitment firm, do NOT give career advice, and do NOT redirect to external job portals.";
     }
 
     private function compactContextForOpenAi(string $context): string
