@@ -602,7 +602,7 @@
 
             <div class="card mt-3">
                 <div class="card-header">
-                    <h6 class="mb-0"><i class="fas fa-tasks mr-2"></i> Saved Items (Notes, Reminders, Tasks)</h6>
+                    <h6 class="mb-0"><i class="fas fa-tasks mr-2"></i> Saved Items (MySQL Memory: Notes, Dictation, Reminders, Tasks)</h6>
                 </div>
                 <div class="card-body" style="max-height: 320px; overflow-y: auto;">
                     @forelse($savedItems as $item)
@@ -611,19 +611,84 @@
                                 <span class="badge bg-dark text-uppercase">{{ $item['type'] }}</span>
                                 <small class="text-muted">{{ $item['created_at'] ?? '' }}</small>
                             </div>
-                            <div class="font-weight-bold">{{ $item['title'] ?: 'Untitled' }}</div>
-                            @if(!empty($item['content']))
-                                <div class="small mt-1">{{ $item['content'] }}</div>
-                            @endif
-                            <div class="mt-1">
-                                <small class="text-muted">Status: {{ $item['status'] ?? 'pending' }}</small>
-                                @if(!empty($item['due_at']))
-                                    <small class="text-muted ms-2">Due: {{ $item['due_at'] }}</small>
+                            @if($editingItemId === ($item['id'] ?? null))
+                                <div class="form-group mb-2">
+                                    <label class="small mb-1">Type</label>
+                                    <select class="form-control form-control-sm" wire:model="editType">
+                                        <option value="note">note</option>
+                                        <option value="task">task</option>
+                                        <option value="reminder">reminder</option>
+                                        <option value="dictation">dictation</option>
+                                        <option value="email_draft">email_draft</option>
+                                        <option value="email">email</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mb-2">
+                                    <label class="small mb-1">Title</label>
+                                    <input type="text" class="form-control form-control-sm" wire:model="editTitle">
+                                </div>
+                                <div class="form-group mb-2">
+                                    <label class="small mb-1">Content</label>
+                                    <textarea class="form-control form-control-sm" rows="3" wire:model="editContent"></textarea>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-4 mb-2">
+                                        <label class="small mb-1">Status</label>
+                                        <select class="form-control form-control-sm" wire:model="editStatus">
+                                            <option value="pending">pending</option>
+                                            <option value="saved">saved</option>
+                                            <option value="completed">completed</option>
+                                            <option value="draft">draft</option>
+                                            <option value="pending_confirmation">pending_confirmation</option>
+                                            <option value="sent">sent</option>
+                                            <option value="send_failed">send_failed</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group col-md-8 mb-2">
+                                        <label class="small mb-1">Due At</label>
+                                        <input type="datetime-local" class="form-control form-control-sm" wire:model="editDueAt">
+                                    </div>
+                                </div>
+                                <div class="form-group mb-2">
+                                    <label class="small mb-1">Tags / Keywords (comma separated)</label>
+                                    <input type="text" class="form-control form-control-sm" wire:model="editTags" placeholder="client, urgent, billing">
+                                </div>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-success" wire:click="saveEditedItem">
+                                        <i class="fas fa-save mr-1"></i> Save
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" wire:click="cancelEditSavedItem">
+                                        Cancel
+                                    </button>
+                                </div>
+                            @else
+                                <div class="font-weight-bold">{{ $item['title'] ?: 'Untitled' }}</div>
+                                @if(!empty($item['content']))
+                                    <div class="small mt-1">{{ $item['content'] }}</div>
                                 @endif
-                            </div>
+                                <div class="mt-1">
+                                    <small class="text-muted">Status: {{ $item['status'] ?? 'pending' }}</small>
+                                    @if(!empty($item['due_at']))
+                                        <small class="text-muted ms-2">Due: {{ $item['due_at'] }}</small>
+                                    @endif
+                                </div>
+                                @if(!empty($item['tags']))
+                                    <div class="mt-1">
+                                        <small class="text-muted">Tags: {{ $item['tags'] }}</small>
+                                    </div>
+                                @endif
+                                <div class="mt-2 d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" wire:click="editSavedItem({{ $item['id'] }})">
+                                        <i class="fas fa-edit mr-1"></i> Edit
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" wire:click="deleteSavedItem({{ $item['id'] }})" onclick="return confirm('Delete this saved item?')">
+                                        <i class="fas fa-trash mr-1"></i> Delete
+                                    </button>
+                                </div>
+                            @endif
                         </div>
                     @empty
-                        <p class="text-muted mb-0">No saved items yet. Try commands like “add note…” or “remind me tomorrow at 10”.</p>
+                        <p class="text-muted mb-0">No saved items yet. Try commands like “add note…” or “remind me tomorrow at 10”. You can edit every saved row here with keyboard and mouse.</p>
                     @endforelse
                 </div>
             </div>

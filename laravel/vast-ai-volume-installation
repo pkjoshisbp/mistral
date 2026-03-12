@@ -1,0 +1,111 @@
+Look carefully at your df -h:
+
+overlay          32G   ...   /
+/dev/nvme0n1p3   63G   ...   /workspace
+
+That means:
+
+✅ Your 63GB volume is successfully mounted at /workspace
+✅ It is persistent
+✅ You are on the correct host
+✅ Volume + instance are properly attached
+
+So nothing is broken anymore.
+
+Why It Says “Volume in use”
+
+Because:
+
+The volume is currently attached to this running instance.
+
+Vast will not let you delete a volume while it’s mounted.
+
+This is normal and correct behavior.
+
+If you want to delete it later:
+
+Stop / destroy the instance
+
+Then delete the volume
+
+Important: Your Setup Is Now Correct
+
+You now have:
+
+32GB temporary container disk
+
+63GB persistent volume at /workspace
+
+This is exactly what we wanted.
+
+What This Means Practically
+
+Anything you put inside:
+
+/workspace
+
+Will survive:
+
+Instance stop
+
+Instance restart
+
+Host maintenance
+
+Reattachment later
+
+Anything installed outside /workspace:
+
+/opt
+/usr
+/root
+
+Will not survive container recreation.
+
+You Are Safe Now
+
+This line confirms success:
+
+/dev/nvme0n1p3   63G   ...   /workspace
+
+That is your persistent disk.
+
+Next Step
+
+Now we install properly inside /workspace.
+
+Critical Ollama GPU Note (important)
+
+If you install Ollama in /workspace by extracting only the binary, GPU inference may silently fall back to CPU.
+
+Reason:
+
+- /workspace/ollama/bin/ollama alone is not enough for CUDA inference
+- GPU runners/libraries are required under lib/ollama
+- in this setup they exist at /usr/local/lib/ollama
+
+So after creating /workspace/ollama, also do:
+
+mkdir -p /workspace/ollama/lib
+ln -s /usr/local/lib/ollama /workspace/ollama/lib/ollama
+
+Then run Ollama with models path on /workspace:
+
+OLLAMA_MODELS=/workspace/ollama/models OLLAMA_HOST=127.0.0.1:11434 /workspace/ollama/bin/ollama serve
+
+Verification:
+
+- check log for "inference compute ... library=CUDA"
+- if it shows "library=cpu", GPU runners are still not being used
+
+Example:
+
+cd /workspace
+mkdir ollama
+mkdir models
+
+From now on, treat /workspace as your real machine disk.
+
+You are now in stable infrastructure mode.
+
+No more disappearing installs 🙂

@@ -29,6 +29,12 @@
                 ->whereDate('created_at', $today)
                 ->count();
             $aiRepliesTotal = \App\Models\ChatMessage::whereIn('sender_type', ['ai', 'assistant'])->count();
+            $vastStatus = \Illuminate\Support\Facades\Cache::get('vastai_connectivity_status', null);
+            $vastHealthy = (bool) data_get($vastStatus, 'healthy', false);
+            $vastFailures = (int) data_get($vastStatus, 'failures', 0);
+            $vastCheckedAt = (string) data_get($vastStatus, 'checked_at', 'Not checked yet');
+            $vastOllamaOk = (bool) data_get($vastStatus, 'ollama_ok', false);
+            $vastWhisperOk = (bool) data_get($vastStatus, 'whisper_ok', false);
         @endphp
 
         <!-- Small boxes (Stat box) -->
@@ -223,10 +229,17 @@
                             </div>
                             <div class="col-12">
                                 <div class="info-box">
-                                    <span class="info-box-icon bg-success"><i class="fas fa-brain"></i></span>
+                                    <span class="info-box-icon {{ $vastHealthy ? 'bg-success' : 'bg-danger' }}"><i class="fas fa-link"></i></span>
                                     <div class="info-box-content">
-                                        <span class="info-box-text">Mistral 7B Model</span>
-                                        <span class="info-box-number">Ready</span>
+                                        <span class="info-box-text">Vast.ai Connectivity</span>
+                                        <span class="info-box-number">
+                                            {{ $vastHealthy ? 'Healthy' : 'Degraded' }}
+                                            @if(!$vastHealthy)
+                                                ({{ $vastFailures }} failures)
+                                            @endif
+                                        </span>
+                                        <small class="text-muted d-block">Ollama: {{ $vastOllamaOk ? 'OK' : 'Down' }} | Whisper: {{ $vastWhisperOk ? 'OK' : 'Down' }}</small>
+                                        <small class="text-muted d-block">Last checked: {{ $vastCheckedAt }}</small>
                                     </div>
                                 </div>
                             </div>

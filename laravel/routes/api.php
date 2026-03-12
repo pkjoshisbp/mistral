@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\WhatsappWebhookController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\Api\OrderStatusController;
 use App\Http\Controllers\Api\ShopifyDataController;
+use App\Http\Controllers\Api\MobilePersonalAssistantController;
 use App\Http\Controllers\Webhooks\MailgunInboundController;
 
 Route::post('/leads', [LeadController::class, 'store']);
@@ -63,4 +64,27 @@ Route::prefix('integrations')->group(function () {
     
     // Shopify webhook route (still in API, webhook doesn't need sessions)
     Route::post('/webhook/shopify', [IntegrationController::class, 'shopifyWebhook'])->name('api.integrations.shopify.webhook');
+});
+
+Route::prefix('mobile-assistant')->group(function () {
+    Route::post('/login', [MobilePersonalAssistantController::class, 'login']);
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('/logout', [MobilePersonalAssistantController::class, 'logout']);
+        Route::get('/me', [MobilePersonalAssistantController::class, 'me']);
+
+        Route::get('/settings', [MobilePersonalAssistantController::class, 'getSettings']);
+        Route::put('/settings', [MobilePersonalAssistantController::class, 'updateSettings']);
+
+        Route::get('/training/samples', [MobilePersonalAssistantController::class, 'trainingSamples']);
+        Route::post('/training/save-correction', [MobilePersonalAssistantController::class, 'saveTrainingCorrection']);
+
+        Route::post('/voice/transcribe', [MobilePersonalAssistantController::class, 'transcribe']);
+        Route::post('/commands/process', [MobilePersonalAssistantController::class, 'processCommand']);
+
+        Route::get('/items', [MobilePersonalAssistantController::class, 'listItems']);
+        Route::post('/items', [MobilePersonalAssistantController::class, 'createItem']);
+        Route::put('/items/{id}', [MobilePersonalAssistantController::class, 'updateItem']);
+        Route::delete('/items/{id}', [MobilePersonalAssistantController::class, 'deleteItem']);
+    });
 });

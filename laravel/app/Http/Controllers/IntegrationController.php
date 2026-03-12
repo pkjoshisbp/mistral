@@ -1086,7 +1086,7 @@ class IntegrationController extends Controller
                 'action_type' => 'search',
                 'description' => 'Get Shopify store contact, address, and business information.',
                 'aliases' => ['store info', 'shop info', 'contact info', 'address info'],
-                'keywords' => ['store', 'shop', 'contact', 'address', 'phone', 'email', 'location', 'about', 'who are you'],
+                'keywords' => ['store info', 'shop info', 'contact', 'address', 'phone', 'email', 'location', 'about your store', 'about you', 'who are you'],
                 'source_type' => 'api',
                 'source_config' => [
                     'method' => 'POST',

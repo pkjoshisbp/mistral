@@ -447,9 +447,13 @@ class FaqsManager extends Component
                     'title' => $faq->question,
                     'content' => $faq->answer,
                     'category' => $faq->category ?? 'general',
+                    'keywords' => $faq->keywords,
+                    'search_keywords' => $faq->keywords,
                     'metadata' => [
                         'table_id' => $faq->id,
                         'follow_up' => $faq->follow_up ?? '',
+                        'keywords' => $faq->keywords,
+                        'search_keywords' => $faq->keywords,
                         'updated_at' => $faq->updated_at->toISOString()
                     ]
                 ]

@@ -9,15 +9,17 @@ NC='\033[0m'
 echo "=== Autossh Tunnel Status ==="
 echo ""
 
+VAST_PORT="${VAST_PORT:-51734}"
+
 # Check if autossh is running
-if pgrep -f "autossh.*29425" > /dev/null; then
-    PID=$(pgrep -f "autossh.*29425")
+if pgrep -f "autossh.*${VAST_PORT}" > /dev/null; then
+    PID=$(pgrep -f "autossh.*${VAST_PORT}")
     echo -e "${GREEN}✅ Autossh running (PID: $PID)${NC}"
     
     # Show process details
     echo ""
     echo "Process details:"
-    ps aux | grep autossh | grep 29425 | grep -v grep
+    ps aux | grep autossh | grep ${VAST_PORT} | grep -v grep
     
     # Test connection
     echo ""

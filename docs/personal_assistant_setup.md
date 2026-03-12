@@ -1,5 +1,12 @@
 # Personal Assistant Voice Stack Setup
 
+## Critical port mapping (always use this while debugging)
+
+- Local model endpoint: `http://127.0.0.1:11434` (local Ollama on this server)
+- Vast.ai model endpoint: `http://127.0.0.1:11435` (SSH tunnel local port forwarding to remote `127.0.0.1:11434` on Vast.ai)
+
+If `11435` fails but `11434` works, the issue is tunnel/remote availability, not local Ollama.
+
 ## What was added
 
 > Scope: This Personal Assistant module is customer-panel only (`/customer/personal-assistant`) and is separate from the public website chat widget pipeline.

@@ -21,7 +21,16 @@ class WidgetSettingsController extends Controller
         }
 
         $data = $request->validate([
+            'organizationId' => 'nullable|integer',
             'primaryColor' => 'required|string|max:32',
+            'widgetIconColor' => 'nullable|string|max:32',
+            'assistantBubbleBgColor' => 'nullable|string|max:32',
+            'assistantBubbleTextColor' => 'nullable|string|max:32',
+            'widgetButtonBgType' => 'nullable|string|in:gradient,solid',
+            'widgetButtonSolidColor' => 'nullable|string|max:32',
+            'widgetButtonGradientStart' => 'nullable|string|max:32',
+            'widgetButtonGradientEnd' => 'nullable|string|max:32',
+            'widgetButtonGradientAngle' => 'nullable|integer|min:0|max:360',
             'chatPosition' => 'required|string|in:bottom-right,bottom-left,top-right,top-left',
             'offsetX' => 'nullable|integer|min:0|max:200',
             'offsetY' => 'nullable|integer|min:0|max:200',
@@ -35,8 +44,32 @@ class WidgetSettingsController extends Controller
             'widgetCustomJs' => 'nullable|string|max:20000',
         ]);
 
+        if (!empty($data['organizationId'])) {
+            $requestedOrgId = (int) $data['organizationId'];
+            $requestedOrg = $user->organizations()->where('organizations.id', $requestedOrgId)->first();
+            if ($requestedOrg) {
+                $org = $requestedOrg;
+            }
+        }
+
         $settings = $org->settings ?? [];
         $settings['primary_color'] = $data['primaryColor'];
+        $settings['widget_icon_color'] = !empty($data['widgetIconColor'])
+            ? $data['widgetIconColor']
+            : ($settings['widget_icon_color'] ?? '#ffffff');
+        $settings['widget_bot_bubble_bg_color'] = !empty($data['assistantBubbleBgColor'])
+            ? $data['assistantBubbleBgColor']
+            : ($settings['widget_bot_bubble_bg_color'] ?? '#f4f8f6');
+        $settings['widget_bot_bubble_text_color'] = !empty($data['assistantBubbleTextColor'])
+            ? $data['assistantBubbleTextColor']
+            : ($settings['widget_bot_bubble_text_color'] ?? '#000000');
+        $settings['widget_button_bg_type'] = $data['widgetButtonBgType'] ?? ($settings['widget_button_bg_type'] ?? 'gradient');
+        $settings['widget_button_solid_color'] = $data['widgetButtonSolidColor'] ?? ($settings['widget_button_solid_color'] ?? ($settings['primary_color'] ?? '#007bff'));
+        $settings['widget_button_gradient_start'] = $data['widgetButtonGradientStart'] ?? ($settings['widget_button_gradient_start'] ?? '#667eea');
+        $settings['widget_button_gradient_end'] = $data['widgetButtonGradientEnd'] ?? ($settings['widget_button_gradient_end'] ?? '#764ba2');
+        $settings['widget_button_gradient_angle'] = isset($data['widgetButtonGradientAngle'])
+            ? (int) $data['widgetButtonGradientAngle']
+            : (int) ($settings['widget_button_gradient_angle'] ?? 135);
         $settings['widget_position'] = $data['chatPosition'];
     if (isset($data['offsetX'])) $settings['widget_offset_x'] = (int)$data['offsetX'];
     if (isset($data['offsetY'])) $settings['widget_offset_y'] = (int)$data['offsetY'];
@@ -151,9 +184,26 @@ class WidgetSettingsController extends Controller
         Log::info('Customer widget settings saved', [
             'user_id' => $user->id,
             'org_id' => $org->id,
+            'posted_primary_color' => $data['primaryColor'] ?? null,
+            'posted_widget_icon_color' => $data['widgetIconColor'] ?? null,
+            'posted_widget_bot_bubble_bg_color' => $data['assistantBubbleBgColor'] ?? null,
+            'posted_widget_bot_bubble_text_color' => $data['assistantBubbleTextColor'] ?? null,
+            'posted_widget_button_bg_type' => $data['widgetButtonBgType'] ?? null,
+            'posted_widget_button_solid_color' => $data['widgetButtonSolidColor'] ?? null,
             'settings' => $settings,
         ]);
 
-        return response()->json(['success' => true]);
+        return response()->json([
+            'success' => true,
+            'settings' => [
+                'primaryColor' => $settings['primary_color'] ?? null,
+                'widgetIconColor' => $settings['widget_icon_color'] ?? null,
+                'assistantBubbleBgColor' => $settings['widget_bot_bubble_bg_color'] ?? '#f4f8f6',
+                'assistantBubbleTextColor' => $settings['widget_bot_bubble_text_color'] ?? '#000000',
+                'widgetButtonBgType' => $settings['widget_button_bg_type'] ?? 'gradient',
+                'widgetButtonSolidColor' => $settings['widget_button_solid_color'] ?? null,
+                'organizationId' => $org->id,
+            ],
+        ]);
     }
 }

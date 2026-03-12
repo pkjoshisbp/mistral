@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-VAST_HOST="171.248.41.73"
-VAST_PORT="29425"
-VAST_USER="root"
+VAST_HOST="${VAST_HOST:-123.21.129.10}"
+VAST_PORT="${VAST_PORT:-51734}"
+VAST_USER="${VAST_USER:-root}"
 
 ssh -o StrictHostKeyChecking=no -p ${VAST_PORT} ${VAST_USER}@${VAST_HOST} <<'REMOTE_SETUP'
 set -euo pipefail

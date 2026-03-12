@@ -55,38 +55,17 @@ class FollowUpStateService
 
         $topicHints = $pendingState['topic_hints'] ?? [];
         if (is_array($topicHints)) {
+            $addedHints = 0;
             foreach ($topicHints as $hint) {
                 $hint = trim((string) $hint);
-                if ($hint !== '') {
+                if ($hint !== '' && $this->isRetrievalSafeHint($hint)) {
                     $parts[] = $hint;
-                }
-            }
-        }
-
-        $followUp = $pendingState['follow_up'] ?? null;
-        if (is_array($followUp)) {
-            $followUpType = trim((string) ($followUp['type'] ?? ''));
-            if ($followUpType !== '') {
-                $parts[] = $followUpType;
-            }
-
-            $followUpTopics = $followUp['topic'] ?? [];
-            if (is_string($followUpTopics)) {
-                $followUpTopics = [$followUpTopics];
-            }
-            if (is_array($followUpTopics)) {
-                foreach ($followUpTopics as $topic) {
-                    $topic = trim((string) $topic);
-                    if ($topic !== '') {
-                        $parts[] = $topic;
+                    $addedHints++;
+                    if ($addedHints >= 2) {
+                        break;
                     }
                 }
             }
-        }
-
-        $question = trim((string) ($pendingState['question'] ?? ''));
-        if ($question !== '') {
-            $parts[] = $question;
         }
 
         if ($message !== '') {
@@ -94,7 +73,42 @@ class FollowUpStateService
         }
 
         $query = trim(implode(' ', array_values(array_unique(array_filter($parts)))));
+        $query = preg_replace('/\s+/', ' ', (string) $query) ?? '';
+
+        if (mb_strlen($query) > 220) {
+            $fallbackParts = [];
+            if ($entity !== '' && $this->isRetrievalSafeHint($entity)) {
+                $fallbackParts[] = $entity;
+            }
+            if ($message !== '') {
+                $fallbackParts[] = $message;
+            }
+            $query = trim(implode(' ', $fallbackParts));
+        }
+
         return $query !== '' ? $query : $message;
+    }
+
+    private function isRetrievalSafeHint(string $hint): bool
+    {
+        $normalized = trim((string) preg_replace('/\s+/', ' ', $hint));
+        if ($normalized === '' || mb_strlen($normalized) > 64) {
+            return false;
+        }
+
+        if (str_contains($normalized, ',') || str_contains($normalized, '|')) {
+            return false;
+        }
+
+        if (substr_count($normalized, '/') >= 2 || substr_count($normalized, '\\') >= 2) {
+            return false;
+        }
+
+        if (preg_match('/\b(default\s+category|show\s+by\s+room|room\s+by\s+view|expand)\b/i', $normalized)) {
+            return false;
+        }
+
+        return true;
     }
 
     public function updatePendingState(ChatConversation $conversation, string $assistantResponse, array $contextPayloads = [], ?array $providedState = null): void

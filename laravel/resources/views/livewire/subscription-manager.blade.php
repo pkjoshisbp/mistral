@@ -48,7 +48,7 @@
                                         $price = $currentSubscription->subscriptionPlan->price ?? 0;
                                     @endphp
                                     @if($isFromIndia)
-                                        <span class="h5 text-primary">₹{{ number_format($price * 83, 0) }}</span>
+                                        <span class="h5 text-primary">₹{{ number_format($price * 100, 0) }}</span>
                                     @else
                                         <span class="h5 text-primary">${{ number_format($price, 0) }}</span>
                                     @endif
@@ -216,9 +216,9 @@
                                             <div class="text-primary">
                                                 @if($isFromIndia)
                                                     @if($plan->slug === 'payg')
-                                                        <strong>₹{{ number_format($plan->monthly_price * 83, 0) }} for credits</strong>
+                                                        <strong>₹{{ number_format($plan->monthly_price * 100, 0) }} for credits</strong>
                                                     @else
-                                                        <strong>₹{{ number_format($plan->monthly_price * 83, 0) }}/mo</strong>
+                                                        <strong>₹{{ number_format($plan->monthly_price * 100, 0) }}/mo</strong>
                                                     @endif
                                                 @else
                                                     @if($plan->slug === 'payg')

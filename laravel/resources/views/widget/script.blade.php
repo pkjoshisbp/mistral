@@ -395,7 +395,15 @@
             this.createWidget();
             this.bindEvents();
             this.applyCustomWidgetJs();
-            
+
+            // Track page view when widget script loads (delayed to avoid blocking render)
+            setTimeout(() => {
+                this.trackAnalytics('page_view', {
+                    referrer: document.referrer || null,
+                    user_agent: navigator.userAgent,
+                });
+            }, 1500);
+
             // Detect and apply Shopify theme colors if available
             if (this.config.isShopify) {
                 setTimeout(() => {
@@ -514,16 +522,16 @@
                 <div id="${widgetId}" class="ai-chat-widget ${this.config.position}" style="--ai-offset-x: ${this.config.offsetX || 20}px; --ai-offset-y: ${this.config.offsetY || 20}px;">
                     <!-- Chat Button -->
                     <div id="${buttonId}" class="ai-chat-button">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2ZM20 16H5.17L4 17.17V4H20V16Z" fill="white"/>
-                            <circle cx="8" cy="10" r="1" fill="white"/>
-                            <circle cx="12" cy="10" r="1" fill="white"/>
-                            <circle cx="16" cy="10" r="1" fill="white"/>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color:${this.config.widgetIconColor || '#ffffff'};fill:${this.config.widgetIconColor || '#ffffff'};">
+                            <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2ZM20 16H5.17L4 17.17V4H20V16Z" fill="${this.config.widgetIconColor || '#ffffff'}"/>
+                            <circle cx="8" cy="10" r="1" fill="${this.config.widgetIconColor || '#ffffff'}"/>
+                            <circle cx="12" cy="10" r="1" fill="${this.config.widgetIconColor || '#ffffff'}"/>
+                            <circle cx="16" cy="10" r="1" fill="${this.config.widgetIconColor || '#ffffff'}"/>
                         </svg>
                         <span class="ai-chat-notification" id="${notificationId}">1</span>
                     </div>
 
-                    ${this.config.brandingEnabled && this.config.brandingBadge ? `
+                    ${this.config.brandingEnabled && this.config.brandingBadge && !this.config.standardAttribution ? `
                         <div class="ai-chat-badge" style="position:absolute; ${this.config.position.includes('bottom') ? 'bottom: -20px;' : 'top: -20px;'} ${this.config.position.includes('right') ? 'right: 0;' : 'left: 0;'} opacity: 0.7;">
                             <a href="https://ai-chat.support" target="_blank" rel="nofollow noopener noreferrer" aria-label="Powered by ai chat" style="display:inline-flex;align-items:center;text-decoration:none; font-size:11px; color:#111; font-family: 'Segoe UI', Helvetica, Arial, sans-serif;">
                                 Powered by ai chat
@@ -597,12 +605,18 @@
                             </button>
                         </div>
 
-                        <!-- Branding Footer - Minimal text only -->
+                        <!-- Branding Footer / Shopify Standard Attribution -->
                         ${this.config.brandingEnabled ? `
                         <div class="ai-chat-branding" style="padding:6px 12px; background:#ffffff; border-top:1px solid #f0f0f0; text-align:center; font-size:11px; color:#111;">
-                            <a href="https://ai-chat.support" target="_blank" rel="noopener noreferrer" aria-label="Powered by ai chat" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none; color:#111; font-family: 'Segoe UI', Helvetica, Arial, sans-serif;">
-                                Powered by ai chat
-                            </a>
+                            ${this.config.standardAttribution ? `
+                                <a href="https://ai-chat.support" target="_blank" rel="noopener noreferrer nofollow" class="ai-chat-attribution-link" aria-label="App attribution" title="Powered by AI Chat Support" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;line-height:1;text-decoration:none;overflow:hidden;border-radius:50%;background:#000000;box-shadow:0 1px 3px rgba(0,0,0,.24);font-family:Inter,'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:700;color:#ffffff;letter-spacing:.2px;">
+                                    AI
+                                </a>
+                            ` : `
+                                <a href="https://ai-chat.support" target="_blank" rel="noopener noreferrer" aria-label="Powered by ai chat" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none; color:#111; font-family: 'Segoe UI', Helvetica, Arial, sans-serif;">
+                                    Powered by ai chat
+                                </a>
+                            `}
                         </div>
                         ` : ''}
                     </div>
@@ -709,6 +723,7 @@
             const input = document.getElementById(this.ids.input);
             const leadSubmit = document.getElementById(this.ids.leadSubmit);
             const leadSkip = document.getElementById(this.ids.leadSkip);
+            const widget = document.getElementById(this.ids.widget);
 
             if (!button) {
                 console.error('AI Chat Widget: Button not found');
@@ -937,7 +952,30 @@
 
         linkify(text) {
             if (!text) return '';
-            
+
+            // ── Numbered list normalisation (text-only, safe before HTML processing) ──
+            // Case 1: LLM puts the number at the end of the previous line:
+            //   "details: 1.\n**Item**"  →  "details:\n\n1. **Item**"
+            text = text.replace(/([^\n])\s*(\d+)\.\s*\n/g, '$1\n\n$2. ');
+            // Case 2: number already starts a line but no blank line before it
+            text = text.replace(/\n(\d+\.\s)/g, '\n\n$1');
+            // Case 3: fully inline list — LLM emits no newlines at all:
+            //   "...buy. 2. Basic: ..."  or  "plans: 1. Free: ..."
+            // Insert a double newline before each "N. " that follows sentence/clause punctuation.
+            // Guard: lookahead ensures the char after "N. " is not another digit (avoids
+            // splitting "version 1. 2 features" type text).
+            text = text.replace(/([.!?:,)])\s+(\d+\.\s+)(?=\D)/g, '$1\n\n$2');
+
+            // ── Bold/italic placeholders (applied after HTML-escape below) ──────────
+            // We use placeholders so the defensive tag-strip doesn't eat them.
+            const boldPH = [], italicPH = [];
+            text = text.replace(/\*\*([^*\n]+?)\*\*/g, (_, inner) => {
+                boldPH.push(inner); return `__BOLD_${boldPH.length - 1}__`;
+            });
+            text = text.replace(/\*([^*\n]+?)\*/g, (_, inner) => {
+                italicPH.push(inner); return `__ITALIC_${italicPH.length - 1}__`;
+            });
+
             // Preserve existing anchors by placeholdering them first
             const anchorPlaceholders = [];
             let anchorIndex = 0;
@@ -1044,6 +1082,16 @@
                 processed = processed.replace(`__ANCHOR_${i}__`, anchorPlaceholders[i]);
             }
 
+            // Restore bold/italic placeholders as HTML (inner text was not yet escaped,
+            // so escape it now before wrapping in tags)
+            const _esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            for (let i = 0; i < boldPH.length; i++) {
+                processed = processed.replace(`__BOLD_${i}__`, `<strong>${_esc(boldPH[i])}</strong>`);
+            }
+            for (let i = 0; i < italicPH.length; i++) {
+                processed = processed.replace(`__ITALIC_${i}__`, `<em>${_esc(italicPH[i])}</em>`);
+            }
+
             // Preserve line breaks
             return processed.replace(/\n/g, '<br>');
         }
@@ -1138,18 +1186,14 @@
             const interval = 18; // ms per step
 
             const tick = () => {
-                if (i >= text.length) {
-                    // Final render with linkify for clickable URLs
-                    contentEl.innerHTML = this.linkify(text);
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    return;
-                }
                 const next = text.slice(0, i += step);
-                // Light render without full linkify each tick for performance; apply simple escape
-                const safe = next.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-                contentEl.innerHTML = safe;
+                // Apply full formatting each tick so the animation always looks like
+                // the final rendered output (bold, numbered lists, links, etc.)
+                contentEl.innerHTML = this.linkify(next);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                setTimeout(tick, interval);
+                if (i < text.length) {
+                    setTimeout(tick, interval);
+                }
             };
             tick();
 
@@ -1440,8 +1484,12 @@
             // Apply colors to widget elements dynamically
             const style = document.createElement('style');
             style.id = 'ai-chat-dynamic-colors';
+            const launcherMode = String(this.config.widgetButtonBgType || 'gradient').toLowerCase();
+            const launcherBackgroundRule = launcherMode === 'solid'
+                ? `.ai-chat-button { background: ${colors.primaryColor} !important; }`
+                : '';
             style.innerHTML = `
-                .ai-chat-button { background: ${colors.primaryColor} !important; }
+                ${launcherBackgroundRule}
                 .ai-chat-header { background: ${colors.primaryColor} !important; }
                 .ai-chat-message-user .ai-chat-message-content { background: ${colors.primaryColor} !important; }
                 .ai-chat-send-button { background: ${colors.primaryColor} !important; }
@@ -1476,6 +1524,9 @@
                     event_type: eventType,
                     page_url: window.location.href,
                     page_title: document.title,
+                    referrer: data.referrer !== undefined ? data.referrer : (document.referrer || null),
+                    user_agent: data.user_agent !== undefined ? data.user_agent : navigator.userAgent,
+                    timestamp: new Date().toISOString(),
                     event_data: {
                         widget_event: true,
                         ...data
@@ -1704,7 +1755,7 @@
                         if (this.wsStream && !this.wsStream.hasContent && !this.wsStream.finished) {
                             this.cleanupWebSocketStream(false);
                         }
-                    }, 2500)
+                    }, 8000)
                 };
 
                 try {
@@ -1775,44 +1826,31 @@
                     requestBody.is_shopify = true;
                 }
 
-                // Try WebSocket first (fallback to SSE)
-                const wsSucceeded = await this.sendWebSocketStream(requestBody, message);
-                if (wsSucceeded) {
-                    return;
-                }
-
-                // Use fetch with streaming for real-time SSE responses
-                const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/chat/stream`, {
+                // Plain HTTP JSON request - simple and reliable across all proxy/server configs
+                const response = await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/chat`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Accept': 'text/event-stream'
                     },
                     body: JSON.stringify(requestBody)
                 });
 
+                this.removeTypingIndicator();
+
                 // Handle rate limiting
                 if (response.status === 429) {
                     const data = await response.json();
-                    this.removeTypingIndicator();
                     const waitTime = data.retry_after || 60;
                     this.addMessage(`Please slow down! You can send up to 5 messages per minute. Please wait ${waitTime} seconds.`, 'bot');
                     return;
                 }
 
                 if (!response.ok) {
-                    this.removeTypingIndicator();
                     let errorText = '';
                     try {
                         errorText = await response.text();
-                    } catch (readErr) {
-                        console.warn('[AI Chat] Failed to read error response:', readErr);
-                    }
-                    console.error('[AI Chat] Stream request failed:', {
-                        status: response.status,
-                        statusText: response.statusText,
-                        body: errorText
-                    });
+                    } catch (readErr) {}
+                    console.error('[AI Chat] Request failed:', { status: response.status, body: errorText });
                     const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
                     if (contactFallback) {
                         this.addMessage(contactFallback, 'bot');
@@ -1822,222 +1860,21 @@
                     return;
                 }
 
-                let botMessageElement = null;
-                let contentEl = null;
-                let firstTokenTimestampSet = false;
-                let firstChunkReceived = false;
+                const jsonData = await response.json();
+                const botResponse = jsonData.response || '';
+                const hasContent = botResponse.trim().length > 0;
 
-                // Read the stream
-                let fullResponse = '';
-                let hasContent = false;
-                let buffer = '';
-
-                if (!response.body) {
-                    let fallbackText = '';
-                    try {
-                        fallbackText = await response.text();
-                    } catch (readErr) {
-                        console.warn('[AI Chat] Failed to read fallback response:', readErr);
+                if (hasContent) {
+                    this.addStreamingMessage(botResponse);
+                    if (this.isUnansweredResponse(botResponse)) {
+                        this.trackAnalytics('unanswered_question', { message, response: botResponse });
                     }
-
-                    console.warn('[AI Chat] Stream body missing, using fallback text:', fallbackText);
-
-                    if (fallbackText.includes('data: ')) {
-                        const parts = fallbackText.split('\n\n');
-                        for (const part of parts) {
-                            if (part.startsWith('data: ')) {
-                                try {
-                                    const data = JSON.parse(part.slice(6));
-                                    if (data.content) {
-                                        fullResponse += data.content;
-                                    }
-                                } catch (err) {
-                                    console.error('Fallback parse error:', err);
-                                }
-                            }
-                        }
-                    } else if (fallbackText.trim().length > 0) {
-                        fullResponse = fallbackText.trim();
-                    }
-
-                    this.removeTypingIndicator();
-
-                    if (fullResponse.trim().length > 0) {
-                        this.addMessage(fullResponse, 'bot');
-                    } else {
-                        const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
-                        if (contactFallback) {
-                            this.addMessage(contactFallback, 'bot');
-                        } else {
-                            this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
-                        }
-                    }
-                    return;
-                }
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    // Decode chunk and add to buffer
-                    buffer += decoder.decode(value, { stream: true });
-                    
-                    // Process complete SSE messages
-                    const lines = buffer.split('\n\n');
-                    buffer = lines.pop(); // Keep incomplete message in buffer
-
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-                                
-                                if (data.error) {
-                                    if (!hasContent) {
-                                        if (!firstChunkReceived) {
-                                            this.removeTypingIndicator();
-                                        }
-                                        const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
-                                        if (contactFallback) {
-                                            this.addMessage(contactFallback, 'bot');
-                                        } else {
-                                            this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
-                                        }
-                                    } else {
-                                        console.warn('[AI Chat] Stream error after partial response:', data.error);
-                                    }
-                                    return;
-                                }
-                                
-                                // Append content as it streams
-                                if (data.content) {
-                                    if (!firstChunkReceived) {
-                                        firstChunkReceived = true;
-                                        this.removeTypingIndicator();
-
-                                        const messagesContainer = document.getElementById(this.ids.messages);
-                                        botMessageElement = document.createElement('div');
-                                        botMessageElement.className = 'ai-chat-message ai-chat-message-bot';
-                                        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                                        botMessageElement.innerHTML = `
-                                            <div class="ai-chat-message-content"></div>
-                                            <div class="ai-chat-message-time" style="margin:4px 0 0 0!important;padding:0!important;display:block!important;">${time}</div>
-                                        `;
-                                        messagesContainer.appendChild(botMessageElement);
-                                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                                        contentEl = botMessageElement.querySelector('.ai-chat-message-content');
-                                    }
-
-                                    if (!firstTokenTimestampSet && botMessageElement) {
-                                        const firstTokenTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                                        const timeEl = botMessageElement.querySelector('.ai-chat-message-time');
-                                        if (timeEl) {
-                                            timeEl.textContent = firstTokenTime;
-                                        }
-                                        firstTokenTimestampSet = true;
-                                    }
-                                    fullResponse += data.content;
-                                    hasContent = true;
-                                    if (contentEl) {
-                                        contentEl.innerHTML = this.linkify(fullResponse);
-                                    }
-                                    if (botMessageElement && botMessageElement.parentNode) {
-                                        botMessageElement.parentNode.scrollTop = botMessageElement.parentNode.scrollHeight;
-                                    }
-                                }
-                            } catch (err) {
-                                console.error('Stream parse error:', err, { line });
-                            }
-                        }
-                    }
-                }
-
-                // Process any trailing SSE payload left in buffer (some servers end without final \n\n)
-                if (buffer && buffer.trim().length > 0) {
-                    const trailingLines = buffer.split('\n');
-                    for (const line of trailingLines) {
-                        const trimmed = line.trim();
-                        if (!trimmed.startsWith('data: ')) continue;
-
-                        try {
-                            const data = JSON.parse(trimmed.slice(6));
-
-                            if (data.error) {
-                                if (!hasContent) {
-                                    this.removeTypingIndicator();
-                                    const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
-                                    if (contactFallback) {
-                                        this.addMessage(contactFallback, 'bot');
-                                    } else {
-                                        this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
-                                    }
-                                }
-                                return;
-                            }
-
-                            if (data.content) {
-                                if (!firstChunkReceived) {
-                                    firstChunkReceived = true;
-                                    this.removeTypingIndicator();
-
-                                    const messagesContainer = document.getElementById(this.ids.messages);
-                                    botMessageElement = document.createElement('div');
-                                    botMessageElement.className = 'ai-chat-message ai-chat-message-bot';
-                                    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                                    botMessageElement.innerHTML = `
-                                        <div class="ai-chat-message-content"></div>
-                                        <div class="ai-chat-message-time" style="margin:4px 0 0 0!important;padding:0!important;display:block!important;">${time}</div>
-                                    `;
-                                    messagesContainer.appendChild(botMessageElement);
-                                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                                    contentEl = botMessageElement.querySelector('.ai-chat-message-content');
-                                }
-
-                                if (!firstTokenTimestampSet && botMessageElement) {
-                                    const firstTokenTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                                    const timeEl = botMessageElement.querySelector('.ai-chat-message-time');
-                                    if (timeEl) {
-                                        timeEl.textContent = firstTokenTime;
-                                    }
-                                    firstTokenTimestampSet = true;
-                                }
-
-                                fullResponse += data.content;
-                                hasContent = true;
-                                if (contentEl) {
-                                    contentEl.innerHTML = this.linkify(fullResponse);
-                                }
-                                if (botMessageElement && botMessageElement.parentNode) {
-                                    botMessageElement.parentNode.scrollTop = botMessageElement.parentNode.scrollHeight;
-                                }
-                            }
-                        } catch (err) {
-                            console.error('Trailing stream parse error:', err, { line: trimmed });
-                        }
-                    }
-                }
-
-                if (!hasContent) {
-                    this.removeTypingIndicator();
+                } else {
                     const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
                     if (contactFallback) {
                         this.addMessage(contactFallback, 'bot');
                     } else {
                         this.addMessage('Sorry, I encountered an error. Please try again.', 'bot');
-                    }
-                    return;
-                }
-
-                if (fullResponse.trim().length > 0) {
-                    this.messages.push({ content: fullResponse, sender: 'bot', timestamp: new Date() });
-                    this.saveMessages();
-                    if (this.isUnansweredResponse(fullResponse)) {
-                        this.trackAnalytics('unanswered_question', {
-                            message,
-                            response: fullResponse
-                        });
                     }
                 }
 
@@ -2048,15 +1885,55 @@
                     stack: error?.stack
                 });
                 this.removeTypingIndicator();
-                if (!hasContent) {
-                    const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
-                    if (contactFallback) {
-                        this.addMessage(contactFallback, 'bot');
-                    } else {
-                        this.addMessage('Sorry, I\'m experiencing technical difficulties. Please try again later.', 'bot');
-                    }
+                const contactFallback = this.isContactQuery(message) ? this.buildContactResponse() : '';
+                if (contactFallback) {
+                    this.addMessage(contactFallback, 'bot');
+                } else {
+                    this.addMessage('Sorry, I\'m experiencing technical difficulties. Please try again later.', 'bot');
                 }
             }
+
+            if (widget) {
+                widget.addEventListener('click', (event) => {
+                    const link = event.target?.closest?.('.ai-chat-attribution-link');
+                    if (!link) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const href = link.getAttribute('href') || 'https://ai-chat.support';
+                    this.openAttributionLink(href);
+                });
+            }
+        }
+
+        openAttributionLink(url) {
+            const targetUrl = String(url || 'https://ai-chat.support');
+
+            try {
+                const isDesignMode = !!(window.Shopify && window.Shopify.designMode);
+                const opener = isDesignMode && window.top && window.top !== window ? window.top : window;
+                const opened = opener.open(targetUrl, '_blank', 'noopener,noreferrer');
+
+                if (opened) {
+                    try {
+                        opened.opener = null;
+                    } catch (e) {}
+                    return;
+                }
+            } catch (error) {
+                console.debug('[AI Widget] openAttributionLink direct open failed:', error);
+            }
+
+            const temp = document.createElement('a');
+            temp.href = targetUrl;
+            temp.target = '_blank';
+            temp.rel = 'noopener noreferrer';
+            temp.style.display = 'none';
+            document.body.appendChild(temp);
+            temp.click();
+            temp.remove();
         }
     }
 

@@ -1,5 +1,12 @@
 @php
     $t = is_string($text ?? '') ? $text : '';
+    // Numbered list normalisation — mirrors the JS linkify() logic in widget/script.blade.php
+    // Case 1: number at end of previous line → push to new paragraph
+    $t = preg_replace('/([^\n])\s*(\d+)\.\s*\n/', "$1\n\n$2. ", $t);
+    // Case 2: number already starts a line but no blank line precedes it
+    $t = preg_replace('/\n(\d+\.\s)/', "\n\n$1", $t);
+    // Case 3: fully inline list — no newlines at all, e.g. "conversations) 2. Basic"
+    $t = preg_replace('/([.!?:,)])\s+(\d+\.\s+)(?=\D)/u', "$1\n\n$2", $t);
     // Normalize Markdown links: [label](url) -> label (url) or just URL
     $t = preg_replace_callback('/\[(.*?)\]\(([^)]+)\)/s', function ($m) {
         $label = trim($m[1] ?? '');

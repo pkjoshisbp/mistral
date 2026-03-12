@@ -2,6 +2,9 @@
 
 namespace App\Services;
 
+use App\Models\CrawlJob;
+use App\Models\Organization;
+use App\Models\OrganizationData;
 use App\Models\WebsiteCrawler;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
@@ -27,6 +30,55 @@ class WebsiteCrawlerService
             ]
         ]);
         $this->aiAgentService = $aiAgentService;
+    }
+
+    /**
+     * Create a CrawlJob record and kick off the first batch in background.
+     * Returns the CrawlJob.
+     */
+    public function startCrawlJob(WebsiteCrawler $crawler, int $batchSize = 20): CrawlJob
+    {
+        $urls = $this->getUrlsToCrawl($crawler);
+
+        // Filter to only crawlable URLs
+        $filtered = array_values(array_filter($urls, fn($u) => $this->shouldCrawlUrl($u, $crawler)));
+
+        // Respect max_pages config
+        if ($crawler->max_pages > 0 && count($filtered) > $crawler->max_pages) {
+            $filtered = array_slice($filtered, 0, $crawler->max_pages);
+        }
+
+        $job = CrawlJob::create([
+            'organization_id' => $crawler->organization_id,
+            'crawler_id'      => $crawler->id,
+            'status'          => 'pending',
+            'total_urls'      => count($filtered),
+            'processed_count' => 0,
+            'failed_count'    => 0,
+            'batch_size'      => $batchSize,
+            'current_offset'  => 0,
+            'all_urls'        => $filtered,
+            'crawl_log'       => ['Crawl job created. ' . count($filtered) . ' URLs queued.'],
+        ]);
+
+        // Launch first batch as a detached background process (nohup ensures it
+        // survives SSH session closure / VS Code disconnect)
+        $artisan = base_path('artisan');
+        $php     = PHP_BINARY;
+        $cmd     = "{$php} {$artisan} crawl:run-batch {$job->id} --batch-size={$batchSize}";
+        exec('nohup ' . $cmd . ' > /dev/null 2>&1 &');
+
+        Log::info("CrawlJob #{$job->id} started. {$job->total_urls} URLs, batch_size={$batchSize}");
+
+        return $job;
+    }
+
+    /**
+     * Public wrapper around crawlSinglePage so the artisan command can call it.
+     */
+    public function crawlSinglePagePublic(string $url, WebsiteCrawler $crawler): bool
+    {
+        return $this->crawlSinglePage($url, $crawler);
     }
 
     public function testUrl($url)
@@ -289,6 +341,20 @@ class WebsiteCrawlerService
             }
         }
 
+        // Check url_filter_pattern (simple substring or glob match, e.g. /products/)
+        if (!empty($crawler->url_filter_pattern)) {
+            $pattern = $crawler->url_filter_pattern;
+            // Support wildcard * patterns
+            if (strpos($pattern, '*') !== false) {
+                $regexPattern = '#' . str_replace(['\*', '/'], ['.*', '\/'], preg_quote($pattern, '#')) . '#i';
+                if (!preg_match($regexPattern, $url)) {
+                    return false;
+                }
+            } elseif (strpos($url, $pattern) === false) {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -313,26 +379,78 @@ class WebsiteCrawlerService
                 Log::info('Skipping invalid HTML content: ' . $url);
                 return false;
             }
+
+            // --- Noise removal: strip configured selectors from HTML ---
+            $noiseSelectors = $crawler->noise_selectors_with_defaults;
+            $content = $this->stripNoiseSelectors($content, $noiseSelectors);
             
-            // Extract content using simple HTML DOM
+            // Extract content using simple HTML DOM (title, meta, headings, plain text)
             $extractedData = $this->extractContent($content, $url);
             
             if (!empty($extractedData['content'])) {
-                // Store in vector database
-                $this->aiAgentService->storeData(
-                    $crawler->organization_id,
-                    'webpage',
-                    $extractedData['title'] ?: parse_url($url, PHP_URL_PATH),
-                    $extractedData['content'],
-                    [
-                        'url' => $url,
-                        'source' => 'website_crawler',
-                        'crawler_id' => $crawler->id,
-                        'meta_description' => $extractedData['meta_description'] ?? '',
-                        'headings' => $extractedData['headings'] ?? []
-                    ]
-                );
-                
+                $attributeList = $crawler->attribute_list;
+                $useStructuredExtraction = !empty($attributeList) 
+                    && ($crawler->extraction_method ?? 'llm') === 'llm';
+
+                if ($useStructuredExtraction) {
+                    // --- LLM-based structured attribute extraction ---
+                    $result = $this->extractAttributesViaLlm(
+                        $extractedData['content'],
+                        $attributeList,
+                        $crawler->page_type ?? 'product',
+                        $url,
+                        $crawler->extraction_prompt_override
+                    );
+
+                    $title = $result['extracted']['name']
+                        ?? $result['extracted']['title']
+                        ?? ($extractedData['title'] ?: parse_url($url, PHP_URL_PATH));
+
+                    // Auto-inject the page URL for URL-type attributes that LLM can't know
+                    $urlAttributes = ['product_url', 'page_url', 'url', 'link', 'listing_url'];
+                    foreach ($urlAttributes as $urlAttr) {
+                        if (in_array($urlAttr, $attributeList) && empty($result['extracted'][$urlAttr])) {
+                            $result['extracted'][$urlAttr] = $url;
+                            // Rebuild flat_content with injected URL
+                            $flat = $result['flat_content'] ?? '';
+                            $result['flat_content'] = $flat . "\n{$urlAttr}: {$url}";
+                        }
+                    }
+
+                    $contentToStore = !empty($result['flat_content'])
+                        ? $result['flat_content']
+                        : $extractedData['content'];
+
+                    $this->storeCrawledPage(
+                        $crawler,
+                        $title,
+                        $contentToStore,
+                        $crawler->qdrant_data_type ?? 'product',
+                        array_merge($result['extracted'] ?? [], [
+                            'url' => $url,
+                            'source' => 'website_crawler',
+                            'crawler_id' => $crawler->id,
+                            'page_type' => $crawler->page_type ?? 'product',
+                            'meta_description' => $extractedData['meta_description'] ?? '',
+                        ])
+                    );
+                } else {
+                    // --- Plain text extraction (no LLM, fast fallback) ---
+                    $this->storeCrawledPage(
+                        $crawler,
+                        $extractedData['title'] ?: parse_url($url, PHP_URL_PATH),
+                        $extractedData['content'],
+                        $crawler->qdrant_data_type ?? 'webpage',
+                        [
+                            'url' => $url,
+                            'source' => 'website_crawler',
+                            'crawler_id' => $crawler->id,
+                            'meta_description' => $extractedData['meta_description'] ?? '',
+                            'headings' => $extractedData['headings'] ?? []
+                        ]
+                    );
+                }
+
                 Log::info('Successfully crawled: ' . $url);
                 return true;
             }
@@ -345,6 +463,161 @@ class WebsiteCrawlerService
         
         return false;
     }
+
+    /**
+     * Save crawled page data to organization_data table and sync to Qdrant
+     * using the organization slug as the collection name (consistent with rest of platform).
+     */
+    private function storeCrawledPage(
+        WebsiteCrawler $crawler,
+        string $title,
+        string $content,
+        string $dataType,
+        array $metadata = []
+    ): void {
+        $organization = $crawler->organization ?? Organization::find($crawler->organization_id);
+
+        if (!$organization) {
+            Log::warning('storeCrawledPage: organization not found for crawler ' . $crawler->id);
+            return;
+        }
+
+        // 1. Persist to organization_data for DB management & history
+        $orgData = OrganizationData::create([
+            'organization_id' => $organization->id,
+            'type'            => $dataType,
+            'name'            => $title,
+            'description'     => $metadata['meta_description'] ?? '',
+            'content'         => $content,
+            'metadata'        => $metadata,
+            'is_synced'       => false,
+        ]);
+
+        // 2. Sync to Qdrant under the org slug collection (e.g. "indian-art-zone")
+        $item = [
+            'id'      => $orgData->id,
+            'title'   => $title,
+            'content' => $content,
+            'type'    => $dataType,
+        ];
+        // Merge key metadata fields into the Qdrant payload
+        foreach (['url', 'product_url', 'price', 'artist', 'medium', 'style',
+                  'size', 'color', 'availability', 'category_name', 'source', 'crawler_id'] as $field) {
+            if (!empty($metadata[$field])) {
+                $item[$field] = $metadata[$field];
+            }
+        }
+
+        $result = $this->aiAgentService->storeDataToQdrant($organization->slug, $dataType, [$item]);
+
+        // 3. Mark as synced if Qdrant accepted it
+        if (!empty($result['successful_stores'])) {
+            $orgData->update(['is_synced' => true, 'last_synced_at' => now()]);
+        } else {
+            Log::warning('storeCrawledPage: Qdrant sync failed', [
+                'org'  => $organization->slug,
+                'type' => $dataType,
+                'title' => $title,
+            ]);
+        }
+    }
+
+    /**
+     * Strip HTML noise selectors (nav, footer, ads, etc.) from raw HTML
+     * before processing or sending to the LLM.
+     */
+    private function stripNoiseSelectors(string $html, array $selectors): string
+    {
+        if (empty($selectors)) {
+            return $html;
+        }
+
+        // Use DOMDocument for reliable node removal
+        try {
+            $dom = new \DOMDocument();
+            @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOERROR | LIBXML_NOWARNING);
+            $xpath = new \DOMXPath($dom);
+
+            foreach ($selectors as $selector) {
+                $selector = trim($selector);
+                if (empty($selector)) continue;
+
+                // Convert CSS-ish selectors to XPath
+                if ($selector[0] === '#') {
+                    // #id
+                    $id = substr($selector, 1);
+                    $xpathQuery = "//*[@id='{$id}']";
+                } elseif ($selector[0] === '.') {
+                    // .class
+                    $class = substr($selector, 1);
+                    $xpathQuery = "//*[contains(concat(' ',normalize-space(@class),' '),' {$class} ')]";
+                } elseif (strpos($selector, '.') !== false && strpos($selector, '.') !== 0) {
+                    // tag.class
+                    [$tag, $cls] = explode('.', $selector, 2);
+                    $xpathQuery = "//{$tag}[contains(concat(' ',normalize-space(@class),' '),' {$cls} ')]";
+                } else {
+                    // plain tag
+                    $xpathQuery = "//{$selector}";
+                }
+
+                try {
+                    $nodes = $xpath->query($xpathQuery);
+                    if ($nodes) {
+                        foreach ($nodes as $node) {
+                            $node->parentNode?->removeChild($node);
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::debug("Noise selector '{$selector}' failed: " . $e->getMessage());
+                }
+            }
+
+            return $dom->saveHTML();
+        } catch (\Exception $e) {
+            Log::debug('stripNoiseSelectors DOMDocument failed, returning original HTML: ' . $e->getMessage());
+            return $html;
+        }
+    }
+
+    /**
+     * Call FastAPI /crawl/extract-attributes to extract structured attributes
+     * from cleaned page text using the configured LLM.
+     */
+    private function extractAttributesViaLlm(
+        string $pageText,
+        array $attributes,
+        string $pageType,
+        string $pageUrl,
+        ?string $promptOverride = null
+    ): array {
+        $fastApiUrl = config('services.ai_agent.url', 'http://localhost:8111');
+
+        try {
+            $payload = [
+                'text'       => $pageText,
+                'attributes' => $attributes,
+                'page_type'  => $pageType,
+                'page_url'   => $pageUrl,
+            ];
+
+            if ($promptOverride) {
+                $payload['prompt_override'] = $promptOverride;
+            }
+
+            $response = $this->httpClient->post($fastApiUrl . '/crawl/extract-attributes', [
+                'json'    => $payload,
+                'timeout' => 60,
+            ]);
+
+            $result = json_decode($response->getBody()->getContents(), true);
+            return $result ?? ['extracted' => [], 'flat_content' => ''];
+
+        } catch (\Exception $e) {
+            Log::error('LLM attribute extraction failed for ' . $pageUrl . ': ' . $e->getMessage());
+            return ['extracted' => [], 'flat_content' => $pageText];
+        }
+    }
+
 
     private function extractContent($html, $url): array
     {

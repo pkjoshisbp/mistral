@@ -1,0 +1,10 @@
+plan_name,plan_type,billing_period,usd_price,inr_price,token_limit,credit_validity_months,rollover,features,description,is_active,sort_order,category,keywords
+Free,subscription,one_time,0,0,20000,1,No,"20K one-time tokens | Valid for 1 month | Try before you buy","One-time free plan with 20K tokens valid for 1 month",true,0,pricing,"free trial, starter free, no cost"
+Basic,subscription,monthly,19,1900,500000,,,"Dashboard access | Email support | Basic analytics | Up to 500K tokens",Entry subscription plan,true,1,pricing,"basic monthly, starter monthly"
+Starter,subscription,monthly,49,4900,1500000,,,"Everything in Basic | Better analytics | Priority support | Up to 1.5M tokens",Growth subscription plan,true,2,pricing,"starter monthly, growth plan"
+Business,subscription,monthly,199,19900,10000000,,,"Everything in Starter | Team collaboration | API access | Up to 10M tokens",Business subscription plan,true,3,pricing,"pro monthly, business monthly"
+Enterprise,subscription,monthly,999,99900,50000000,,,"Everything in Business | Dedicated support | Advanced controls | Up to 50M tokens",Enterprise subscription plan,true,4,pricing,"enterprise monthly, unlimited scale"
+Starter Credits,credit,one_time,24,2400,500000,12,Yes,"500 Thousand tokens | 1 Year validity | Carry forward on timely renewal | Email support",One-time credit package,true,5,pricing,"starter credits, 5 lakh tokens"
+Basic Credits,credit,one_time,69,6900,1500000,12,Yes,"1.5 Million tokens | 1 Year validity | Carry forward on timely renewal | Email support",One-time credit package,true,6,pricing,"basic credits, 15 lakh tokens"
+Standard Credits,credit,one_time,129,12900,4000000,12,Yes,"4 Million tokens | 1 Year validity | Carry forward on timely renewal | Better value per token",One-time credit package,true,7,pricing,"standard credits, 40 lakh tokens"
+Premium Credits,credit,one_time,299,29900,10000000,12,Yes,"10 Million tokens | 1 Year validity | Carry forward on timely renewal | Priority support",One-time credit package,true,8,pricing,"premium credits, 1 crore tokens"

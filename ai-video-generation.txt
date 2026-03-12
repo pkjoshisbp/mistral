@@ -1,0 +1,762 @@
+is there any open source video generator like ollama etc which I can use on my own server(vast.ai)?
+
+Yes — there are some open-source video generation models you can run on your own GPU server (like your Vast.ai RTX 4090 instance). However, video generation is still much heavier than text models, so requirements are higher than something like Ollama.
+
+Below are the best open-source options currently available.
+
+1️⃣ Stable Video Diffusion (Best Open Source Option)
+
+Developed by Stability AI.
+
+Capabilities
+
+Image → video generation
+
+2–4 second clips
+
+Very good quality
+
+Can extend clips sequentially
+
+Requirements
+
+GPU: 16–24 GB VRAM
+
+Your RTX 4090 (24GB) is perfect.
+
+Installation
+
+Example setup on a Vast.ai server:
+
+git clone https://github.com/Stability-AI/generative-models
+cd generative-models
+
+pip install -r requirements.txt
+
+Generate video:
+
+python scripts/sampling/simple_video_sample.py \
+--input_image example.png \
+--num_frames 25
+
+You generate short clips then stitch them.
+
+2️⃣ AnimateDiff
+
+Very popular open-source method.
+
+Features
+
+Text → video
+
+Image → video
+
+Works with Stable Diffusion models
+
+Advantage
+
+Huge ecosystem.
+
+Works with:
+
+Automatic1111
+
+ComfyUI
+
+Diffusers
+
+Example:
+
+git clone https://github.com/guoyww/AnimateDiff
+3️⃣ ModelScope Text-to-Video
+
+One of the first open-source text-to-video models.
+
+Features
+
+Text → video
+
+Generates ~2–3 second clips
+
+Example:
+
+from diffusers import DiffusionPipeline
+pipe = DiffusionPipeline.from_pretrained(
+    "damo-vilab/text-to-video-ms-1.7b"
+)
+4️⃣ Open-Sora
+
+A community attempt to replicate Sora-like generation.
+
+Features
+
+text → video
+
+longer videos possible
+
+But still experimental.
+
+5️⃣ ComfyUI (Highly Recommended)
+
+Instead of running scripts manually, use ComfyUI.
+
+You can run:
+
+Stable Video Diffusion
+
+AnimateDiff
+
+video pipelines
+
+image → video
+
+Install
+git clone https://github.com/comfyanonymous/ComfyUI
+cd ComfyUI
+pip install -r requirements.txt
+python main.py
+
+Then open:
+
+http://server-ip:8188
+Recommended Setup for Your Vast.ai Server
+
+Since you already use Vast.ai for AI inference, the best stack is:
+
+Vast.ai GPU
+   ↓
+ComfyUI
+   ↓
+AnimateDiff
+   ↓
+Stable Video Diffusion
+
+This lets you generate marketing videos automatically.
+
+Example Prompt for Your Product
+
+Example prompt for your AI Chat Support promo:
+
+modern SaaS marketing video,
+female technology presenter explaining AI customer support platform,
+website chat widget answering customer questions instantly,
+modern office environment,
+cinematic lighting,
+technology startup commercial style
+Realistic Expectation (Important)
+
+Even the best open-source models currently generate:
+
+3–5 second clips
+
+So workflow is:
+
+generate scene clips
+↓
+combine clips
+↓
+add voiceover
+↓
+final video
+GPU Requirement Summary
+Model	VRAM
+Stable Video Diffusion	16GB
+AnimateDiff	12–16GB
+ModelScope	16GB
+Open-Sora	24GB+
+
+Your 4090 (24GB) can run all of them.
+
+💡 Since you already have:
+
+Vast.ai GPU
+
+Python backend
+
+automation scripts
+
+You could actually build a video generator service similar to your ai-chat.support product.
+
+If you want, I can also show you something very powerful:
+
+A full pipeline where:
+
+product description
+↓
+LLM writes script
+↓
+AI generates images
+↓
+AI generates video scenes
+↓
+AI generates voiceover
+↓
+Final marketing video automatically
+
+This can run fully on your Vast.ai server.
+
+Supplementary hints
+Best Architecture For Your Current System
+
+Since you already built FastAPI + ffmpeg + TTS pipeline, your architecture should look like this:
+
+User prompt
+↓
+FastAPI
+↓
+LLM script generator (ollama)
+↓
+ComfyUI API
+↓
+Video scenes
+↓
+TTS
+↓
+FFmpeg merge
+↓
+Final video
+
+This will work nicely with your existing endpoints:
+
+127.0.0.1:11435  (Ollama)
+127.0.0.1:18081  (STT)
+127.0.0.1:18082  (TTS)
+127.0.0.1:18083  (TTS)
+7️⃣ My Honest Recommendation
+
+For your AI infrastructure project, I would run:
+
+GPU	Purpose
+5060 Ti	LLM + TTS
+4090	video generation
+
+Video models love VRAM.
+
+So the best setup on Vast.ai is:
+
+cheap GPU (chat + inference)
++
+4090 instance (video rendering)
+
+This is how many AI startups operate.
+
+💡 One more important thing:
+Your current setup (FastAPI + ffmpeg + TTS + LLM) is already 80% of a full automated AI video generator.
+
+With a small addition, you could build a system where:
+
+website URL
+↓
+AI generates marketing script
+↓
+AI generates scenes
+↓
+AI generates voice
+↓
+video automatically rendered
+
+This could actually become another product alongside your ai-chat.support platform.
+
+If you want, I can also show you a surprisingly powerful open-source video model that runs well on 16 GB GPUs like your 5060 Ti and produces better results than most people expect.
+
+I am not sure how it is being used or calculated - 32gb is the container size, but I have attached 62gb storage volume to this instance which shows 30gb free. I can also remove gemma2:9b which I am not using.
+
+What you’re seeing is normal with Vast.ai instances. There are two different storage areas involved, and they can be confusing.
+
+1️⃣ Why You See 32 GB and 62 GB
+
+Your screenshot shows:
+
+Storage Type	Meaning
+32 GB container disk	Docker container filesystem
+62 GB volume	Persistent storage attached to instance
+
+So effectively:
+
+Container filesystem  → ~32 GB
+Attached volume       → ~62 GB
+
+Most AI models you installed (Ollama models) are stored in:
+
+/workspace
+
+which is on the attached volume, not the container disk.
+
+That is why Copilot reports:
+
+/workspace = 62 GB total
+33 GB used
+30 GB free
+
+So your real usable space is the 62 GB volume.
+
+2️⃣ Removing Unused Ollama Models
+
+Yes — removing unused models like Gemma 2 9B is a good idea.
+
+First check sizes:
+
+ollama list
+
+Then remove:
+
+ollama rm gemma2:9b
+
+Typical sizes:
+
+Model	Size
+gemma2:9b	~5–6 GB
+llama3:8b	~4–5 GB
+mistral-nemo	~6 GB
+
+Removing Gemma2 will likely free ~6 GB.
+
+3️⃣ Where Models Are Actually Stored
+
+Ollama stores models here:
+
+/root/.ollama/models
+
+But on Vast.ai images it is usually mapped into:
+
+/workspace/.ollama
+
+You can confirm with:
+
+du -sh /workspace/*
+4️⃣ How Much Space You Will Have After Cleanup
+
+Current:
+
+30 GB free
+
+After removing Gemma:
+
+≈36 GB free
+
+That is enough for a lean video stack.
+
+Example:
+
+Component	Size
+ComfyUI	~2 GB
+AnimateDiff	~5 GB
+SD model	~6–7 GB
+
+Total ≈ 14 GB
+
+So you will still have 20 GB free.
+
+5️⃣ Best Strategy With Your Current Disk
+
+Do this:
+
+Step 1
+
+Remove unused models
+
+ollama rm gemma2:9b
+Step 2
+
+Install
+
+ComfyUI
+
+AnimateDiff
+
+Step 3
+
+Connect ComfyUI to your existing FastAPI pipeline.
+
+Then your pipeline becomes:
+
+FastAPI
+↓
+Ollama (script)
+↓
+ComfyUI (scene render)
+↓
+TTS
+↓
+FFmpeg
+↓
+Final video
+6️⃣ Important Tip (Most People Miss This)
+
+Keep models on the attached volume:
+
+/workspace/models
+
+Never inside container directories like:
+
+/usr
+/opt
+/root
+
+Otherwise they disappear when the container restarts.
+
+7️⃣ Quick Check Command
+
+Run this to confirm your real free space:
+
+df -h
+
+You should see something like:
+
+/workspace   62G   32G   30G
+
+✅ Conclusion
+
+You do not need to recreate the instance yet.
+
+Just:
+
+1️⃣ remove unused models
+2️⃣ install ComfyUI + AnimateDiff
+3️⃣ keep everything under /workspace
+
+💡 If you want, I can also show you something extremely useful for your setup:
+
+A very lightweight video generator pipeline (only ~8 GB models) that produces surprisingly good SaaS marketing videos and runs perfectly on 16 GB GPUs like your 5060 Ti.
+
+yes please
+
+Since your GPU is 16 GB VRAM (RTX 5060 Ti) and your disk is ~30 GB free, the best approach is a very lightweight video generation stack. This avoids the huge models like Open-Sora while still producing usable marketing clips.
+
+Below is a practical stack that fits your current resources and integrates nicely with your FastAPI + TTS + ffmpeg pipeline.
+
+Lightweight Video Generation Stack (≈8–12 GB)
+
+Install:
+
+ComfyUI
+
+AnimateDiff
+
+Stable Diffusion 1.5
+
+This combination works very well on 16 GB GPUs.
+
+Typical size:
+
+Component	Disk
+ComfyUI	~2 GB
+SD 1.5 model	~4 GB
+AnimateDiff models	~3–4 GB
+
+Total ≈ 9–10 GB
+
+That fits comfortably in your remaining space.
+
+Why This Stack Works Well
+
+Advantages:
+
+Runs smoothly on 16 GB VRAM
+
+Generates 5–8 second clips
+
+Supports image → video animation
+
+Easy API control from Python
+
+Perfect for building:
+
+AI marketing video generator
+Installation Steps
+1️⃣ Install ComfyUI
+cd /workspace
+git clone https://github.com/comfyanonymous/ComfyUI
+cd ComfyUI
+pip install -r requirements.txt
+
+Run it:
+
+python main.py
+
+UI will appear at:
+
+http://SERVER-IP:8188
+2️⃣ Install AnimateDiff Nodes
+cd /workspace/ComfyUI/custom_nodes
+git clone https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved
+
+Restart ComfyUI after installing.
+
+3️⃣ Download Models
+
+Create directories:
+
+mkdir -p /workspace/ComfyUI/models/checkpoints
+mkdir -p /workspace/ComfyUI/models/animatediff_models
+
+Download:
+
+Stable Diffusion model
+
+v1-5-pruned-emaonly.safetensors
+
+Size ≈ 4 GB
+
+Place in:
+
+ComfyUI/models/checkpoints
+
+AnimateDiff motion model
+
+mm_sd_v15_v2.ckpt
+
+Size ≈ 1.7 GB
+
+Place in:
+
+ComfyUI/models/animatediff_models
+Example Prompt (Your Product)
+
+Example video scene:
+
+modern SaaS marketing video,
+female presenter explaining AI chatbot platform,
+website chat widget answering customer questions instantly,
+startup office environment,
+blue glowing UI interface,
+cinematic lighting
+
+AnimateDiff will turn this into short animated clips.
+
+Integrating With Your Existing Pipeline
+
+Your current system already has:
+
+FastAPI
+
+Ollama
+
+TTS
+
+ffmpeg
+
+So the pipeline becomes:
+
+User request
+↓
+FastAPI endpoint
+↓
+Ollama generates script
+↓
+ComfyUI API generates video scenes
+↓
+TTS generates voice
+↓
+FFmpeg merges scenes + audio
+↓
+Final marketing video
+Expected Output Quality
+
+With this lightweight stack you can generate:
+
+Feature	Result
+Clip length	4–8 sec
+Resolution	512p
+Style	animated / cinematic
+Speed	20–60 sec render
+
+For marketing videos, this is usually sufficient.
+
+Storage Planning Tip
+
+Keep all AI assets inside:
+
+/workspace/models
+/workspace/ComfyUI
+
+Your attached Vast.ai volume will persist them even if the container restarts.
+
+💡 One more thing (this could be very useful for your SaaS):
+
+Because you already built a crawler + vector DB + LLM pipeline for ai-chat.support, you could extend it to automatically generate marketing videos from a website:
+
+website URL
+↓
+crawler extracts content
+↓
+LLM generates marketing script
+↓
+image generator creates scenes
+↓
+AnimateDiff generates video
+↓
+TTS voice
+↓
+Final promotional video
+
+This could become another AI product feature.
+
+If you want, I can also show you something very powerful but still lightweight:
+
+A ComfyUI workflow that automatically generates a full 60-second marketing video from one prompt (very useful for SaaS demos).
+
+can I also use auto-stitching using any of these models to generate longer video?
+
+Yes — but not directly inside most open-source video models yet. Models like AnimateDiff or Stable Video Diffusion normally generate short clips (3–8 seconds).
+
+However, you can absolutely generate longer videos automatically using auto-stitching pipelines. Since you already have FastAPI + ffmpeg, you’re actually in a perfect position to do this.
+
+Below are the practical methods.
+
+1️⃣ The Standard Method (Scene-Based Stitching)
+
+This is how most AI video generators work today.
+
+script
+↓
+split into scenes
+↓
+generate each scene video
+↓
+stitch with ffmpeg
+↓
+final video
+
+Example:
+
+Scene	Length
+Scene 1	6 sec
+Scene 2	7 sec
+Scene 3	8 sec
+Scene 4	5 sec
+
+Total video = 26 seconds
+
+You can scale this to 3–4 minutes easily.
+
+2️⃣ Auto-Stitching With FFmpeg (Very Reliable)
+
+Since you already use FFmpeg, the easiest approach is automatic stitching.
+
+Example command:
+
+ffmpeg -f concat -safe 0 -i clips.txt -c copy final_video.mp4
+
+Example clips.txt:
+
+file scene1.mp4
+file scene2.mp4
+file scene3.mp4
+file scene4.mp4
+
+This is very fast and lossless.
+
+3️⃣ AI-Based Scene Continuation (Experimental)
+
+Some models attempt scene continuation.
+
+Example workflow:
+
+generate clip
+↓
+last frame → next prompt
+↓
+generate next clip
+↓
+repeat
+
+This improves visual continuity.
+
+Possible with:
+
+AnimateDiff
+
+Stable Video Diffusion
+
+But still experimental.
+
+4️⃣ ComfyUI Auto Video Pipelines
+
+With ComfyUI, you can create workflows like:
+
+prompt
+↓
+image generator
+↓
+AnimateDiff
+↓
+repeat loop
+↓
+video combine
+
+Some workflows automatically generate 10–20 clips and merge them.
+
+5️⃣ Example Automatic Pipeline For Your Server
+
+You could implement this using your existing FastAPI.
+
+POST /video/jobs
+      ↓
+LLM generates script
+      ↓
+script → scene prompts
+      ↓
+AnimateDiff generates clips
+      ↓
+FFmpeg stitches clips
+      ↓
+TTS voice overlay
+      ↓
+final video
+
+Since you already have endpoints like:
+
+/video/jobs
+/tts
+/transcribe
+
+this is very easy to extend.
+
+6️⃣ Typical Output For Marketing Videos
+
+Using this system you can generate:
+
+Video Length	Scenes
+30 sec	5 scenes
+60 sec	10 scenes
+3 min	25–30 scenes
+
+Each scene is 4–7 seconds.
+
+7️⃣ Important Trick (For Smooth Videos)
+
+Add transitions between scenes.
+
+Example FFmpeg fade:
+
+xfade=transition=fade:duration=1
+
+This makes the final video look much more professional.
+
+8️⃣ Best Architecture For Your Current System
+
+Your stack could look like this:
+
+User prompt
+↓
+Ollama (script generator)
+↓
+scene prompts
+↓
+ComfyUI (AnimateDiff)
+↓
+video clips
+↓
+FFmpeg stitching
+↓
+TTS voice
+↓
+final video
+
+Which matches your current setup nicely.
+
+💡 One more important thing:
+There is a newer technique called “latent video looping” that allows generating 30–60 second continuous clips even on 16GB GPUs like your 5060 Ti.
+
+It’s not widely documented yet but works extremely well for AI marketing videos. If you want, I can show you how to run that on your current Vast.ai instance.

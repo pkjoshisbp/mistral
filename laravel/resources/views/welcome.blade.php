@@ -357,7 +357,7 @@
                                         <small class="text-muted">Minimum charge (100k tokens)</small>
                                     @elseif($plan->slug === 'free')
                                         <div class="h3 text-success">Free</div>
-                                        <small class="text-muted">20K tokens for trial</small>
+                                        <small class="text-muted">20K one-time tokens (valid 1 month)</small>
                                     @else
                                         <div class="h3">Custom</div>
                                         @php
@@ -373,7 +373,9 @@
                                 <p class="text-muted">{{ $planDesc }}</p>
                                 
                                 <div class="mb-3">
-                                    @if($plan->token_cap_monthly > 0)
+                                    @if($plan->slug === 'free' && $plan->token_cap_monthly > 0)
+                                        <strong>{{ $plan->formatted_token_cap }} one-time tokens</strong>
+                                    @elseif($plan->token_cap_monthly > 0)
                                         <strong>{{ $plan->formatted_token_cap }} tokens/month</strong>
                                     @else
                                         <strong>No usage cap</strong>
@@ -409,7 +411,7 @@
                                         {{ $planButton }}
                                     </a>
                                 @else
-                                    @if($isShopifyUser)
+                                    @if($isShopifyUser && $plan->slug !== 'free')
                                         <a href="{{ route('customer.subscription') }}" class="btn btn-outline-primary btn-block w-100">
                                             Manage Plan in Shopify Dashboard
                                         </a>

@@ -1,6 +1,10 @@
 ---
 applyTo: '**'
 ---
+> **READ FIRST:** Full project architecture, all service ports, GPU location, tunnel
+> setup, and critical warnings are in **[docs/PROJECT_SETUP.md](../../docs/PROJECT_SETUP.md)**.
+> Do not assume GPU is local. Do not assume any service runs locally without checking that file.
+
 we want to setup a system which can serve multiple organizations as AI support agent.
 for this we are using Llama 3.2
 and the depending software alongwith it.

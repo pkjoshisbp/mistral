@@ -18,7 +18,7 @@ class AnalyticsDashboard extends Component
 
     public function mount()
     {
-        $this->organization = auth()->user()->organization ?? null;
+        $this->organization = auth()->user()->primaryOrganization() ?? null;
         $this->loadAnalytics();
     }
 
@@ -44,8 +44,8 @@ class AnalyticsDashboard extends Component
             ->get();
 
         $this->metrics = [
-            'total_page_views' => $analyticsData->where('event_type', 'page_view')->count(),
-            'unique_visitors' => $analyticsData->where('event_type', 'page_view')->pluck('visitor_id')->unique()->count(),
+            'total_page_views' => $analyticsData->whereIn('event_type', ['page_view', 'widget_open'])->count(),
+            'unique_visitors' => $analyticsData->whereIn('event_type', ['page_view', 'widget_open'])->pluck('visitor_id')->unique()->count(),
             'total_sessions' => $analyticsData->pluck('session_id')->unique()->count(),
             'widget_interactions' => $analyticsData->whereIn('event_type', ['widget_open', 'chat_message'])->count(),
             'avg_time_on_page' => round($analyticsData->where('event_type', 'page_view')->avg('time_on_page') ?? 0, 2),
@@ -103,7 +103,7 @@ class AnalyticsDashboard extends Component
             ->take(10)
             ->values();
 
-        $this->analytics['top_pages'] = $analyticsData->where('event_type', 'page_view')
+        $this->analytics['top_pages'] = $analyticsData->whereIn('event_type', ['page_view', 'widget_open'])
             ->groupBy('page_url')
             ->map(function ($group) {
                 return [
@@ -117,8 +117,9 @@ class AnalyticsDashboard extends Component
             ->take(10)
             ->values();
 
-        $this->analytics['traffic_by_country'] = $analyticsData->where('event_type', 'page_view')
+        $this->analytics['traffic_by_country'] = $analyticsData->whereIn('event_type', ['page_view', 'widget_open'])
             ->whereNotNull('country')
+            ->filter(fn($r) => $r->country !== '')
             ->groupBy('country')
             ->map(function ($group) {
                 return [
@@ -145,8 +146,8 @@ class AnalyticsDashboard extends Component
             ->where('created_at', '>=', $startDate)
             ->selectRaw('DATE(created_at) as date, 
                         COUNT(*) as total_events,
-                        COUNT(CASE WHEN event_type = "page_view" THEN 1 END) as page_views,
-                        COUNT(DISTINCT visitor_id) as unique_visitors')
+                        COUNT(CASE WHEN event_type IN ("page_view","widget_open") THEN 1 END) as page_views,
+                        COUNT(DISTINCT CASE WHEN event_type IN ("page_view","widget_open") THEN visitor_id END) as unique_visitors')
             ->groupBy('date')
             ->orderBy('date')
             ->get()

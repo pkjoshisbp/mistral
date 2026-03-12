@@ -14,6 +14,7 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\SendScheduledEmailCampaigns::class,
         \App\Console\Commands\SyncWhatsappTemplates::class,
         \App\Console\Commands\RunWidgetWebSocketServer::class,
+        \App\Console\Commands\CheckVastAiConnectivity::class,
     ];
 
     /**
@@ -25,6 +26,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('email:send-scheduled')->everyMinute();
         $schedule->command('whatsapp:sync-templates')->dailyAt('02:00')->withoutOverlapping();
         $schedule->command('credits:scan-expiry --days=7')->dailyAt('01:30')->withoutOverlapping();
+        $schedule->command('vastai:check-connectivity')->everyFiveMinutes()->withoutOverlapping();
     }
 
     /**

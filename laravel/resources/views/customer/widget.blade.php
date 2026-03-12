@@ -41,7 +41,8 @@
                                     <div class="row">
                                         <div class="col-md-6 mb-3">
                                             <label class="form-label">Widget Position</label>
-                                            @php $custOrg = auth()->user()->organizations->first(); $pos = $custOrg->settings['widget_position'] ?? 'bottom-right'; @endphp
+                                            @php $custOrg = auth()->user()->primaryOrganization() ?? auth()->user()->organizations->first(); $pos = $custOrg->settings['widget_position'] ?? 'bottom-right'; @endphp
+                                            <input type="hidden" id="organizationId" name="organizationId" value="{{ $custOrg->id }}">
                                             <select class="form-select" id="chatPosition" name="chatPosition">
                                                 <option value="bottom-right" {{ $pos==='bottom-right' ? 'selected' : '' }}>Bottom Right</option>
                                                 <option value="bottom-left" {{ $pos==='bottom-left' ? 'selected' : '' }}>Bottom Left</option>
@@ -52,6 +53,60 @@
                                         <div class="col-md-6 mb-3">
                                             <label class="form-label">Primary Color</label>
                                             <input type="color" id="primaryColor" name="primaryColor" class="form-control form-control-color" value="{{ $custOrg->settings['primary_color'] ?? '#007bff' }}">
+                                        </div>
+                                    </div>
+                                    @php
+                                        $widgetButtonBgType = $custOrg->settings['widget_button_bg_type'] ?? 'gradient';
+                                        $widgetButtonSolidColor = $custOrg->settings['widget_button_solid_color'] ?? ($custOrg->settings['primary_color'] ?? '#007bff');
+                                        $widgetButtonGradientStart = $custOrg->settings['widget_button_gradient_start'] ?? '#667eea';
+                                        $widgetButtonGradientEnd = $custOrg->settings['widget_button_gradient_end'] ?? '#764ba2';
+                                        $widgetButtonGradientAngle = (int) ($custOrg->settings['widget_button_gradient_angle'] ?? 135);
+                                        $previewLauncherBackground = $widgetButtonBgType === 'solid'
+                                            ? $widgetButtonSolidColor
+                                            : 'linear-gradient(' . $widgetButtonGradientAngle . 'deg, ' . $widgetButtonGradientStart . ', ' . $widgetButtonGradientEnd . ')';
+                                    @endphp
+                                    <input type="hidden" id="widgetIconColor" name="widgetIconColor" value="#ffffff">
+                                    @php
+                                        $assistantBubbleBgColor = $custOrg->settings['widget_bot_bubble_bg_color'] ?? '#f4f8f6';
+                                        $assistantBubbleTextColor = $custOrg->settings['widget_bot_bubble_text_color'] ?? '#000000';
+                                    @endphp
+                                    <div class="row">
+                                        <div class="col-md-4 mb-3">
+                                            <label class="form-label">Launcher Background</label>
+                                            <select class="form-select" id="widgetButtonBgType" name="widgetButtonBgType">
+                                                <option value="gradient" {{ $widgetButtonBgType === 'gradient' ? 'selected' : '' }}>Gradient</option>
+                                                <option value="solid" {{ $widgetButtonBgType === 'solid' ? 'selected' : '' }}>Solid</option>
+                                            </select>
+                                            <small class="text-muted">Controls bubble background around the icon.</small>
+                                        </div>
+                                        <div class="col-md-4 mb-3" id="widgetSolidColorWrap">
+                                            <label class="form-label">Solid Background Color</label>
+                                            <input type="color" id="widgetButtonSolidColor" name="widgetButtonSolidColor" class="form-control form-control-color" value="{{ $widgetButtonSolidColor }}">
+                                        </div>
+                                        <div class="col-md-4 mb-3" id="widgetGradientStartWrap">
+                                            <label class="form-label">Gradient Start</label>
+                                            <input type="color" id="widgetButtonGradientStart" name="widgetButtonGradientStart" class="form-control form-control-color" value="{{ $widgetButtonGradientStart }}">
+                                        </div>
+                                        <div class="col-md-4 mb-3" id="widgetGradientEndWrap">
+                                            <label class="form-label">Gradient End</label>
+                                            <input type="color" id="widgetButtonGradientEnd" name="widgetButtonGradientEnd" class="form-control form-control-color" value="{{ $widgetButtonGradientEnd }}">
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Assistant Bubble Background</label>
+                                            <input type="color" id="assistantBubbleBgColor" name="assistantBubbleBgColor" class="form-control form-control-color" value="{{ $assistantBubbleBgColor }}">
+                                            <small class="text-muted">Default: #F4F8F6 (light grey / silver)</small>
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Assistant Bubble Text Color</label>
+                                            <input type="color" id="assistantBubbleTextColor" name="assistantBubbleTextColor" class="form-control form-control-color" value="{{ $assistantBubbleTextColor }}">
+                                        </div>
+                                    </div>
+                                    <div class="row" id="widgetGradientAngleRow">
+                                        <div class="col-md-4 mb-3" id="widgetGradientAngleWrap">
+                                            <label class="form-label">Gradient Angle (deg)</label>
+                                            <input type="number" id="widgetButtonGradientAngle" name="widgetButtonGradientAngle" class="form-control" min="0" max="360" step="1" value="{{ $widgetButtonGradientAngle }}">
                                         </div>
                                     </div>
                                     <div class="row">
@@ -137,6 +192,7 @@
                                         <small class="text-muted">Executes in widget context for this organization only.</small>
                                     </div>
                                     <button type="submit" class="btn btn-success">Save Settings</button>
+                                    <small id="widgetSavedModeInfo" class="ms-3 text-muted">Saved mode: {{ ucfirst($widgetButtonBgType) }}</small>
                                 </form>
                             </div>
                         </div>
@@ -148,7 +204,7 @@
                                 </div>
                                 <div class="card-body">
                                     <div class="text-center">
-                                        <i class="fas fa-comments fa-4x text-primary mb-3"></i>
+                                        <i class="fas fa-comments fa-4x mb-3" style="color: #ffffff; background: {{ $previewLauncherBackground }}; border-radius: 50%; padding: 16px;"></i>
                                         <h6>AI Chat Widget</h6>
                                         <p class="text-muted small">Your widget will appear on your website like this, positioned in the bottom corner for easy customer access.</p>
                                     </div>
@@ -209,12 +265,49 @@ function copyWidgetCode() {
     });
 }
 
+function toggleGradientInputs() {
+    const bgType = (document.getElementById('widgetButtonBgType')?.value || 'gradient').toLowerCase();
+    const showGradient = bgType === 'gradient';
+    const showSolid = bgType === 'solid';
+
+    const solidWrap = document.getElementById('widgetSolidColorWrap');
+    const startWrap = document.getElementById('widgetGradientStartWrap');
+    const endWrap = document.getElementById('widgetGradientEndWrap');
+    const angleRow = document.getElementById('widgetGradientAngleRow');
+
+    if (solidWrap) solidWrap.style.display = showSolid ? '' : 'none';
+    if (startWrap) startWrap.style.display = showGradient ? '' : 'none';
+    if (endWrap) endWrap.style.display = showGradient ? '' : 'none';
+    if (angleRow) angleRow.style.display = showGradient ? '' : 'none';
+
+    const solidInput = document.getElementById('widgetButtonSolidColor');
+    const startInput = document.getElementById('widgetButtonGradientStart');
+    const endInput = document.getElementById('widgetButtonGradientEnd');
+    const angleInput = document.getElementById('widgetButtonGradientAngle');
+    if (solidInput) solidInput.disabled = !showSolid;
+    if (startInput) startInput.disabled = !showGradient;
+    if (endInput) endInput.disabled = !showGradient;
+    if (angleInput) angleInput.disabled = !showGradient;
+}
+
+document.getElementById('widgetButtonBgType')?.addEventListener('change', toggleGradientInputs);
+toggleGradientInputs();
+
 // Handle form submit with fetch to show toast without reload
 document.getElementById('widgetSettingsForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     const form = e.target;
     const payload = {
+        organizationId: parseInt(document.getElementById('organizationId').value || '0', 10),
         primaryColor: document.getElementById('primaryColor').value,
+        widgetIconColor: document.getElementById('widgetIconColor').value,
+        assistantBubbleBgColor: document.getElementById('assistantBubbleBgColor').value,
+        assistantBubbleTextColor: document.getElementById('assistantBubbleTextColor').value,
+        widgetButtonBgType: document.getElementById('widgetButtonBgType').value,
+        widgetButtonSolidColor: document.getElementById('widgetButtonSolidColor').value,
+        widgetButtonGradientStart: document.getElementById('widgetButtonGradientStart').value,
+        widgetButtonGradientEnd: document.getElementById('widgetButtonGradientEnd').value,
+        widgetButtonGradientAngle: parseInt(document.getElementById('widgetButtonGradientAngle').value || '135', 10),
         chatPosition: document.getElementById('chatPosition').value,
         offsetX: parseInt(document.getElementById('offsetX').value || '20', 10),
         offsetY: parseInt(document.getElementById('offsetY').value || '20', 10),
@@ -237,6 +330,30 @@ document.getElementById('widgetSettingsForm').addEventListener('submit', async f
         if (!res.ok) throw new Error('Failed to save settings');
         const data = await res.json();
         if (data.success) {
+            if (data.settings?.widgetIconColor) {
+                document.getElementById('widgetIconColor').value = data.settings.widgetIconColor;
+            }
+            if (data.settings?.primaryColor) {
+                document.getElementById('primaryColor').value = data.settings.primaryColor;
+            }
+            if (data.settings?.assistantBubbleBgColor) {
+                document.getElementById('assistantBubbleBgColor').value = data.settings.assistantBubbleBgColor;
+            }
+            if (data.settings?.assistantBubbleTextColor) {
+                document.getElementById('assistantBubbleTextColor').value = data.settings.assistantBubbleTextColor;
+            }
+            if (data.settings?.widgetButtonBgType) {
+                document.getElementById('widgetButtonBgType').value = data.settings.widgetButtonBgType;
+                const modeInfo = document.getElementById('widgetSavedModeInfo');
+                if (modeInfo) {
+                    const mode = data.settings.widgetButtonBgType;
+                    modeInfo.textContent = `Saved mode: ${mode.charAt(0).toUpperCase()}${mode.slice(1)}`;
+                }
+            }
+            if (data.settings?.widgetButtonSolidColor) {
+                document.getElementById('widgetButtonSolidColor').value = data.settings.widgetButtonSolidColor;
+            }
+            toggleGradientInputs();
             alert('Widget settings saved successfully!');
         } else {
             alert('Could not save settings.');

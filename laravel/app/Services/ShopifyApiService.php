@@ -114,38 +114,70 @@ class ShopifyApiService
             return [];
         }
         
-        $searchTerm = strtolower($query);
-        $matches = [];
-        
-        // Also search for singular version if query ends in 's'
-        $singularTerm = null;
-        if (substr($searchTerm, -1) === 's' && strlen($searchTerm) > 3) {
-            $singularTerm = substr($searchTerm, 0, -1);
+        $searchTerm = strtolower(trim($query));
+        $searchTerm = preg_replace('/[^a-z0-9\s-]/i', ' ', $searchTerm);
+        $searchTerm = preg_replace('/\s+/', ' ', (string) $searchTerm);
+        $searchTerm = trim((string) $searchTerm);
+
+        $stopWords = [
+            'tell', 'about', 'show', 'me', 'please', 'the', 'a', 'an', 'do', 'does',
+            'you', 'your', 'have', 'has', 'in', 'stock', 'available', 'product', 'products',
+            'item', 'items', 'for', 'with', 'and', 'or', 'to', 'of', 'info', 'information',
+            'details', 'model', 'looking', 'find', 'search'
+        ];
+
+        $rawTokens = array_values(array_filter(explode(' ', $searchTerm)));
+        $tokens = array_values(array_filter($rawTokens, function ($token) use ($stopWords) {
+            return strlen($token) >= 3 && !in_array($token, $stopWords, true);
+        }));
+
+        if (empty($tokens) && $searchTerm !== '') {
+            $tokens = [$searchTerm];
         }
-        
+
+        $scored = [];
+
         foreach ($allProducts as $product) {
-            $titleLower = strtolower($product['title'] ?? '');
-            $descLower = strtolower($product['description'] ?? '');
-            
-            // Check if search term (or singular) appears in title or description
-            $found = stripos($titleLower, $searchTerm) !== false || 
-                     stripos($descLower, $searchTerm) !== false;
-                     
-            if (!$found && $singularTerm) {
-                $found = stripos($titleLower, $singularTerm) !== false || 
-                         stripos($descLower, $singularTerm) !== false;
+            $titleLower = strtolower((string) ($product['title'] ?? ''));
+            $descLower = strtolower((string) ($product['description'] ?? ''));
+            $haystack = $titleLower . ' ' . $descLower;
+
+            $score = 0;
+            if ($searchTerm !== '' && (str_contains($titleLower, $searchTerm) || str_contains($descLower, $searchTerm))) {
+                $score += 8;
             }
-            
-            if ($found) {
-                $matches[] = $product;
-                if (count($matches) >= $limit) {
-                    break;
+
+            foreach ($tokens as $token) {
+                if (str_contains($titleLower, $token)) {
+                    $score += 5;
+                } elseif (str_contains($descLower, $token)) {
+                    $score += 2;
+                }
+
+                if (str_ends_with($token, 's') && strlen($token) > 3) {
+                    $singular = substr($token, 0, -1);
+                    if ($singular !== '' && str_contains($haystack, $singular)) {
+                        $score += 1;
+                    }
                 }
             }
+
+            if ($score > 0) {
+                $scored[] = ['score' => $score, 'product' => $product];
+            }
         }
+
+        usort($scored, function ($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
+
+        $matches = array_map(function ($item) {
+            return $item['product'];
+        }, array_slice($scored, 0, $limit));
         
         \Log::info('[SHOPIFY] searchProducts results', [
             'query' => $query,
+            'tokens' => $tokens,
             'matches_found' => count($matches)
         ]);
         

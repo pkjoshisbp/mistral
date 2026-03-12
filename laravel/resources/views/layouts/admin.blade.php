@@ -12,6 +12,24 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <!-- AdminLTE -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/css/adminlte.min.css">
+  <!-- Global responsive overrides -->
+  <style>
+    /* Touch-friendly buttons on mobile */
+    @media (max-width: 576px) {
+      .btn-group { flex-wrap: wrap; gap: 0.25rem; }
+      .btn-group > .btn { border-radius: 0.25rem !important; }
+      .card-header.d-flex { flex-wrap: wrap; }
+      .content-header .breadcrumb { display: none; }
+      .main-sidebar { z-index: 1045; }
+    }
+    /* Card-based conversation layout helpers */
+    .conversation-card .card-header { background: #f8f9fa; }
+    .conversation-card .card-footer { border-top: 1px solid #dee2e6; }
+    .message-content { word-break: break-word; white-space: normal; }
+    /* Gap utility fallback for older browsers */
+    .gap-1 { gap: 0.25rem !important; }
+    .gap-2 { gap: 0.5rem !important; }
+  </style>
   <!-- Livewire Styles -->
   @livewireStyles
 </head>
@@ -144,11 +162,20 @@
               <p>CSV Import</p>
             </a>
           </li>
-          
           <li class="nav-item">
-            <a href="{{ route('admin.ai-chat') }}" class="nav-link {{ request()->routeIs('admin.ai-chat') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-comments"></i>
-              <p>AI Chat</p>
+            <a href="{{ route('admin.catalog-prices') }}" class="nav-link {{ request()->routeIs('admin.catalog-prices') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-tags"></i>
+              <p>Catalog Prices</p>
+            </a>
+          </li>
+          {{-- Video Generation nav hidden (route/files kept as backup)
+          <li class="nav-item">
+            <a href="{{ route('admin.video-generation') }}" class="nav-link {{ request()->routeIs('admin.video-generation') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-film"></i>
+              <p>Video Generation</p>
+            </a>
+          </li>
+          --}}
             </a>
           </li>
           <li class="nav-item">

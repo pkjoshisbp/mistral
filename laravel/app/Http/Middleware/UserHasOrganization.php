@@ -17,8 +17,8 @@ class UserHasOrganization
     {
         $user = auth()->user();
         
-        // Check if user has access (either active subscription or sufficient credits)
-        if (!$user || !$user->canAccessPremiumFeatures()) {
+        // Check if user has access (either active subscription or some usable credits)
+        if (!$user || !$user->hasAnyAccess()) {
             return redirect()->route('customer.subscription')
                 ->with('error', 'Access requires an active subscription or available credits. Please subscribe or purchase credits to continue.');
         }

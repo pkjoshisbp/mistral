@@ -12,6 +12,21 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <!-- AdminLTE -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/css/adminlte.min.css">
+  <!-- Global responsive overrides -->
+  <style>
+    @media (max-width: 576px) {
+      .btn-group { flex-wrap: wrap; gap: 0.25rem; }
+      .btn-group > .btn { border-radius: 0.25rem !important; }
+      .card-header.d-flex { flex-wrap: wrap; }
+      .content-header .breadcrumb { display: none; }
+      .main-sidebar { z-index: 1045; }
+    }
+    .conversation-card .card-header { background: #f8f9fa; }
+    .conversation-card .card-footer { border-top: 1px solid #dee2e6; }
+    .message-content { word-break: break-word; white-space: normal; }
+    .gap-1 { gap: 0.25rem !important; }
+    .gap-2 { gap: 0.5rem !important; }
+  </style>
   <!-- Livewire Styles -->
   @livewireStyles
 </head>
@@ -83,8 +98,8 @@
         </div>
         <div class="info">
           <a href="{{ route('customer.profile.edit') }}" class="d-block">{{ Auth::user()->name }}</a>
-          @if(Auth::user()->organization)
-            <small class="text-muted">{{ Auth::user()->organization->name }}</small>
+          @if(Auth::user()->primaryOrganization())
+            <small class="text-muted">{{ Auth::user()->primaryOrganization()->name }}</small>
           @endif
         </div>
       </div>
@@ -99,7 +114,7 @@
             </a>
           </li>
           
-          @if(Auth::user()->canAccessPremiumFeatures())
+          @if(Auth::user()->hasAnyAccess())
           <li class="nav-header">DATA MANAGEMENT</li>
           <li class="nav-item">
             <a href="{{ route('customer.organization') }}" class="nav-link {{ request()->routeIs('customer.organization') ? 'active' : '' }}">
@@ -156,14 +171,21 @@
               <p>CSV Import</p>
             </a>
           </li>
-
-          <li class="nav-header">WIDGET</li>
+          <li class="nav-item">
+            <a href="{{ route('customer.catalog-prices') }}" class="nav-link {{ request()->routeIs('customer.catalog-prices') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-tags"></i>
+              <p>Catalog Prices</p>
+            </a>
+          </li>
+          <li class="nav-header">MY LEADS</li>
           <li class="nav-item">
             <a href="{{ route('customer.leads') }}" class="nav-link {{ request()->routeIs('customer.leads') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-address-card"></i>
+              <i class="nav-icon fas fa-user-tag"></i>
               <p>My Leads</p>
             </a>
           </li>
+
+          <li class="nav-header">WIDGET &amp; INTEGRATIONS</li>
           <li class="nav-item">
             <a href="{{ route('customer.widget') }}" class="nav-link {{ request()->routeIs('customer.widget') ? 'active' : '' }}">
               <i class="nav-icon fas fa-code"></i>
@@ -176,9 +198,11 @@
               <p>WhatsApp Integration</p>
             </a>
           </li>
+
+          <li class="nav-header">LIVE CHAT</li>
           <li class="nav-item">
             <a href="{{ route('customer.chat-test') }}" class="nav-link {{ request()->routeIs('customer.chat-test') ? 'active' : '' }}">
-              <i class="nav-icon fas fa-comments"></i>
+              <i class="nav-icon fas fa-flask"></i>
               <p>Test Chat</p>
             </a>
           </li>
@@ -194,10 +218,24 @@
               <p>Chat History</p>
             </a>
           </li>
+
+          <li class="nav-header">PERSONAL ASSISTANT</li>
           <li class="nav-item">
             <a href="{{ route('customer.personal-assistant') }}" class="nav-link {{ request()->routeIs('customer.personal-assistant') ? 'active' : '' }}">
               <i class="nav-icon fas fa-microphone"></i>
               <p>Personal Assistant</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('customer.personal-assistant-widget') }}" class="nav-link {{ request()->routeIs('customer.personal-assistant-widget') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-comment-dots"></i>
+              <p>Assistant Widget</p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{{ route('customer.assistant-memory') }}" class="nav-link {{ request()->routeIs('customer.assistant-memory') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-brain"></i>
+              <p>Extended Memory</p>
             </a>
           </li>
           @else
@@ -217,7 +255,7 @@
               <p>Subscription</p>
             </a>
           </li>
-          @if(Auth::user()->canAccessPremiumFeatures())
+          @if(Auth::user()->hasAnyAccess())
           <li class="nav-item">
             <a href="{{ route('customer.token-usage') }}" class="nav-link {{ request()->routeIs('customer.token-usage') ? 'active' : '' }}">
               <i class="nav-icon fas fa-microchip"></i>

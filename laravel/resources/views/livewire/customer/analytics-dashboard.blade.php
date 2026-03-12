@@ -48,7 +48,7 @@
                         <div class="small-box bg-info">
                             <div class="inner">
                                 <h3>{{ number_format($metrics['total_page_views']) }}</h3>
-                                <p>Page Views</p>
+                                <p>Widget Page Views</p>
                             </div>
                             <div class="icon"><i class="fas fa-eye"></i></div>
                         </div>

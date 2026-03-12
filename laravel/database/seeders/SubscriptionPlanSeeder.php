@@ -17,8 +17,8 @@ class SubscriptionPlanSeeder extends Seeder
                 'name' => 'Starter',
                 'slug' => 'starter',
                 'description' => 'Low-cost entry plan to try AI chat support',
-                'monthly_price' => 15.00,
-                'yearly_price' => 150.00, // 10 months price for 12 months
+                'monthly_price' => 19.00,
+                'yearly_price' => 190.00, // 10 months price for 12 months
                 'token_cap_monthly' => 500000, // 500K tokens
                 'overage_price_per_100k' => 6.00,
                 'features' => [

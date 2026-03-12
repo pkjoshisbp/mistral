@@ -155,16 +155,35 @@ class ShopifyDataController extends Controller
         
         // Use LLM to extract product keyword(s) from natural language
         $keywords = $this->extractProductKeyword($query);
-        
-        if (empty($keywords)) {
-            // General product query - get all products
-            Log::info('[SHOPIFY] General product query', ['original' => $original, 'keywords' => 'none']);
-            return $this->shopifyService->getAllProducts(10);
-        } else {
-            // Specific product search - search by keywords
+
+        if (!empty($keywords)) {
             Log::info('[SHOPIFY] Specific product search', ['original' => $original, 'keywords' => $keywords]);
-            return $this->shopifyService->searchProducts($keywords, 10);
+            $results = $this->shopifyService->searchProducts($keywords, 10);
+            if (!empty($results)) {
+                return $results;
+            }
+
+            $fallbackKeywords = $this->fallbackKeywordExtraction($query);
+            if (!empty($fallbackKeywords) && strtolower($fallbackKeywords) !== strtolower($keywords)) {
+                Log::info('[SHOPIFY] Product search fallback keywords', [
+                    'original' => $original,
+                    'primary_keywords' => $keywords,
+                    'fallback_keywords' => $fallbackKeywords,
+                ]);
+
+                $fallbackResults = $this->shopifyService->searchProducts($fallbackKeywords, 10);
+                if (!empty($fallbackResults)) {
+                    return $fallbackResults;
+                }
+            }
         }
+
+        Log::info('[SHOPIFY] General product query fallback', [
+            'original' => $original,
+            'keywords' => $keywords ?: 'none',
+        ]);
+
+        return $this->shopifyService->getAllProducts(10);
     }
 
     /**
@@ -182,13 +201,9 @@ class ShopifyDataController extends Controller
             
             if ($response->successful()) {
                 $result = trim($response->json('result', ''));
-                
-                // Clean up response - remove common filler words if LLM added them
-                $result = preg_replace('/\b(the|a|an|some|any)\s+/i', '', $result);
-                $result = trim($result);
-                
-                // If response is [empty] or too long, return null
-                if (empty($result) || stripos($result, '[empty]') !== false || strlen($result) > 50) {
+
+                $result = $this->normalizeProductKeyword($result, $query);
+                if ($result === null) {
                     return null;
                 }
                 
@@ -204,8 +219,30 @@ class ShopifyDataController extends Controller
             // Fallback to simple regex if LLM fails
             return $this->fallbackKeywordExtraction($query);
         }
-        
-        return null;
+
+        return $this->fallbackKeywordExtraction($query);
+    }
+
+    protected function normalizeProductKeyword(string $candidate, string $originalQuery): ?string
+    {
+        $result = strtolower(trim($candidate));
+        $result = preg_replace('/[^a-z0-9\s-]/i', ' ', $result);
+        $result = preg_replace('/\s+/', ' ', (string) $result);
+        $result = trim((string) $result);
+
+        if ($result === '' || stripos($result, '[empty]') !== false || strlen($result) > 50) {
+            return $this->fallbackKeywordExtraction($originalQuery);
+        }
+
+        $result = preg_replace('/\b(tell|about|show|give|share|details?|information|info|me|please|on|for|the|a|an|some|any|product|products|item|items|model|do|does|you|your|have|has|what|which|is|are|in|stock|available|looking|find|search)\b/i', ' ', $result);
+        $result = preg_replace('/\s+/', ' ', (string) $result);
+        $result = trim((string) $result);
+
+        if ($result === '' || in_array($result, ['featured', 'products', 'items', 'catalog'], true)) {
+            return $this->fallbackKeywordExtraction($originalQuery);
+        }
+
+        return $result;
     }
 
     /**
@@ -214,7 +251,7 @@ class ShopifyDataController extends Controller
     protected function fallbackKeywordExtraction(string $query): ?string
     {
         // Remove common question words, articles, and price/quality adjectives
-        $keywords = preg_replace('/\b(what|which|do|does|you|your|have|has|sell|selling|any|all|products?|items?|looking|for|show|me|my|the|a|an|available|current|can|i|see|get|list|in|stock|and|is|what|price|lowest|highest|cost|cheapest|most expensive|best|worst|featured)\b/i', '', $query);
+        $keywords = preg_replace('/\b(what|which|do|does|you|your|have|has|sell|selling|any|all|products?|items?|looking|for|show|me|my|the|a|an|available|current|can|i|see|get|list|in|stock|and|is|what|price|lowest|highest|cost|cheapest|most expensive|best|worst|featured|tell|about|details?|information|info|please|find|search|model)\b/i', '', $query);
         $keywords = preg_replace('/[^\w\s-]/', '', $keywords);
         $keywords = trim($keywords);
         

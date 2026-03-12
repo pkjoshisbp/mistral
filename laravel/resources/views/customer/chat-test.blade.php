@@ -2,6 +2,12 @@
 
 @section('title', 'Chat Test')
 
+@php
+    $testOrg = auth()->user()->primaryOrganization();
+    $testOrgId = $testOrg?->id;
+    $testOrgSlug = $testOrg?->slug ?? $testOrgId;
+@endphp
+
 @section('content')
 <div class="container-fluid">
     <div class="row">
@@ -43,8 +49,9 @@
                                     <h6 class="mb-0">Test Information</h6>
                                 </div>
                                 <div class="card-body">
-                                    <p><strong>Organization ID:</strong> {{ auth()->user()->organization_id ?? 3 }}</p>
-                                    <p><strong>API Endpoint:</strong> <code>/widget/{{ auth()->user()->organization_id ?? 3 }}/chat</code></p>
+                                    <p><strong>Organization:</strong> {{ $testOrg?->name ?? 'Not assigned' }}</p>
+                                    <p><strong>Organization ID:</strong> {{ $testOrgId ?? 'N/A' }}</p>
+                                    <p><strong>API Endpoint:</strong> <code>/widget/{{ $testOrgSlug }}/chat</code></p>
                                     <p><strong>Status:</strong> <span class="badge bg-success">Active</span></p>
                                     <hr>
                                     <h6>Test Features:</h6>
@@ -147,7 +154,7 @@ async function sendTestMessage() {
     showTypingIndicator();
     
     try {
-        const response = await fetch('/widget/{{ auth()->user()->organization_id ?? 3 }}/chat', {
+        const response = await fetch('/widget/{{ $testOrgSlug }}/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

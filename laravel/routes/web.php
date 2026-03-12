@@ -687,6 +687,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/faqs', \App\Livewire\Admin\FaqsManager::class)->name('faqs');
     Route::get('/general-info', \App\Livewire\Admin\GeneralInfoManager::class)->name('general-info');
     Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
+    Route::get('/video-generation', \App\Livewire\Admin\VideoGenerationManager::class)->name('video-generation');
     Route::get('/live-chats', \App\Livewire\Admin\AgentConsole::class)->name('live-chats');
     Route::get('/chat-history', \App\Livewire\Admin\ChatHistoryManager::class)->name('chat-history');
     Route::get('/chat-history/{id}/export', function ($id) {
@@ -759,6 +760,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     // Action Manager Route - Live Data Actions
     Route::get('/action-manager', \App\Livewire\Admin\ActionManager::class)->name('action-manager');
         Route::get('/csv-import', \App\Livewire\Admin\CsvImportManager::class)->name('csv-import');
+        Route::get('/catalog-prices', \App\Livewire\Admin\CatalogPriceManager::class)->name('catalog-prices');
     
     // Token Usage Analytics Route
     Route::get('/token-usage-analytics', \App\Livewire\Admin\TokenUsageAnalytics::class)->name('token-usage-analytics');
@@ -824,9 +826,12 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/integration-settings', \App\Livewire\Customer\IntegrationSettingsManager::class)->name('integration-settings');
         Route::get('/action-manager', \App\Livewire\Customer\ActionManager::class)->name('action-manager');
         Route::get('/csv-import', \App\Livewire\Customer\CsvImportManager::class)->name('csv-import');
+        Route::get('/catalog-prices', \App\Livewire\Customer\CatalogPriceManager::class)->name('catalog-prices');
         Route::get('/live-chats', \App\Livewire\Customer\AgentConsole::class)->name('live-chats');
         Route::get('/chat-history', \App\Livewire\Customer\ChatHistory::class)->name('chat-history');
         Route::get('/personal-assistant', \App\Livewire\Customer\PersonalAssistant::class)->name('personal-assistant');
+        Route::get('/assistant-memory', \App\Livewire\Customer\AssistantMemoryManager::class)->name('assistant-memory');
+        Route::get('/personal-assistant-widget', \App\Livewire\Customer\PersonalAssistantWidget::class)->name('personal-assistant-widget');
         Route::get('/token-usage', \App\Livewire\Customer\TokenUsage::class)->name('token-usage');
         Route::get('/credits', \App\Livewire\Customer\Credits::class)->name('credits');
         Route::get('/leads', \App\Livewire\Customer\LeadsManager::class)->name('leads');

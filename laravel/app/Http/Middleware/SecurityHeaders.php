@@ -43,12 +43,17 @@ class SecurityHeaders
         $response->headers->set('Content-Security-Policy', implode('; ', $csp));
         
         // Additional security headers
-        $response->headers->set('X-Frame-Options', 'DENY');
+        // SAMEORIGIN allows admin panel to embed same-domain widget previews in iframes
+        $response->headers->set('X-Frame-Options', 'SAMEORIGIN');
         $response->headers->set('X-XSS-Protection', '1; mode=block');
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
-        $isPersonalAssistantPage = $request->is('customer/personal-assistant') || $request->is('customer/personal-assistant/*');
+        $isPersonalAssistantPage =
+            $request->is('customer/personal-assistant') ||
+            $request->is('customer/personal-assistant/*') ||
+            $request->is('customer/personal-assistant-widget') ||
+            $request->is('customer/personal-assistant-widget/*');
         if ($isPersonalAssistantPage) {
             $response->headers->set('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
         } else {

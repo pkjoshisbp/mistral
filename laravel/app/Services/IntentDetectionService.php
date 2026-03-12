@@ -12,18 +12,24 @@ class IntentDetectionService
 {
     private AiAgentService $aiAgent;
 
-    // Rule-based keywords for quick intent detection
+    // Rule-based keywords for quick intent detection.
+    // IMPORTANT: 'available'/'availability' are NOT booking signals — they indicate stock/status checks
+    // (realtime_data). Only classify as 'booking' when the user explicitly wants to MAKE a reserveration
+    // or appointment. This avoids mis-classifying product catalog queries as booking requests.
     private const INTENT_KEYWORDS = [
         'booking' => [
-            'reserve', 'book', 'booking', 'reservation', 'availability', 'available',
-            'schedule', 'appointment', 'check availability', 'room available',
-            'slot available', 'can i book', 'can i reserve'
+            'reserve', 'book a', 'book an', 'booking', 'reservation',
+            'appointment', 'can i book', 'can i reserve', 'can i schedule',
+            'make a reservation', 'schedule an appointment', 'book a slot',
+            'book a table', 'book a room'
         ],
         'pricing' => [
             'price', 'cost', 'fee', 'charge', 'rate', 'pricing', 'how much',
             'tuition', 'fees', 'payment', 'bill', 'invoice', 'expense'
         ],
         'realtime_data' => [
+            'available', 'availability', 'check availability', 'in stock', 'out of stock',
+            'is it available', 'slot available', 'room available', 'in your store',
             'current', 'now', 'today', 'live', 'real-time', 'status', 'check',
             'inventory', 'stock', 'balance', 'account', 'latest', 'update'
         ],
@@ -50,32 +56,40 @@ class IntentDetectionService
         ]
     ];
 
-    // Example phrases for embedding-based intent matching
+    // Example phrases for embedding-based intent matching.
+    // Booking examples must be appointment/reservation-making phrases ONLY.
+    // Availability/stock checking belongs to realtime_data, not booking.
     private const INTENT_EXAMPLES = [
         'booking' => [
             'book an appointment',
-            'reserve a slot',
-            'check availability for a booking'
+            'reserve a slot for me',
+            'I want to make a reservation',
+            'can I schedule an appointment'
         ],
         'pricing' => [
             'what is the price',
             'how much does it cost',
-            'pricing and fees'
+            'pricing and fees',
+            'what is the cost of this product'
         ],
         'realtime_data' => [
-            'check current status',
-            'live inventory status',
-            'latest availability now'
+            'is this item available',
+            'is it in stock',
+            'check availability of the product',
+            'do you have this in your store',
+            'live inventory status'
         ],
         'lookup' => [
             'search for a record',
             'find a product',
-            'look up details'
+            'look up details',
+            'show me information about'
         ],
         'static_info' => [
             'return policy information',
             'tell me about your services',
-            'general FAQ and help'
+            'general FAQ and help',
+            'what is your refund policy'
         ]
     ];
 
@@ -231,7 +245,7 @@ class IntentDetectionService
             $topP = $settings['intent_llm_top_p'] ?? 0.85;
             $repeatPenalty = $settings['intent_llm_repeat_penalty'] ?? 1.05;
 
-            $systemPrompt = "You are an intent classifier. Choose exactly one intent: booking, pricing, realtime_data, lookup, or static_info. Mark action_needed=true only when the user wants to do something (book, check live data, search/lookup). Respond with JSON only: {\\\"intent\\\":\\\"...\\\", \\\"confidence\\\":0-1, \\\"action_needed\\\":true/false, \\\"reasoning\\\":\\\"<=12 words\\\"}. No prose.";
+            $systemPrompt = "You are an intent classifier. Choose exactly one intent: booking, pricing, realtime_data, lookup, or static_info. Rules: (1) Use 'booking' ONLY when the user explicitly wants to MAKE or SCHEDULE an appointment/reservation — NOT for stock or product availability checks. (2) Use 'realtime_data' when the user is checking availability, stock status, or whether a product/service exists. (3) 'Is X available?' about a product = realtime_data. 'Book an appointment' = booking. Mark action_needed=true only when the user wants to do something (book, check live data, search/lookup). Respond with JSON only: {\\\"intent\\\":\\\"...\\\", \\\"confidence\\\":0-1, \\\"action_needed\\\":true/false, \\\"reasoning\\\":\\\"<=12 words\\\"}. No prose.";
 
             $options = [
                 'num_predict' => $maxTokens,
@@ -419,7 +433,7 @@ class IntentDetectionService
 
     private function getCachedIntentEmbeddings(): array
     {
-        return Cache::remember('intent_embeddings_v1', 3600, function () {
+        return Cache::remember('intent_embeddings_v2', 3600, function () {
             $intentEmbeddings = [];
             $allTexts = [];
             $intentMap = [];

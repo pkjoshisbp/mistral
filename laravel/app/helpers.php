@@ -15,7 +15,7 @@ if (!function_exists('convertCurrency')) {
         // Exchange rates (you should update these regularly or use an API)
         $rates = [
             'USD' => 1.0,
-            'INR' => 83.0,  // 1 USD = 83 INR (approximate)
+            'INR' => 100.0,
             'EUR' => 0.85,  // 1 USD = 0.85 EUR (approximate)
             'GBP' => 0.73,  // 1 USD = 0.73 GBP (approximate)
         ];

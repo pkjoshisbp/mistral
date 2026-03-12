@@ -38,6 +38,13 @@ class PersonalAssistant extends Component
 
     public $history = [];
     public $savedItems = [];
+    public $editingItemId = null;
+    public $editType = 'note';
+    public $editTitle = '';
+    public $editContent = '';
+    public $editStatus = 'pending';
+    public $editDueAt = '';
+    public $editTags = '';
     public $actionStatus = '';
     public $onboardingStatus = '';
     public $isProcessing = false;
@@ -388,6 +395,8 @@ class PersonalAssistant extends Component
             $user = Auth::user();
             $organization = $user?->primaryOrganization();
 
+            $this->learnCorrectionFromCommandEdit($user->id, $organization?->id);
+
             $context = collect($this->history)->take(-6)->map(function ($item) {
                 return ($item['role'] ?? 'user') . ': ' . ($item['text'] ?? '');
             })->values()->all();
@@ -452,22 +461,32 @@ class PersonalAssistant extends Component
 
         $content = trim((string) ($entities['content'] ?? $entities['text'] ?? $rawText));
         $title = trim((string) ($entities['title'] ?? $entities['subject'] ?? Str::limit($content, 80, '')));
+        $isShoppingList = str_contains(strtolower($rawText), 'shopping list') || str_contains(strtolower($rawText), 'grocery');
+        $memoryKeywords = $this->extractMemoryKeywords($content . ' ' . $title);
 
         if (in_array($intent, ['notes', 'dictation'], true) || str_contains($action, 'note')) {
             $item = PersonalAssistantItem::create([
                 'user_id' => $user->id,
                 'organization_id' => $organization?->id,
                 'type' => 'note',
-                'title' => $title !== '' ? $title : 'Quick note',
+                'title' => $title !== '' ? $title : ($isShoppingList ? 'Shopping list' : 'Quick note'),
                 'content' => $content,
                 'status' => 'saved',
-                'meta' => ['source' => 'voice_assistant'],
+                'meta' => [
+                    'source' => 'voice_assistant',
+                    'memory' => true,
+                    'memory_type' => $isShoppingList ? 'shopping_list' : 'note',
+                    'keywords' => $memoryKeywords,
+                ],
             ]);
+            $this->syncPersonalItemToVector($item);
 
             return [
                 'handled' => true,
                 'status' => 'Saved note #' . $item->id,
-                'reply' => 'Saved your note: ' . ($item->title ?: 'Quick note') . '.',
+                'reply' => $isShoppingList
+                    ? 'Saved your shopping list: ' . ($item->title ?: 'Shopping list') . '.'
+                    : 'Saved your note: ' . ($item->title ?: 'Quick note') . '.',
             ];
         }
 
@@ -481,8 +500,14 @@ class PersonalAssistant extends Component
                 'content' => $content,
                 'due_at' => $dueAt,
                 'status' => 'pending',
-                'meta' => ['source' => 'voice_assistant'],
+                'meta' => [
+                    'source' => 'voice_assistant',
+                    'memory' => true,
+                    'memory_type' => 'reminder',
+                    'keywords' => $memoryKeywords,
+                ],
             ]);
+            $this->syncPersonalItemToVector($item);
 
             $dueText = $dueAt ? $dueAt->format('M d, Y H:i:s') : 'without a specific time';
 
@@ -503,8 +528,14 @@ class PersonalAssistant extends Component
                 'content' => $content,
                 'due_at' => $dueAt,
                 'status' => 'pending',
-                'meta' => ['source' => 'voice_assistant'],
+                'meta' => [
+                    'source' => 'voice_assistant',
+                    'memory' => true,
+                    'memory_type' => $isShoppingList ? 'shopping_list' : 'task',
+                    'keywords' => $memoryKeywords,
+                ],
             ]);
+            $this->syncPersonalItemToVector($item);
 
             return [
                 'handled' => true,
@@ -569,6 +600,7 @@ class PersonalAssistant extends Component
                     'missing' => 'recipient',
                 ],
             ]);
+            $this->syncPersonalItemToVector($draft);
 
             return [
                 'handled' => true,
@@ -591,6 +623,7 @@ class PersonalAssistant extends Component
                     'missing' => 'body',
                 ],
             ]);
+            $this->syncPersonalItemToVector($draft);
 
             return [
                 'handled' => true,
@@ -612,6 +645,7 @@ class PersonalAssistant extends Component
                     'source' => 'voice_assistant',
                 ],
             ]);
+            $this->syncPersonalItemToVector($draft);
 
             return [
                 'handled' => true,
@@ -639,6 +673,7 @@ class PersonalAssistant extends Component
                     'sent_at' => now()->toISOString(),
                 ],
             ]);
+            $this->syncPersonalItemToVector($sent);
 
             return [
                 'handled' => true,
@@ -664,6 +699,7 @@ class PersonalAssistant extends Component
                     'error' => $e->getMessage(),
                 ],
             ]);
+            $this->syncPersonalItemToVector($failed);
 
             return [
                 'handled' => true,
@@ -762,19 +798,49 @@ class PersonalAssistant extends Component
             return 'Tell me what to search in your notes, reminders, or tasks.';
         }
 
-        $results = PersonalAssistantItem::query()
+        $candidates = PersonalAssistantItem::query()
             ->where('user_id', $userId)
             ->where('organization_id', $organizationId)
-            ->where(function ($q) use ($query) {
-                $q->where('title', 'like', '%' . $query . '%')
-                    ->orWhere('content', 'like', '%' . $query . '%');
-            })
             ->latest()
-            ->limit(5)
+            ->limit(150)
             ->get();
 
+        $needle = mb_strtolower(trim($query));
+        $results = $candidates->filter(function ($item) use ($needle) {
+            $title = mb_strtolower((string) ($item->title ?? ''));
+            $content = mb_strtolower((string) ($item->content ?? ''));
+            $keywords = collect((array) data_get($item->meta, 'keywords', []))
+                ->map(fn ($word) => mb_strtolower(trim((string) $word)))
+                ->filter()
+                ->all();
+
+            if (str_contains($title, $needle) || str_contains($content, $needle)) {
+                return true;
+            }
+
+            foreach ($keywords as $keyword) {
+                if ($keyword !== '' && (str_contains($keyword, $needle) || str_contains($needle, $keyword))) {
+                    return true;
+                }
+            }
+
+            return false;
+        })->take(5)->values();
+
         if ($results->isEmpty()) {
-            return 'I could not find anything matching "' . $query . '" in your saved items.';
+            $vectorMatches = $this->searchPersonalMemoryVector($userId, $query, 5);
+            if (empty($vectorMatches)) {
+                return 'I could not find anything matching "' . $query . '" in your saved items.';
+            }
+
+            $vectorLines = collect($vectorMatches)->map(function ($result) {
+                $payload = is_array($result['payload'] ?? null) ? $result['payload'] : [];
+                $label = strtoupper((string) ($payload['type'] ?? 'ITEM'));
+                $title = (string) ($payload['title'] ?? 'Untitled');
+                return '- [' . $label . '] ' . $title;
+            })->implode("\n");
+
+            return "I found these semantic matches for \"{$query}\":\n" . $vectorLines;
         }
 
         $lines = $results->map(function ($item) {
@@ -789,6 +855,165 @@ class PersonalAssistant extends Component
     {
         $clean = preg_replace('/^(find|search|look up|lookup)\s+/i', '', trim($text));
         return trim((string) $clean);
+    }
+
+    private function extractMemoryKeywords(string $text): array
+    {
+        $hashtags = [];
+        preg_match_all('/#([\p{L}\p{N}_-]{2,40})/u', $text, $matches);
+        if (!empty($matches[1])) {
+            $hashtags = collect($matches[1])
+                ->map(fn ($tag) => mb_strtolower(trim((string) $tag)))
+                ->filter(fn ($tag) => $tag !== '')
+                ->unique()
+                ->values()
+                ->all();
+        }
+
+        $words = collect(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($text)) ?: [])
+            ->map(fn ($word) => trim((string) $word))
+            ->filter(fn ($word) => mb_strlen($word) >= 3)
+            ->reject(fn ($word) => in_array($word, [
+                'the', 'and', 'for', 'with', 'from', 'that', 'this', 'your', 'you', 'are', 'was', 'were',
+                'have', 'has', 'had', 'will', 'would', 'should', 'can', 'could', 'not', 'but', 'about',
+                'into', 'onto', 'over', 'under', 'after', 'before', 'tomorrow', 'today', 'task', 'note',
+                'reminder', 'list', 'shopping', 'grocery',
+            ], true))
+            ->unique()
+            ->take(12)
+            ->values()
+            ->all();
+
+        return array_values(array_unique(array_merge($hashtags, $words)));
+    }
+
+    public function editSavedItem(int $itemId): void
+    {
+        $user = Auth::user();
+        $organization = $user?->primaryOrganization();
+
+        $item = PersonalAssistantItem::query()
+            ->where('id', $itemId)
+            ->where('user_id', $user->id)
+            ->where('organization_id', $organization?->id)
+            ->first();
+
+        if (!$item) {
+            $this->actionStatus = 'Item not found.';
+            return;
+        }
+
+        $this->editingItemId = $item->id;
+        $this->editType = (string) $item->type;
+        $this->editTitle = (string) ($item->title ?? '');
+        $this->editContent = (string) ($item->content ?? '');
+        $this->editStatus = (string) ($item->status ?: 'pending');
+        $this->editDueAt = $item->due_at ? $item->due_at->format('Y-m-d\TH:i') : '';
+        $this->editTags = collect((array) data_get($item->meta, 'keywords', []))
+            ->filter(fn ($tag) => trim((string) $tag) !== '')
+            ->implode(', ');
+    }
+
+    public function cancelEditSavedItem(): void
+    {
+        $this->editingItemId = null;
+        $this->editType = 'note';
+        $this->editTitle = '';
+        $this->editContent = '';
+        $this->editStatus = 'pending';
+        $this->editDueAt = '';
+        $this->editTags = '';
+    }
+
+    public function saveEditedItem(): void
+    {
+        if (!$this->editingItemId) {
+            return;
+        }
+
+        $this->validate([
+            'editType' => 'required|string|max:24',
+            'editTitle' => 'nullable|string|max:255',
+            'editContent' => 'nullable|string|max:10000',
+            'editStatus' => 'required|string|max:24',
+            'editDueAt' => 'nullable|date',
+            'editTags' => 'nullable|string|max:1000',
+        ]);
+
+        $user = Auth::user();
+        $organization = $user?->primaryOrganization();
+
+        $item = PersonalAssistantItem::query()
+            ->where('id', $this->editingItemId)
+            ->where('user_id', $user->id)
+            ->where('organization_id', $organization?->id)
+            ->first();
+
+        if (!$item) {
+            $this->actionStatus = 'Item not found for update.';
+            $this->cancelEditSavedItem();
+            return;
+        }
+
+        $tags = collect(preg_split('/[\r\n,]+/', (string) $this->editTags) ?: [])
+            ->map(fn ($tag) => mb_strtolower(trim((string) $tag)))
+            ->filter(fn ($tag) => $tag !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        $dueAt = null;
+        if (trim((string) $this->editDueAt) !== '') {
+            try {
+                $dueAt = Carbon::parse($this->editDueAt);
+            } catch (\Throwable $e) {
+                $dueAt = null;
+            }
+        }
+
+        $meta = is_array($item->meta) ? $item->meta : [];
+        $meta['keywords'] = $tags;
+        $meta['memory'] = true;
+        $meta['updated_via'] = 'manual_editor';
+
+        $item->update([
+            'type' => trim((string) $this->editType) !== '' ? trim((string) $this->editType) : 'note',
+            'title' => trim((string) $this->editTitle),
+            'content' => trim((string) $this->editContent),
+            'status' => trim((string) $this->editStatus) !== '' ? trim((string) $this->editStatus) : 'pending',
+            'due_at' => $dueAt,
+            'meta' => $meta,
+        ]);
+        $this->syncPersonalItemToVector($item->fresh());
+
+        $this->actionStatus = 'Saved changes for item #' . $item->id;
+        $this->cancelEditSavedItem();
+        $this->loadSavedItems();
+    }
+
+    public function deleteSavedItem(int $itemId): void
+    {
+        $user = Auth::user();
+        $organization = $user?->primaryOrganization();
+
+        $item = PersonalAssistantItem::query()
+            ->where('id', $itemId)
+            ->where('user_id', $user->id)
+            ->where('organization_id', $organization?->id)
+            ->first();
+
+        if (!$item) {
+            $this->actionStatus = 'Item not found for deletion.';
+            return;
+        }
+
+        $item->delete();
+        $this->deletePersonalItemFromVector($itemId);
+        $this->actionStatus = 'Deleted item #' . $itemId;
+        if ((int) $this->editingItemId === (int) $itemId) {
+            $this->cancelEditSavedItem();
+        }
+        $this->loadSavedItems();
     }
 
     private function sentenceSamples(): array
@@ -945,6 +1170,54 @@ class PersonalAssistant extends Component
         return $output;
     }
 
+    private function learnCorrectionFromCommandEdit(int $userId, ?int $organizationId): void
+    {
+        $raw = trim((string) $this->transcript);
+        $edited = trim((string) $this->editedTranscript);
+
+        if ($raw === '' || $edited === '' || $raw === $edited) {
+            return;
+        }
+
+        if ($this->normalizeComparisonText($raw) === $this->normalizeComparisonText($edited)) {
+            return;
+        }
+
+        $profile = PersonalAssistantProfile::where('user_id', $userId)
+            ->where('organization_id', $organizationId)
+            ->first();
+
+        if (!$profile) {
+            return;
+        }
+
+        $corrections = is_array($profile->correction_map) ? $profile->correction_map : [];
+        $settings = is_array($profile->settings) ? $profile->settings : [];
+        $history = is_array($settings['auto_correction_pairs'] ?? null) ? $settings['auto_correction_pairs'] : [];
+
+        $corrections[$raw] = $edited;
+        $history[] = [
+            'from' => $raw,
+            'to' => $edited,
+            'at' => now()->toISOString(),
+            'source' => 'command_console',
+        ];
+
+        if (count($corrections) > 300) {
+            $corrections = array_slice($corrections, -300, null, true);
+        }
+
+        $settings['auto_correction_pairs'] = array_slice($history, -300);
+
+        $profile->correction_map = $corrections;
+        $profile->settings = $settings;
+        $profile->save();
+
+        $this->correctionMapText = collect($corrections)
+            ->map(fn ($target, $source) => trim((string) $source) . ' => ' . trim((string) $target))
+            ->implode("\n");
+    }
+
     private function persistLastUsed(): void
     {
         $user = Auth::user();
@@ -1037,20 +1310,138 @@ class PersonalAssistant extends Component
             ->where('user_id', $user->id)
             ->where('organization_id', $organization?->id)
             ->latest()
-            ->limit(12)
             ->get()
             ->map(function (PersonalAssistantItem $item) {
                 return [
+                    'id' => $item->id,
                     'type' => $item->type,
                     'title' => $item->title,
                     'content' => $item->content,
                     'status' => $item->status,
                     'due_at' => $item->due_at?->toDateTimeString(),
+                    'due_at_local' => $item->due_at?->format('Y-m-d\TH:i'),
                     'created_at' => $item->created_at?->toDateTimeString(),
+                    'tags' => collect((array) data_get($item->meta, 'keywords', []))
+                        ->filter(fn ($tag) => trim((string) $tag) !== '')
+                        ->implode(', '),
                 ];
             })
             ->values()
             ->all();
+    }
+
+    private function buildUserMemoryCollectionName(int $userId): string
+    {
+        return 'pa_user_' . $userId;
+    }
+
+    private function ensureUserMemoryCollection(AiAgentService $aiAgentService, int $userId): string
+    {
+        $collectionName = $this->buildUserMemoryCollectionName($userId);
+
+        try {
+            if (!$aiAgentService->collectionExists($collectionName)) {
+                $aiAgentService->createCollection($collectionName, 768);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Failed to ensure user memory collection', [
+                'collection' => $collectionName,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $collectionName;
+    }
+
+    private function syncPersonalItemToVector(PersonalAssistantItem $item): void
+    {
+        try {
+            $aiAgentService = app(AiAgentService::class);
+            $collectionName = $this->ensureUserMemoryCollection($aiAgentService, (int) $item->user_id);
+
+            $keywords = collect((array) data_get($item->meta, 'keywords', []))
+                ->map(fn ($word) => trim((string) $word))
+                ->filter(fn ($word) => $word !== '')
+                ->values()
+                ->all();
+
+            $contentForEmbedding = implode("\n", array_filter([
+                'Type: ' . (string) $item->type,
+                'Title: ' . (string) ($item->title ?? ''),
+                'Content: ' . (string) ($item->content ?? ''),
+                !empty($keywords) ? ('Keywords: ' . implode(', ', $keywords)) : '',
+                $item->due_at ? ('Due At: ' . $item->due_at->toDateTimeString()) : '',
+                'Status: ' . (string) ($item->status ?? 'pending'),
+            ]));
+
+            $embedding = $aiAgentService->embed($contentForEmbedding);
+            if (!$embedding || !is_array($embedding)) {
+                return;
+            }
+
+            $payload = [
+                'item_id' => 'pa_item_' . $item->id,
+                'user_id' => (int) $item->user_id,
+                'organization_id' => $item->organization_id,
+                'type' => (string) $item->type,
+                'title' => (string) ($item->title ?? ''),
+                'content' => (string) ($item->content ?? ''),
+                'status' => (string) ($item->status ?? 'pending'),
+                'due_at' => $item->due_at?->toDateTimeString(),
+                'keywords' => $keywords,
+                'source' => 'personal_assistant',
+                'updated_at' => $item->updated_at?->toDateTimeString(),
+            ];
+
+            $aiAgentService->addToQdrant($collectionName, $embedding, $payload, 9000000 + (int) $item->id);
+        } catch (\Throwable $e) {
+            Log::warning('Personal memory sync to Qdrant failed', [
+                'item_id' => $item->id,
+                'user_id' => $item->user_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function deletePersonalItemFromVector(int $itemId): void
+    {
+        try {
+            $user = Auth::user();
+            if (!$user) {
+                return;
+            }
+
+            $aiAgentService = app(AiAgentService::class);
+            $collectionName = $this->buildUserMemoryCollectionName((int) $user->id);
+            $aiAgentService->deleteDataFromQdrant($collectionName, ['pa_item_' . $itemId]);
+        } catch (\Throwable $e) {
+            Log::warning('Personal memory delete from Qdrant failed', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function searchPersonalMemoryVector(int $userId, string $query, int $limit = 5): array
+    {
+        try {
+            $aiAgentService = app(AiAgentService::class);
+            $collectionName = $this->buildUserMemoryCollectionName($userId);
+
+            if (!$aiAgentService->collectionExists($collectionName)) {
+                return [];
+            }
+
+            $results = $aiAgentService->enhancedSearch($collectionName, $query, $limit);
+            return is_array($results['results'] ?? null) ? $results['results'] : [];
+        } catch (\Throwable $e) {
+            Log::warning('Personal memory vector search failed', [
+                'user_id' => $userId,
+                'query' => $query,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
     }
 
     public function render()

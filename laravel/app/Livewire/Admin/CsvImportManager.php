@@ -27,11 +27,13 @@ class CsvImportManager extends Component
     public $categoryColumn = '';
     public $defaultCategory = 'general';
 
-    public $dryRun = true;
+    public $dryRun = false;
     public $skipQdrant = false;
 
     public $importOutput = '';
     public $importExitCode = null;
+    public $uiMessage = '';
+    public $uiMessageType = 'success';
 
     public $showEditorModal = false;
     public $selectedDataset = '';
@@ -40,6 +42,9 @@ class CsvImportManager extends Component
     public $selectedQdrantType = 'info';
     public $editorRows = [];
     public $editorDeletedRowIds = [];
+
+    /** Custom AI instruction applied to all responses referencing this dataset */
+    public $datasetInstruction = '';
 
     protected $rules = [
         'organizationId' => 'required|exists:organizations,id',
@@ -80,6 +85,7 @@ class CsvImportManager extends Component
         return OrganizationData::query()
             ->where('organization_id', $this->organizationId)
             ->where('metadata->source', 'csv_import')
+            ->whereNull('metadata->is_config')
             ->get()
             ->groupBy(function (OrganizationData $row): string {
                 return (string) data_get($row->metadata, 'dataset', 'unknown');
@@ -100,6 +106,42 @@ class CsvImportManager extends Component
             ->values();
     }
 
+    public function getShowOperationalFieldsProperty(): bool
+    {
+        return !$this->isPricingLikeType;
+    }
+
+    public function getIsPricingLikeTypeProperty(): bool
+    {
+        $type = strtolower(trim((string) $this->selectedType));
+
+        return in_array($type, ['pricing', 'price', 'plan', 'plans', 'credit', 'credits', 'subscription'], true);
+    }
+
+    public function getEditorDescriptionLabelProperty(): string
+    {
+        return $this->isPricingLikeType ? 'Features' : 'Description';
+    }
+
+    public function getEditorContentLabelProperty(): string
+    {
+        return $this->isPricingLikeType ? 'Plan Details' : 'Content';
+    }
+
+    public function getEditorDescriptionPlaceholderProperty(): string
+    {
+        return $this->isPricingLikeType
+            ? 'e.g. Dashboard access | Email support | Basic analytics | Up to 500K tokens/month'
+            : 'Enter a short summary for this row';
+    }
+
+    public function getEditorContentPlaceholderProperty(): string
+    {
+        return $this->isPricingLikeType
+            ? "e.g. Plan name: Basic\nPlan type: subscription\nBilling period: monthly\nUsd price: 19"
+            : 'Enter full searchable content for this row';
+    }
+
     public function updatedOrganizationId(): void
     {
         $this->closeEditorModal();
@@ -108,7 +150,7 @@ class CsvImportManager extends Component
     public function openDatasetEditor(string $dataset, string $type): void
     {
         if (!$this->organizationId) {
-            session()->flash('error', 'Please select an organization first.');
+            $this->pushUiMessage('error', 'Please select an organization first.');
             return;
         }
 
@@ -117,13 +159,24 @@ class CsvImportManager extends Component
             ->where('type', $type)
             ->where('metadata->source', 'csv_import')
             ->where('metadata->dataset', $dataset)
+            ->whereNull('metadata->is_config')
             ->orderBy('id')
             ->get();
 
         if ($rows->isEmpty()) {
-            session()->flash('error', 'No imported rows found for selected dataset.');
+            $this->pushUiMessage('error', 'No imported rows found for selected dataset.');
             return;
         }
+
+        // Load dataset-level AI instruction from config row
+        $configRow = OrganizationData::query()
+            ->where('organization_id', $this->organizationId)
+            ->where('type', 'dataset_config')
+            ->where('metadata->source', 'csv_import')
+            ->where('metadata->dataset', $dataset)
+            ->where('metadata->is_config', true)
+            ->first();
+        $this->datasetInstruction = $configRow ? trim((string) data_get($configRow->metadata, 'instruction', '')) : '';
 
         $this->selectedDataset = $dataset;
         $this->selectedType = $type;
@@ -132,14 +185,30 @@ class CsvImportManager extends Component
         $this->editorDeletedRowIds = [];
 
         $this->editorRows = $rows->map(function (OrganizationData $row): array {
+            $metadata = is_array($row->metadata) ? $row->metadata : [];
+            $rowContent = (string) ($row->content ?? '');
             return [
                 'id' => $row->id,
-                'external_key' => (string) data_get($row->metadata, 'external_key', ''),
-                'qdrant_type' => (string) data_get($row->metadata, 'qdrant_type', 'info'),
+                'external_key' => (string) data_get($metadata, 'external_key', ''),
+                'qdrant_type' => (string) data_get($metadata, 'qdrant_type', 'info'),
                 'name' => (string) $row->name,
                 'description' => (string) ($row->description ?? ''),
-                'content' => (string) ($row->content ?? ''),
-                'category' => (string) data_get($row->metadata, 'category', 'general'),
+                'content' => $rowContent,
+                'category' => (string) data_get($metadata, 'category', 'general'),
+                'working_schedule' => (string) (
+                    data_get($metadata, 'working_schedule')
+                    ?? $this->extractFirstLabeledLine($rowContent, ['Working Schedule', 'Timing'])
+                ),
+                'leave_notes' => (string) (
+                    data_get($metadata, 'leave_notes')
+                    ?? $this->extractFirstLabeledLine($rowContent, ['Leave / Absence'])
+                ),
+                'search_keywords' => (string) (
+                    data_get($metadata, 'search_keywords')
+                    ?? data_get($metadata, 'keywords')
+                    ?? data_get($metadata, 'csv.keywords')
+                    ?? $this->extractFirstLabeledLine($rowContent, ['Also known as'])
+                ),
                 'is_synced' => (bool) $row->is_synced,
             ];
         })->toArray();
@@ -161,6 +230,9 @@ class CsvImportManager extends Component
             'description' => '',
             'content' => '',
             'category' => 'general',
+            'working_schedule' => '',
+            'leave_notes' => '',
+            'search_keywords' => '',
             'is_synced' => false,
         ];
     }
@@ -189,18 +261,19 @@ class CsvImportManager extends Component
         $this->selectedQdrantType = 'info';
         $this->editorRows = [];
         $this->editorDeletedRowIds = [];
+        $this->datasetInstruction = '';
     }
 
     public function deleteDataset(string $dataset, string $type): void
     {
         if (!$this->organizationId) {
-            session()->flash('error', 'Please select an organization first.');
+            $this->pushUiMessage('error', 'Please select an organization first.');
             return;
         }
 
         $organization = $this->selectedOrganization;
         if (!$organization) {
-            session()->flash('error', 'Selected organization not found.');
+            $this->pushUiMessage('error', 'Selected organization not found.');
             return;
         }
 
@@ -212,7 +285,7 @@ class CsvImportManager extends Component
             ->get();
 
         if ($rows->isEmpty()) {
-            session()->flash('error', 'No rows found for selected dataset.');
+            $this->pushUiMessage('error', 'No rows found for selected dataset.');
             return;
         }
 
@@ -226,12 +299,19 @@ class CsvImportManager extends Component
 
         OrganizationData::query()->whereIn('id', $rows->pluck('id')->all())->delete();
 
+        // Also delete dataset_config row
+        OrganizationData::query()
+            ->where('organization_id', $organization->id)
+            ->where('type', 'dataset_config')
+            ->where('metadata->dataset', $dataset)
+            ->delete();
+
         if (!empty($qdrantIds)) {
             $aiService = new AiAgentService();
             $aiService->deleteDataFromQdrant($organization->slug, $qdrantIds);
         }
 
-        session()->flash('message', 'Dataset deleted successfully.');
+        $this->pushUiMessage('success', 'Dataset deleted successfully and synced to Qdrant.');
 
         if ($this->showEditorModal && $this->selectedDataset === $dataset && $this->selectedType === $type) {
             $this->closeEditorModal();
@@ -241,18 +321,18 @@ class CsvImportManager extends Component
     public function saveEditedRows(): void
     {
         if (!$this->organizationId) {
-            session()->flash('error', 'Please select an organization first.');
+            $this->pushUiMessage('error', 'Please select an organization first.');
             return;
         }
 
         $organization = $this->selectedOrganization;
         if (!$organization) {
-            session()->flash('error', 'Selected organization not found.');
+            $this->pushUiMessage('error', 'Selected organization not found.');
             return;
         }
 
         if (empty($this->editorRows) && empty($this->editorDeletedRowIds)) {
-            session()->flash('error', 'No changes to save.');
+            $this->pushUiMessage('error', 'No changes to save.');
             return;
         }
 
@@ -261,7 +341,13 @@ class CsvImportManager extends Component
             'editorRows.*.description' => 'nullable|string',
             'editorRows.*.content' => 'nullable|string',
             'editorRows.*.category' => 'required|string|max:100',
+            'editorRows.*.working_schedule' => 'nullable|string|max:255',
+            'editorRows.*.leave_notes' => 'nullable|string|max:1000',
+            'editorRows.*.search_keywords' => 'nullable|string|max:500',
         ]);
+
+        // Save the dataset-level AI instruction
+        $this->saveDatasetConfigRow($organization);
 
         $existingIds = array_values(array_filter(array_map(fn ($row) => (int) ($row['id'] ?? 0), $this->editorRows)));
 
@@ -291,17 +377,41 @@ class CsvImportManager extends Component
             $metadata['category'] = trim((string) ($edited['category'] ?? 'general'));
             $metadata['external_key'] = trim((string) ($edited['external_key'] ?? ''));
 
+            $workingSchedule = trim((string) ($edited['working_schedule'] ?? ''));
+            $leaveNotes = trim((string) ($edited['leave_notes'] ?? ''));
+            $searchKeywords = trim((string) ($edited['search_keywords'] ?? ''));
+            if ($workingSchedule !== '') {
+                $metadata['working_schedule'] = $workingSchedule;
+            } else {
+                unset($metadata['working_schedule']);
+            }
+            if ($leaveNotes !== '') {
+                $metadata['leave_notes'] = $leaveNotes;
+            } else {
+                unset($metadata['leave_notes']);
+            }
+            if ($searchKeywords !== '') {
+                $metadata['search_keywords'] = $searchKeywords;
+                $metadata['keywords'] = $searchKeywords;
+            } else {
+                unset($metadata['search_keywords']);
+                unset($metadata['keywords']);
+            }
+
             $qdrantType = trim((string) ($edited['qdrant_type'] ?? $this->selectedQdrantType ?? 'info'));
             if (!in_array($qdrantType, ['faq', 'info', 'service'], true)) {
                 $qdrantType = 'info';
             }
             $metadata['qdrant_type'] = $qdrantType;
 
+            $baseContent = trim((string) ($edited['content'] ?? ''));
+            $enrichedContent = $this->buildEnrichedContent($baseContent, $workingSchedule, $leaveNotes, $searchKeywords);
+
             if ($isExisting) {
                 $row->update([
                     'name' => trim((string) ($edited['name'] ?? '')),
                     'description' => trim((string) ($edited['description'] ?? '')),
-                    'content' => trim((string) ($edited['content'] ?? '')),
+                    'content' => $enrichedContent,
                     'metadata' => $metadata,
                     'is_synced' => false,
                     'last_synced_at' => null,
@@ -312,7 +422,7 @@ class CsvImportManager extends Component
                     'type' => $this->selectedType ?: $this->type,
                     'name' => trim((string) ($edited['name'] ?? '')),
                     'description' => trim((string) ($edited['description'] ?? '')),
-                    'content' => trim((string) ($edited['content'] ?? '')),
+                    'content' => $enrichedContent,
                     'metadata' => $metadata,
                     'is_synced' => false,
                     'last_synced_at' => null,
@@ -322,7 +432,7 @@ class CsvImportManager extends Component
             $qdrantItemsByType[$qdrantType][] = [
                 'id' => $qdrantType . '_' . $row->id,
                 'title' => $row->name,
-                'content' => $row->content ?: ($row->description ?? ''),
+                'content' => $enrichedContent ?: ($row->description ?? ''),
                 'category' => data_get($row->metadata, 'category', 'general'),
                 'metadata' => [
                     'table_id' => $row->id,
@@ -360,7 +470,7 @@ class CsvImportManager extends Component
                 $aiService = new AiAgentService();
                 $deleteResult = $aiService->deleteDataFromQdrant($organization->slug, $qdrantDeleteIds);
                 if (!$deleteResult) {
-                    session()->flash('error', 'Rows were deleted in DB, but Qdrant delete failed.');
+                    $this->pushUiMessage('error', 'Rows were deleted in DB, but Qdrant delete failed.');
                     return;
                 }
             }
@@ -371,7 +481,7 @@ class CsvImportManager extends Component
             foreach ($qdrantItemsByType as $qdrantType => $items) {
                 $result = $aiService->updateDataToQdrant($organization->slug, $qdrantType, $items);
                 if (!$result || !($result['success'] ?? false)) {
-                    session()->flash('error', 'Rows saved, but Qdrant sync failed for type: ' . $qdrantType);
+                    $this->pushUiMessage('error', 'Rows saved, but Qdrant sync failed for type: ' . $qdrantType);
                     return;
                 }
             }
@@ -386,7 +496,7 @@ class CsvImportManager extends Component
                 ]);
         }
 
-        session()->flash('message', 'CSV rows saved and synced successfully.');
+        $this->pushUiMessage('success', 'Changes saved successfully and synced to Qdrant.');
         $this->openDatasetEditor($this->selectedDataset, $this->selectedType);
     }
 
@@ -443,12 +553,146 @@ class CsvImportManager extends Component
         $this->importOutput = Artisan::output();
 
         if ($this->importExitCode === 0) {
-            session()->flash('message', 'CSV import command completed successfully.');
+            if ($this->dryRun) {
+                $this->pushUiMessage('success', 'Dry run completed successfully. No data was saved because preview mode is enabled.');
+            } else {
+                if ($this->skipQdrant) {
+                    $this->pushUiMessage('success', 'CSV import completed successfully. Data was saved; Qdrant sync was skipped.');
+                } else {
+                    $this->pushUiMessage('success', 'CSV import completed successfully and synced to Qdrant.');
+                }
+            }
         } else {
-            session()->flash('error', 'CSV import command failed. Check output below.');
+            $this->pushUiMessage('error', 'CSV import command failed. Check output below.');
         }
 
         $this->reset('csvFile');
+    }
+
+    public function clearUiMessage(): void
+    {
+        $this->uiMessage = '';
+        $this->uiMessageType = 'success';
+    }
+
+    private function pushUiMessage(string $type, string $message): void
+    {
+        $normalizedType = $type === 'error' ? 'error' : 'success';
+        $this->uiMessageType = $normalizedType;
+        $this->uiMessage = $message;
+        session()->flash($normalizedType === 'error' ? 'error' : 'message', $message);
+    }
+
+    /**
+     * Build enriched Qdrant content by appending schedule and leave info.
+     */
+    private function buildEnrichedContent(string $baseContent, string $workingSchedule, string $leaveNotes, string $searchKeywords = ''): string
+    {
+        $parts = [];
+        $cleanBaseContent = $this->stripManagedEnrichmentLines($baseContent);
+        if ($cleanBaseContent !== '') {
+            $parts[] = $cleanBaseContent;
+        }
+        if ($workingSchedule !== '') {
+            $parts[] = 'Working Schedule: ' . $workingSchedule;
+        }
+        if ($leaveNotes !== '') {
+            $parts[] = 'Leave / Absence: ' . $leaveNotes;
+        }
+        // Search synonyms are embedded into the vector so abbreviations/alternate
+        // names (e.g. "USG, ultrasound, sonography") match visitor queries at search
+        // time without any runtime processing.
+        if ($searchKeywords !== '') {
+            $parts[] = 'Also known as: ' . $searchKeywords;
+        }
+        return implode("\n", $parts);
+    }
+
+    private function stripManagedEnrichmentLines(string $content): string
+    {
+        if ($content === '') {
+            return '';
+        }
+
+        $lines = preg_split('/\r?\n/', $content) ?: [];
+        $filtered = [];
+        foreach ($lines as $line) {
+            $trimmed = trim((string) $line);
+            if ($trimmed === '') {
+                continue;
+            }
+
+            if (preg_match('/^(working\s*schedule|timing|leave\s*\/\s*absence|also\s+known\s+as)\s*:/i', $trimmed)) {
+                continue;
+            }
+
+            $filtered[] = $trimmed;
+        }
+
+        return implode("\n", $filtered);
+    }
+
+    private function extractFirstLabeledLine(string $content, array $labels): string
+    {
+        if ($content === '' || empty($labels)) {
+            return '';
+        }
+
+        foreach ($labels as $label) {
+            $pattern = '/^\s*' . preg_quote($label, '/') . '\s*:\s*(.+)$/im';
+            if (preg_match($pattern, $content, $match)) {
+                return trim((string) ($match[1] ?? ''));
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Upsert (or delete) the dataset_config row storing the AI instruction for this dataset.
+     */
+    private function saveDatasetConfigRow($organization): void
+    {
+        $instruction = trim((string) $this->datasetInstruction);
+
+        if ($instruction === '') {
+            // Remove config row if instruction is cleared
+            OrganizationData::query()
+                ->where('organization_id', $organization->id)
+                ->where('type', 'dataset_config')
+                ->where('metadata->source', 'csv_import')
+                ->where('metadata->dataset', $this->selectedDataset)
+                ->delete();
+            return;
+        }
+
+        $existing = OrganizationData::query()
+            ->where('organization_id', $organization->id)
+            ->where('type', 'dataset_config')
+            ->where('metadata->source', 'csv_import')
+            ->where('metadata->dataset', $this->selectedDataset)
+            ->first();
+
+        $meta = [
+            'source' => 'csv_import',
+            'dataset' => $this->selectedDataset,
+            'is_config' => true,
+            'instruction' => $instruction,
+        ];
+
+        if ($existing) {
+            $existing->update(['metadata' => $meta, 'name' => $this->selectedDataset . ' (config)']);
+        } else {
+            OrganizationData::create([
+                'organization_id' => $organization->id,
+                'type' => 'dataset_config',
+                'name' => $this->selectedDataset . ' (config)',
+                'description' => null,
+                'content' => null,
+                'metadata' => $meta,
+                'is_synced' => true,
+            ]);
+        }
     }
 
     public function render()

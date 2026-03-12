@@ -598,7 +598,7 @@
                                             $globalProvider = \App\Models\AdminSetting::get('ai_model_provider', 'llama');
                                             $globalModel = $globalProvider === 'openai'
                                                 ? \App\Models\AdminSetting::get('openai_default_model', 'gpt-5-mini')
-                                                : \App\Models\AdminSetting::get('llama_default_model', 'llama3.2:3b');
+                                                : \App\Models\AdminSetting::get('llama_default_model', 'llama3:8b-instruct-q5_K_M');
                                         @endphp
                                         <div class="row">
                                             <div class="col-md-4">

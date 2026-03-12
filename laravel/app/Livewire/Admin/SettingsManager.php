@@ -39,7 +39,7 @@ class SettingsManager extends Component
     public $ai_backend_type = 'ollama'; // ollama or llamacpp
     public $openai_api_key = '';
     public $openai_default_model = 'gpt-5-mini'; // Only allowed model
-    public $llama_default_model = 'llama3.2:3b';
+    public $llama_default_model = 'llama3:8b-instruct-q5_K_M';
     public $llamacpp_model_path = '';
     public $llamacpp_model_repo = 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom';
     public $llamacpp_threads = 4;
@@ -62,6 +62,8 @@ class SettingsManager extends Component
     public function getAvailableLlamaModels()
     {
         return [
+            'llama3:8b-instruct-q5_K_M' => 'Llama 3 8B Instruct (Vast.ai, recommended)',
+            'mistral-nemo:latest' => 'Mistral Nemo (Vast.ai)',
             'llama3.2:1b' => 'Llama 3.2:1B (Fast, lightweight)',
             'llama3.2:3b' => 'Llama 3.2:3B (Balanced quality/speed)',
             'llama3.2:3b-instruct-gguf' => 'Llama 3.2:3B Instruct GGUF (llama.cpp optimized)',
@@ -104,12 +106,13 @@ class SettingsManager extends Component
     {
         $testModel = $model ?: $this->llama_default_model;
         $testPrompt = "Respond with 'AI system test successful' and the current model name.";
+        $ollamaUrl = $this->resolveOllamaUrlForModel($testModel);
         
         try {
             $startTime = microtime(true);
             
             // Test with Ollama API
-            $response = \Http::timeout(30)->post('http://localhost:11434/api/generate', [
+            $response = \Http::timeout(45)->post("{$ollamaUrl}/api/generate", [
                 'model' => $testModel,
                 'prompt' => $testPrompt,
                 'stream' => false
@@ -122,7 +125,7 @@ class SettingsManager extends Component
                 $data = $response->json();
                 $responseText = $data['response'] ?? 'No response received';
                 
-                session()->flash('success', "✅ Model '{$testModel}' test successful! Response time: {$responseTime}s. Response: " . substr($responseText, 0, 100) . "...");
+                session()->flash('success', "✅ Model '{$testModel}' test successful via {$ollamaUrl}! Response time: {$responseTime}s. Response: " . substr($responseText, 0, 100) . "...");
             } else {
                 session()->flash('error', "❌ Model test failed. HTTP status: " . $response->status());
             }
@@ -130,6 +133,20 @@ class SettingsManager extends Component
         } catch (\Exception $e) {
             session()->flash('error', "❌ Model test error: " . $e->getMessage());
         }
+    }
+
+    private function resolveOllamaUrlForModel(string $model): string
+    {
+        $vastModels = [
+            'llama3:8b-instruct-q5_K_M',
+            'llama3.1:8b',
+            'mistral-nemo',
+            'mistral-nemo:latest',
+        ];
+
+        return in_array($model, $vastModels, true)
+            ? 'http://127.0.0.1:11435'
+            : 'http://localhost:11434';
     }
 
     public function loadSettings()
@@ -163,7 +180,10 @@ class SettingsManager extends Component
         $this->ai_backend_type = AdminSetting::get('ai_backend_type', 'ollama');
         $this->openai_api_key = AdminSetting::get('openai_api_key', '');
         $this->openai_default_model = AdminSetting::get('openai_default_model', 'gpt-5-mini');
-        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3.2:1b');
+        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3:8b-instruct-q5_K_M');
+        if (!array_key_exists($this->llama_default_model, $this->getAvailableLlamaModels())) {
+            $this->llama_default_model = 'llama3:8b-instruct-q5_K_M';
+        }
         $this->llamacpp_model_path = AdminSetting::get('llamacpp_model_path', '');
         $this->llamacpp_model_repo = AdminSetting::get('llamacpp_model_repo', 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom');
         $this->llamacpp_threads = AdminSetting::get('llamacpp_threads', 4);

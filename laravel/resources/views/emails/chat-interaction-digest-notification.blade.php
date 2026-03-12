@@ -73,7 +73,7 @@
                   </td>
                   <td style="padding-left:10px;">
                     <div style="font-size:11px;color:#999;margin-bottom:4px;">
-                      {{ $message->getSenderDisplayName() }} &bull; {{ optional($message->sent_at)->format('M j, g:i A') }}
+                      {{ $message->getSenderDisplayName() }} &bull; {{ optional($message->sent_at ?? $message->created_at)->format('M j, g:i:s A') }}
                     </div>
                     <div style="background:{{ $isUser ? '#f1f3f5' : '#e8f0fe' }};border-radius:0 8px 8px 8px;padding:10px 14px;font-size:14px;color:#333;line-height:1.6;">
                       {!! nl2br(e($message->message)) !!}

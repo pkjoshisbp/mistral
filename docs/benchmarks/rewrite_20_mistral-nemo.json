@@ -1,0 +1,194 @@
+{
+  "summary": {
+    "model": "mistral-nemo",
+    "cases": 20,
+    "current_pass": 3,
+    "context_pass": 19,
+    "current_avg_ms": 1362.45,
+    "context_avg_ms": 1327.96,
+    "current_avg_score": 56.5,
+    "context_avg_score": 93
+  },
+  "rows": [
+    {
+      "case": "c01_followup_avail_ge",
+      "current_ms": 4622.35,
+      "context_ms": 1185.66,
+      "current_score": 50,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c02_followup_price_ge",
+      "current_ms": 1097.44,
+      "context_ms": 1243.94,
+      "current_score": 50,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c03_followup_delivery_ge",
+      "current_ms": 1230.76,
+      "context_ms": 1311.95,
+      "current_score": 50,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c04_followup_custom_ge",
+      "current_ms": 1567.99,
+      "context_ms": 1361.07,
+      "current_score": 50,
+      "context_score": 20,
+      "current_pass": false,
+      "context_pass": false
+    },
+    {
+      "case": "c05_followup_stock_ml02",
+      "current_ms": 1045.41,
+      "context_ms": 1213.83,
+      "current_score": 50,
+      "context_score": 90,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c06_exact_avail_ge",
+      "current_ms": 1117.16,
+      "context_ms": 1195.58,
+      "current_score": 70,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c07_exact_price_ge",
+      "current_ms": 1122.71,
+      "context_ms": 2178.42,
+      "current_score": 100,
+      "context_score": 100,
+      "current_pass": true,
+      "context_pass": true
+    },
+    {
+      "case": "c08_exact_delivery_ge",
+      "current_ms": 1251.73,
+      "context_ms": 1282.55,
+      "current_score": 20,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c09_exact_custom_ge",
+      "current_ms": 1234.12,
+      "context_ms": 1400.41,
+      "current_score": 100,
+      "context_score": 90,
+      "current_pass": true,
+      "context_pass": true
+    },
+    {
+      "case": "c10_exact_avail_ml02",
+      "current_ms": 1121.9,
+      "context_ms": 1744.96,
+      "current_score": 50,
+      "context_score": 90,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c11_noisy_avail_ge",
+      "current_ms": 1174.19,
+      "context_ms": 1190.52,
+      "current_score": 70,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c12_noisy_price_ge",
+      "current_ms": 1602.35,
+      "context_ms": 1209.37,
+      "current_score": 50,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c13_noisy_delivery_ml02",
+      "current_ms": 1075.42,
+      "context_ms": 1302.15,
+      "current_score": 50,
+      "context_score": 90,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c14_short_followup_it_price",
+      "current_ms": 1052.35,
+      "context_ms": 1257.33,
+      "current_score": 50,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c15_short_followup_it_avail",
+      "current_ms": 1056.79,
+      "context_ms": 1243.97,
+      "current_score": 50,
+      "context_score": 90,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c16_mixed_entity_intent",
+      "current_ms": 1184.11,
+      "context_ms": 1300.82,
+      "current_score": 50,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c17_mixed_entity_intent2",
+      "current_ms": 1132.86,
+      "context_ms": 1264.31,
+      "current_score": 20,
+      "context_score": 90,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c18_conflict_phrase",
+      "current_ms": 1146.7,
+      "context_ms": 1176.75,
+      "current_score": 50,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c19_conflict_price",
+      "current_ms": 1078.44,
+      "context_ms": 1264.96,
+      "current_score": 50,
+      "context_score": 100,
+      "current_pass": false,
+      "context_pass": true
+    },
+    {
+      "case": "c20_long_followup",
+      "current_ms": 1334.29,
+      "context_ms": 1230.58,
+      "current_score": 100,
+      "context_score": 100,
+      "current_pass": true,
+      "context_pass": true
+    }
+  ]
+}

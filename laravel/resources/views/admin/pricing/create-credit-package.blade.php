@@ -197,7 +197,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     usdInput.addEventListener('input', function() {
-        if (!isNaN(parseFloat(this.value))) { inrInput.value = (parseFloat(this.value) * 83).toFixed(0); }
+        if (!isNaN(parseFloat(this.value))) { inrInput.value = (parseFloat(this.value) * 100).toFixed(0); }
         updateDerived();
     });
     inrInput.addEventListener('input', updateDerived);

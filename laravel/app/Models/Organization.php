@@ -74,6 +74,11 @@ class Organization extends Model
         return $this->hasMany(ChatConversation::class);
     }
 
+    public function videoGenerationJobs()
+    {
+        return $this->hasMany(VideoGenerationJob::class);
+    }
+
     public function integrations()
     {
         return $this->hasMany(Integration::class);

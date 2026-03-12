@@ -19,10 +19,10 @@
                 <div class="card-header"><h3 class="card-title"><i class="fas fa-filter mr-2"></i> Filters</h3></div>
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-3 mb-2">
+                        <div class="col-12 col-md-3 mb-2">
                             <input type="text" class="form-control" placeholder="Search" wire:model.live="search">
                         </div>
-                        <div class="col-md-3 mb-2">
+                        <div class="col-12 col-md-3 mb-2">
                             <select class="form-control" wire:model.live="organizationId">
                                 <option value="">All Organizations</option>
                                 @foreach($organizations as $org)
@@ -30,80 +30,85 @@
                                 @endforeach
                             </select>
                         </div>
-                        <div class="col-md-2 mb-2"><input type="date" class="form-control" wire:model.live="dateFrom"></div>
-                        <div class="col-md-2 mb-2"><input type="date" class="form-control" wire:model.live="dateTo"></div>
+                        <div class="col-6 col-md-2 mb-2"><input type="date" class="form-control" wire:model.live="dateFrom" placeholder="From date"></div>
+                        <div class="col-6 col-md-2 mb-2"><input type="date" class="form-control" wire:model.live="dateTo" placeholder="To date"></div>
                     </div>
                 </div>
             </div>
             <div class="card">
                 <div class="card-header"><h3 class="card-title"><i class="fas fa-comments mr-2"></i> Conversations ({{ $conversations->total() }})</h3></div>
-                <div class="card-body p-0">
-                    <table class="table table-striped mb-0">
-                        <thead><tr><th>Date</th><th>Organization</th><th>Visitor</th><th>Messages</th><th>Actions</th></tr></thead>
-                        <tbody>
-                        @forelse($conversations as $conversation)
-                            <tr>
-                                <td>{{ $conversation->created_at->format('Y-m-d H:i:s') }}</td>
-                                <td>{{ $conversation->organization->name ?? 'N/A' }}</td>
-                                <td>
-                                    <div>{{ $conversation->visitor_name ?? 'Anonymous' }}</div>
-                                    @if($conversation->visitor_email)
-                                        <small class="text-muted d-block">{{ $conversation->visitor_email }}</small>
-                                    @endif
-                                    @if($conversation->visitor_country || $conversation->visitor_location)
-                                        <small class="text-muted d-block">
-                                            <i class="fas fa-map-marker-alt"></i>
-                                            {{ $conversation->visitor_location }}{{ $conversation->visitor_location && $conversation->visitor_country ? ', ' : '' }}{{ $conversation->visitor_country }}
-                                        </small>
-                                    @endif
-                                </td>
-                                <td>{{ $conversation->messages->count() }}</td>
-                                <td>
-                                    <a class="btn btn-xs btn-outline-primary" href="{{ route('admin.chat-history', ['focusConversation' => $conversation->id]) }}" title="View conversation">
-                                        <i class="fas fa-eye"></i>
+                <div class="card-body p-2">
+                    @forelse($conversations as $conversation)
+                        <div class="card border mb-2 shadow-sm conversation-card">
+                            {{-- Card header: date + org + action buttons --}}
+                            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-1 py-2 px-3">
+                                <div class="me-2">
+                                    <time class="local-ts font-weight-bold" data-utc="{{ $conversation->created_at->utc()->toISOString() }}">{{ $conversation->created_at->format('Y-m-d H:i') }}</time>
+                                    <span class="badge badge-secondary ml-1">{{ $conversation->organization->name ?? 'N/A' }}</span>
+                                </div>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <a class="btn btn-sm btn-outline-primary" href="{{ route('admin.chat-history', ['focusConversation' => $conversation->id]) }}" title="View conversation">
+                                        <i class="fas fa-eye"></i> View
                                     </a>
-                                    <a class="btn btn-xs btn-outline-success" href="{{ route('admin.chat-history.export', ['id' => $conversation->id]) }}" title="Export conversation">
-                                        <i class="fas fa-file-export"></i>
+                                    <a class="btn btn-sm btn-outline-success" href="{{ route('admin.chat-history.export', ['id' => $conversation->id]) }}" title="Export conversation">
+                                        <i class="fas fa-file-export"></i> Export
                                     </a>
-                                </td>
-                            </tr>
+                                </div>
+                            </div>
+                            {{-- Card body: visitor info + message count --}}
+                            <div class="card-body py-2 px-3">
+                                <div class="d-flex align-items-start justify-content-between">
+                                    <div>
+                                        <strong>{{ $conversation->visitor_name ?? 'Anonymous' }}</strong>
+                                        @if($conversation->visitor_email)
+                                            <small class="text-muted d-block">{{ $conversation->visitor_email }}</small>
+                                        @endif
+                                        @if($conversation->visitor_country || $conversation->visitor_location)
+                                            <small class="text-muted d-block">
+                                                <i class="fas fa-map-marker-alt"></i>
+                                                {{ $conversation->visitor_location }}{{ $conversation->visitor_location && $conversation->visitor_country ? ', ' : '' }}{{ $conversation->visitor_country }}
+                                            </small>
+                                        @endif
+                                    </div>
+                                    <span class="badge badge-info ml-2 align-self-start">{{ $conversation->messages->count() }} msg{{ $conversation->messages->count() !== 1 ? 's' : '' }}</span>
+                                </div>
+                            </div>
+                            {{-- Inline expanded messages (when triggered) --}}
                             @if(isset($showDetails[$conversation->id]))
-                                <tr class="bg-light"><td colspan="5">
-                                    <div class="p-3 chat-messages" style="max-height: 320px; overflow-y: auto;">
+                                <div class="card-footer bg-light p-3" id="conv-{{ $conversation->id }}">
+                                    <div class="chat-messages mb-3" style="max-height: 320px; overflow-y: auto;">
                                         @foreach($conversation->messages as $message)
                                             @php 
                                                 $isUser = ($message->sender_type === 'user');
                                                 $sender = method_exists($message, 'getSenderDisplayName') ? $message->getSenderDisplayName() : ($message->sender_name ?? ucfirst($message->sender_type ?? 'System'));
-                                                $time = ($message->sent_at ?? $message->created_at)->format('H:i:s');
+                                                $msgTs = ($message->sent_at ?? $message->created_at)->utc()->toISOString();
+                                                $timeFallback = ($message->sent_at ?? $message->created_at)->format('h:i A');
                                             @endphp
-                                            <div class="mb-3">
+                                            <div class="mb-2">
                                                 <div class="small mb-1">
                                                     <span class="badge {{ $isUser ? 'bg-primary' : 'bg-secondary' }}">{{ $sender }}</span>
-                                                    <span class="text-muted ms-2">{{ $time }}</span>
+                                                    <time class="text-muted ms-2 local-ts" data-utc="{{ $msgTs }}">{{ $timeFallback }}</time>
                                                 </div>
-                                                <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
-                                                    {!! preg_replace('/(<br\s*\/?\s*>\s*){2,}/i', '<br>', $message->message_html) !!}
+                                                <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded" style="max-width:100%">
+                                                    {!! $message->message_html !!}
                                                 </div>
                                             </div>
                                         @endforeach
                                     </div>
-                                    <div class="mt-3">
-                                        <label class="form-label">Agent Reply</label>
-                                        <textarea class="form-control" rows="3" wire:model.defer="replyMessage.{{ $conversation->id }}" placeholder="Type your reply as a support agent..."></textarea>
-                                        <div class="d-flex justify-content-end mt-2">
-                                            <button class="btn btn-sm btn-outline-primary" wire:click="sendAgentReply({{ $conversation->id }})">
-                                                <i class="fas fa-reply"></i> Send as Agent
-                                            </button>
-                                        </div>
-                                        <small class="text-muted">Agent replies are visible to customers and used as AI context for follow-ups.</small>
+                                    <label class="form-label">Agent Reply</label>
+                                    <textarea class="form-control" rows="3" wire:model.defer="replyMessage.{{ $conversation->id }}" placeholder="Type your reply as a support agent..."></textarea>
+                                    <div class="d-flex justify-content-end mt-2">
+                                        <button class="btn btn-sm btn-outline-primary" wire:click="sendAgentReply({{ $conversation->id }})">
+                                            <i class="fas fa-reply"></i> Send as Agent
+                                        </button>
                                     </div>
-                                </td></tr>
+                                    <small class="text-muted">Agent replies are visible to customers and used as AI context for follow-ups.</small>
+                                </div>
                             @endif
-                        @empty
-                            <tr><td colspan="5" class="text-center p-4 text-muted">No conversations found.</td></tr>
-                        @endforelse
-                        </tbody>
-                    </table>
+                        </div>
+                    @empty
+                        <div class="text-center p-4 text-muted">No conversations found.</div>
+                    @endforelse
                 </div>
                 <div class="card-footer">{{ $conversations->links() }}</div>
             </div>
@@ -146,6 +151,21 @@
     color: #e5f0ff;
 }
 </style>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    function convertLocalTs() {
+        document.querySelectorAll('time.local-ts[data-utc]').forEach(function (el) {
+            var d = new Date(el.dataset.utc);
+            if (!isNaN(d)) {
+                el.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+            }
+        });
+    }
+    convertLocalTs();
+    // Re-run after Livewire re-renders (details expand)
+    document.addEventListener('livewire:updated', convertLocalTs);
+});
+</script>
 </div>
 
 

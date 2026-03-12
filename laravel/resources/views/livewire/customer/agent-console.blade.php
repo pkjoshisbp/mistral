@@ -66,105 +66,82 @@
         <div class="card-header">
             <h3 class="card-title">Conversations ({{ $conversations->total() }})</h3>
         </div>
-        <div class="card-body">
+        <div class="card-body p-2">
             @if($conversations->count() > 0)
-                <div class="table-responsive">
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Visitor</th>
-                                <th>Status</th>
-                                <th>Assigned</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach($conversations as $conversation)
-                                @php
-                                    $tz = $orgTimezone ?? config('app.timezone', 'UTC');
-                                @endphp
-                                <tr>
-                                    <td>
-                                        <div class="fw-bold">{{ $conversation->created_at->timezone($tz)->format('M d, Y') }}</div>
-                                        <small class="text-muted">{{ $conversation->created_at->timezone($tz)->format('h:i A') }}</small>
-                                    </td>
-                                    <td>
-                                        <div class="fw-bold">{{ $conversation->visitor_name ?? 'Anonymous' }}</div>
-                                        @if($conversation->visitor_email)
-                                            <small class="text-muted d-block">{{ $conversation->visitor_email }}</small>
-                                        @endif
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-info text-dark">{{ $conversation->agent_status ?? 'ai_active' }}</span>
-                                    </td>
-                                    <td>
-                                        @if($conversation->assignedAgent)
-                                            <span class="badge bg-primary">{{ $conversation->assignedAgent->name }}</span>
-                                        @else
-                                            <span class="text-muted">Unassigned</span>
-                                        @endif
-                                    </td>
-                                    <td>
-                                        <div class="btn-group">
-                                            <button type="button" class="btn btn-sm btn-outline-primary" wire:click="toggleDetails({{ $conversation->id }})">
-                                                <i class="fas fa-eye"></i>
-                                                @if(isset($showDetails[$conversation->id]))
-                                                    Hide
-                                                @else
-                                                    View
-                                                @endif
-                                            </button>
-                                            <button type="button" class="btn btn-sm btn-outline-success" wire:click="assignToMe({{ $conversation->id }})">
-                                                Assign to me
-                                            </button>
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" wire:click="releaseToAi({{ $conversation->id }})">
-                                                Back to AI
-                                            </button>
-                                            <button type="button" class="btn btn-sm btn-outline-danger" wire:click="closeConversation({{ $conversation->id }})">
-                                                Close
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                                @if(isset($showDetails[$conversation->id]))
-                                    <tr>
-                                        <td colspan="5" class="bg-light" id="conv-{{ $conversation->id }}">
-                                            <div class="p-3 chat-messages" style="max-height: 320px; overflow-y: auto;">
-                                                @foreach($conversation->messages as $message)
-                                                    @php
-                                                        $isUser = ($message->sender_type === 'user');
-                                                        $sender = method_exists($message, 'getSenderDisplayName') ? $message->getSenderDisplayName() : ($message->sender_name ?? ucfirst($message->sender_type ?? 'System'));
-                                                        $sentAt = $message->sent_at ?? $message->created_at;
-                                                        $time = $sentAt ? $sentAt->timezone($tz)->format('H:i') : '';
-                                                    @endphp
-                                                    <div class="mb-3">
-                                                        <div class="small mb-1">
-                                                            <span class="badge {{ $isUser ? 'bg-primary' : 'bg-secondary' }}">{{ $sender }}</span>
-                                                            <span class="text-muted ms-2">{{ $time }}</span>
-                                                        </div>
-                                                        <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
-                                                            {!! $message->message_html !!}
-                                                        </div>
-                                                    </div>
-                                                @endforeach
-                                            </div>
-                                            <div class="mt-3">
-                                                <label class="form-label">Agent Reply</label>
-                                                <textarea class="form-control" rows="3" wire:model.defer="replyMessage.{{ $conversation->id }}" placeholder="Type your reply"></textarea>
-                                                <div class="d-flex justify-content-end mt-2">
-                                                    <button type="button" class="btn btn-primary" wire:click="sendAgentReply({{ $conversation->id }})">Send Reply</button>
-                                                </div>
-                                            </div>
-                                        </td>
-                                    </tr>
+                @foreach($conversations as $conversation)
+                    @php
+                        $tz = $orgTimezone ?? config('app.timezone', 'UTC');
+                    @endphp
+                    <div class="card border mb-2 shadow-sm conversation-card">
+                        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-1 py-2 px-3">
+                            <div class="me-2">
+                                <span class="font-weight-bold">{{ $conversation->created_at->timezone($tz)->format('M d, Y') }}</span>
+                                <small class="text-muted ml-1">{{ $conversation->created_at->timezone($tz)->format('h:i A') }}</small>
+                                <span class="badge bg-info text-dark ml-1">{{ $conversation->agent_status ?? 'ai_active' }}</span>
+                                @if($conversation->assignedAgent)
+                                    <span class="badge bg-primary ml-1">{{ $conversation->assignedAgent->name }}</span>
                                 @endif
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
+                            </div>
+                            <div class="d-flex flex-wrap gap-1">
+                                <button type="button" class="btn btn-sm {{ isset($showDetails[$conversation->id]) ? 'btn-primary' : 'btn-outline-primary' }}"
+                                        wire:click="toggleDetails({{ $conversation->id }})">
+                                    <i class="fas {{ isset($showDetails[$conversation->id]) ? 'fa-eye-slash' : 'fa-eye' }}"></i>
+                                    <span class="d-none d-sm-inline">{{ isset($showDetails[$conversation->id]) ? 'Hide' : 'View' }}</span>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-success" wire:click="assignToMe({{ $conversation->id }})">
+                                    <i class="fas fa-user-check"></i>
+                                    <span class="d-none d-sm-inline">Assign to me</span>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" wire:click="releaseToAi({{ $conversation->id }})">
+                                    <i class="fas fa-robot"></i>
+                                    <span class="d-none d-sm-inline">Back to AI</span>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" wire:click="closeConversation({{ $conversation->id }})">
+                                    <i class="fas fa-times"></i>
+                                    <span class="d-none d-sm-inline">Close</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body py-2 px-3">
+                            <strong>{{ $conversation->visitor_name ?? 'Anonymous' }}</strong>
+                            @if($conversation->visitor_email)
+                                <small class="text-muted d-block">{{ $conversation->visitor_email }}</small>
+                            @endif
+                        </div>
+                        @if(isset($showDetails[$conversation->id]))
+                            <div class="card-footer bg-light p-3" id="conv-{{ $conversation->id }}">
+                                <div class="chat-messages p-2 mb-3" style="max-height: 320px; overflow-y: auto; background:#fff; border-radius:4px;">
+                                    @foreach($conversation->messages as $message)
+                                        @php
+                                            $isUser = ($message->sender_type === 'user');
+                                            $sender = method_exists($message, 'getSenderDisplayName') ? $message->getSenderDisplayName() : ($message->sender_name ?? ucfirst($message->sender_type ?? 'System'));
+                                            $sentAt = $message->sent_at ?? $message->created_at;
+                                            $time = $sentAt ? $sentAt->timezone($tz)->format('H:i') : '';
+                                        @endphp
+                                        <div class="mb-2">
+                                            <div class="small mb-1">
+                                                <span class="badge {{ $isUser ? 'bg-primary' : 'bg-secondary' }}">{{ $sender }}</span>
+                                                <span class="text-muted ms-1">{{ $time }}</span>
+                                            </div>
+                                            <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded" style="max-width:100%">
+                                                {!! $message->message_html !!}
+                                            </div>
+                                        </div>
+                                    @endforeach
+                                </div>
+                                <label class="form-label">Agent Reply</label>
+                                <textarea class="form-control" rows="3" wire:model.defer="replyMessage.{{ $conversation->id }}" placeholder="Type your reply"></textarea>
+                                <div class="d-flex justify-content-end mt-2">
+                                    <button type="button" class="btn btn-primary btn-sm" wire:click="sendAgentReply({{ $conversation->id }})">
+                                        <i class="fas fa-paper-plane"></i> Send Reply
+                                    </button>
+                                </div>
+                            </div>
+                        @endif
+                    </div>
+                @endforeach
 
-                <div class="d-flex justify-content-center">
+                <div class="d-flex justify-content-center mt-3">
                     {{ $conversations->links() }}
                 </div>
             @else

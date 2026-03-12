@@ -167,8 +167,16 @@ class ActionService
 
         // First try keyword-based matching (more reliable)
         foreach ($actions as $action) {
+            if ($this->isPricingDatabaseAction($action)) {
+                continue;
+            }
+
             // Skip if action type doesn't match intent (unless no specific types recommended)
             if (!empty($recommendedTypes) && !in_array($action->action_type, $recommendedTypes)) {
+                continue;
+            }
+
+            if ($this->isShopifyActionQueryType($action, 'shop_info') && !$this->isShopifyStoreInfoIntentQuery($queryLower)) {
                 continue;
             }
 
@@ -213,6 +221,10 @@ class ActionService
         if (empty($matches)) {
             $intent = $intentResult['intent'] ?? null;
             $pricingActions = $actions->filter(function ($action) use ($recommendedTypes) {
+                if ($this->isPricingDatabaseAction($action)) {
+                    return false;
+                }
+
                 if (!empty($recommendedTypes) && !in_array($action->action_type, $recommendedTypes)) {
                     return false;
                 }
@@ -245,8 +257,16 @@ class ActionService
 
                 if ($queryEmbedding) {
                     foreach ($actions as $action) {
+                        if ($this->isPricingDatabaseAction($action)) {
+                            continue;
+                        }
+
                         // Skip if action type doesn't match intent (unless no specific types recommended)
                         if (!empty($recommendedTypes) && !in_array($action->action_type, $recommendedTypes)) {
+                            continue;
+                        }
+
+                        if ($this->isShopifyActionQueryType($action, 'shop_info') && !$this->isShopifyStoreInfoIntentQuery($queryLower)) {
                             continue;
                         }
 
@@ -288,6 +308,30 @@ class ActionService
             } catch (\Exception $e) {
                 Log::warning('Semantic matching failed, falling back to basic keyword matching', [
                     'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        // Sort by similarity score (highest first)
+        if (empty($matches)) {
+            $shopifyProductAction = $actions->first(function ($action) {
+                return $this->isShopifyActionQueryType($action, 'products');
+            });
+
+            if ($shopifyProductAction
+                && !$this->isShopifyStoreInfoIntentQuery($queryLower)
+                && !$this->isLikelyOrderQuery($queryLower)) {
+                $matches[] = [
+                    'action' => $shopifyProductAction,
+                    'score' => (float) ($shopifyProductAction->min_score_threshold ?? 0.6),
+                    'method' => 'shopify_product_default',
+                    'matched_terms' => [],
+                ];
+
+                Log::info('Shopify product default action selected', [
+                    'action_id' => $shopifyProductAction->id,
+                    'action_name' => $shopifyProductAction->name,
+                    'reason' => 'No stronger action match; defaulting to Shopify product search for catalog-like query',
                 ]);
             }
         }
@@ -350,6 +394,41 @@ class ActionService
         }
 
         return false;
+    }
+
+    private function isShopifyActionQueryType(OrganizationAction $action, string $queryType): bool
+    {
+        if (($action->source_type ?? null) !== 'api') {
+            return false;
+        }
+
+        $sourceConfig = $action->source_config ?? [];
+        if (!is_array($sourceConfig)) {
+            return false;
+        }
+
+        $body = $sourceConfig['body'] ?? [];
+        if (!is_array($body)) {
+            return false;
+        }
+
+        return ($body['query_type'] ?? null) === $queryType;
+    }
+
+    private function isShopifyStoreInfoIntentQuery(string $queryLower): bool
+    {
+        return (bool) preg_match('/\b(contact|address|phone|email|location|business hours|opening hours|store info|shop info|about your store|about you|who are you)\b/i', $queryLower);
+    }
+
+    private function isLikelyOrderQuery(string $queryLower): bool
+    {
+        return (bool) preg_match('/\b(order|tracking|track|shipment|delivery|where is my)\b/i', $queryLower);
+    }
+
+    private function isPricingDatabaseAction(OrganizationAction $action): bool
+    {
+        return in_array($action->action_type, ['pricing', 'cost', 'rates'], true)
+            && $action->source_type === 'database';
     }
 
     /**

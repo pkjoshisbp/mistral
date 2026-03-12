@@ -38,8 +38,12 @@ class ShopifyOnboarding extends Component
             abort(404, 'Organization not found');
         }
         
-        // Generate deep link to theme editor
-        $this->deepLink = "https://{$this->shop}/admin/themes/current/editor?context=apps&activateAppId=" . config('services.shopify.app_id') . "/ai-chat-widget";
+        // Generate deep link to theme editor - activates the app embed directly
+        // extensionUid comes from extensions/ai-chat-widget/shopify.extension.toml (uid field)
+        // blockHandle is the filename of the liquid block without .liquid extension
+        $extensionUid = '45c51f62-01cb-9718-b977-78f5108db8351ae77f7a';
+        $blockHandle = 'chat-widget';
+        $this->deepLink = "https://{$this->shop}/admin/themes/current/editor?context=apps&activateAppId={$extensionUid}/{$blockHandle}";
         
         Log::info('Shopify onboarding page loaded', [
             'shop' => $this->shop,

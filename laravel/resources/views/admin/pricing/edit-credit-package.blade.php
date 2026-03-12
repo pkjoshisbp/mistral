@@ -228,7 +228,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Auto-calculate INR when USD changes
     usdInput.addEventListener('input', function() {
-        inrInput.value = (parseFloat(this.value) * 83).toFixed(0);
+        inrInput.value = (parseFloat(this.value) * 100).toFixed(0);
         updateRecommendation();
     });
 

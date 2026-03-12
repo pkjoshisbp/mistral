@@ -16,37 +16,26 @@
             </div>
             <div class="card-body">
                 <div class="row">
-                    <div class="col-md-4">
-                        <div class="form-group">
-                            <label for="search">Search Messages</label>
-                            <input type="text" class="form-control" id="search" 
-                                   wire:model.live="search" 
-                                   placeholder="Search in messages...">
-                        </div>
+                    <div class="col-12 col-md-4 mb-2">
+                        <label for="search">Search Messages</label>
+                        <input type="text" class="form-control" id="search"
+                               wire:model.live="search"
+                               placeholder="Search in messages...">
                     </div>
-                    <div class="col-md-3">
-                        <div class="form-group">
-                            <label for="dateFrom">From Date</label>
-                            <input type="date" class="form-control" id="dateFrom" 
-                                   wire:model.live="dateFrom">
-                        </div>
+                    <div class="col-6 col-md-3 mb-2">
+                        <label for="dateFrom">From Date</label>
+                        <input type="date" class="form-control" id="dateFrom"
+                               wire:model.live="dateFrom">
                     </div>
-                    <div class="col-md-3">
-                        <div class="form-group">
-                            <label for="dateTo">To Date</label>
-                            <input type="date" class="form-control" id="dateTo" 
-                                   wire:model.live="dateTo">
-                        </div>
+                    <div class="col-6 col-md-3 mb-2">
+                        <label for="dateTo">To Date</label>
+                        <input type="date" class="form-control" id="dateTo"
+                               wire:model.live="dateTo">
                     </div>
-                    <div class="col-md-2">
-                        <div class="form-group">
-                            <label>&nbsp;</label>
-                            <div>
-                                <button type="button" class="btn btn-secondary btn-sm" wire:click="clearFilters">
-                                    <i class="fas fa-times"></i> Clear
-                                </button>
-                            </div>
-                        </div>
+                    <div class="col-12 col-md-2 mb-2 d-flex align-items-end">
+                        <button type="button" class="btn btn-secondary btn-sm w-100" wire:click="clearFilters">
+                            <i class="fas fa-times"></i> Clear
+                        </button>
                     </div>
                 </div>
             </div>
@@ -60,129 +49,103 @@
                     Chat Conversations ({{ $conversations->total() }})
                 </h3>
             </div>
-            <div class="card-body">
+            <div class="card-body p-2">
                 @if($conversations->count() > 0)
-                    <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
-                                <tr>
-                                    <th>Date & Time</th>
-                                    <th>Visitor Info</th>
-                                    <th>Messages</th>
-                                    <th>Duration</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach($conversations as $conversation)
-                                    <tr>
-                                        <td>
-                                            <div class="font-weight-bold">
-                                                {{ $conversation->created_at->format('M d, Y') }}
-                                            </div>
-                                            <small class="text-muted">
-                                                {{ $conversation->created_at->format('h:i:s A') }}
+                    @foreach($conversations as $conversation)
+                        <div class="card border mb-2 shadow-sm conversation-card" id="conv-{{ $conversation->id }}">
+                            {{-- Card header: date + action buttons --}}
+                            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-1 py-2 px-3">
+                                <div class="me-2">
+                                    <time class="local-ts font-weight-bold" data-utc="{{ $conversation->created_at->utc()->toISOString() }}" data-format="date">{{ $conversation->created_at->format('M d, Y') }}</time>
+                                    <small class="text-muted ml-1">
+                                        <time class="local-ts" data-utc="{{ $conversation->created_at->utc()->toISOString() }}" data-format="time">{{ $conversation->created_at->format('h:i:s A') }}</time>
+                                    </small>
+                                    <span class="badge badge-info ml-1">{{ $conversation->messages_count ?? $conversation->messages->count() }} msg{{ ($conversation->messages_count ?? $conversation->messages->count()) !== 1 ? 's' : '' }}</span>
+                                </div>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <button type="button"
+                                            class="btn btn-sm {{ isset($showDetails[$conversation->id]) ? 'btn-primary' : 'btn-outline-primary' }}"
+                                            wire:click="toggleDetails({{ $conversation->id }})">
+                                        <i class="fas {{ isset($showDetails[$conversation->id]) ? 'fa-eye-slash' : 'fa-eye' }}"></i>
+                                        {{ isset($showDetails[$conversation->id]) ? 'Hide' : 'View' }}
+                                    </button>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-success"
+                                            wire:click="exportSession({{ $conversation->id }})">
+                                        <i class="fas fa-file-export"></i>
+                                        <span class="d-none d-sm-inline">Export PDF</span>
+                                    </button>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            wire:click="deleteSession({{ $conversation->id }})"
+                                            onclick="return confirm('Are you sure you want to delete this chat conversation?')">
+                                        <i class="fas fa-trash"></i>
+                                        <span class="d-none d-sm-inline">Delete</span>
+                                    </button>
+                                </div>
+                            </div>
+                            {{-- Card body: visitor info --}}
+                            <div class="card-body py-2 px-3">
+                                <div class="d-flex align-items-start justify-content-between">
+                                    <div>
+                                        <strong>{{ $conversation->visitor_name ?? 'Anonymous' }}</strong>
+                                        @if($conversation->visitor_email)
+                                            <small class="text-muted d-block"><i class="fas fa-envelope fa-xs"></i> {{ $conversation->visitor_email }}</small>
+                                        @endif
+                                        @if($conversation->visitor_phone)
+                                            <small class="text-muted d-block"><i class="fas fa-phone fa-xs"></i> {{ $conversation->visitor_phone }}</small>
+                                        @endif
+                                        @if($conversation->visitor_country || $conversation->visitor_location)
+                                            <small class="text-muted d-block">
+                                                <i class="fas fa-map-marker-alt fa-xs"></i>
+                                                {{ $conversation->visitor_location }}{{ $conversation->visitor_location && $conversation->visitor_country ? ', ' : '' }}{{ $conversation->visitor_country }}
                                             </small>
-                                        </td>
-                                        <td>
-                                            <div class="font-weight-bold">
-                                                {{ $conversation->visitor_name ?? 'Anonymous' }}
-                                            </div>
-                                            @if($conversation->visitor_email)
-                                                <small class="text-muted d-block">{{ $conversation->visitor_email }}</small>
-                                            @endif
-                                            @if($conversation->visitor_phone)
-                                                <small class="text-muted d-block">{{ $conversation->visitor_phone }}</small>
-                                            @endif
-                                            @if($conversation->visitor_country || $conversation->visitor_location)
-                                                <small class="text-muted d-block">
-                                                    <i class="fas fa-map-marker-alt"></i>
-                                                    {{ $conversation->visitor_location }}{{ $conversation->visitor_location && $conversation->visitor_country ? ', ' : '' }}{{ $conversation->visitor_country }}
-                                                </small>
-                                            @endif
-                                        </td>
-                                        <td>
-                                            <span class="badge badge-info">
-                                                {{ $conversation->messages_count ?? $conversation->messages->count() }} messages
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <small class="text-muted">
-                                                {{ $conversation->created_at->diffForHumans($conversation->updated_at, true) }}
-                                            </small>
-                                        </td>
-                                        <td>
-                                            <div class="btn-group">
-                                                <button type="button" 
-                                                        class="btn btn-sm btn-outline-primary"
-                                                        wire:click="toggleDetails({{ $conversation->id }})">
-                                                    <i class="fas fa-eye"></i>
-                                                    @if(isset($showDetails[$conversation->id]))
-                                                        Hide
-                                                    @else
-                                                        View
-                                                    @endif
-                                                </button>
-                                                <button type="button" 
-                                                        class="btn btn-sm btn-outline-success"
-                                                        wire:click="exportSession({{ $conversation->id }})">
-                                                    <i class="fas fa-file-export"></i>
-                                                    Export PDF
-                                                </button>
-                                                <button type="button" 
-                                                        class="btn btn-sm btn-outline-danger"
-                                                        wire:click="deleteSession({{ $conversation->id }})"
-                                                        onclick="return confirm('Are you sure you want to delete this chat conversation?')">
-                                                    <i class="fas fa-trash"></i>
-                                                    Delete
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    @if(isset($showDetails[$conversation->id]))
-                                        <tr>
-                                            <td colspan="5" class="bg-light" id="conv-{{ $conversation->id }}">
-                                                <div class="chat-messages p-3" style="max-height: 300px; overflow-y: auto;">
-                                                    @foreach($conversation->messages as $message)
-                                                        @php 
-                                                            $isUser = $message->sender_type === 'user'; 
-                                                            $sender = $message->getSenderDisplayName();
-                                                        @endphp
-                                                        <div class="message mb-3">
-                                                            <div class="d-flex {{ $isUser ? 'justify-content-end' : 'justify-content-start' }}">
-                                                                <div class="{{ $isUser ? 'text-end' : 'text-start' }}" style="max-width: 80%;">
-                                                                    <div class="small mb-1">
-                                                                        <span class="badge {{ $isUser ? 'bg-primary' : 'bg-secondary' }}">{{ $sender }}</span>
-                                                                        <span class="text-muted ms-2">{{ ($message->sent_at ?? $message->created_at)->format('h:i:s A') }}</span>
-                                                                    </div>
-                                                                    <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
-                                                                        {!! preg_replace('/(<br\s*\/?\s*>\s*){2,}/i', '<br>', $message->message_html) !!}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
+                                        @endif
+                                    </div>
+                                    <small class="text-muted ml-2 align-self-start text-right">
+                                        {{ $conversation->created_at->diffForHumans($conversation->updated_at, true) }}
+                                    </small>
+                                </div>
+                            </div>
+                            {{-- Inline expanded messages --}}
+                            @if(isset($showDetails[$conversation->id]))
+                                <div class="card-footer bg-light p-3">
+                                    <div class="chat-messages mb-3" style="max-height: 300px; overflow-y: auto;">
+                                        @foreach($conversation->messages as $message)
+                                            @php
+                                                $isUser = $message->sender_type === 'user';
+                                                $sender = $message->getSenderDisplayName();
+                                            @endphp
+                                            <div class="message mb-2">
+                                                <div class="d-flex {{ $isUser ? 'justify-content-end' : 'justify-content-start' }}">
+                                                    <div class="{{ $isUser ? 'text-end' : 'text-start' }}" style="max-width: 85%;">
+                                                        <div class="small mb-1">
+                                                            <span class="badge {{ $isUser ? 'bg-primary' : 'bg-secondary' }}">{{ $sender }}</span>
+                                                            <time class="text-muted ms-1 local-ts" data-utc="{{ ($message->sent_at ?? $message->created_at)->utc()->toISOString() }}">{{ ($message->sent_at ?? $message->created_at)->format('h:i:s A') }}</time>
                                                         </div>
-                                                    @endforeach
-                                                </div>
-                                                <div class="mt-3">
-                                                    <label class="form-label">Agent Reply</label>
-                                                    <textarea class="form-control" rows="3" wire:model.defer="replyMessage.{{ $conversation->id }}" placeholder="Type a response that will be shown to the customer..."></textarea>
-                                                    <div class="d-flex justify-content-end mt-2">
-                                                        <button type="button" class="btn btn-primary btn-sm" wire:click="sendAgentReply({{ $conversation->id }})">
-                                                            <i class="fas fa-paper-plane"></i> Send Reply
-                                                        </button>
+                                                        <div class="message-content {{ $isUser ? 'bg-primary text-white' : 'bg-white border' }} d-inline-block p-2 rounded">
+                                                            {!! $message->message_html !!}
+                                                        </div>
                                                     </div>
-                                                    <small class="text-muted d-block mt-1">Replies are visible to customers and used as AI context.</small>
                                                 </div>
-                                            </td>
-                                        </tr>
-                                    @endif
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                    <label class="form-label">Agent Reply</label>
+                                    <textarea class="form-control" rows="3" wire:model.defer="replyMessage.{{ $conversation->id }}" placeholder="Type a response that will be shown to the customer..."></textarea>
+                                    <div class="d-flex justify-content-end mt-2">
+                                        <button type="button" class="btn btn-primary btn-sm" wire:click="sendAgentReply({{ $conversation->id }})">
+                                            <i class="fas fa-paper-plane"></i> Send Reply
+                                        </button>
+                                    </div>
+                                    <small class="text-muted d-block mt-1">Replies are visible to customers and used as AI context.</small>
+                                </div>
+                            @endif
+                        </div>
+                    @endforeach
 
                     <!-- Pagination -->
-                    <div class="d-flex justify-content-center">
+                    <div class="d-flex justify-content-center mt-3">
                         {{ $conversations->links() }}
                     </div>
                 @else
@@ -193,7 +156,7 @@
                         <h5 class="text-muted">No chat conversations found</h5>
                         <p class="text-muted">
                             @if($search || $dateFrom || $dateTo)
-                                Try adjusting your filters or 
+                                Try adjusting your filters or
                                 <button type="button" class="btn btn-link p-0" wire:click="clearFilters">clear all filters</button>.
                             @else
                                 Start a conversation with the AI chat widget to see your chat history here.
@@ -206,48 +169,57 @@
     
 
 <style>
-.chat-messages {
+.conversation-card .card-header {
     background: #f8f9fa;
+}
+.conversation-card .card-footer {
+    border-top: 1px solid #dee2e6;
+}
+.chat-messages {
+    background: #fff;
     border-radius: 0.25rem;
-    padding: 0.75rem !important;
 }
 .chat-messages .message {
-    margin-bottom: 0.5rem !important;
-}
-.chat-messages .mb-3 { margin-bottom: 0.4rem !important; }
-.chat-messages .mb-1 { margin-bottom: 0.15rem !important; }
-.chat-messages .small {
-    margin-bottom: 2px !important;
+    margin-bottom: 0.4rem !important;
 }
 .message-content {
     word-break: break-word;
     white-space: normal;
-    line-height: 1.25;
-    padding: 4px 8px !important;
+    line-height: 1.3;
+    max-width: 100%;
 }
-.message-content p,
-.message-content ul,
-.message-content ol {
+.message-content p, .message-content ul, .message-content ol {
     margin: 0 0 4px 0 !important;
 }
-.message-content p:last-child,
-.message-content ul:last-child,
-.message-content ol:last-child {
+.message-content p:last-child, .message-content ul:last-child, .message-content ol:last-child {
     margin-bottom: 0 !important;
 }
-.message-content li {
-    margin-bottom: 2px !important;
+.message-content li { margin-bottom: 2px !important; }
+.message-content a { color: #0d6efd; text-decoration: underline; }
+.message-content.text-white a { color: #e5f0ff; }
+@media (max-width: 576px) {
+    .conversation-card .card-header { flex-direction: column; align-items: flex-start !important; }
+    .conversation-card .card-header > div:last-child { margin-top: 0.4rem; }
 }
-
-.message-content a {
-    color: #0d6efd;
-    text-decoration: underline;
-}
-
-.text-white .message-content a,
-.message-content.text-white a {
-    color: #e5f0ff;
-}
-
 </style>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    function convertLocalTs() {
+        document.querySelectorAll('time.local-ts[data-utc]').forEach(function (el) {
+            var d = new Date(el.dataset.utc);
+            if (isNaN(d)) return;
+            var fmt = el.dataset.format;
+            if (fmt === 'date') {
+                el.textContent = d.toLocaleDateString([], {year:'numeric', month:'short', day:'numeric'});
+            } else if (fmt === 'time') {
+                el.textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+            } else {
+                el.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+            }
+        });
+    }
+    convertLocalTs();
+    document.addEventListener('livewire:updated', convertLocalTs);
+});
+</script>
 </div>

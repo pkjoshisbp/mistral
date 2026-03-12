@@ -1,5 +1,15 @@
 # AI Agent Multi-Tenant Chat System - Copilot Instructions
 
+> **IMPORTANT:** Before assuming anything about ports, GPU, installed tools, or
+> service locations — read the full reference first:
+> **[docs/PROJECT_SETUP.md](../docs/PROJECT_SETUP.md)**
+>
+> Key facts to internalize:
+> - **GPU is on vast.ai, NOT local.** `nvidia-smi` will fail on this server.
+> - **ComfyUI, large Ollama LLMs, Whisper, XTTS all run on vast.ai via SSH tunnels.**
+> - **FastAPI venv is at `ai_backend/venv/`** — always use `venv/bin/pip` to install packages.
+> - **SadTalker / Wav2Lip are NOT installed** anywhere (as of 2026-03-09).
+
 ## System Architecture
 
 This is a **multi-organization AI support agent system** with three main components:

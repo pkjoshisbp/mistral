@@ -89,6 +89,21 @@ class AiAgentService
     }
 
     /**
+     * Get model dedicated for query rewriting.
+     */
+    public function getRewriteModel(): string
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $configured = trim((string) \App\Models\AdminSetting::get('ai_rewrite_model', ''));
+            if ($configured !== '') {
+                return $configured;
+            }
+        }
+
+        return 'mistral-nemo';
+    }
+
+    /**
      * Get the configured AI backend type
      */
     public function getBackendType()
@@ -494,41 +509,12 @@ class AiAgentService
                             $relevantResults[] = $result;
                         }
                     }
-                    
-                    // If we have high-quality results (score > 0.7), prefer fewer, better results
-                    $hasHighQualityResult = false;
-                    foreach ($relevantResults as $result) {
-                        if (($result['score'] ?? 0) > 0.7) {
-                            $hasHighQualityResult = true;
-                            break;
-                        }
-                    }
-                    
-                    // Adjust limit based on result quality
-                    $effectiveLimit = $hasHighQualityResult ? min($limit, 5) : $limit;
-                    
-                    // Prioritize service results for service queries, then other results
-                    $serviceResults = [];
-                    $mriResults = [];
-                    $otherResults = [];
-                    
-                    foreach ($relevantResults as $result) {
-                        $payload = $result['payload'] ?? [];
-                        $dataType = $payload['data_type'] ?? '';
-                        $content = $payload['content'] ?? '';
-                        
-                        if ($dataType === 'service') {
-                            $serviceResults[] = $result;
-                        } elseif (stripos($content, 'MRI') !== false || stripos($content, 'magnetic resonance') !== false) {
-                            $mriResults[] = $result;
-                        } else {
-                            $otherResults[] = $result;
-                        }
-                    }
-                    
-                    // Merge prioritized results and trim to effective limit
-                    $finalResults = array_merge($serviceResults, $mriResults, $otherResults);
-                    $data['results'] = array_slice($finalResults, 0, $effectiveLimit);
+
+                    usort($relevantResults, function ($a, $b) {
+                        return ((float) ($b['score'] ?? 0.0)) <=> ((float) ($a['score'] ?? 0.0));
+                    });
+
+                    $data['results'] = array_slice($relevantResults, 0, max(1, (int) $limit));
                 }
                 Log::info('AI Agent Qdrant search response', ['response' => $data]);
                 return $data;
@@ -612,7 +598,7 @@ PROMPT;
     /**
      * Enhanced search with optional query rewriting 
      */
-    public function enhancedSearch($collectionName, $originalQuery, $limit = 5)
+    public function enhancedSearch($collectionName, $originalQuery, $limit = 5, array $options = [])
     {
         $searchStartTime = microtime(true);
         try {
@@ -622,6 +608,23 @@ PROMPT;
             ]);
 
             $useRewriteAndIntent = $this->useIntentAndRewrite();
+            $disableRewrite = (bool) ($options['disable_rewrite'] ?? false);
+            if ($disableRewrite && $useRewriteAndIntent) {
+                $useRewriteAndIntent = false;
+                Log::info('Bypassing query rewrite via enhancedSearch options', [
+                    'collection' => $collectionName,
+                    'original_query' => $originalQuery,
+                ]);
+            }
+            $entityFocusedQuery = $this->isEntityFocusedRetrievalQuery((string) $originalQuery);
+            if ($entityFocusedQuery && $useRewriteAndIntent) {
+                $useRewriteAndIntent = false;
+                Log::info('Bypassing query rewrite for entity-focused retrieval query', [
+                    'collection' => $collectionName,
+                    'original_query' => $originalQuery,
+                ]);
+            }
+
             $termBoostResults = $this->searchQdrantByTerms($collectionName, (string) $originalQuery, max((int) $limit, 8));
 
             if (!$useRewriteAndIntent) {
@@ -640,7 +643,7 @@ PROMPT;
                     $termBoostResults['results'] ?? [],
                     $results['results'] ?? [],
                 ]);
-                $rerankedResults = $this->applyExplicitTermReranking($mergedResults, (string) $originalQuery);
+                $rerankedResults = $this->applyHybridLexicalReranking($mergedResults, (string) $originalQuery);
                 $results = [
                     'results' => array_slice($rerankedResults, 0, (int) $limit),
                 ];
@@ -763,7 +766,7 @@ PROMPT;
                 return ($b['score'] ?? 0) <=> ($a['score'] ?? 0);
             });
 
-            $mergedResults = $this->applyExplicitTermReranking($mergedResults, (string) $originalQuery);
+            $mergedResults = $this->applyHybridLexicalReranking($mergedResults, (string) $originalQuery);
 
             $topMerged = array_slice($mergedResults, 0, 3);
             $topMergedSummary = array_map(function ($item) {
@@ -812,13 +815,18 @@ PROMPT;
             return $results;
         }
 
+        $sortedByScore = $results;
+        usort($sortedByScore, function (array $a, array $b): int {
+            return ((float) ($b['score'] ?? 0.0)) <=> ((float) ($a['score'] ?? 0.0));
+        });
+
         $terms = $this->extractExplicitSearchTerms($query);
         if (empty($terms)) {
-            return $results;
+            return $sortedByScore;
         }
 
         $reranked = [];
-        foreach ($results as $item) {
+        foreach ($sortedByScore as $item) {
             if (!is_array($item)) {
                 continue;
             }
@@ -869,6 +877,350 @@ PROMPT;
         ]);
 
         return $reranked;
+    }
+
+    private function applyHybridLexicalReranking(array $results, string $query): array
+    {
+        if (empty($results)) {
+            return $results;
+        }
+
+        $queryNorm = $this->normalizeSearchText($query);
+        $isPricingLikeIntent = (bool) preg_match('/\b(plan|plans|pricing|price|cost|subscription|subscriptions|package|packages|tier|tiers|billing)\b/i', $queryNorm);
+        $isEnterpriseLikeIntent = (bool) preg_match('/\b(corporate|enterprise|business|company|team|organization|organisation)\b/i', $queryNorm);
+        $isDemoLikeIntent = (bool) preg_match('/\b(demo|trial|sample|example|test)\b/i', $queryNorm);
+
+        $queryTerms = $this->extractLexicalTermsForRerank($query);
+        if (empty($queryTerms)) {
+            return $this->applyExplicitTermReranking($results, $query);
+        }
+
+        $queryEntityTerms = $this->extractQueryEntityTermsForRerank($queryTerms, $queryNorm);
+        $expandedEntityTerms = $this->expandEntityAliasesForRerank($queryEntityTerms);
+        $hasStrongEntityIntent = !empty($queryEntityTerms);
+
+        $rescored = [];
+        foreach ($results as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $payload = is_array($item['payload'] ?? null) ? $item['payload'] : [];
+            $titleNorm = $this->normalizeSearchText((string) ($payload['title'] ?? $payload['question'] ?? ''));
+            $contentNorm = $this->normalizeSearchText((string) ($payload['content'] ?? $payload['answer'] ?? ''));
+            $entityNorm = $this->normalizeSearchText($this->extractPayloadEntityTextForRerank($payload));
+            $keywordsNorm = $this->normalizeSearchText($this->extractPayloadKeywordsForRerank($payload));
+            $auxNorm = $this->normalizeSearchText(implode(' ', array_filter([
+                (string) ($payload['category'] ?? ''),
+                (string) ($payload['plan_type'] ?? ''),
+                (string) ($payload['billing_period'] ?? ''),
+                (string) ($payload['type'] ?? ''),
+                (string) data_get($payload, 'metadata.plan_type', ''),
+                (string) data_get($payload, 'metadata.billing_period', ''),
+                (string) data_get($payload, 'metadata.csv.plan_type', ''),
+                (string) data_get($payload, 'metadata.csv.billing_period', ''),
+            ])));
+
+            $matched = 0;
+            $entityMatches = 0;
+            $keywordMatches = 0;
+            $titleMatches = 0;
+            $contentMatches = 0;
+            $auxMatches = 0;
+            $lexicalBoost = 0.0;
+
+            foreach ($queryTerms as $term) {
+                if ($term === '') {
+                    continue;
+                }
+
+                $inEntity = $entityNorm !== '' && str_contains($entityNorm, $term);
+                $inKeywords = $keywordsNorm !== '' && str_contains($keywordsNorm, $term);
+                $inTitle = $titleNorm !== '' && str_contains($titleNorm, $term);
+                $inContent = $contentNorm !== '' && str_contains($contentNorm, $term);
+                $inAux = $auxNorm !== '' && str_contains($auxNorm, $term);
+
+                if ($inEntity || $inKeywords || $inTitle || $inContent || $inAux) {
+                    $matched++;
+                }
+
+                if ($inEntity) {
+                    $lexicalBoost += 0.52;
+                    $entityMatches++;
+                }
+
+                if ($inKeywords) {
+                    $lexicalBoost += 0.52;
+                    $keywordMatches++;
+                }
+
+                if ($inTitle) {
+                    $lexicalBoost += 0.38;
+                    $titleMatches++;
+                }
+
+                if ($inContent) {
+                    $lexicalBoost += 0.16;
+                    $contentMatches++;
+                }
+
+                if ($inAux) {
+                    $lexicalBoost += 0.14;
+                    $auxMatches++;
+                }
+            }
+
+            $queryEntityHitCount = 0;
+            foreach ($expandedEntityTerms as $entityTerm) {
+                if ($entityTerm === '') {
+                    continue;
+                }
+
+                $inEntity = $entityNorm !== '' && str_contains($entityNorm, $entityTerm);
+                $inKeywords = $keywordsNorm !== '' && str_contains($keywordsNorm, $entityTerm);
+                $inTitle = $titleNorm !== '' && str_contains($titleNorm, $entityTerm);
+                $inAux = $auxNorm !== '' && str_contains($auxNorm, $entityTerm);
+                if ($inEntity || $inKeywords || $inTitle || $inAux) {
+                    $queryEntityHitCount++;
+                }
+            }
+            $lexicalBoost += (0.38 * $queryEntityHitCount);
+
+            $coverage = $matched > 0 ? ($matched / max(1, count($queryTerms))) : 0.0;
+            $lexicalBoost += (0.55 * $coverage);
+
+            $entityCoverage = !empty($expandedEntityTerms)
+                ? ($queryEntityHitCount / max(1, count($expandedEntityTerms)))
+                : 0.0;
+            $lexicalBoost += (0.62 * $entityCoverage);
+            if ($hasStrongEntityIntent) {
+                if ($queryEntityHitCount > 0) {
+                    $lexicalBoost += 0.48;
+                } else {
+                    $lexicalBoost -= 0.72;
+                }
+            }
+
+            $anchorHits = $entityMatches + $keywordMatches + $titleMatches + $auxMatches;
+            if (count($queryTerms) >= 2 && $anchorHits === 0 && $contentMatches > 0) {
+                $lexicalBoost -= 0.35;
+            }
+            if ($coverage < 0.34) {
+                $lexicalBoost -= 0.18;
+            }
+
+            $combinedNorm = trim($entityNorm . ' ' . $titleNorm . ' ' . $keywordsNorm . ' ' . $auxNorm . ' ' . $contentNorm);
+            if ($isEnterpriseLikeIntent) {
+                if ((bool) preg_match('/\b(corporate|enterprise|business|team)\b/i', $combinedNorm)) {
+                    $lexicalBoost += 0.92;
+                } else {
+                    $lexicalBoost -= 1.05;
+                }
+                if (!$isDemoLikeIntent && (bool) preg_match('/\b(demo|trial|sample)\b/i', $combinedNorm)) {
+                    $lexicalBoost -= 0.55;
+                }
+            }
+
+            if ($isPricingLikeIntent) {
+                if ((bool) preg_match('/\b(subscription|monthly|yearly|recurring|plan|pricing|billing)\b/i', $combinedNorm)) {
+                    $lexicalBoost += 0.25;
+                }
+            }
+
+            $baseScore = (float) ($item['score'] ?? 0.0);
+            $hybridScore = $baseScore + $lexicalBoost;
+
+            $item['score'] = $hybridScore;
+            $item['hybrid_score'] = $hybridScore;
+            $item['semantic_score'] = $baseScore;
+            $item['lexical_match'] = [
+                'coverage' => round($coverage, 4),
+                'entity_coverage' => round($entityCoverage, 4),
+                'matched_terms' => $matched,
+                'entity_hits' => $entityMatches,
+                'entity_query_hits' => $queryEntityHitCount,
+                'keyword_hits' => $keywordMatches,
+                'title_hits' => $titleMatches,
+                'content_hits' => $contentMatches,
+                'aux_hits' => $auxMatches,
+            ];
+
+            $rescored[] = $item;
+        }
+
+        usort($rescored, function (array $a, array $b): int {
+            return ((float) ($b['hybrid_score'] ?? $b['score'] ?? 0.0)) <=> ((float) ($a['hybrid_score'] ?? $a['score'] ?? 0.0));
+        });
+
+        return $rescored;
+    }
+
+    private function extractLexicalTermsForRerank(string $query): array
+    {
+        $normalized = $this->normalizeSearchText($query);
+        if ($normalized === '') {
+            return [];
+        }
+
+        $parts = preg_split('/\s+/', $normalized) ?: [];
+        $stopWords = [
+            'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'do', 'for', 'from', 'how', 'i', 'if',
+            'in', 'is', 'it', 'me', 'my', 'of', 'on', 'or', 'our', 'please', 'show', 'tell', 'the',
+            'to', 'us', 'we', 'what', 'when', 'where', 'which', 'who', 'with', 'you', 'your',
+            'have', 'has', 'had', 'any', 'there', 'about', 'can', 'could', 'would', 'should'
+        ];
+
+        $terms = [];
+        foreach ($parts as $part) {
+            $part = trim((string) $part);
+            if ($part === '' || mb_strlen($part) < 2) {
+                continue;
+            }
+
+            if (in_array($part, $stopWords, true)) {
+                continue;
+            }
+
+            $terms[$part] = $part;
+        }
+
+        return array_values($terms);
+    }
+
+    private function extractPayloadKeywordsForRerank(array $payload): string
+    {
+        $candidates = [
+            $payload['keywords'] ?? null,
+            $payload['search_keywords'] ?? null,
+            $payload['semantic_text'] ?? null,
+            $payload['semantic_terms'] ?? null,
+            data_get($payload, 'metadata.keywords'),
+            data_get($payload, 'metadata.search_keywords'),
+            data_get($payload, 'metadata.semantic_text'),
+            data_get($payload, 'metadata.semantic_terms'),
+            data_get($payload, 'metadata.csv.keywords'),
+            data_get($payload, 'metadata.csv.search_keywords'),
+            data_get($payload, 'metadata.csv.semantic_text'),
+            data_get($payload, 'metadata.csv.semantic_terms'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_array($candidate)) {
+                $candidate = implode(' ', array_map('strval', $candidate));
+            }
+
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return trim($candidate);
+            }
+        }
+
+        return '';
+    }
+
+    private function extractPayloadEntityTextForRerank(array $payload): string
+    {
+        $candidates = [
+            $payload['entity'] ?? null,
+            $payload['primary_entity'] ?? null,
+            $payload['entities'] ?? null,
+            data_get($payload, 'metadata.entity'),
+            data_get($payload, 'metadata.primary_entity'),
+            data_get($payload, 'metadata.entities'),
+            data_get($payload, 'metadata.csv.entity'),
+            data_get($payload, 'metadata.csv.primary_entity'),
+            data_get($payload, 'metadata.csv.entities'),
+            data_get($payload, 'metadata.product_name'),
+            $payload['category'] ?? null,
+        ];
+
+        $parts = [];
+        foreach ($candidates as $candidate) {
+            if (is_array($candidate)) {
+                foreach ($candidate as $value) {
+                    if (is_scalar($value)) {
+                        $value = trim((string) $value);
+                        if ($value !== '') {
+                            $parts[] = $value;
+                        }
+                    }
+                }
+            } elseif (is_scalar($candidate)) {
+                $value = trim((string) $candidate);
+                if ($value !== '') {
+                    $parts[] = $value;
+                }
+            }
+        }
+
+        if (empty($parts)) {
+            return '';
+        }
+
+        return implode(' ', array_values(array_unique($parts)));
+    }
+
+    private function extractQueryEntityTermsForRerank(array $queryTerms, string $queryNorm): array
+    {
+        $nonEntityTerms = [
+            'price', 'pricing', 'cost', 'plan', 'plans', 'subscription', 'subscriptions',
+            'package', 'packages', 'tier', 'tiers', 'billing', 'monthly', 'yearly', 'details',
+            'detail', 'compare', 'comparison', 'feature', 'features', 'benefits', 'info', 'information'
+        ];
+
+        $entityTerms = [];
+        foreach ($queryTerms as $term) {
+            if ($term === '' || in_array($term, $nonEntityTerms, true)) {
+                continue;
+            }
+            $entityTerms[$term] = $term;
+        }
+
+        if (empty($entityTerms)) {
+            foreach ($queryTerms as $term) {
+                if ($term !== '') {
+                    $entityTerms[$term] = $term;
+                }
+            }
+        }
+
+        if ((bool) preg_match('/\b(corporate|enterprise|business)\b/i', $queryNorm)) {
+            $entityTerms['corporate'] = 'corporate';
+            $entityTerms['enterprise'] = 'enterprise';
+            $entityTerms['business'] = 'business';
+        }
+
+        return array_values($entityTerms);
+    }
+
+    private function expandEntityAliasesForRerank(array $entityTerms): array
+    {
+        $aliases = [
+            'corporate' => ['corporate', 'enterprise', 'business', 'company', 'team'],
+            'enterprise' => ['enterprise', 'corporate', 'business', 'company', 'team'],
+            'business' => ['business', 'enterprise', 'corporate', 'team'],
+            'clinic' => ['clinic', 'diagnostic', 'diagnostics', 'lab', 'laboratory'],
+            'plan' => ['plan', 'plans', 'package', 'packages', 'subscription'],
+        ];
+
+        $expanded = [];
+        foreach ($entityTerms as $term) {
+            $term = trim((string) $term);
+            if ($term === '') {
+                continue;
+            }
+
+            $expanded[$term] = $term;
+            if (isset($aliases[$term])) {
+                foreach ($aliases[$term] as $alias) {
+                    $alias = trim((string) $alias);
+                    if ($alias !== '') {
+                        $expanded[$alias] = $alias;
+                    }
+                }
+            }
+        }
+
+        return array_values($expanded);
     }
 
     private function mergeSearchResultsById(array $resultGroups): array
@@ -981,6 +1333,12 @@ PROMPT;
             }
         }
 
+        if ($this->isEntityFocusedRetrievalQuery($trimmed)) {
+            foreach ($this->extractImplicitEntityTermsForSearch($trimmed) as $term) {
+                $terms[] = $term;
+            }
+        }
+
         $deduped = [];
         foreach ($terms as $term) {
             $normalized = $this->normalizeSearchText((string) $term);
@@ -991,6 +1349,74 @@ PROMPT;
         }
 
         return array_values($deduped);
+    }
+
+    private function isEntityFocusedRetrievalQuery(string $query): bool
+    {
+        $q = strtolower(trim($query));
+        if ($q === '') {
+            return false;
+        }
+
+        if (str_contains($q, '"')) {
+            return true;
+        }
+
+        return (bool) preg_match(
+            '/\b(available|availability|in\s+stock|out\s+of\s+stock|stock|price|pricing|cost|quote|quoted|customi[sz]e|customi[sz]ation|deliver|delivery|eta|sku|item|product|service|test)\b/i',
+            $q
+        );
+    }
+
+    private function extractImplicitEntityTermsForSearch(string $query): array
+    {
+        $normalized = strtolower((string) preg_replace('/[^\p{L}\p{N}\s\-]+/u', ' ', $query));
+        $normalized = trim((string) preg_replace('/\s+/', ' ', $normalized));
+        if ($normalized === '') {
+            return [];
+        }
+
+        $tokens = array_values(array_filter(explode(' ', $normalized), function ($token) {
+            return $token !== '' && mb_strlen($token) >= 2;
+        }));
+
+        if (count($tokens) < 2) {
+            return [];
+        }
+
+        $stopwords = [
+            'is', 'are', 'was', 'were', 'be', 'been', 'being', 'a', 'an', 'the', 'for', 'to', 'of', 'in', 'on', 'at',
+            'and', 'or', 'if', 'yes', 'no', 'can', 'could', 'would', 'should', 'will', 'do', 'does', 'did', 'right',
+            'now', 'today', 'tomorrow', 'please', 'with', 'without', 'about', 'any', 'what', 'when', 'where', 'which',
+            'who', 'whom', 'this', 'that', 'these', 'those', 'my', 'your', 'our', 'their', 'it', 'its', 'as', 'by',
+            'from', 'into', 'even', 'not', 'have', 'has', 'had', 'we', 'you', 'they', 'i', 'me', 'us', 'mean',
+            'available', 'availability', 'store', 'shop', 'service', 'item', 'product', 'painting', 'customized',
+            'customised', 'cost', 'price', 'pricing', 'delivery', 'deliver', 'stock', 'quote', 'quoted'
+        ];
+
+        $phrases = [];
+        $maxN = min(4, count($tokens));
+        for ($n = $maxN; $n >= 2; $n--) {
+            for ($i = 0; $i <= count($tokens) - $n; $i++) {
+                $slice = array_slice($tokens, $i, $n);
+                $meaningful = array_values(array_filter($slice, function ($token) use ($stopwords) {
+                    return !in_array($token, $stopwords, true) && mb_strlen($token) >= 3;
+                }));
+
+                if (count($meaningful) < 2) {
+                    continue;
+                }
+
+                $phrase = trim(implode(' ', $meaningful));
+                if ($phrase === '' || mb_strlen($phrase) < 6) {
+                    continue;
+                }
+
+                $phrases[$phrase] = true;
+            }
+        }
+
+        return array_slice(array_keys($phrases), 0, 6);
     }
 
     private function normalizeSearchText(string $value): string
@@ -1109,31 +1535,37 @@ PROMPT;
     {
         $startTime = microtime(true);
         try {
-            // Use Vast.ai for faster query rewriting
-            $systemPrompt = "Extract the core product/category and qualifier keywords.
+            $systemPrompt = "Rewrite user query for semantic retrieval.
 Rules:
-- Keep the main noun
-- Keep user intent
-- Remove politeness and filler
-- Output 2–4 lowercase keywords only
-- Do not invent new terms";
+- Keep original intent.
+- Preserve exact entity names if present.
+- Remove filler words.
+- Output a single short retrieval query (max 12 words).
+- Do not invent any facts, dates, or prices.
+- Return ONLY the rewritten query text.";
             
             $messages = [
                 ['role' => 'system', 'content' => $systemPrompt],
                 ['role' => 'user', 'content' => $originalQuery]
             ];
             
-            // Use Vast.ai GPU with llama3:8b for faster rewriting
-            $response = $this->llmChat($messages, 'llama3:8b-instruct-q5_K_M', null, null, ['use_vastai' => true]);
+            $rewriteModel = $this->getRewriteModel();
+            $response = $this->llmChat($messages, $rewriteModel, null, null, [
+                'use_vastai' => true,
+                'temperature' => 0.0,
+                'num_predict' => 48,
+            ]);
             $elapsed = round((microtime(true) - $startTime) * 1000, 2);
             
             if ($response && isset($response['message']['content'])) {
-                $rewrittenQuery = trim($response['message']['content']);
+                $rawOutput = trim((string) $response['message']['content']);
+                $rewrittenQuery = $this->normalizeRewriteOutput($rawOutput, (string) $originalQuery);
                 
                 Log::info('Query rewrite timing', [
                     'elapsed_ms' => $elapsed,
                     'original' => $originalQuery,
-                    'rewritten' => $rewrittenQuery
+                    'rewritten' => $rewrittenQuery,
+                    'rewrite_model' => $rewriteModel,
                 ]);
                 
                 // Validation: If the rewritten query is too long or conversational, use original
@@ -1152,13 +1584,15 @@ Rules:
                 
                 Log::info('Query rewrite successful', [
                     'original' => $originalQuery,
-                    'rewritten' => $rewrittenQuery
+                    'rewritten' => $rewrittenQuery,
+                    'rewrite_model' => $rewriteModel,
                 ]);
                 return $rewrittenQuery;
             } else {
                 Log::warning('Query rewrite failed, using original query', [
                     'original' => $originalQuery,
-                    'response' => $response
+                    'response' => $response,
+                    'rewrite_model' => $rewriteModel,
                 ]);
                 return $originalQuery;
             }
@@ -1169,6 +1603,134 @@ Rules:
             ]);
             return $originalQuery;
         }
+    }
+
+    /**
+     * Rewrite follow-up query using explicit conversational context:
+     * original user question + assistant answer + current follow-up.
+     */
+    public function rewriteFollowUpQueryWithContext(string $originalQuestion, string $assistantAnswer, string $followUpQuestion): string
+    {
+        $startTime = microtime(true);
+
+        $originalQuestion = trim($originalQuestion);
+        $assistantAnswer = trim($assistantAnswer);
+        $followUpQuestion = trim($followUpQuestion);
+
+        if ($followUpQuestion === '') {
+            return '';
+        }
+
+        $assistantAnswerForPrompt = mb_substr($assistantAnswer, 0, 700);
+
+        try {
+            $systemPrompt = "You rewrite ONLY the current follow-up user message into a single retrieval query.
+Use conversation context to resolve references like this/that/it.
+Rules:
+- Keep exact entity names when present.
+- Use original question + assistant answer only as context.
+- Output one concise retrieval query (max 16 words).
+- No explanations, no labels, no markdown.";
+
+            $userPrompt = "Original question: {$originalQuestion}\n"
+                . "Assistant answer: {$assistantAnswerForPrompt}\n"
+                . "Current follow-up question: {$followUpQuestion}\n"
+                . "Return rewritten retrieval query only.";
+
+            $rewriteModel = $this->getRewriteModel();
+
+            Log::info('Follow-up rewrite input context', [
+                'original_question' => $originalQuestion,
+                'assistant_answer_preview' => mb_substr($assistantAnswerForPrompt, 0, 220),
+                'follow_up_question' => $followUpQuestion,
+                'rewrite_model' => $rewriteModel,
+            ]);
+
+            $response = $this->llmChat([
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $userPrompt],
+            ], $rewriteModel, null, null, [
+                'use_vastai' => true,
+                'temperature' => 0.0,
+                'num_predict' => 64,
+            ]);
+
+            $elapsed = round((microtime(true) - $startTime) * 1000, 2);
+
+            if ($response && isset($response['message']['content'])) {
+                $rawOutput = trim((string) $response['message']['content']);
+                $fallback = trim($originalQuestion . ' ' . $followUpQuestion);
+                $rewrittenQuery = $this->normalizeRewriteOutput($rawOutput, $fallback !== '' ? $fallback : $followUpQuestion);
+
+                Log::info('Follow-up rewrite output', [
+                    'elapsed_ms' => $elapsed,
+                    'follow_up_question' => $followUpQuestion,
+                    'rewritten_query' => $rewrittenQuery,
+                    'rewrite_model' => $rewriteModel,
+                ]);
+
+                if (strlen($rewrittenQuery) > 140 || str_word_count($rewrittenQuery) > 20) {
+                    Log::warning('Follow-up rewrite too long; using compact fallback', [
+                        'follow_up_question' => $followUpQuestion,
+                        'rewritten_query' => $rewrittenQuery,
+                    ]);
+
+                    return trim($followUpQuestion);
+                }
+
+                return $rewrittenQuery;
+            }
+
+            Log::warning('Follow-up rewrite failed; using follow-up question directly', [
+                'follow_up_question' => $followUpQuestion,
+                'rewrite_model' => $rewriteModel,
+            ]);
+
+            return $followUpQuestion;
+        } catch (\Throwable $e) {
+            Log::warning('Follow-up rewrite exception; using follow-up question directly', [
+                'follow_up_question' => $followUpQuestion,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $followUpQuestion;
+        }
+    }
+
+    private function normalizeRewriteOutput(string $rewritten, string $original): string
+    {
+        $text = trim($rewritten);
+        if ($text === '') {
+            return trim($original);
+        }
+
+        $text = preg_replace('/^```[a-zA-Z]*\s*/', '', $text) ?? $text;
+        $text = preg_replace('/```$/', '', $text) ?? $text;
+
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', $text) ?: []), function ($line) {
+            return $line !== '';
+        }));
+
+        if (!empty($lines)) {
+            $first = $lines[0];
+            $first = preg_replace('/^(?:[-*]|\d+[.)])\s*/', '', $first) ?? $first;
+            $first = preg_replace('/^(?:core\s+product\/?category|qualifier\s+keywords?)\s*[:\-]\s*/i', '', $first) ?? $first;
+            $text = trim($first);
+        }
+
+        if (str_contains($text, ',')) {
+            $parts = array_values(array_filter(array_map(function ($part) {
+                return trim((string) preg_replace('/[^\p{L}\p{N}\s\-]+/u', ' ', $part));
+            }, explode(',', $text)), function ($part) {
+                return $part !== '';
+            }));
+            if (!empty($parts)) {
+                $text = implode(' ', array_slice($parts, 0, 4));
+            }
+        }
+
+        $text = trim((string) preg_replace('/\s+/', ' ', $text));
+        return $text !== '' ? $text : trim($original);
     }
 
     /**
@@ -1701,6 +2263,8 @@ Rules:
     public function storeDataToQdrant($organizationSlug, $dataType, $items)
     {
         try {
+            $items = $this->normalizeItemsForQdrant($items);
+
             // Filter out items with empty content to avoid overwriting good data with blanks
             $filtered = [];
             foreach ($items as $it) {
@@ -1822,6 +2386,8 @@ Rules:
     public function updateDataToQdrant($organizationSlug, $dataType, $items, int $timeoutSeconds = 60)
     {
         try {
+            $items = $this->normalizeItemsForQdrant($items);
+
             Log::info('Updating data to Qdrant', [
                 'organization_slug' => $organizationSlug,
                 'data_type' => $dataType,
@@ -2064,6 +2630,331 @@ Rules:
                 'error' => $e->getMessage()
             ]);
         }
+    }
+
+    private function normalizeItemsForQdrant(array $items): array
+    {
+        return array_map(function ($item) {
+            if (!is_array($item)) {
+                return $item;
+            }
+
+            $metadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
+
+            $keywords = trim((string) (
+                $item['keywords']
+                ?? $item['search_keywords']
+                ?? data_get($metadata, 'keywords')
+                ?? data_get($metadata, 'search_keywords')
+                ?? data_get($metadata, 'csv.keywords')
+                ?? data_get($metadata, 'csv.search_keywords')
+                ?? ''
+            ));
+
+            if ($keywords !== '') {
+                $item['keywords'] = $keywords;
+                $item['search_keywords'] = $keywords;
+
+                $metadata['keywords'] = $keywords;
+                $metadata['search_keywords'] = $keywords;
+
+                $csvMeta = is_array($metadata['csv'] ?? null) ? $metadata['csv'] : [];
+                if (($csvMeta['keywords'] ?? '') === '') {
+                    $csvMeta['keywords'] = $keywords;
+                }
+                if (($csvMeta['search_keywords'] ?? '') === '') {
+                    $csvMeta['search_keywords'] = $keywords;
+                }
+                $metadata['csv'] = $csvMeta;
+            }
+
+            $entity = trim((string) (
+                $item['entity']
+                ?? $item['primary_entity']
+                ?? data_get($metadata, 'entity')
+                ?? data_get($metadata, 'primary_entity')
+                ?? data_get($metadata, 'csv.entity')
+                ?? data_get($metadata, 'csv.primary_entity')
+                ?? $keywords
+                ?? ''
+            ));
+
+            if ($entity === '') {
+                $title = trim((string) ($item['title'] ?? ''));
+                if ($title !== '') {
+                    $entityFromTitle = trim((string) preg_replace('/\|.*$/', '', $title));
+                    if ($entityFromTitle !== '') {
+                        $entity = $entityFromTitle;
+                    }
+                }
+            }
+
+            if ($entity === '') {
+                $entity = trim((string) ($item['category'] ?? data_get($metadata, 'category') ?? ''));
+            }
+
+            if ($entity !== '') {
+                $item['entity'] = $entity;
+                $item['primary_entity'] = $entity;
+                $metadata['entity'] = $entity;
+                $metadata['primary_entity'] = $entity;
+
+                $csvMeta = is_array($metadata['csv'] ?? null) ? $metadata['csv'] : [];
+                if (($csvMeta['entity'] ?? '') === '') {
+                    $csvMeta['entity'] = $entity;
+                }
+                if (($csvMeta['primary_entity'] ?? '') === '') {
+                    $csvMeta['primary_entity'] = $entity;
+                }
+                $metadata['csv'] = $csvMeta;
+            }
+
+            [$entity, $keywords, $semanticTerms, $semanticText] = $this->buildOrgNeutralSemanticMetadata(
+                $item,
+                $metadata,
+                $entity,
+                $keywords
+            );
+
+            if ($entity !== '') {
+                $item['entity'] = $entity;
+                $item['primary_entity'] = $entity;
+                $metadata['entity'] = $entity;
+                $metadata['primary_entity'] = $entity;
+            }
+
+            if ($keywords !== '') {
+                $item['keywords'] = $keywords;
+                $item['search_keywords'] = $keywords;
+                $metadata['keywords'] = $keywords;
+                $metadata['search_keywords'] = $keywords;
+            }
+
+            if (!empty($semanticTerms)) {
+                $item['semantic_terms'] = array_values($semanticTerms);
+                $metadata['semantic_terms'] = array_values($semanticTerms);
+            }
+
+            if ($semanticText !== '') {
+                $item['semantic_text'] = $semanticText;
+                $metadata['semantic_text'] = $semanticText;
+            }
+
+            $csvMeta = is_array($metadata['csv'] ?? null) ? $metadata['csv'] : [];
+            if ($entity !== '' && ($csvMeta['entity'] ?? '') === '') {
+                $csvMeta['entity'] = $entity;
+            }
+            if ($entity !== '' && ($csvMeta['primary_entity'] ?? '') === '') {
+                $csvMeta['primary_entity'] = $entity;
+            }
+            if ($keywords !== '' && ($csvMeta['keywords'] ?? '') === '') {
+                $csvMeta['keywords'] = $keywords;
+            }
+            if ($keywords !== '' && ($csvMeta['search_keywords'] ?? '') === '') {
+                $csvMeta['search_keywords'] = $keywords;
+            }
+            if (!empty($semanticTerms) && empty($csvMeta['semantic_terms'])) {
+                $csvMeta['semantic_terms'] = array_values($semanticTerms);
+            }
+            if ($semanticText !== '' && ($csvMeta['semantic_text'] ?? '') === '') {
+                $csvMeta['semantic_text'] = $semanticText;
+            }
+            $metadata['csv'] = $csvMeta;
+
+            $item['metadata'] = $metadata;
+
+            return $item;
+        }, $items);
+    }
+
+    private function buildOrgNeutralSemanticMetadata(array $item, array $metadata, string $entity, string $keywords): array
+    {
+        $title = trim((string) ($item['title'] ?? ''));
+        $content = trim((string) ($item['content'] ?? ''));
+        $category = trim((string) ($item['category'] ?? data_get($metadata, 'category') ?? ''));
+        $csv = is_array($metadata['csv'] ?? null) ? $metadata['csv'] : [];
+
+        $seedText = trim(implode(' ', array_filter([
+            $title,
+            $content,
+            $category,
+            $entity,
+            $keywords,
+            (string) data_get($metadata, 'description', ''),
+            (string) data_get($csv, 'description', ''),
+            (string) data_get($csv, 'plan_name', ''),
+            (string) data_get($csv, 'plan_type', ''),
+            (string) data_get($csv, 'billing_period', ''),
+        ])));
+
+        $existingTerms = $this->extractSemanticTerms($keywords);
+        $existingSemanticTerms = data_get($metadata, 'semantic_terms');
+        if (is_array($existingSemanticTerms)) {
+            $existingTerms = array_merge($existingTerms, $this->extractSemanticTerms($existingSemanticTerms));
+        } elseif (is_string($existingSemanticTerms)) {
+            $existingTerms = array_merge($existingTerms, $this->extractSemanticTerms($existingSemanticTerms));
+        }
+
+        $baseTerms = $this->extractLexicalTermsForRerank($seedText);
+        $normalizedSeed = $this->normalizeSearchText($seedText);
+
+        $synonymMap = [
+            'enterprise' => ['corporate', 'business', 'large organization', 'high volume', 'scalable'],
+            'corporate' => ['enterprise', 'business', 'company', 'organization', 'high volume'],
+            'business' => ['corporate', 'enterprise', 'company', 'team'],
+            'starter' => ['basic', 'entry level', 'small team', 'beginner'],
+            'basic' => ['starter', 'entry level', 'simple plan', 'affordable'],
+            'free' => ['trial', 'no cost', 'starter free', 'complimentary'],
+            'subscription' => ['monthly plan', 'yearly plan', 'recurring billing', 'plan'],
+            'plan' => ['package', 'tier', 'subscription', 'pricing option'],
+            'pricing' => ['cost', 'price', 'charges', 'fee'],
+            'credits' => ['token pack', 'one time package', 'prepaid tokens'],
+            'monthly' => ['per month', 'recurring monthly', 'month to month'],
+            'yearly' => ['annual', 'per year', 'yearly billing'],
+        ];
+
+        $expandedTerms = [];
+        foreach ($synonymMap as $trigger => $aliases) {
+            if (str_contains($normalizedSeed, $trigger)) {
+                foreach ($aliases as $alias) {
+                    $expandedTerms[] = $alias;
+                }
+            }
+        }
+
+        if ($this->shouldUseLlmSemanticExpansion()) {
+            $llmAliases = $this->generateSemanticAliasesWithLlm($seedText, $entity);
+            if (!empty($llmAliases)) {
+                $expandedTerms = array_merge($expandedTerms, $llmAliases);
+            }
+        }
+
+        if ($entity === '' && $title !== '') {
+            $entity = trim((string) preg_replace('/\|.*$/', '', $title));
+        }
+        if ($entity === '') {
+            $entity = $category;
+        }
+
+        $entityTerms = $this->extractSemanticTerms($entity);
+        $allTerms = array_merge($entityTerms, $existingTerms, $baseTerms, $expandedTerms);
+
+        $deduped = [];
+        foreach ($allTerms as $term) {
+            $term = trim((string) $term);
+            if ($term === '') {
+                continue;
+            }
+            $norm = $this->normalizeSearchText($term);
+            if ($norm === '' || mb_strlen($norm) < 2) {
+                continue;
+            }
+            $deduped[$norm] = $norm;
+        }
+
+        $semanticTerms = array_slice(array_values($deduped), 0, 28);
+        $semanticText = implode(' ', $semanticTerms);
+        $keywordsOut = implode(', ', array_slice($semanticTerms, 0, 16));
+
+        return [$entity, $keywordsOut, $semanticTerms, $semanticText];
+    }
+
+    private function shouldUseLlmSemanticExpansion(): bool
+    {
+        $enabled = env('AI_SEMANTIC_ENRICH_WITH_LLM', false);
+        if (is_bool($enabled)) {
+            return $enabled;
+        }
+
+        return in_array(strtolower((string) $enabled), ['1', 'true', 'yes', 'on'], true);
+    }
+
+    private function generateSemanticAliasesWithLlm(string $seedText, string $entity): array
+    {
+        $seedText = trim($seedText);
+        if ($seedText === '') {
+            return [];
+        }
+
+        try {
+            $model = 'llama3.2:1b';
+            $systemPrompt = "Generate concise search synonyms and related user intent terms for semantic retrieval. "
+                . "Return STRICT JSON only: {\"terms\":[\"term1\",\"term2\"]}. "
+                . "Rules: 6-12 terms, lowercase, short phrases allowed, no duplicates, no markdown, no explanations.";
+
+            $messages = [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => json_encode([
+                    'entity' => $entity,
+                    'text' => mb_substr($seedText, 0, 700),
+                ])],
+            ];
+
+            $response = $this->llmChat($messages, $model, null, null, ['num_predict' => 140, 'temperature' => 0.2]);
+            $content = trim((string) data_get($response, 'message.content', ''));
+            if ($content === '') {
+                return [];
+            }
+
+            $parsed = json_decode($content, true);
+            if (!is_array($parsed) || !is_array($parsed['terms'] ?? null)) {
+                return [];
+            }
+
+            $terms = [];
+            foreach ($parsed['terms'] as $term) {
+                $term = $this->normalizeSearchText((string) $term);
+                if ($term !== '' && mb_strlen($term) >= 2) {
+                    $terms[$term] = $term;
+                }
+            }
+
+            return array_slice(array_values($terms), 0, 12);
+        } catch (\Throwable $e) {
+            Log::warning('LLM semantic enrichment skipped', [
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+    }
+
+    private function extractSemanticTerms($value): array
+    {
+        if (is_array($value)) {
+            $parts = $value;
+        } else {
+            $raw = trim((string) $value);
+            if ($raw === '') {
+                return [];
+            }
+            $parts = preg_split('/[,;|\/\n]+/', $raw) ?: [];
+        }
+
+        $terms = [];
+        foreach ($parts as $part) {
+            $part = trim((string) $part);
+            if ($part === '') {
+                continue;
+            }
+
+            $norm = $this->normalizeSearchText($part);
+            if ($norm === '') {
+                continue;
+            }
+            $terms[] = $norm;
+        }
+
+        return $terms;
+    }
+
+    /**
+     * @internal Kept as no-op placeholder. Abbreviation expansion is now handled
+     * per-org via the "Search Synonyms" column in the CSV editor, which embeds
+     * synonyms directly into Qdrant vector content at import time — zero runtime cost.
+     */
+    private function expandMedicalAbbreviations(string $query): string
+    {
+        return $query;
     }
 
 }

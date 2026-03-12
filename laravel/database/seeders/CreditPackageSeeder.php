@@ -25,8 +25,8 @@ class CreditPackageSeeder extends Seeder
                 'name' => 'Starter Credits',
                 'slug' => 'starter-credits',
                 'description' => 'Low-cost entry plan for trying AI chat support',
-                'usd_price' => 19.00, // Entry level price point
-                'inr_price' => 1580.00, // 1580 INR (~83x conversion)
+                'usd_price' => 24.00,
+                'inr_price' => 2400.00,
                 'tokens' => 500000, // 500K tokens
                 'features' => [
                     '500 Thousand tokens',
@@ -43,7 +43,7 @@ class CreditPackageSeeder extends Seeder
                 'slug' => 'basic-credits',
                 'description' => 'Perfect for occasional usage with 12-month validity',
                 'usd_price' => 69.00, // ~40% more than Starter monthly rate per 1M
-                'inr_price' => 5730.00, // 5730 INR (~83x conversion)
+                'inr_price' => 6900.00,
                 'tokens' => 1000000, // 1M tokens
                 'features' => [
                     '1 Million tokens',
@@ -60,7 +60,7 @@ class CreditPackageSeeder extends Seeder
                 'slug' => 'standard-credits',
                 'description' => 'Great value for regular usage with 12-month validity',
                 'usd_price' => 129.00, // ~30% more than Starter for 2M
-                'inr_price' => 10700.00,
+                'inr_price' => 12900.00,
                 'tokens' => 2000000, // 2M tokens 
                 'features' => [
                     '2 Million tokens',
@@ -77,7 +77,7 @@ class CreditPackageSeeder extends Seeder
                 'slug' => 'premium-credits', 
                 'description' => 'Best value for heavy users with maximum flexibility',
                 'usd_price' => 299.00, // ~25% more than Pro monthly rate for 5M
-                'inr_price' => 24800.00,
+                'inr_price' => 29900.00,
                 'tokens' => 5000000, // 5M tokens
                 'features' => [
                     '5 Million tokens',

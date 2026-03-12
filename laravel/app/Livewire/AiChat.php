@@ -339,15 +339,20 @@ $nluUser = [
                 $uniquePayloads[$dedupKey] = $payload;
             }
             foreach ($uniquePayloads as $payload) {
-                // Only use description for context and logs
-                if (isset($payload['description']) && ($desc = trim($payload['description'])) !== '') {
-                    $context .= "Description: " . (strlen($desc) > 300 ? substr($desc, 0, 300) . '...' : $desc) . "\n";
+                // Use payload['content'] which contains the FULL data synced to Qdrant:
+                // name, price, artist, medium, size, availability, description, product_url, etc.
+                // This is what the LLM needs to give accurate, complete answers.
+                $fullContent = isset($payload['content']) ? trim($payload['content']) : '';
+                if ($fullContent !== '') {
+                    $context .= $fullContent . "\n";
+                } elseif (isset($payload['title']) && trim($payload['title']) !== '') {
+                    // Fallback: old records that may only have title+description
+                    $context .= "Name: " . trim($payload['title']) . "\n";
+                    $desc = isset($payload['description']) ? trim($payload['description']) : '';
+                    if ($desc !== '') {
+                        $context .= "Description: " . $desc . "\n";
+                    }
                 }
-                // Optionally include other key fields (e.g., name, category, keywords) if needed
-                // Example:
-                // if (isset($payload['name']) && ($name = trim($payload['name'])) !== '') {
-                //     $context .= "Name: $name\n";
-                // }
                 $context .= "\n";
             }
         } elseif (empty($shopifyContext)) {

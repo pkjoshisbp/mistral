@@ -101,8 +101,28 @@ class ChatMessage extends Model
     // Remove stray '>' that could be left from malformed tags
     $text = preg_replace('/\s*>\s*/', ' ', $text) ?? $text;
 
+    // === Numbered list normalisation (mirrors JS linkify() in widget/script.blade.php) ===
+    // Case 1: number at end of previous sentence without a proper newline
+    $text = preg_replace('/([^\n])\s*(\d+)\.\s*\n/u', "$1\n\n$2. ", $text);
+    // Case 2: number starts a line without a blank line before it
+    $text = preg_replace('/\n(\d+\.\s)/u', "\n\n$1", $text);
+    // Case 3: fully inline list — e.g. "...conversations) 2. Basic"
+    $text = preg_replace('/([.!?:,)])\s+(\d+\.\s+)(?=\D)/u', "$1\n\n$2", $text);
+
     // Escape early to prevent XSS; we'll inject safe anchors later
     $escaped = e($text);
+
+    // === Markdown bold / italic ===
+    $boldTokens = [];
+    $escaped = preg_replace_callback('/\*\*([^*\n]+?)\*\*/u', function ($m) use (&$boldTokens) {
+        $boldTokens[] = $m[1]; // content is already e()-escaped
+        return '__BOLD_' . (count($boldTokens) - 1) . '__';
+    }, $escaped) ?? $escaped;
+    $italicTokens = [];
+    $escaped = preg_replace_callback('/(?<!\*)\*([^*\n]+?)\*(?!\*)/u', function ($m) use (&$italicTokens) {
+        $italicTokens[] = $m[1];
+        return '__ITALIC_' . (count($italicTokens) - 1) . '__';
+    }, $escaped) ?? $escaped;
 
         // Placeholder emails to ensure they are NOT linked
         $emailPlaceholders = [];
@@ -164,7 +184,51 @@ class ChatMessage extends Model
             $processed = str_replace('__EMAIL_'.$i.'__', e($email), $processed);
         }
 
-        // Preserve newlines
-        return nl2br($processed);
+        // Restore bold / italic markdown
+        foreach ($boldTokens as $i => $inner) {
+            $processed = str_replace('__BOLD_'.$i.'__', '<strong>'.$inner.'</strong>', $processed);
+        }
+        foreach ($italicTokens as $i => $inner) {
+            $processed = str_replace('__ITALIC_'.$i.'__', '<em>'.$inner.'</em>', $processed);
+        }
+
+        // === Convert to paragraphs and numbered lists ===
+        $paragraphs = preg_split('/\n\n+/', $processed);
+        if ($paragraphs === false || count($paragraphs) <= 1) {
+            return nl2br($processed);
+        }
+        $htmlParts = [];
+        $listItems = [];
+        $flushList = function () use (&$listItems, &$htmlParts) {
+            if (!empty($listItems)) {
+                $liHtml = implode('', array_map(fn ($item) => '<li>' . $item . '</li>', $listItems));
+                $htmlParts[] = '<ol>' . $liHtml . '</ol>';
+                $listItems = [];
+            }
+        };
+        foreach ($paragraphs as $para) {
+            $para = trim($para);
+            if ($para === '') continue;
+            $lines = explode("\n", $para);
+            if (preg_match('/^\d+\.\s/', trim($lines[0] ?? ''))) {
+                // Numbered list block — collect items; consecutive list blocks are merged
+                $currentItem = '';
+                foreach ($lines as $ln) {
+                    $ln = trim($ln);
+                    if (preg_match('/^\d+\.\s+(.+)$/', $ln, $lm)) {
+                        if ($currentItem !== '') $listItems[] = $currentItem;
+                        $currentItem = $lm[1];
+                    } elseif ($ln !== '' && $currentItem !== '') {
+                        $currentItem .= ' ' . $ln;
+                    }
+                }
+                if ($currentItem !== '') $listItems[] = $currentItem;
+            } else {
+                $flushList(); // close any open list before regular paragraph
+                $htmlParts[] = '<p>' . nl2br(implode("\n", array_map('trim', $lines))) . '</p>';
+            }
+        }
+        $flushList();
+        return implode('', $htmlParts) ?: nl2br($processed);
     }
 }

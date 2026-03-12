@@ -13,7 +13,7 @@ class Dashboard extends Component
 
     public function mount()
     {
-        $this->organization = auth()->user()->organization;
+        $this->organization = auth()->user()->primaryOrganization();
         if ($this->organization) {
             $this->loadStats();
         }

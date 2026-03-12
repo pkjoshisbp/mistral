@@ -1,0 +1,163 @@
+Video: AI Chat Support — Promo (HD 720p, 16:9, ~165 sec)
+Output quality: hd  |  Aspect ratio: 16:9  |  Voice: female, Indian accent
+Global style prompt: Modern SaaS product promo, clean cinematic style, professional blue and purple brand tones, soft motion, technology atmosphere
+
+──────────────────────────────────────────────────────────────────────
+Scene 1 — Hook (10 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://nmgprod.s3.amazonaws.com/media/file/26/0e/6105ae88e4957f6fb70ac51077b1/cover_image__0sr4zaUP__online_search.jpeg.960x540_q85_crop_upscale.jpg
+https://cdn.shopify.com/s/files/1/0070/7032/files/8factory43.png?v=1759609785
+https://images.unsplash.com/photo-1556745757-8d76bdb6984b?w=1280&h=720&fit=crop
+
+Motion mode: preserve
+
+Prompt:
+frustrated website visitor searching for help on an ecommerce website, confused expression, modern home office, cinematic lighting, technology atmosphere
+
+Voiceover:
+Every day customers visit your website looking for answers… But many leave without finding what they need. They scroll, search, hesitate, and then disappear before ever reaching out.
+
+──────────────────────────────────────────────────────────────────────
+Scene 2 — Slow Support (15 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1553775282-20af80779df7?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=1280&h=720&fit=crop
+
+Prompt:
+website visitor waiting for live chat response, typing indicator bubble visible, customer looking impatient, modern laptop screen UI, cinematic lighting, slow cinematic dolly-in, subtle handheld parallax, natural motion
+
+Voiceover:
+Traditional customer support can’t keep up. Slow replies. Missed opportunities. Lost customers. Every delayed answer creates friction, and every unanswered question reduces trust.
+
+──────────────────────────────────────────────────────────────────────
+Scene 3 — Introducing AI Chat Support (15 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://images.unsplash.com/photo-1677442136019-21780ecad995?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=1280&h=720&fit=crop
+https://ai-chat.support/images/ai-chat-logo.png
+https://images.unsplash.com/photo-1531746790731-6c087fecd65a?w=1280&h=720&fit=crop
+
+Prompt:
+friendly female AI assistant appearing as digital hologram, modern technology interface, chat bubbles floating, blue glowing UI elements, futuristic tech environment, cinematic product reveal lighting, slow orbital camera move, gentle push-in, dynamic parallax motion
+
+Voiceover:
+What if your website could answer every question instantly? Introducing AI Chat Support. A smart assistant designed to guide visitors the moment they need help.
+
+──────────────────────────────────────────────────────────────────────
+Scene 4 — Instant AI Response (20 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://ai-chat.support/images/onboarding/widget-settings.png
+https://images.unsplash.com/photo-1551650975-87deedd944c3?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1563986768609-322da13575f3?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1596526131083-e8c633964948?w=1280&h=720&fit=crop
+
+Motion mode: preserve
+
+Prompt:
+AI chat widget responding instantly to customer question on a clean modern SaaS website, technology product demo style
+
+Voiceover:
+A powerful AI assistant trained on your website, documents, and data. It responds instantly — any time, any day. So your visitors get clarity immediately, without waiting in a queue.
+
+──────────────────────────────────────────────────────────────────────
+Scene 5 — Data Training (25 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1504868584819-f8e8b4b6d7e3?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1544383835-bda2bc66a55d?w=1280&h=720&fit=crop
+
+Prompt:
+AI system learning from multiple data sources simultaneously, website pages documents spreadsheets connecting to glowing AI core, neural network data streams, futuristic purple and blue visualization, cinematic tracking shot, flowing camera move, subtle depth motion
+
+Voiceover:
+It learns from your website pages, FAQs, spreadsheets, APIs and knowledge base. So it understands your business perfectly. That means answers stay relevant, accurate, and aligned with how your team already works.
+
+──────────────────────────────────────────────────────────────────────
+Scene 6 — Integrations (25 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1556742031-c6961e8560b0?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1523474253046-8cd2748b5fd2?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1280&h=720&fit=crop
+
+Prompt:
+AI chatbot seamlessly connected to multiple platforms, WhatsApp green interface on phone, Shopify ecommerce store dashboard, WordPress website backend panel, glowing digital connection lines between icons, slow camera sweep, cinematic motion, product-demo parallax
+
+Voiceover:
+Works with Shopify, WordPress, and any website. Even connects directly with WhatsApp conversations. You can support customers across channels with one consistent AI experience.
+
+──────────────────────────────────────────────────────────────────────
+Scene 7 — AI Brain (20 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://images.unsplash.com/photo-1617791160536-598cf32026fb?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1655720031554-a929595ffad7?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1676573393021-7ae7c6dc29dc?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1592478411213-6153e4ebc07d?w=1280&h=720&fit=crop
+
+Motion mode: preserve
+
+Prompt:
+AI neural network processing thousands of questions simultaneously, data nodes lighting up in sequence, deep blue and purple glow, particle streams flowing between nodes, cinematic depth of field, slow forward camera travel, layered parallax motion
+
+Voiceover:
+Powered by advanced AI models and intelligent vector search technology. It finds the right context fast, then responds in a natural and helpful way.
+
+──────────────────────────────────────────────────────────────────────
+Scene 8 — Business Success (25 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1553877522-43269d4ea984?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1521791136064-7986c2920216?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1559136555-9303baea8ebd?w=1280&h=720&fit=crop
+
+Prompt:
+successful business owner smiling while reviewing analytics dashboard with rising conversation charts, happy customers sending messages, modern startup office environment, warm golden cinematic lighting, slow dolly forward, natural body motion, cinematic parallax
+
+Voiceover:
+Your customers get answers instantly. You get happier customers and more conversions. Better conversations lead to stronger confidence and more completed actions.
+
+──────────────────────────────────────────────────────────────────────
+Scene 9 — Final CTA (15 sec)
+──────────────────────────────────────────────────────────────────────
+Images (one per line):
+https://ai-chat.support/images/ai-chat-logo.png
+https://ai-chat.support/images/ai-chat-logo-sm.png
+https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1516321165247-4aa89a48be55?w=1280&h=720&fit=crop
+https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=1280&h=720&fit=crop
+
+Motion mode: preserve
+
+Prompt:
+cinematic logo reveal for AI Chat Support brand, modern SaaS brand animation, neon blue accent lighting, professional brand identity reveal shot
+
+Voiceover:
+AI Chat Support. Turn your website into a 24/7 AI assistant. Start today at ai-chat.support and give every visitor a faster, smarter experience.
+
+──────────────────────────────────────────────────────────────────────
+Background Music Style
+──────────────────────────────────────────────────────────────────────
+Search in stock libraries for:
+"Technology Corporate Ambient"
+"Startup Innovation Music"
+"AI Futuristic Background"
+
+Voice: female, Indian accent preferred

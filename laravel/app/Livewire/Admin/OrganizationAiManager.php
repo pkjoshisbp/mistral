@@ -309,6 +309,7 @@ class OrganizationAiManager extends Component
             'ollama' => [
                 'llama' => [
                     'llama3:8b-instruct-q5_K_M' => 'Llama 3 8B Instruct (Vast.ai)',
+                    'mistral-nemo:latest' => 'Mistral Nemo (Vast.ai)',
                     'llama3.2:3b' => 'Llama 3.2 3B (Fast)',
                     'llama3.2:1b' => 'Llama 3.2 1B (Fastest)', 
                     'llama3.1:8b' => 'Llama 3.1 8B (Balanced)',

@@ -178,8 +178,8 @@
 
                             <div class="mb-3">
                                 <strong>INR Equivalent (100x):</strong><br>
-                                Monthly: ₹{{ number_format($plan->monthly_price * 83, 0) }}<br>
-                                Yearly: ₹{{ number_format($plan->yearly_price * 83, 0) }}
+                                Monthly: ₹{{ number_format($plan->monthly_price * 100, 0) }}<br>
+                                Yearly: ₹{{ number_format($plan->yearly_price * 100, 0) }}
                             </div>
                         </div>
                     </div>

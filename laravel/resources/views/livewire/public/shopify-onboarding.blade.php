@@ -34,9 +34,18 @@
                             </div>
                         </div>
                         
-                        <div class="alert alert-info border-0">
-                            <i class="fas fa-info-circle me-2"></i>
-                            <strong>Important:</strong> The chat widget is not yet visible on your store. You need to enable it in your theme editor (next step).
+                        <div class="alert alert-warning border-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>One more step!</strong> The chat widget is not yet visible on your store. You need to enable it in your Shopify theme editor.
+                        </div>
+
+                        <!-- Primary CTA - activate right from step 1 -->
+                        <div class="text-center my-4 p-4 bg-success bg-opacity-10 rounded border border-success">
+                            <h5 class="mb-2 text-success"><i class="fas fa-toggle-on me-2"></i>Activate Your Chat Widget Now</h5>
+                            <p class="text-muted small mb-3">This link opens Shopify with the toggle <strong>already turned ON</strong>. You only need to click <strong>Save</strong>.</p>
+                            <a href="{{ $deepLink }}" target="_blank" class="btn btn-success btn-lg px-5">
+                                <i class="fas fa-external-link-alt me-2"></i>Enable Widget in Theme Editor
+                            </a>
                         </div>
                         
                         <div class="row mt-4">
@@ -81,19 +90,22 @@
                             </div>
                         </div>
                         
-                        <div class="alert alert-primary border-0 mb-4">
-                            <i class="fas fa-lightbulb me-2"></i>
-                            <strong>Shopify Requirement:</strong> All theme app extensions must be enabled by you in the theme editor. The app cannot automatically add itself to your store.
+                        <div class="alert alert-warning border-0 mb-4">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>Action Required:</strong> You must click the button below to enable the widget. It takes only 2 clicks — the link will pre-activate the toggle for you. Just click <strong>Save</strong> in the theme editor.
                         </div>
                         
                         <!-- Quick Start Button -->
                         <div class="text-center mb-4 p-4 bg-success bg-opacity-10 rounded border border-success">
-                            <h5 class="mb-3 text-success"><i class="fas fa-rocket me-2"></i>Quick Start (Recommended)</h5>
-                            <a href="{{ $deepLink }}" target="_blank" class="btn btn-success btn-lg">
-                                <i class="fas fa-external-link-alt me-2"></i>
-                                Open Theme Editor & Activate Widget
+                            <h5 class="mb-3 text-success"><i class="fas fa-rocket me-2"></i>Enable Widget — 2 Clicks!</h5>
+                            <a href="{{ $deepLink }}" target="_blank" class="btn btn-success btn-lg px-5">
+                                <i class="fas fa-toggle-on me-2"></i>
+                                Activate Widget in Theme Editor
                             </a>
-                            <p class="text-muted mt-3 mb-0 small">This link opens your current theme with the AI Chat Support widget ready to enable</p>
+                            <div class="mt-3">
+                                <p class="mb-1 fw-bold text-dark">The link opens Shopify with the widget toggle <span class="text-success">already turned ON</span>.</p>
+                                <p class="text-muted mb-0 small">All you have to do is click <strong>Save</strong> in the top-right corner of the theme editor — that's it!</p>
+                            </div>
                         </div>
                         
                         <div class="accordion mb-4" id="detailedInstructions">
