@@ -233,76 +233,103 @@
             </div>
         @endif
 
+        <!-- Filter Bar -->
+        <div class="row mb-3 align-items-center">
+            <div class="col-12 col-md-6 mb-2 mb-md-0">
+                <div class="input-group input-group-sm">
+                    <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div>
+                    <input type="text" class="form-control" placeholder="Search name, slug or email…" wire:model.live="search">
+                    @if($search)
+                        <div class="input-group-append">
+                            <button class="btn btn-outline-secondary" type="button" wire:click="$set('search','')"><i class="fas fa-times"></i></button>
+                        </div>
+                    @endif
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <select class="form-control form-control-sm" wire:model.live="filterStatus">
+                    <option value="">All Statuses</option>
+                    <option value="active">Active only</option>
+                    <option value="inactive">Inactive only</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-3 text-right text-muted small">
+                {{ count($organizations) }} organization{{ count($organizations) !== 1 ? 's' : '' }}
+            </div>
+        </div>
+
         <!-- Organizations List -->
         @if(count($organizations) > 0)
-            <div class="row">
-                @foreach($organizations as $org)
-                    <div class="col-md-6 mb-3">
-                        <div class="card card-outline card-primary">
-                            <div class="card-header">
-                                <h5 class="card-title">{{ $org->name }}</h5>
-                                <div class="card-tools">
-                                    <button wire:click="editOrganization({{ $org->id }})" class="btn btn-tool text-warning" title="Edit">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <button wire:click="deleteOrganization({{ $org->id }})" 
-                                            onclick="return confirm('Are you sure you want to delete this organization? This will remove all associated data, users, and Qdrant collections. This action cannot be undone!')" 
-                                            class="btn btn-tool text-danger" 
-                                            title="Delete">
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="card-body">
-                                <p class="text-muted">{{ $org->description ?: 'No description provided' }}</p>
-                                
-                                <div class="row">
-                                    <div class="col-6">
-                                        <strong>Slug:</strong> <code>{{ $org->slug }}</code>
-                                    </div>
-                                    <div class="col-6">
-                                        <strong>Users:</strong> {{ $org->users->count() }}
-                                    </div>
-                                </div>
-                                
-                                @php $displayWebsite = $org->website ?? $org->website_url; @endphp
-                                @if($displayWebsite)
-                                    <div class="mt-2">
-                                        <strong>Website:</strong> 
-                                        <a href="{{ $displayWebsite }}" target="_blank" class="text-primary">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover table-sm mb-0">
+                    <thead class="thead-dark">
+                        <tr>
+                            <th style="width:30px">#</th>
+                            <th>Organization</th>
+                            <th class="d-none d-md-table-cell">Slug</th>
+                            <th class="d-none d-lg-table-cell">Website</th>
+                            <th class="d-none d-lg-table-cell">Contact</th>
+                            <th style="width:60px" class="text-center">Users</th>
+                            <th style="width:80px">Status</th>
+                            <th style="width:90px">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($organizations as $index => $org)
+                            <tr>
+                                <td class="text-muted">{{ $index + 1 }}</td>
+                                <td>
+                                    <strong>{{ $org->name }}</strong>
+                                    @if($org->description)
+                                        <small class="text-muted d-block">{{ Str::limit($org->description, 70) }}</small>
+                                    @endif
+                                    <small class="d-md-none text-muted"><code>{{ $org->slug }}</code></small>
+                                </td>
+                                <td class="d-none d-md-table-cell"><code>{{ $org->slug }}</code></td>
+                                <td class="d-none d-lg-table-cell">
+                                    @php $displayWebsite = $org->website ?? $org->website_url; @endphp
+                                    @if($displayWebsite)
+                                        <a href="{{ $displayWebsite }}" target="_blank" class="text-primary" style="word-break:break-all;font-size:12px">
                                             {{ $displayWebsite }}
                                         </a>
-                                    </div>
-                                @endif
-
-                                @if($org->contact_email || $org->contact_phone)
-                                    <div class="mt-2">
-                                        <strong>Contact:</strong>
-                                        <span>{{ $org->contact_email ?? '—' }}</span>
-                                        @if($org->contact_phone)
-                                            <span class="ml-2">| {{ $org->contact_phone }}</span>
-                                        @endif
-                                    </div>
-                                @endif
-                                
-                                <div class="mt-2">
-                                    <strong>Collection:</strong> <code>{{ $org->collection_name }}</code>
-                                </div>
-                                
-                                <div class="mt-2">
-                                    <strong>Status:</strong> 
+                                    @else
+                                        <span class="text-muted">—</span>
+                                    @endif
+                                </td>
+                                <td class="d-none d-lg-table-cell" style="font-size:12px">
+                                    @if($org->contact_email)
+                                        <div>{{ $org->contact_email }}</div>
+                                    @endif
+                                    @if($org->contact_phone)
+                                        <div>{{ $org->contact_phone }}</div>
+                                    @endif
+                                    @if(!$org->contact_email && !$org->contact_phone)
+                                        <span class="text-muted">—</span>
+                                    @endif
+                                </td>
+                                <td class="text-center">{{ $org->users->count() }}</td>
+                                <td>
                                     @if($org->is_active)
                                         <span class="badge badge-success">Active</span>
                                     @else
                                         <span class="badge badge-danger">Inactive</span>
                                     @endif
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                @endforeach
-            </div>
-        @else
+                                </td>
+                                <td>
+                                    <button wire:click="editOrganization({{ $org->id }})" class="btn btn-xs btn-warning" title="Edit">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button wire:click="deleteOrganization({{ $org->id }})" 
+                                            onclick="return confirm('Are you sure you want to delete this organization? This will remove all associated data, users, and Qdrant collections. This action cannot be undone!')"
+                                            class="btn btn-xs btn-danger" 
+                                            title="Delete">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
             <div class="text-center py-4">
                 <i class="fas fa-building fa-3x text-muted mb-3"></i>
                 <h5 class="text-muted">No organizations created yet.</h5>

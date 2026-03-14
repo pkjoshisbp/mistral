@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, BackgroundTasks
 import httpx
 import logging
@@ -32,9 +33,9 @@ MODEL_WARMED = False
 # Config
 DEFAULT_EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")  # Fast dedicated embedding model
 FALLBACK_EMBED_MODEL = os.getenv("FALLBACK_EMBED_MODEL", "llama3.2:1b")  # Fallback if nomic fails
-DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3:8b-instruct-q5_K_M")  # vast.ai primary model via tunnel
+DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.1:8b")  # vast.ai primary model via tunnel
 FALLBACK_CHAT_MODEL = os.getenv("FALLBACK_CHAT_MODEL", "llama3.2:3b")  # Fast local fallback
-EMBED_TIMEOUT_SEC = float(os.getenv("EMBED_TIMEOUT", "15"))
+EMBED_TIMEOUT_SEC = float(os.getenv("EMBED_TIMEOUT", "25"))  # 25s handles nomic-embed-text cold-start (model load ~20s)
 MAX_EMBED_CHARS = int(os.getenv("MAX_EMBED_CHARS", "1800"))
 EMBED_CONCURRENCY = int(os.getenv("EMBED_CONCURRENCY", "8"))  # Max concurrent embed endpoint calls
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "100"))  # Items per /api/embed batch call
@@ -65,7 +66,7 @@ MODELS_DIR = os.getenv("MODELS_DIR", "/var/www/clients/client1/web64/web/models"
 #   Free headroom:              ~4,500–7,000 MiB
 #
 # Priority order (Ollama only loads one large model at a time via LRU eviction):
-#   1. llama3.1:8b  or llama3:8b-instruct-q5_K_M  — primary chat model
+#   1. llama3.1:8b  — primary chat model
 #   2. llama3.2:3b                                  — fast fallback
 #   3. mistral-nemo                                 — crawl/indexing (lower priority)
 #
@@ -73,7 +74,6 @@ MODELS_DIR = os.getenv("MODELS_DIR", "/var/www/clients/client1/web64/web/models"
 # Running mistral-nemo + Whisper simultaneously ≈ 10.2 GB → fits with ~6 GB free.
 # Do NOT run all three large models simultaneously — Ollama handles LRU eviction.
 VASTAI_MODELS = [
-    "llama3:8b-instruct-q5_K_M",
     "llama3.1:8b",
     "mistral-nemo",
     "mistral-nemo:latest",
@@ -242,7 +242,90 @@ embed_semaphore = asyncio.Semaphore(EMBED_CONCURRENCY)
 # keeps the GPU partly free for Ollama chat inference between scenes.
 _comfyui_semaphore = asyncio.Semaphore(1)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ──
+    global MODEL_WARMED
+    try:
+        logging.info("Cleaning up any stuck ollama processes...")
+        cleanup_stuck_ollama_processes()
+
+        asyncio.create_task(periodic_process_cleanup())
+        logging.info("Started background process monitoring")
+
+        asyncio.create_task(periodic_vastai_healthcheck())
+        logging.info("Started Vast.ai healthcheck monitor")
+
+        asyncio.create_task(periodic_embed_keepalive())
+        logging.info("Started embed keepalive task")
+
+        logging.info("Warming up models...")
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            await client.get(f"{OLLAMA_URL}/api/tags")
+
+            embed_resp = await client.post(
+                f"{OLLAMA_URL}/api/embeddings",
+                json={"model": DEFAULT_EMBED_MODEL, "prompt": "warmup", "keep_alive": "24h"}
+            )
+
+            chat_url = get_ollama_url(DEFAULT_CHAT_MODEL)
+            try:
+                chat_resp = await client.post(
+                    f"{chat_url}/api/chat",
+                    json={
+                        "model": DEFAULT_CHAT_MODEL,
+                        "messages": [{"role": "user", "content": "warmup"}],
+                        "stream": False
+                    }
+                )
+                logging.info(f"Default chat model warmed: {DEFAULT_CHAT_MODEL} url={chat_url} status={chat_resp.status_code}")
+            except Exception as ce:
+                logging.warning(f"Default chat warm failed: {DEFAULT_CHAT_MODEL} url={chat_url} error={ce}")
+
+            if FALLBACK_EMBED_MODEL != DEFAULT_EMBED_MODEL:
+                try:
+                    fallback_embed_resp = await client.post(
+                        f"{OLLAMA_URL}/api/embeddings",
+                        json={"model": FALLBACK_EMBED_MODEL, "prompt": "warmup"}
+                    )
+                    logging.info(f"Fallback embed model warmed: {FALLBACK_EMBED_MODEL} status={fallback_embed_resp.status_code}")
+                except Exception as fe:
+                    logging.warning(f"Fallback embed warm failed: {FALLBACK_EMBED_MODEL} error={fe}")
+
+            if FALLBACK_CHAT_MODEL != DEFAULT_CHAT_MODEL:
+                try:
+                    fallback_chat_url = get_ollama_url(FALLBACK_CHAT_MODEL)
+                    fallback_chat_resp = await client.post(
+                        f"{fallback_chat_url}/api/chat",
+                        json={
+                            "model": FALLBACK_CHAT_MODEL,
+                            "messages": [{"role": "user", "content": "warmup"}],
+                            "stream": False,
+                            "keep_alive": "0"  # Don't hold in RAM — nomic-embed-text has priority
+                        }
+                    )
+                    logging.info(f"Fallback chat model verified (not held in RAM): {FALLBACK_CHAT_MODEL} url={fallback_chat_url} status={fallback_chat_resp.status_code}")
+                except Exception as fc:
+                    logging.warning(f"Fallback chat warm failed: {FALLBACK_CHAT_MODEL} error={fc}")
+
+            MODEL_WARMED = True
+            logging.info(
+                "Models warmed up successfully: default_embed=%s default_chat=%s fallback_embed=%s fallback_chat=%s",
+                DEFAULT_EMBED_MODEL,
+                DEFAULT_CHAT_MODEL,
+                FALLBACK_EMBED_MODEL if FALLBACK_EMBED_MODEL != DEFAULT_EMBED_MODEL else "(same)",
+                FALLBACK_CHAT_MODEL if FALLBACK_CHAT_MODEL != DEFAULT_CHAT_MODEL else "(same)"
+            )
+    except Exception as e:
+        logging.error(f"Model warmup failed: {str(e)}")
+
+    yield  # Application runs here
+
+    # ── Shutdown ──
+    await stop_llamacpp_server()
+
+
+app = FastAPI(lifespan=lifespan)
 qdrant = QdrantClient(host="127.0.0.1", port=6333)
 # OLLAMA_URL already defined at line 37 - don't override it
 
@@ -1938,11 +2021,6 @@ async def _process_video_job(job_id: str):
     finally:
         shutil.rmtree(scene_dir, ignore_errors=True)
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources when FastAPI shuts down"""
-    await stop_llamacpp_server()
-
 # Helper functions for llama.cpp server management
 async def start_llamacpp_server(model_path: str) -> bool:
     """Start llama-server with the specified model"""
@@ -2083,6 +2161,26 @@ async def restart_vastai_tunnel(reason: str) -> None:
                 logging.info("Vast.ai tunnel restart completed.")
         except Exception as e:
             logging.error("Vast.ai tunnel restart exception: %s", str(e))
+
+async def periodic_embed_keepalive() -> None:
+    """Ping nomic-embed-text every 4 minutes to keep it loaded in local Ollama RAM.
+    Prevents the 15-second cold-start that occurs when the model is evicted."""
+    await asyncio.sleep(30)  # Wait for initial warmup to complete first
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{OLLAMA_URL}/api/embeddings",
+                    json={"model": DEFAULT_EMBED_MODEL, "prompt": "keepalive", "keep_alive": "24h"}
+                )
+                if resp.status_code == 200:
+                    logging.debug(f"embed keepalive ping ok model={DEFAULT_EMBED_MODEL}")
+                else:
+                    logging.warning(f"embed keepalive ping failed status={resp.status_code}")
+        except Exception as e:
+            logging.warning(f"embed keepalive ping error: {e}")
+        await asyncio.sleep(240)  # ping every 4 minutes
+
 
 async def periodic_vastai_healthcheck() -> None:
     """Periodically verify the vast.ai tunnel and restart if needed."""
@@ -2351,7 +2449,7 @@ async def _generate_embedding(model: str, text: str, start_time: float):
         async with httpx.AsyncClient(timeout=EMBED_TIMEOUT_SEC) as client:
             resp = await client.post(
                 f"{embed_url}/api/embeddings",
-                json={"model": model, "prompt": text}
+                json={"model": model, "prompt": text, "keep_alive": "1h"}
             )
             if resp.status_code != 200:
                 raise HTTPException(status_code=500, detail=f"Ollama API error ({model}): {resp.text}")
@@ -3542,8 +3640,9 @@ async def llm_chat(request: Request):
     last_error = None
     for url_to_try, model_to_use in configs_to_try:
         try:
-            # Use shorter timeout for Vast.ai to enable fast fallback
-            timeout = 15.0 if url_to_try == OLLAMA_URL_VASTAI else 60.0
+            # 45s for Vast.ai (large models need 6-12s load + inference on cold start)
+            # 60s for local fallback
+            timeout = 45.0 if url_to_try == OLLAMA_URL_VASTAI else 60.0
             attempt_start = time.time()
             async with httpx.AsyncClient(timeout=timeout) as client:
                 payload = {
@@ -3576,21 +3675,21 @@ async def llm_chat(request: Request):
             
                 # Estimate token usage (simple approximation: ~4 chars per token)
                 input_text = " ".join([msg.get("content", "") for msg in messages])
-                output_text = result.get("message", {}).get("content", "")
+                message_obj = result.get("message", {})
+                output_text = message_obj.get("content", "") or ""
                 input_tokens = len(input_text) // 4
                 output_tokens = len(output_text) // 4
                 total_tokens = input_tokens + output_tokens
             
                 response_payload = {
-                    "message": result.get("message", {}),
+                    "message": message_obj,
                     "usage": {
                         "prompt_tokens": input_tokens,
                         "completion_tokens": output_tokens,
                         "total_tokens": total_tokens
                     }
                 }
-                logging.info(f"Returning payload: {response_payload}")
-            
+
                 return response_payload
                 
         except Exception as e:
@@ -3801,90 +3900,6 @@ async def stream_chat(request: Request):
                 yield f"data: {json.dumps(error_data)}\n\n"
     
     return StreamingResponse(generate(), media_type="text/event-stream")
-
-@app.on_event("startup")
-async def warm_model():
-    global MODEL_WARMED
-    try:
-        # Clean up any existing stuck processes before starting
-        logging.info("Cleaning up any stuck ollama processes...")
-        cleanup_stuck_ollama_processes()
-        
-        # Start background process monitoring task
-        asyncio.create_task(periodic_process_cleanup())
-        logging.info("Started background process monitoring")
-
-        # Start Vast.ai healthcheck monitor
-        asyncio.create_task(periodic_vastai_healthcheck())
-        logging.info("Started Vast.ai healthcheck monitor")
-        
-        logging.info("Warming up models...")
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            # Check available models
-            await client.get(f"{OLLAMA_URL}/api/tags")
-            
-            # Warm up embedding model
-            embed_resp = await client.post(
-                f"{OLLAMA_URL}/api/embeddings",
-                json={"model": DEFAULT_EMBED_MODEL, "prompt": "warmup"}
-            )
-            
-            # Warm up chat model — route to correct host (Vast.ai for GPU models, local otherwise)
-            chat_url = get_ollama_url(DEFAULT_CHAT_MODEL)
-            try:
-                chat_resp = await client.post(
-                    f"{chat_url}/api/chat",
-                    json={
-                        "model": DEFAULT_CHAT_MODEL,
-                        "messages": [{"role": "user", "content": "warmup"}],
-                        "stream": False
-                    }
-                )
-                logging.info(f"Default chat model warmed: {DEFAULT_CHAT_MODEL} url={chat_url} status={chat_resp.status_code}")
-            except Exception as ce:
-                logging.warning(f"Default chat warm failed: {DEFAULT_CHAT_MODEL} url={chat_url} error={ce}")
-
-            # Optionally warm fallback embedding model (if different)
-            fallback_embed_resp = None
-            if FALLBACK_EMBED_MODEL != DEFAULT_EMBED_MODEL:
-                try:
-                    fallback_embed_resp = await client.post(
-                        f"{OLLAMA_URL}/api/embeddings",
-                        json={"model": FALLBACK_EMBED_MODEL, "prompt": "warmup"}
-                    )
-                    logging.info(f"Fallback embed model warmed: {FALLBACK_EMBED_MODEL} status={fallback_embed_resp.status_code}")
-                except Exception as fe:
-                    logging.warning(f"Fallback embed warm failed: {FALLBACK_EMBED_MODEL} error={fe}")
-
-            # Optionally warm fallback chat model (if different) — always local
-            fallback_chat_resp = None
-            if FALLBACK_CHAT_MODEL != DEFAULT_CHAT_MODEL:
-                try:
-                    fallback_chat_url = get_ollama_url(FALLBACK_CHAT_MODEL)
-                    fallback_chat_resp = await client.post(
-                        f"{fallback_chat_url}/api/chat",
-                        json={
-                            "model": FALLBACK_CHAT_MODEL,
-                            "messages": [{"role": "user", "content": "warmup"}],
-                            "stream": False
-                        }
-                    )
-                    logging.info(f"Fallback chat model warmed: {FALLBACK_CHAT_MODEL} url={fallback_chat_url} status={fallback_chat_resp.status_code}")
-                except Exception as fc:
-                    logging.warning(f"Fallback chat warm failed: {FALLBACK_CHAT_MODEL} error={fc}")
-
-            MODEL_WARMED = True
-            logging.info(
-                "Models warmed up successfully: default_embed=%s default_chat=%s fallback_embed=%s fallback_chat=%s",
-                DEFAULT_EMBED_MODEL,
-                DEFAULT_CHAT_MODEL,
-                FALLBACK_EMBED_MODEL if FALLBACK_EMBED_MODEL != DEFAULT_EMBED_MODEL else "(same)",
-                FALLBACK_CHAT_MODEL if FALLBACK_CHAT_MODEL != DEFAULT_CHAT_MODEL else "(same)"
-            )
-                
-    except Exception as e:
-        logging.error(f"Model warmup failed: {str(e)}")
-        pass
 
 @app.post("/store_data")
 async def store_data(request: Request):

@@ -20,6 +20,7 @@ class ChatHistoryManager extends Component
     public $showDetails = [];
     public $focusConversation;
     public $replyMessage = [];
+    public $modalConversation = null;
 
     protected $queryString = [
         'search' => ['except' => ''],
@@ -51,6 +52,18 @@ class ChatHistoryManager extends Component
         } else {
             $this->showDetails[$id] = true;
         }
+    }
+
+    public function openConversationModal($id)
+    {
+        $this->modalConversation = ChatConversation::with(['messages', 'organization'])->find($id);
+        $this->dispatch('show-chat-modal');
+    }
+
+    public function closeConversationModal()
+    {
+        $this->modalConversation = null;
+        $this->dispatch('hide-chat-modal');
     }
 
     public function exportSession($sessionId)

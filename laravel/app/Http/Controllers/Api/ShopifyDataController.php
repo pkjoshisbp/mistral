@@ -70,7 +70,9 @@ class ShopifyDataController extends Controller
 
             switch ($queryType) {
                 case 'products':
-                    $data = $this->handleProductQuery($query);
+                    $productResult = $this->handleProductQuery($query);
+                    $data = $productResult['results'] ?? $productResult;
+                    $specificMatch = $productResult['specific_match'] ?? true;
                     $formattedText = $this->shopifyService->formatForAI($data, 'products');
                     break;
 
@@ -102,6 +104,7 @@ class ShopifyDataController extends Controller
                 'query_type' => $queryType,
                 'data' => $data,
                 'formatted_text' => $formattedText,
+                'specific_match' => $specificMatch ?? true,
             ]);
 
         } catch (\Exception $e) {
@@ -152,18 +155,27 @@ class ShopifyDataController extends Controller
     protected function handleProductQuery(string $query)
     {
         $original = $query;
+
+        // Normalize spec-format separators before LLM extraction
+        // e.g. "JACKET,APPRON: SIZE 29 IN" → "JACKET APPRON SIZE 29 IN"
+        $normalizedQuery = preg_replace('/[,;:]+/', ' ', $query);
+        $normalizedQuery = preg_replace('/\s+/', ' ', $normalizedQuery);
+        $normalizedQuery = trim($normalizedQuery);
         
         // Use LLM to extract product keyword(s) from natural language
-        $keywords = $this->extractProductKeyword($query);
+        $keywords = $this->extractProductKeyword($normalizedQuery);
 
         if (!empty($keywords)) {
             Log::info('[SHOPIFY] Specific product search', ['original' => $original, 'keywords' => $keywords]);
             $results = $this->shopifyService->searchProducts($keywords, 10);
-            if (!empty($results)) {
-                return $results;
+            $maxScore = $this->shopifyService->getLastSearchMaxScore();
+
+            // Score >= 5 means at least one title-level match (not just generic keyword in description)
+            if (!empty($results) && $maxScore >= 5) {
+                return ['results' => $results, 'specific_match' => true];
             }
 
-            $fallbackKeywords = $this->fallbackKeywordExtraction($query);
+            $fallbackKeywords = $this->fallbackKeywordExtraction($normalizedQuery);
             if (!empty($fallbackKeywords) && strtolower($fallbackKeywords) !== strtolower($keywords)) {
                 Log::info('[SHOPIFY] Product search fallback keywords', [
                     'original' => $original,
@@ -172,27 +184,84 @@ class ShopifyDataController extends Controller
                 ]);
 
                 $fallbackResults = $this->shopifyService->searchProducts($fallbackKeywords, 10);
-                if (!empty($fallbackResults)) {
-                    return $fallbackResults;
+                $fallbackMaxScore = $this->shopifyService->getLastSearchMaxScore();
+                if (!empty($fallbackResults) && $fallbackMaxScore >= 5) {
+                    return ['results' => $fallbackResults, 'specific_match' => true];
+                }
+            }
+
+            // Last resort: extract English-looking words embedded in a foreign-language query.
+            // e.g. "say lagi ada kebutuhan apron untuk lab kimia" contains "apron" and "lab".
+            $embeddedEnglish = $this->extractEmbeddedEnglishWords($original);
+            if (!empty($embeddedEnglish)
+                && strtolower($embeddedEnglish) !== strtolower((string) $keywords)
+                && strtolower($embeddedEnglish) !== strtolower((string) $fallbackKeywords)
+            ) {
+                Log::info('[SHOPIFY] Embedded English word search', [
+                    'original' => $original,
+                    'embedded' => $embeddedEnglish,
+                ]);
+                $embeddedResults = $this->shopifyService->searchProducts($embeddedEnglish, 10);
+                $embeddedMaxScore = $this->shopifyService->getLastSearchMaxScore();
+                if (!empty($embeddedResults) && $embeddedMaxScore >= 5) {
+                    return ['results' => $embeddedResults, 'specific_match' => true];
                 }
             }
         }
 
-        Log::info('[SHOPIFY] General product query fallback', [
+        Log::info('[SHOPIFY] General product query fallback - no specific match', [
             'original' => $original,
             'keywords' => $keywords ?: 'none',
         ]);
 
-        return $this->shopifyService->getAllProducts(10);
+        // Return general catalog but flag it as no specific match so AI can ask for clarification
+        return ['results' => $this->shopifyService->getAllProducts(10), 'specific_match' => false];
     }
 
     /**
      * Use LLM to extract product name/keyword from natural language query
      */
+    /**
+     * Detect the likely language of a short query string.
+     * Uses only regex pattern matching — zero latency, no API call.
+     * Returns a BCP-47 language tag or 'en' as default.
+     */
+    protected function detectLanguage(string $text): string
+    {
+        $lower = strtolower($text);
+
+        // Indonesian / Malay (common function words and product-related words)
+        if (preg_match('/\b(ada|untuk|dengan|adalah|yang|tidak|ini|itu|bisa|dari|saya|kami|lagi|mau|atau|dan|dalam|kebutuhan|butuh|cari|harga|stok|barang|produk|pesan|tersedia)\b/', $lower)) {
+            return 'id'; // Indonesian
+        }
+
+        // Spanish / Portuguese
+        if (preg_match('/\b(necesito|tengo|busco|precio|comprar|disponible|producto|quiero|hola|gracias|necesita|tener|tiene)\b/', $lower)) {
+            return 'es';
+        }
+
+        // Arabic script
+        if (preg_match('/[\x{0600}-\x{06FF}]/u', $text)) {
+            return 'ar';
+        }
+
+        // Chinese characters
+        if (preg_match('/[\x{4E00}-\x{9FFF}]/u', $text)) {
+            return 'zh';
+        }
+
+        return 'en';
+    }
+
     protected function extractProductKeyword(string $query): ?string
     {
         try {
-            $prompt = "Extract ONLY the product name or category being asked about. Ignore price/quality adjectives like 'cheapest', 'best', 'lowest'. Return just the product type in 1-3 words.\n\nExamples:\n\"do you have snowboard in stock?\" → snowboard\n\"what is the cheapest snowboard?\" → snowboard\n\"what is the lowest price for a gift card?\" → gift card\n\"show me your best ski wax products\" → ski wax\n\"looking for hydrogen model\" → hydrogen\n\"what products do you sell?\" → [empty]\n\"tell me about featured items\" → [empty]\n\nQuery: \"$query\"\nProduct type:";
+            $detectedLang = $this->detectLanguage($query);
+            $langHint = $detectedLang !== 'en'
+                ? "NOTE: The query appears to be in language code '{$detectedLang}'. Translate the product need to English.\n\n"
+                : '';
+
+            $prompt = "You are extracting a product type from a customer query. The query may be in ANY language.\n\n{$langHint}Rules:\n- Extract ONLY the product type/category in English\n- If query is in another language (Indonesian, Spanish, etc.), translate the product need to English\n- Ignore size, color, material, and specification details\n- Ignore price/quality adjectives like 'cheapest', 'best', 'lowest'\n- Return just 1-3 English words\n- Return [empty] if no specific product is mentioned\n\nExamples:\n\"do you have snowboard in stock?\" → snowboard\n\"say lagi ada kebutuhan apron untuk lab kimia\" → lab apron\n\"JACKET APPRON SIZE 29 IN X 35 IN COLOR BLACK FOR CHEMICAL LABORATORY\" → lab jacket\n\"necesito guantes de laboratorio\" → lab gloves\n\"what is the cheapest snowboard?\" → snowboard\n\"what is the lowest price for a gift card?\" → gift card\n\"show me your best ski wax products\" → ski wax\n\"what products do you sell?\" → [empty]\n\"tell me about featured items\" → [empty]\n\nQuery: \"$query\"\nProduct type:";
             
             $response = \Illuminate\Support\Facades\Http::timeout(5)->post(config('services.ai_agent.url') . '/extract', [
                 'prompt' => $prompt,
@@ -246,6 +315,44 @@ class ShopifyDataController extends Controller
     }
 
     /**
+     * Extract English words embedded inside a non-English query.
+     * Useful for multilingual queries like "ada kebutuhan apron untuk lab kimia"
+     * where "apron" and "lab" are English product keywords mixed into Indonesian.
+     * Only picks ASCII-alpha tokens >= 4 chars that are not common stop words.
+     */
+    protected function extractEmbeddedEnglishWords(string $query): ?string
+    {
+        $stopWords = [
+            'tell','show','have','does','what','which','this','that','they',
+            'with','from','your','will','also','more','need','want','like',
+            'some','into','been','were','when','then','than','such','each',
+        ];
+
+        $tokens = preg_split('/[\s,;:]+/', strtolower($query));
+        $english = [];
+        foreach ($tokens as $token) {
+            $token = preg_replace('/[^a-z]/', '', $token);
+            if (strlen($token) >= 4
+                && preg_match('/^[a-z]+$/', $token)     // pure ASCII letters = likely English
+                && !in_array($token, $stopWords, true)
+                && !preg_match('/^(yang|yang|untuk|lagi|kimia|dengan|atau|saya|kami|ada|kebutuhan|dari|pada|tidak|bisa|juga|hanya|sama|oleh|atas|bawah|depan|belakang)$/', $token) // known Indonesian stop words
+            ) {
+                $english[] = $token;
+            }
+        }
+
+        if (empty($english)) {
+            return null;
+        }
+
+        // Take up to 2 most distinctive (longest) tokens as product keywords
+        usort($english, fn($a, $b) => strlen($b) - strlen($a));
+        $best = array_slice(array_unique($english), 0, 2);
+        $result = implode(' ', $best);
+        return strlen($result) >= 3 ? $result : null;
+    }
+
+    /**
      * Fallback keyword extraction using regex (if LLM fails)
      */
     protected function fallbackKeywordExtraction(string $query): ?string
@@ -269,10 +376,28 @@ class ShopifyDataController extends Controller
      */
     protected function handleOrderQuery(string $query)
     {
-        // Extract order number
-        if (preg_match('/#?(\d+)/', $query, $matches)) {
-            $orderNumber = $matches[1];
-            return $this->shopifyService->searchOrder($orderNumber);
+        $orderIdentifier = null;
+
+        // Match alphanumeric order IDs first (e.g. SPF2606, DR-1023, ABC123)
+        if (preg_match('/\b([A-Z]{1,5}[-]?\d{3,})\b/i', $query, $matches)) {
+            $orderIdentifier = strtoupper($matches[1]);
+        } elseif (preg_match('/#(\d{3,})/', $query, $matches)) {
+            // Explicit # prefix (e.g. #1001)
+            $orderIdentifier = $matches[1];
+        } elseif (preg_match('/\b(\d{4,})\b/', $query, $matches)) {
+            // Bare long number (e.g. 10045)
+            $orderIdentifier = $matches[1];
+        }
+
+        if ($orderIdentifier) {
+            $result = $this->shopifyService->searchOrder($orderIdentifier);
+            if ($result) {
+                // Attach the queried identifier so formatForAI can reference it
+                if (isset($result['error'])) {
+                    $result['queried_identifier'] = $orderIdentifier;
+                }
+                return $result;
+            }
         }
 
         // Extract email

@@ -139,15 +139,10 @@ class WidgetController
 
         $hasShopifyIntegration = (bool) $activeShopifyIntegration;
 
+        // Always use the organization name as configured in the admin panel.
+        // Previously the Shopify shop domain (e.g. "toheedb.myshopify.com") was
+        // used as a display name fallback, which overrode the correct org name.
         $displayOrgName = $organization->name;
-        if ($hasShopifyIntegration && !empty($activeShopifyIntegration->shop)) {
-            $shopLabel = str_replace('.myshopify.com', '', strtolower((string) $activeShopifyIntegration->shop));
-            $shopLabel = str_replace(['-', '_'], ' ', $shopLabel);
-            $shopLabel = trim(preg_replace('/\s+/', ' ', $shopLabel));
-            if ($shopLabel !== '') {
-                $displayOrgName = $shopLabel;
-            }
-        }
 
         if (!$hasShopifyIntegration) {
             $hasShopifyIntegration = $organization->integrations()
@@ -782,6 +777,7 @@ class WidgetController
                                 if ($data['success'] ?? false) {
                                     $shopifyData = $data;
                                     $hasShopifyData = !empty($data['data']);
+                                    $shopifySpecificMatch = $data['specific_match'] ?? true;
                                     
                                     // Build concise context for LLM
                                     if ($hasShopifyData && ($data['query_type'] ?? '') === 'products') {
@@ -810,6 +806,8 @@ class WidgetController
                                             return 'Products';
                                         }, $products));
                                         
+                                        $isSpecificMatch = $shopifySpecificMatch ?? true;
+
                                         // Build smart context with price range and examples
                                         $shopifyContext = "Available Products ({$productCount} total):\n";
                                         $shopifyContext .= "Categories: " . implode(', ', $categories) . "\n";
@@ -825,9 +823,8 @@ class WidgetController
                                             $shopifyContext .= "\n";
                                         }
                                         
-                                        // Show examples: lowest price, highest price, and middle range
                                         $exampleCount = min(5, $productCount);
-                                        $shopifyContext .= "Examples (sorted by price):\n";
+                                        $shopifyContext .= "Products (sorted by price):\n";
                                         for ($i = 0; $i < $exampleCount; $i++) {
                                             $p = $products[$i];
                                             $shopifyContext .= "- {$p['title']}: {$p['currency']} {$p['price']}";
@@ -837,13 +834,29 @@ class WidgetController
                                                 $shopifyContext .= " (Out of stock)";
                                             }
                                             $shopifyContext .= "\n";
+
+                                            // For specific-match results include description + variants so LLM can answer size/spec questions
+                                            if ($isSpecificMatch && !empty($p['description'])) {
+                                                $shopifyContext .= "  Details: " . substr(strip_tags($p['description']), 0, 400) . "\n";
+                                            }
+                                            if ($isSpecificMatch && !empty($p['variants'])) {
+                                                $variantTitles = array_column($p['variants'], 'title');
+                                                $variantTitles = array_filter($variantTitles, fn($v) => $v !== 'Default Title');
+                                                if (!empty($variantTitles)) {
+                                                    $shopifyContext .= "  Available sizes/variants: " . implode(', ', $variantTitles) . "\n";
+                                                }
+                                            }
+                                            if (!empty($p['url'])) {
+                                                $shopifyContext .= "  URL: {$p['url']}\n";
+                                            }
                                         }
                                         
                                         if ($productCount > $exampleCount) {
                                             $shopifyContext .= "... and " . ($productCount - $exampleCount) . " more products\n";
                                         }
                                         
-                                        $shopifyContext .= "\nWebsite: {$integration->shop}";
+                                        $orgSiteUrl = $organization->website ?: ($organization->website_url ?? null) ?: $integration->shop;
+                                        $shopifyContext .= "\nWebsite: {$orgSiteUrl}";
                                     } else {
                                         $shopifyContext = $data['formatted_text'] ?? '';
                                     }
@@ -1210,7 +1223,15 @@ class WidgetController
             // Build context with Shopify data priority
             $finalContext = '';
             if (!empty($shopifyContext)) {
-                $finalContext = "LIVE STORE DATA (use this as your primary source):\n\n" . $shopifyContext . "\n\n";
+                $shopifySpecificMatch = $shopifySpecificMatch ?? true;
+                if (!$shopifySpecificMatch) {
+                    // Products returned are a general catalog, not a match for what was asked.
+                    // Instruct LLM to clarify rather than list unrelated products.
+                    $finalContext = "LIVE STORE DATA (general catalog — the specific product requested was NOT found):\n\n" . $shopifyContext . "\n\n";
+                    $finalContext .= "INSTRUCTION: The customer asked for a product we don't appear to carry. Politely confirm you don't have that specific item, and ask if they'd like to see what the store does offer, or if they can clarify what they need.\n\n";
+                } else {
+                    $finalContext = "LIVE STORE DATA (use this as your primary source):\n\n" . $shopifyContext . "\n\n";
+                }
             }
             if ($context) {
                 $finalContext .= "Additional information from knowledge base:\n\n" . $context;
@@ -1293,70 +1314,9 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            $isContactQuery = $this->isContactQuery($message);
-
-            if ($this->isCallbackRequest($message)) {
-                $userPhone = $allUserInfo['phone'] ?? $allUserInfo['contact_phone'] ?? null;
-                if (!$userPhone) {
-                    $userPhone = $this->extractPhoneFromMessage($message);
-                }
-
-                $callbackResponse = $this->buildCallbackResponse($userPhone, $orgEmail, $orgPhone, $orgWebsite);
-
-                $conversation = $this->saveConversationToDatabase(
-                    $organization,
-                    $sessionId,
-                    $message,
-                    $callbackResponse,
-                    $allUserInfo,
-                    compact('country', 'region', 'location', 'city'),
-                    $intentResult
-                );
-
-                $this->logIntentAnalytics(
-                    $organization->id,
-                    $sessionId,
-                    $intentResult,
-                    $request,
-                    compact('country', 'region', 'location', 'city'),
-                    $sessionMetadata
-                );
-
-                return response()->json([
-                    'response' => $callbackResponse,
-                    'session_id' => $sessionId,
-                    'timestamp' => now()->toISOString()
-                ])->header('X-Robots-Tag', 'noindex, nofollow');
-            }
-
-            if ($isContactQuery) {
-                $contactResponse = $this->buildContactResponse($orgEmail, $orgPhone, $orgWebsite);
-
-                $conversation = $this->saveConversationToDatabase(
-                    $organization,
-                    $sessionId,
-                    $message,
-                    $contactResponse,
-                    $allUserInfo,
-                    compact('country', 'region', 'location', 'city'),
-                    $intentResult
-                );
-
-                $this->logIntentAnalytics(
-                    $organization->id,
-                    $sessionId,
-                    $intentResult,
-                    $request,
-                    compact('country', 'region', 'location', 'city'),
-                    $sessionMetadata
-                );
-
-                return response()->json([
-                    'response' => $contactResponse,
-                    'session_id' => $sessionId,
-                    'timestamp' => now()->toISOString()
-                ])->header('X-Robots-Tag', 'noindex, nofollow');
-            }
+            // NOTE: isContactQuery hard-bypass removed — contact queries now go through
+            // the normal Qdrant + LLM pipeline so how-to / config queries are not mis-routed.
+            // The LLM system prompt already contains the org's contact details.
 
             $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
             if ($branchFaqMatch && !$hasShopifyData) {
@@ -1881,8 +1841,6 @@ class WidgetController
             $affirmativeMaxTokens = (int) ($rulePolicy['affirmative_follow_up_max_tokens'] ?? 140);
             if ($isAffirmativeContinuation) {
                 $maxTokens = max(80, min(300, $affirmativeMaxTokens));
-            } elseif ($isContactQuery) {
-                $maxTokens = 60;
             } elseif ($isPricingLikeQuery) {
                 $maxTokens = 620;
             } elseif (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
@@ -1914,6 +1872,13 @@ class WidgetController
                 $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt);
                 $rawResponseText = $aiResponse['answer'] ?? null;
                 $responseText = $rawResponseText ?? 'I apologize, but I\'m experiencing technical difficulties. Please try again later.';
+                // Attempt envelope extraction even in the fallback path so raw JSON is never shown
+                if ($rawResponseText) {
+                    $fallbackEnvelope = $this->extractOneCallEnvelope((string) $rawResponseText);
+                    if (is_array($fallbackEnvelope) && !empty($fallbackEnvelope['response'])) {
+                        $responseText = (string) $fallbackEnvelope['response'];
+                    }
+                }
             } else {
                 $rawResponseText = $aiResponse['message']['content'];
                 $responseText = $rawResponseText;
@@ -3402,9 +3367,9 @@ class WidgetController
                     return;
                 }
 
-                $contactQuickResponse = $this->isContactQuery($message)
-                    ? $this->buildContactResponse($orgEmail, $orgPhone, $orgWebsite)
-                    : null;
+                // NOTE: contactQuickResponse bypass removed — contact queries go through
+                // the normal LLM pipeline. Contact details are in the system prompt.
+                $contactQuickResponse = null;
 
                 // Build messages
                 $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
@@ -3511,16 +3476,16 @@ class WidgetController
 
                 $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $context);
                 $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage) || $aiProvider === 'openai';
-                $maxTokens = $contactQuickResponse ? 60 : 220;
+                $maxTokens = 220;
                 $affirmativeMaxTokens = (int) ($rulePolicy['affirmative_follow_up_max_tokens'] ?? 140);
-                if ($isAffirmativeContinuation && !$contactQuickResponse) {
+                if ($isAffirmativeContinuation) {
                     $maxTokens = max(80, min(300, $affirmativeMaxTokens));
                 }
-                if (!$contactQuickResponse && $isPricingLikeStreamQuery) {
+                if ($isPricingLikeStreamQuery) {
                     $maxTokens = max($maxTokens, 620);
-                } elseif (!$contactQuickResponse && (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
+                } elseif (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
                     || strlen($message) > 120
-                    || strlen($context) > 2000)) {
+                    || strlen($context) > 2000) {
                     $maxTokens = 700;
                 }
 
@@ -3531,13 +3496,6 @@ class WidgetController
                     (string) $context
                 );
 
-                if ($contactQuickResponse) {
-                    $streamBackendUsed = 'contact_quick_response';
-                    $streamBackendAttempts = [];
-                    $fullResponse = $contactQuickResponse;
-                    echo "data: " . json_encode(['content' => $fullResponse, 'done' => true]) . "\n\n";
-                    $this->streamFlush();
-                } else {
                 $streamBackendUsed = null;
                 $streamBackendAttempts = [];
                 $pricingLikeQuery = $isPricingIntent || (bool) preg_match('/\b(subscription|subscriptions|plan|plans|pricing|price|cost|package|packages|monthly|yearly|corporate|enterprise|business)\b/i', (string) $message);
@@ -3881,7 +3839,6 @@ class WidgetController
 
                     $responseElapsedMs = round((microtime(true) - $responseStartTime) * 1000, 2);
                     Log::info('LLM response generation completed', ['elapsed_ms' => $responseElapsedMs, 'response_length' => strlen($fullResponse)]);
-                }
                 }
 
                 if (!$streamBackendUsed) {
@@ -4524,8 +4481,21 @@ class WidgetController
     {
         $message = mb_strtolower($userMessage);
 
-        if (str_contains($message, 'human') || str_contains($message, 'agent') || str_contains($message, 'representative')) {
-            return 'user_requested_human';
+        // Only escalate when the user is explicitly REQUESTING a human — not when they merely
+        // mention the words in a comparison or informational question.
+        // e.g. "speak to a human", "want an agent", "connect me to a person" → escalate
+        //      "how AI differ from human agent?"                              → do NOT escalate
+        $humanRequestPatterns = [
+            '/\b(speak|talk|chat|connect|transfer|escalate|reach|get)\s+(to|with|a)?\s*(human|agent|person|representative|staff|support staff|live agent|real person)\b/i',
+            '/\b(want|need|prefer|request|require|like)\s+(a\s+)?(human|agent|person|live|real)\b/i',
+            '/\b(human|agent|person|representative)\s+(please|now|asap|immediately|urgently)\b/i',
+            '/\bnot\s+(talking|speaking|chatting)\s+(to\s+)?(a\s+)?(bot|ai|robot|machine|computer)\b/i',
+            '/\b(stop|quit)\s+(bot|ai|robot|automated)\b/i',
+        ];
+        foreach ($humanRequestPatterns as $pattern) {
+            if (preg_match($pattern, $message)) {
+                return 'user_requested_human';
+            }
         }
 
         $complaintKeywords = [
@@ -8472,6 +8442,46 @@ class WidgetController
     }
 
     /**
+     * Capture a lead when a visitor submits the contact form,
+     * even before they send any chat message.
+     */
+    public function captureLead(Request $request, $orgId)
+    {
+        $organization = is_numeric($orgId)
+            ? Organization::find($orgId)
+            : Organization::where('slug', $orgId)->first();
+
+        if (!$organization || !$organization->is_active) {
+            return response()->json(['error' => 'Organization not found'], 404)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $userInfo     = $request->input('user_info', []);
+        $locationInfo = $request->input('location_info', []);
+        $sessionId    = $request->input('session_id', '');
+
+        if (empty($userInfo['name']) || empty($userInfo['email']) || empty($sessionId)) {
+            return response()->json(['error' => 'Missing required fields'], 422)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $sessionMetadata = $this->buildLeadSessionMetadata($request, $userInfo);
+
+        $this->upsertWidgetLead(
+            $organization->id,
+            $sessionId,
+            $userInfo,
+            $locationInfo,
+            null,   // no intent yet
+            null,   // no message yet
+            $sessionMetadata
+        );
+
+        return response()->json(['success' => true])
+            ->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    /**
      * Fetch agent messages for a widget session
      */
     public function getAgentMessages(Request $request, $orgId)
@@ -8868,11 +8878,26 @@ class WidgetController
             if (is_array($pseudo)) {
                 return $pseudo;
             }
+            // Last-resort: extract just the "response" value using a targeted regex
+            // Handles cases where JSON is otherwise unparseable but the key is present
+            if (preg_match('/"response"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/s', $rawResponseText, $rm)) {
+                $extracted = json_decode('"' . $rm[1] . '"', true);
+                if (is_string($extracted) && $extracted !== '') {
+                    return ['response' => $extracted, 'structured_state' => null];
+                }
+            }
             return null;
         }
 
         $response = trim((string) ($decoded['response'] ?? $decoded['answer'] ?? ''));
         if ($response === '') {
+            // Last-resort: try targeted regex on original text
+            if (preg_match('/"response"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/s', $rawResponseText, $rm)) {
+                $extracted = json_decode('"' . $rm[1] . '"', true);
+                if (is_string($extracted) && $extracted !== '') {
+                    return ['response' => $extracted, 'structured_state' => null];
+                }
+            }
             return null;
         }
 
@@ -9794,7 +9819,7 @@ class WidgetController
     {
         $lowerMessage = strtolower($message);
         
-        // Generic Shopify keywords
+        // Generic Shopify keywords (English)
         $shopifyKeywords = [
             'product', 'products', 'item', 'items', 'inventory', 'stock',
             'order', 'orders', 'tracking', 'shipment', 'shipping', 'delivery',
@@ -9808,13 +9833,21 @@ class WidgetController
             }
         }
         
-        // Check for "do you have [something]" pattern
-        if (preg_match('/\b(do you have|got|carry|got any)\b/i', $lowerMessage)) {
+        // Check for "do you have / looking for" patterns (English)
+        if (preg_match('/\b(do you have|got|carry|got any|looking for|need|want|interested in)\b/i', $lowerMessage)) {
             return true;
         }
-        
-        // Check for "looking for [something]" pattern
-        if (preg_match('/\b(looking for|need|want|interested in)\b/i', $lowerMessage)) {
+
+        // Multilingual product-need signals (Indonesian/Malay most common for this store)
+        // ada kebutuhan=have a need, butuh=need, cari=looking for, beli=buy, harga=price,
+        // stok=stock, tersedia=available, pesan=order, produk=product
+        if (preg_match('/\b(kebutuhan|butuh|cari|beli|harga|stok|tersedia|pesan|produk|barang|mau|ingin)\b/i', $lowerMessage)) {
+            return true;
+        }
+
+        // Spanish/Portuguese product signals: necesito=I need, busco=looking for,
+        // precio=price, comprar=buy, disponible=available, producto=product
+        if (preg_match('/\b(necesito|busco|precio|comprar|disponible|producto|quiero|tengo)\b/i', $lowerMessage)) {
             return true;
         }
         

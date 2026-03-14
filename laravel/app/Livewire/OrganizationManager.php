@@ -14,6 +14,9 @@ class OrganizationManager extends Component
     public $showCreateForm = false;
     public $showEditForm = false;
     public $editingOrgId = null;
+    public $search = '';
+    public $filterStatus = '';
+
     public $name = '';
     public $slug = '';
     public $description = '';
@@ -47,9 +50,28 @@ class OrganizationManager extends Component
         $this->loadOrganizations();
     }
 
+    public function updatingSearch() { $this->loadOrganizations(); }
+    public function updatingFilterStatus() { $this->loadOrganizations(); }
+
     public function loadOrganizations()
     {
-        $this->organizations = Organization::with('users')->get();
+        $query = Organization::with('users')->orderByDesc('id');
+
+        if ($this->search) {
+            $query->where(function ($q) {
+                $q->where('name', 'like', '%' . $this->search . '%')
+                  ->orWhere('slug', 'like', '%' . $this->search . '%')
+                  ->orWhere('contact_email', 'like', '%' . $this->search . '%');
+            });
+        }
+
+        if ($this->filterStatus === 'active') {
+            $query->where('is_active', true);
+        } elseif ($this->filterStatus === 'inactive') {
+            $query->where('is_active', false);
+        }
+
+        $this->organizations = $query->get();
     }
 
     public function createOrganization()

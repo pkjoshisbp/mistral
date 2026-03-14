@@ -1759,6 +1759,27 @@ Rules:
     /**
      * LLM chat with conversation context
      */
+    /**
+     * Recursively sanitise a value so json_encode never throws on malformed UTF-8.
+     * Invalid byte sequences are replaced with the UTF-8 replacement character (U+FFFD).
+     */
+    private function sanitizeForJson(mixed $value): mixed
+    {
+        if (is_string($value)) {
+            // Replace any invalid UTF-8 sequences
+            $clean = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+            // Fallback: strip bytes that are still invalid after re-encode
+            if (!mb_check_encoding($clean, 'UTF-8')) {
+                $clean = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]|[\x80-\xFF][\x00-\x3F\x80-\xFF]/u', '', $clean) ?? $value;
+            }
+            return $clean;
+        }
+        if (is_array($value)) {
+            return array_map(fn($v) => $this->sanitizeForJson($v), $value);
+        }
+        return $value;
+    }
+
     public function llmChat($messages, $model = null, $userId = null, $organizationId = null, array $options = [])  // Default determined dynamically
     {
         try {
@@ -1766,6 +1787,10 @@ Rules:
             if (!$model) {
                 $model = $this->getLlamaModel();
             }
+
+            // Sanitise message content to prevent json_encode failures on malformed UTF-8
+            // (commonly caused by special chars in Shopify product descriptions)
+            $messages = $this->sanitizeForJson($messages);
 
             $payload = [
                 'messages' => $messages,
@@ -1782,13 +1807,13 @@ Rules:
                 'url' => "{$this->baseUrl}/llm/chat",
                 'payload_preview' => $payloadPreview,
                 'payload_length' => strlen(json_encode($payload)),
-                'timeout' => 60,
+                'timeout' => 120,
                 'model' => $payload['model'],
                 'backend_type' => $payload['backend_type'],
                 'options_count' => !empty($options) ? count($options) : 0
             ]);
 
-            $response = Http::timeout(60)->post("{$this->baseUrl}/llm/chat", $payload);
+            $response = Http::timeout(120)->post("{$this->baseUrl}/llm/chat", $payload);
 
             $body = $response->body();
             $responseData = $response->successful() ? $response->json() : null;

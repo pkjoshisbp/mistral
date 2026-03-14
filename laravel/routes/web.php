@@ -887,6 +887,8 @@ Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class,
     Route::get('{orgId}/messages', [\App\Http\Controllers\WidgetController::class, 'getAgentMessages'])->name('widget.messages');
     Route::get('{orgId}/history', [\App\Http\Controllers\WidgetController::class, 'getConversationHistory'])->name('widget.history');
     Route::get('{orgId}/config', [\App\Http\Controllers\WidgetController::class, 'getConfig'])->name('widget.config');
+    Route::post('{orgId}/lead', [\App\Http\Controllers\WidgetController::class, 'captureLead'])->name('widget.lead.capture');
+    Route::options('{orgId}/lead', function() { return response('', 204); });
     Route::get('{orgId}/test', function($orgId) {
         $organization = \App\Models\Organization::findOrFail($orgId);
         return view('widget.test', compact('organization'));

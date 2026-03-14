@@ -64,10 +64,9 @@
                                 </div>
                                 <div class="d-flex flex-wrap gap-1">
                                     <button type="button"
-                                            class="btn btn-sm {{ isset($showDetails[$conversation->id]) ? 'btn-primary' : 'btn-outline-primary' }}"
-                                            wire:click="toggleDetails({{ $conversation->id }})">
-                                        <i class="fas {{ isset($showDetails[$conversation->id]) ? 'fa-eye-slash' : 'fa-eye' }}"></i>
-                                        {{ isset($showDetails[$conversation->id]) ? 'Hide' : 'View' }}
+                                            class="btn btn-sm btn-outline-primary"
+                                            wire:click="openConversationModal({{ $conversation->id }})">
+                                        <i class="fas fa-eye"></i> View
                                     </button>
                                     <button type="button"
                                             class="btn btn-sm btn-outline-success"
@@ -219,7 +218,82 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
     convertLocalTs();
-    document.addEventListener('livewire:updated', convertLocalTs);
+    document.addEventListener('livewire:updated', function() {
+        convertLocalTs();
+        var modal = document.getElementById('custChatConvModal');
+        if (modal) modal.querySelectorAll('time.local-ts[data-utc]').forEach(function(el) {
+            var d = new Date(el.dataset.utc);
+            if (!isNaN(d)) el.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        });
+    });
+
+    // Show/hide modal via Livewire dispatch (jQuery / Bootstrap 4)
+    window.addEventListener('show-chat-modal', function () {
+        if (typeof $ !== 'undefined') $('#custChatConvModal').modal('show');
+    });
+    window.addEventListener('hide-chat-modal', function () {
+        if (typeof $ !== 'undefined') $('#custChatConvModal').modal('hide');
+    });
+    $(document).on('hidden.bs.modal', '#custChatConvModal', function () {
+        var component = window.Livewire && document.querySelector('[wire\\:id]');
+        if (component) Livewire.find(component.getAttribute('wire:id')).call('closeConversationModal');
+    });
 });
 </script>
+
+{{-- Conversation Detail Modal --}}
+<div class="modal fade" id="custChatConvModal" tabindex="-1" role="dialog" aria-labelledby="custChatConvModalLabel" aria-hidden="true" wire:ignore.self>
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
+        <div class="modal-content">
+            @if($modalConversation)
+            <div class="modal-header bg-info">
+                <h5 class="modal-title text-white" id="custChatConvModalLabel">
+                    <i class="fas fa-comments mr-2"></i>
+                    {{ $modalConversation->visitor_name ?? 'Anonymous' }}
+                </h5>
+                <button type="button" class="close text-white" wire:click="closeConversationModal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" style="max-height:62vh;overflow-y:auto;">
+                @if($modalConversation->visitor_email)
+                    <div class="mb-3 p-2 bg-light rounded d-flex flex-wrap gap-2" style="font-size:13px">
+                        <span><i class="fas fa-envelope mr-1 text-muted"></i>{{ $modalConversation->visitor_email }}</span>
+                        <span class="ml-auto text-muted"><i class="far fa-clock mr-1"></i><time class="local-ts" data-utc="{{ $modalConversation->created_at->utc()->toISOString() }}">{{ $modalConversation->created_at->format('d M Y H:i:s') }}</time></span>
+                    </div>
+                @endif
+                <div class="chat-messages">
+                    @foreach($modalConversation->messages->sortBy('sent_at') as $message)
+                        @php
+                            $isUser = ($message->sender_type === 'user');
+                            $sender = method_exists($message, 'getSenderDisplayName') ? $message->getSenderDisplayName() : ucfirst($message->sender_type ?? 'System');
+                        @endphp
+                        <div class="mb-3 {{ $isUser ? 'text-right' : '' }}">
+                            <div class="small mb-1">
+                                @if(!$isUser)
+                                    <span class="badge badge-secondary mr-1">{{ $sender }}</span>
+                                @endif
+                                <time class="text-muted local-ts" data-utc="{{ ($message->sent_at ?? $message->created_at)->utc()->toISOString() }}">{{ ($message->sent_at ?? $message->created_at)->format('d M H:i:s') }}</time>
+                                @if($isUser)
+                                    <span class="badge badge-primary ml-1">{{ $sender }}</span>
+                                @endif
+                            </div>
+                            <div class="{{ $isUser ? 'bg-primary text-white' : 'bg-light border' }} d-inline-block p-2 rounded" style="max-width:85%;word-break:break-word;text-align:left">
+                                {!! $message->message_html !!}
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-secondary btn-sm" wire:click="closeConversationModal">Close</button>
+            </div>
+            @else
+            <div class="modal-body text-center p-5">
+                <div class="spinner-border text-info" role="status"><span class="sr-only">Loading...</span></div>
+            </div>
+            @endif
+        </div>
+    </div>
+</div>
 </div>

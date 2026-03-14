@@ -438,6 +438,9 @@
                 return;
             }
 
+            // On mobile when open, CSS handles fullscreen — no JS overrides needed
+            if (this.isMobile() && this.isOpen) return;
+
             const offsetY = Number(this.config?.offsetY || 20);
             const launcherHeight = 60;
             const breathingSpace = 12;
@@ -819,14 +822,19 @@
         toggle() {
             const button = document.getElementById(this.ids.button);
             const chatWindow = document.getElementById(this.ids.window);
+            const widgetEl = document.getElementById(this.ids.widget);
             
             this.isOpen = !this.isOpen;
             
             if (this.isOpen) {
                 chatWindow.style.setProperty('display', 'flex', 'important');
                 chatWindow.style.setProperty('visibility', 'visible', 'important');
-                this.applyViewportBounds();
-                button.style.transform = 'scale(0.9)';
+                if (this.isMobile()) {
+                    widgetEl?.classList.add('ai-mobile-open');
+                } else {
+                    this.applyViewportBounds();
+                    button.style.transform = 'scale(0.9)';
+                }
                 
                 // Track widget open
                 this.trackAnalytics('widget_open');
@@ -849,7 +857,7 @@
                     this.leadCaptured = true; // Skip lead capture for logged in users
                     this.saveLeadCaptured(); // Persist this state
                     const input = document.getElementById(this.ids.input);
-                    if (input) {
+                    if (input && !this.isMobile()) {
                         input.focus();
                     }
                     // Show welcome message if no messages yet
@@ -862,6 +870,7 @@
             } else {
                 chatWindow.style.setProperty('display', 'none', 'important');
                 chatWindow.style.setProperty('visibility', 'hidden', 'important');
+                widgetEl?.classList.remove('ai-mobile-open');
                 button.style.transform = 'scale(1)';
                 this.stopAgentPolling();
             }
@@ -904,6 +913,10 @@
             } finally {
                 this.isPollingInFlight = false;
             }
+        }
+
+        isMobile() {
+            return window.innerWidth <= 768;
         }
 
         isContactQuery(text) {
@@ -953,10 +966,14 @@
         linkify(text) {
             if (!text) return '';
 
+            // Strip XML/HTML processing instructions (<?xml ...?>, <!DOCTYPE ...>)
+            text = text.replace(/<\?[^>]*>/g, '').replace(/<!DOCTYPE[^>]*>/gi, '');
+
             // ── Numbered list normalisation (text-only, safe before HTML processing) ──
             // Case 1: LLM puts the number at the end of the previous line:
             //   "details: 1.\n**Item**"  →  "details:\n\n1. **Item**"
-            text = text.replace(/([^\n])\s*(\d+)\.\s*\n/g, '$1\n\n$2. ');
+            // Exclude "/" and digits as preceding char to avoid splitting "24/7.\n" → "24/\n\n7."
+            text = text.replace(/([^\n\d/])\s*(\d+)\.\s*\n/g, '$1\n\n$2. ');
             // Case 2: number already starts a line but no blank line before it
             text = text.replace(/\n(\d+\.\s)/g, '\n\n$1');
             // Case 3: fully inline list — LLM emits no newlines at all:
@@ -983,6 +1000,21 @@
                 const ph = `__ANCHOR_${anchorIndex}__`;
                 anchorPlaceholders.push(m);
                 anchorIndex++;
+                return ph;
+            });
+
+            // ── Preserve safe HTML tags so FAQ/answer HTML renders properly ──────
+            // Tags are sanitized (event handlers, javascript: stripped) to prevent XSS.
+            const safeTags = 'p|ul|ol|li|strong|em|b|i|br|h[1-6]|blockquote|code|pre|hr';
+            const safeTagRx = new RegExp(`</?(?:${safeTags})(?:\\s[^>]*)?>`, 'gi');
+            const safeTagPlaceholders = [];
+            let safeTagIdx = 0;
+            text = text.replace(safeTagRx, (m) => {
+                let safe = m.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '');
+                safe = safe.replace(/javascript\s*:/gi, '');
+                const ph = `__SAFETAG_${safeTagIdx}__`;
+                safeTagPlaceholders.push(safe);
+                safeTagIdx++;
                 return ph;
             });
 
@@ -1039,9 +1071,19 @@
                 }
                 // Image extensions
                 const isImage = /\.(?:png|jpe?g|gif|webp|svg)(?:[?#].*)?$/i.test(url);
+
+                // Build a short display label for long URLs so they don't overflow the bubble
+                let displayUrl = url;
+                try {
+                    const parsed = new URL(url);
+                    // Show host + truncated path (max 40 chars total)
+                    const full2 = parsed.hostname + parsed.pathname + parsed.search;
+                    displayUrl = full2.length > 48 ? full2.slice(0, 45) + '…' : full2;
+                } catch(e) { /* leave as-is */ }
+
                 const linkHtml = isImage
                     ? `<img src="${url}" alt="image" style="max-width:100%;height:auto;"/>${trail}`
-                    : `<a href="${url}" target="_blank">${url}</a>${trail}`;
+                    : `<a href="${url}" target="_blank" rel="noopener noreferrer" title="${url}">${displayUrl}</a>${trail}`;
                 const placeholder = `__LINK_${linkIndex}__`;
                 links[linkIndex] = linkHtml;
                 linkIndex++;
@@ -1092,7 +1134,18 @@
                 processed = processed.replace(`__ITALIC_${i}__`, `<em>${_esc(italicPH[i])}</em>`);
             }
 
-            // Preserve line breaks
+            // Restore safe HTML tags (after escaping so placeholders remain untouched)
+            for (let i = 0; i < safeTagPlaceholders.length; i++) {
+                processed = processed.replace(`__SAFETAG_${i}__`, safeTagPlaceholders[i]);
+            }
+
+            // Preserve line breaks — when block HTML is present, strip formatting
+            // whitespace between tags to prevent spurious <br> inside <ul>/<li> etc.
+            const hasBlockHtml = safeTagPlaceholders.some(t => /^<(?:p|ul|ol|li|h[1-6]|blockquote|pre)/i.test(t));
+            if (hasBlockHtml) {
+                processed = processed.replace(/>\n+/g, '>').replace(/\n+</g, '<').replace(/\n/g, '<br>');
+                return processed;
+            }
             return processed.replace(/\n/g, '<br>');
         }
 
@@ -1244,9 +1297,9 @@
             if (messagesContainer) messagesContainer.style.display = 'none';
             if (inputContainer) inputContainer.style.display = 'none';
             
-            // Focus on name input
+            // Focus on name input — desktop only; on mobile the keyboard should not pop up automatically
             const nameInput = document.getElementById(this.ids.leadName);
-            if (nameInput) nameInput.focus();
+            if (nameInput && !this.isMobile()) nameInput.focus();
         }
 
         hideLeadForm() {
@@ -1285,7 +1338,7 @@
             }
             
             const input = document.getElementById(this.ids.input);
-            if (input) input.focus();
+            if (input && !this.isMobile()) input.focus();
         }
 
         async submitLeadForm() {
@@ -1362,6 +1415,23 @@
             this.leadCaptured = true;
             this.saveLeadCaptured();
             this.saveUserInfo();
+
+            // Persist the lead to the server immediately, before any message is sent,
+            // so visitors who fill the form but don't chat still appear in the Leads screen.
+            try {
+                fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/lead`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({
+                        session_id:    this.sessionId,
+                        user_info:     this.userInfo,
+                        location_info: this.locationInfo || {},
+                        page_url:      window.location.href,
+                        referrer:      document.referrer,
+                        timezone:      Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+                    })
+                }).catch(() => {}); // fire-and-forget; don't block the UX
+            } catch (_e) {}
 
             await this.syncSessionFromStoredContact();
             

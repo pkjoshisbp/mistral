@@ -39,7 +39,7 @@ class SettingsManager extends Component
     public $ai_backend_type = 'ollama'; // ollama or llamacpp
     public $openai_api_key = '';
     public $openai_default_model = 'gpt-5-mini'; // Only allowed model
-    public $llama_default_model = 'llama3:8b-instruct-q5_K_M';
+    public $llama_default_model = 'llama3.1:8b';
     public $llamacpp_model_path = '';
     public $llamacpp_model_repo = 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom';
     public $llamacpp_threads = 4;
@@ -62,13 +62,13 @@ class SettingsManager extends Component
     public function getAvailableLlamaModels()
     {
         return [
-            'llama3:8b-instruct-q5_K_M' => 'Llama 3 8B Instruct (Vast.ai, recommended)',
-            'mistral-nemo:latest' => 'Mistral Nemo (Vast.ai)',
-            'llama3.2:1b' => 'Llama 3.2:1B (Fast, lightweight)',
-            'llama3.2:3b' => 'Llama 3.2:3B (Balanced quality/speed)',
+            'llama3.1:8b'              => 'Llama 3.1 8B (Vast.ai, recommended)',
+            'mistral-nemo:latest'       => 'Mistral Nemo (Vast.ai)',
+            'llama3.2:1b'              => 'Llama 3.2:1B (Fast, lightweight)',
+            'llama3.2:3b'              => 'Llama 3.2:3B (Balanced quality/speed)',
             'llama3.2:3b-instruct-gguf' => 'Llama 3.2:3B Instruct GGUF (llama.cpp optimized)',
-            'mistral:7b' => 'Mistral 7B (High quality, slower)',
-            'gemma:2b' => 'Gemma 2B (Google, fast)',
+            'mistral:7b'               => 'Mistral 7B (High quality, slower)',
+            'gemma:2b'                 => 'Gemma 2B (Google, fast)',
         ];
     }
 
@@ -138,7 +138,6 @@ class SettingsManager extends Component
     private function resolveOllamaUrlForModel(string $model): string
     {
         $vastModels = [
-            'llama3:8b-instruct-q5_K_M',
             'llama3.1:8b',
             'mistral-nemo',
             'mistral-nemo:latest',
@@ -180,9 +179,9 @@ class SettingsManager extends Component
         $this->ai_backend_type = AdminSetting::get('ai_backend_type', 'ollama');
         $this->openai_api_key = AdminSetting::get('openai_api_key', '');
         $this->openai_default_model = AdminSetting::get('openai_default_model', 'gpt-5-mini');
-        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3:8b-instruct-q5_K_M');
+        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3.1:8b');
         if (!array_key_exists($this->llama_default_model, $this->getAvailableLlamaModels())) {
-            $this->llama_default_model = 'llama3:8b-instruct-q5_K_M';
+            $this->llama_default_model = 'llama3.1:8b';
         }
         $this->llamacpp_model_path = AdminSetting::get('llamacpp_model_path', '');
         $this->llamacpp_model_repo = AdminSetting::get('llamacpp_model_repo', 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom');

@@ -432,7 +432,7 @@ class IndustryDemo extends Component
                             ['role' => 'user', 'content' => $message]
                         ];
                         
-                        $response = $aiService->llmChat($messages, 'llama3:8b-instruct-q5_K_M', null, null, ['use_vastai' => true]);
+                        $response = $aiService->llmChat($messages, 'llama3.1:8b', null, null, ['use_vastai' => true]);
                         
                         if ($response && isset($response['message']['content'])) {
                             \Log::info('Hybrid response generated successfully', [
@@ -464,7 +464,7 @@ class IndustryDemo extends Component
                                     ['role' => 'user', 'content' => $message]
                                 ];
                                 
-                                $response = $aiService->llmChat($messages, 'llama3:8b-instruct-q5_K_M', null, null, ['use_vastai' => true]);
+                                $response = $aiService->llmChat($messages, 'llama3.1:8b', null, null, ['use_vastai' => true]);
                                 
                                 if ($response && isset($response['message']['content'])) {
                                     return $response['message']['content'];
@@ -493,7 +493,7 @@ class IndustryDemo extends Component
                         ['role' => 'user', 'content' => $message]
                     ];
                     
-                    $response = $aiService->llmChat($messages, 'llama3:8b-instruct-q5_K_M', null, null, ['use_vastai' => true]);
+                    $response = $aiService->llmChat($messages, 'llama3.1:8b', null, null, ['use_vastai' => true]);
                     
                     if ($response && isset($response['message']['content'])) {
                         return $response['message']['content'];

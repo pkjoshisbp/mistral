@@ -83,7 +83,17 @@ by a persistent SSH autossh tunnel.
 | Ollama (one model at a time) | ~6,000–8,000 MiB | LRU eviction between models |
 | **Free headroom** | **~4,500–7,000 MiB** | |
 
-**Model priority**: llama3.1:8b (chat) → llama3.2:3b (fallback) → mistral-nemo (crawl/indexing)
+**Model priority**: qwen3.5:9b (default chat) → llama3.2:3b (fallback) → mistral-nemo (crawl/indexing)
+
+### Ollama on vast.ai — persistent model storage
+Ollama runs from **`/workspace/ollama/bin/ollama`** (NOT the system `/usr/local/bin/ollama`).
+Models are stored in **`/workspace/ollama/models/`** which is on the persistent NVMe volume.
+`/root/.ollama/models/` is empty — all models live on `/workspace`.
+This means models survive instance restarts automatically. Always pull new models with:
+```bash
+ssh -p 51734 root@123.21.129.10 "ollama pull <model>"
+# Ollama process is already running from /workspace so it uses /workspace/ollama/models by default
+```
 
 ### Check / start tunnel
 ```bash

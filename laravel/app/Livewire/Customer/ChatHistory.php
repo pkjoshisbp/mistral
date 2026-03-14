@@ -18,6 +18,7 @@ class ChatHistory extends Component
     public $showDetails = [];
     public $focusConversation = null;
     public $replyMessage = [];
+    public $modalConversation = null;
 
     protected $queryString = ['search', 'dateFrom', 'dateTo', 'focusConversation'];
 
@@ -52,6 +53,22 @@ class ChatHistory extends Component
         } else {
             $this->showDetails[$sessionId] = true;
         }
+    }
+
+    public function openConversationModal($id)
+    {
+        $org = Auth::user()->primaryOrganization();
+        if (!$org) return;
+        $this->modalConversation = ChatConversation::with('messages')
+            ->where('organization_id', $org->id)
+            ->find($id);
+        $this->dispatch('show-chat-modal');
+    }
+
+    public function closeConversationModal()
+    {
+        $this->modalConversation = null;
+        $this->dispatch('hide-chat-modal');
     }
 
     public function clearFilters()

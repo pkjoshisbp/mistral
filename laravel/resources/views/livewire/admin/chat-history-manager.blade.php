@@ -47,9 +47,9 @@
                                     <span class="badge badge-secondary ml-1">{{ $conversation->organization->name ?? 'N/A' }}</span>
                                 </div>
                                 <div class="d-flex flex-wrap gap-1">
-                                    <a class="btn btn-sm btn-outline-primary" href="{{ route('admin.chat-history', ['focusConversation' => $conversation->id]) }}" title="View conversation">
+                                    <button class="btn btn-sm btn-outline-primary" wire:click="openConversationModal({{ $conversation->id }})" title="View conversation">
                                         <i class="fas fa-eye"></i> View
-                                    </a>
+                                    </button>
                                     <a class="btn btn-sm btn-outline-success" href="{{ route('admin.chat-history.export', ['id' => $conversation->id]) }}" title="Export conversation">
                                         <i class="fas fa-file-export"></i> Export
                                     </a>
@@ -163,9 +163,109 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     convertLocalTs();
     // Re-run after Livewire re-renders (details expand)
-    document.addEventListener('livewire:updated', convertLocalTs);
+    document.addEventListener('livewire:updated', function() {
+        convertLocalTs();
+        // Also re-run inside freshly opened modal
+        var modal = document.getElementById('chatConvModal');
+        if (modal) modal.querySelectorAll('time.local-ts[data-utc]').forEach(function(el) {
+            var d = new Date(el.dataset.utc);
+            if (!isNaN(d)) el.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        });
+    });
+
+    // Show/hide conversation modal — jQuery (Bootstrap 4 / AdminLTE)
+    window.addEventListener('show-chat-modal', function () {
+        if (typeof $ !== 'undefined') {
+            $('#chatConvModal').modal('show');
+        }
+    });
+    window.addEventListener('hide-chat-modal', function () {
+        if (typeof $ !== 'undefined') {
+            $('#chatConvModal').modal('hide');
+        }
+    });
+    // When modal is dismissed via backdrop/ESC, sync Livewire state
+    $(document).on('hidden.bs.modal', '#chatConvModal', function () {
+        var component = window.Livewire && document.querySelector('[wire\\:id]');
+        if (component) {
+            var id = component.getAttribute('wire:id');
+            if (id) Livewire.find(id).call('closeConversationModal');
+        }
+    });
 });
 </script>
+
+{{-- Conversation Detail Modal --}}
+<div class="modal fade" id="chatConvModal" tabindex="-1" role="dialog" aria-labelledby="chatConvModalLabel" aria-hidden="true" wire:ignore.self>
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
+        <div class="modal-content">
+            @if($modalConversation)
+            <div class="modal-header bg-info">
+                <h5 class="modal-title text-white" id="chatConvModalLabel">
+                    <i class="fas fa-comments mr-2"></i>
+                    {{ $modalConversation->visitor_name ?? 'Anonymous' }}
+                    <small class="ml-2 opacity-75">— {{ $modalConversation->organization->name ?? '' }}</small>
+                </h5>
+                <button type="button" class="close text-white" wire:click="closeConversationModal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" style="max-height:62vh;overflow-y:auto;">
+                @if($modalConversation->visitor_email || $modalConversation->visitor_country)
+                    <div class="mb-3 p-2 bg-light rounded d-flex flex-wrap gap-2" style="font-size:13px">
+                        @if($modalConversation->visitor_email)
+                            <span><i class="fas fa-envelope mr-1 text-muted"></i>{{ $modalConversation->visitor_email }}</span>
+                        @endif
+                        @if($modalConversation->visitor_location || $modalConversation->visitor_country)
+                            <span><i class="fas fa-map-marker-alt mr-1 text-muted"></i>{{ $modalConversation->visitor_location }}{{ $modalConversation->visitor_location && $modalConversation->visitor_country ? ', ' : '' }}{{ $modalConversation->visitor_country }}</span>
+                        @endif
+                        <span class="ml-auto text-muted"><i class="far fa-clock mr-1"></i><time class="local-ts" data-utc="{{ $modalConversation->created_at->utc()->toISOString() }}">{{ $modalConversation->created_at->format('d M Y H:i:s') }}</time></span>
+                    </div>
+                @endif
+                <div class="chat-messages">
+                    @foreach($modalConversation->messages->sortBy('sent_at') as $message)
+                        @php
+                            $isUser = ($message->sender_type === 'user');
+                            $sender = $message->sender_name ?? ucfirst($message->sender_type ?? 'System');
+                        @endphp
+                        <div class="mb-3 {{ $isUser ? 'text-right' : '' }}">
+                            <div class="small mb-1">
+                                @if(!$isUser)
+                                    <span class="badge badge-secondary mr-1">{{ $sender }}</span>
+                                @endif
+                                <time class="text-muted local-ts" data-utc="{{ ($message->sent_at ?? $message->created_at)->utc()->toISOString() }}">{{ ($message->sent_at ?? $message->created_at)->format('d M H:i:s') }}</time>
+                                @if($isUser)
+                                    <span class="badge badge-primary ml-1">{{ $sender }}</span>
+                                @endif
+                            </div>
+                            <div class="{{ $isUser ? 'bg-primary text-white' : 'bg-light border' }} d-inline-block p-2 rounded" style="max-width:85%;word-break:break-word;text-align:left">
+                                {!! $message->message_html !!}
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+            <div class="modal-footer flex-column align-items-stretch bg-light">
+                <label class="font-weight-bold text-left mb-1"><i class="fas fa-reply mr-1"></i> Agent Reply</label>
+                <textarea class="form-control mb-2" rows="3" wire:model.defer="replyMessage.{{ $modalConversation->id }}" placeholder="Type your reply as a support agent..."></textarea>
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted">Agent replies are visible to customers and used as AI context.</small>
+                    <div>
+                        <button type="button" class="btn btn-secondary btn-sm mr-2" wire:click="closeConversationModal">Close</button>
+                        <button class="btn btn-primary btn-sm" wire:click="sendAgentReply({{ $modalConversation->id }})">
+                            <i class="fas fa-reply"></i> Send as Agent
+                        </button>
+                    </div>
+                </div>
+            </div>
+            @else
+            <div class="modal-body text-center p-5">
+                <div class="spinner-border text-info" role="status"><span class="sr-only">Loading...</span></div>
+            </div>
+            @endif
+        </div>
+    </div>
+</div>
 </div>
 
 

@@ -26,7 +26,7 @@ class DemoStreamController extends Controller
         }
 
         $fastApiUrl = config('services.ai_agent.url', 'http://localhost:8111');
-        $model      = 'llama3:8b-instruct-q5_K_M';
+        $model      = 'llama3.1:8b';
         $postBody   = json_encode([
             'messages'     => $messages,
             'model'        => $model,

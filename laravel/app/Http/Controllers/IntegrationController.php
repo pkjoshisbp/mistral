@@ -321,12 +321,10 @@ class IntegrationController extends Controller
             return response()->json(['ok' => false, 'message' => 'Shopify API not configured'], 500);
         }
 
-        // Request necessary scopes for full functionality
-        // read_products: Access product catalog for queries
-        // read_orders: Access order information (requires app approval for protected customer data)
-        // read_themes: Access theme colors for widget branding
-        // NOTE: write_script_tags removed - we use theme app extensions instead
-        $scopes = 'read_products,read_orders,read_themes';
+        // read_products: product catalog, read_orders: order history/tracking
+        // read_customers: customer data (PCD Level 1+2 approved, ref #93967)
+        // read_themes: widget branding colours
+        $scopes = 'read_products,read_orders,read_customers,read_themes';
         $state = Str::random(24);
         $redirectUri = config('app.url') . '/api/integrations/shopify/oauth/callback';
         
@@ -1155,10 +1153,8 @@ class IntegrationController extends Controller
             return response()->json(['error' => 'Shopify API not configured'], 500);
         }
 
-        // Use the standard OAuth authorize endpoint - same as initial install
-        // Shopify will automatically detect existing installation and show "Update" instead of "Install"
-        // NOTE: write_script_tags removed - we use theme app extensions instead
-        $scopes = 'read_products,read_orders,read_themes';
+        // All scopes match the published app listing (read_customers: PCD Level 1+2 approved, ref #93967)
+        $scopes = 'read_products,read_orders,read_customers,read_themes';
         $state = Str::random(24);
         $redirectUri = config('app.url') . '/api/integrations/shopify/oauth/callback';
         

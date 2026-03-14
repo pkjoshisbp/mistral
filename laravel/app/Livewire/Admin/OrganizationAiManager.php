@@ -122,7 +122,7 @@ class OrganizationAiManager extends Component
         } else {
             $defaultLlamaModel = $this->aiBackendType === 'llamacpp'
                 ? AdminSetting::get('llamacpp_model_repo', 'llama-3.2-3b-instruct-q4_k_m.gguf')
-                : AdminSetting::get('llama_default_model', 'llama3:8b-instruct-q5_K_M');
+                : AdminSetting::get('llama_default_model', 'llama3.1:8b');
             $this->aiModel = $settings['llama_model']
                 ?? $settings['ai_model']
                 ?? $defaultLlamaModel;
@@ -308,11 +308,10 @@ class OrganizationAiManager extends Component
         $this->availableModels = [
             'ollama' => [
                 'llama' => [
-                    'llama3:8b-instruct-q5_K_M' => 'Llama 3 8B Instruct (Vast.ai)',
+                    'llama3.1:8b' => 'Llama 3.1 8B (Vast.ai, recommended)',
                     'mistral-nemo:latest' => 'Mistral Nemo (Vast.ai)',
                     'llama3.2:3b' => 'Llama 3.2 3B (Fast)',
                     'llama3.2:1b' => 'Llama 3.2 1B (Fastest)', 
-                    'llama3.1:8b' => 'Llama 3.1 8B (Balanced)',
                     'llama3.1:70b' => 'Llama 3.1 70B (Most Capable)',
                     'mistral:7b' => 'Mistral 7B',
                     'codellama:7b' => 'Code Llama 7B'

@@ -13,6 +13,7 @@ class ShopifyApiService
     protected $shopDomain;
     protected $accessToken;
     protected $apiVersion = '2025-01';
+    protected int $lastSearchMaxScore = 0;
 
     public function __construct(?Integration $integration = null)
     {
@@ -135,6 +136,7 @@ class ShopifyApiService
             $tokens = [$searchTerm];
         }
 
+        $this->lastSearchMaxScore = 0;
         $scored = [];
 
         foreach ($allProducts as $product) {
@@ -164,6 +166,9 @@ class ShopifyApiService
 
             if ($score > 0) {
                 $scored[] = ['score' => $score, 'product' => $product];
+                if ($score > $this->lastSearchMaxScore) {
+                    $this->lastSearchMaxScore = $score;
+                }
             }
         }
 
@@ -178,10 +183,20 @@ class ShopifyApiService
         \Log::info('[SHOPIFY] searchProducts results', [
             'query' => $query,
             'tokens' => $tokens,
-            'matches_found' => count($matches)
+            'matches_found' => count($matches),
+            'max_score' => $this->lastSearchMaxScore,
         ]);
         
         return $matches;
+    }
+
+    /**
+     * Return the max relevance score from the last searchProducts() call.
+     * Score >= 5 means at least one title matched a keyword.
+     */
+    public function getLastSearchMaxScore(): int
+    {
+        return $this->lastSearchMaxScore;
     }
 
     /**
@@ -250,6 +265,16 @@ class ShopifyApiService
                     'inventory' => $variant['inventory_quantity'] ?? 0,
                     'available' => ($variant['inventory_quantity'] ?? 0) > 0,
                     'url' => "https://{$this->shopDomain}/products/{$product['handle']}",
+                    // Map all variant titles so size/option info is available for LLM context
+                    'variants' => array_map(function ($v) {
+                        return [
+                            'id'        => $v['id'],
+                            'title'     => $v['title'],
+                            'price'     => $v['price'],
+                            'available' => ($v['inventory_quantity'] ?? 0) > 0,
+                            'inventory' => $v['inventory_quantity'] ?? 0,
+                        ];
+                    }, $product['variants'] ?? []),
                 ];
             }, $response['products']);
         });
@@ -273,7 +298,7 @@ class ShopifyApiService
         if (is_array($response) && isset($response['error']) && $response['error'] === 'protected_data_access_denied') {
             return [
                 'error' => 'requires_approval',
-                'message' => 'Order tracking is not available yet. Our app is pending Shopify approval to access order information. You can check your order status directly in your Shopify account or contact our support team.'
+                'message' => 'Order details are not directly accessible through this chat. Advise the customer to: (1) check their order confirmation email for tracking information, (2) log into their account on our website to view order status, or (3) contact our support team with their order number for assistance.'
             ];
         }
 
@@ -289,7 +314,7 @@ class ShopifyApiService
             if (is_array($response) && isset($response['error']) && $response['error'] === 'protected_data_access_denied') {
                 return [
                     'error' => 'requires_approval',
-                    'message' => 'Order tracking is not available yet. Our app is pending Shopify approval to access order information. You can check your order status directly in your Shopify account or contact our support team.'
+                    'message' => 'Order details are not directly accessible through this chat. Advise the customer to: (1) check their order confirmation email for tracking information, (2) log into their account on our website to view order status, or (3) contact our support team with their order number for assistance.'
                 ];
             }
             
@@ -471,7 +496,11 @@ class ShopifyApiService
                 
                 // Handle error cases
                 if (isset($data['error']) && $data['error'] === 'requires_approval') {
-                    return $data['message'];
+                    $orderId = $data['queried_identifier'] ?? null;
+                    $note = $orderId
+                        ? "[Order lookup for '{$orderId}': " . $data['message'] . "]"
+                        : '[' . $data['message'] . ']';
+                    return $note;
                 }
                 
                 $formatted = "Order {$data['name']}:\n";

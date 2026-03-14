@@ -238,8 +238,8 @@ class IntentDetectionService
     private function detectIntentWithLLM(string $query, array $settings = []): ?array
     {
         try {
-            // Use Vast.ai GPU with llama3:8b for faster intent detection (3-4s vs 26s local)
-            $intentModel = 'llama3:8b-instruct-q5_K_M';
+            // Use Vast.ai GPU with llama3.1:8b for faster intent detection (3-4s vs 26s local)
+            $intentModel = 'llama3.1:8b';
             $maxTokens = $settings['intent_llm_max_tokens'] ?? 64;
             $temperature = $settings['intent_llm_temperature'] ?? 0.1;
             $topP = $settings['intent_llm_top_p'] ?? 0.85;
