@@ -2110,27 +2110,34 @@ class WidgetController
                 $rawResponseText = $aiResponse['message']['content'];
                 $responseText = $rawResponseText;
 
-                $envelope = $this->extractOneCallEnvelope((string) $rawResponseText);
-                if (is_array($envelope)) {
-                    $oneCallEnvelopeParseOk = true;
-                    $responseText = (string) ($envelope['response'] ?? $responseText);
-                    $structuredFollowUpState = $envelope['structured_state'] ?? null;
-                    $oneCallEnvelopeUsed = is_array($structuredFollowUpState) && !empty($structuredFollowUpState);
-                } else {
-                    $oneCallEnvelopeRetryAttempted = true;
-                    $retryEnvelope = $this->retryStrictEnvelopeExtraction(
-                        (string) $rawResponseText,
-                        (string) $message,
-                        $organization,
-                        (int) $organization->id,
-                        $aiProvider
-                    );
-                    if (is_array($retryEnvelope)) {
-                        $oneCallEnvelopeRetrySucceeded = true;
+                // Shopify responses contain live order data (tracking numbers, status, etc.)
+                // built directly from the Shopify API at request time. Skip envelope extraction
+                // entirely — it can trigger a second LLM call that regenerates the response
+                // from conversation history, replacing the correct tracking number with a
+                // stale one from a previous query in the same session.
+                if (!$hasShopifyData) {
+                    $envelope = $this->extractOneCallEnvelope((string) $rawResponseText);
+                    if (is_array($envelope)) {
                         $oneCallEnvelopeParseOk = true;
-                        $responseText = (string) ($retryEnvelope['response'] ?? $responseText);
-                        $structuredFollowUpState = $retryEnvelope['structured_state'] ?? null;
+                        $responseText = (string) ($envelope['response'] ?? $responseText);
+                        $structuredFollowUpState = $envelope['structured_state'] ?? null;
                         $oneCallEnvelopeUsed = is_array($structuredFollowUpState) && !empty($structuredFollowUpState);
+                    } else {
+                        $oneCallEnvelopeRetryAttempted = true;
+                        $retryEnvelope = $this->retryStrictEnvelopeExtraction(
+                            (string) $rawResponseText,
+                            (string) $message,
+                            $organization,
+                            (int) $organization->id,
+                            $aiProvider
+                        );
+                        if (is_array($retryEnvelope)) {
+                            $oneCallEnvelopeRetrySucceeded = true;
+                            $oneCallEnvelopeParseOk = true;
+                            $responseText = (string) ($retryEnvelope['response'] ?? $responseText);
+                            $structuredFollowUpState = $retryEnvelope['structured_state'] ?? null;
+                            $oneCallEnvelopeUsed = is_array($structuredFollowUpState) && !empty($structuredFollowUpState);
+                        }
                     }
                 }
             }
