@@ -795,7 +795,10 @@ class WidgetController
                     $cachedShopifyData = $this->getCachedShopifyData($sessionId);
                     $messageHasNewOrderRef = $this->shopifyMessageContainsOrderEntity($message, $searchQuery);
 
-                    if (!empty($cachedShopifyData) && !$messageHasNewOrderRef) {
+                    if (!empty($cachedShopifyData)
+                        && !$messageHasNewOrderRef
+                        && $this->shouldReuseCachedShopifyData($cachedShopifyData, $message, $searchQuery)
+                    ) {
                         $shopifyContext = $cachedShopifyData;
                         $hasShopifyData = true;
                         Log::info('[SHOPIFY] Cache-first: re-injecting cached Shopify data', [
@@ -1586,7 +1589,7 @@ class WidgetController
                     }
                 }
 
-                $finalFaqResponse = $paraphrasedResponse ?: $directResponse;
+                $finalFaqResponse = $this->decodeHtmlEntitiesRecursively($paraphrasedResponse ?: $directResponse);
                 $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
                     $organization,
                     $finalFaqResponse,
@@ -2167,6 +2170,11 @@ class WidgetController
                 $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
                 if ($structuredShopifyOrderResponse !== null) {
                     $responseText = $structuredShopifyOrderResponse;
+                } else {
+                    $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $message, $shopifyData);
+                    if ($structuredShopifyProductResponse !== null) {
+                        $responseText = $structuredShopifyProductResponse;
+                    }
                 }
                 $responseText = $this->normalizeShopifyResponseText($responseText);
             }
@@ -5620,6 +5628,30 @@ class WidgetController
         }
     }
 
+    private function shouldReuseCachedShopifyData(string $cachedContext, string $message, string $searchQuery = ''): bool
+    {
+        $cachedContext = trim($cachedContext);
+        if ($cachedContext === '') {
+            return false;
+        }
+
+        $cachedLooksLikeOrder = (bool) preg_match(
+            '/\b(order\s+[A-Z0-9#-]+:|tracking number|carrier|fulfillment status|delivery status|shipped on|track at:)\b/i',
+            $cachedContext
+        );
+
+        if (!$cachedLooksLikeOrder) {
+            return false;
+        }
+
+        $combined = trim($message . ' ' . $searchQuery);
+
+        return (bool) preg_match(
+            '/\b(order|tracking|track|shipment|shipping|delivery|delivered|shipped|carrier|fulfillment|status|where\s+is\s+(?:my\s+)?(?:order|package|shipment))\b/i',
+            $combined
+        );
+    }
+
     /**
      * Returns true if the message (or enriched search query) appears to reference
      * a NEW explicit order/product entity — meaning a fresh Shopify API call is
@@ -8742,6 +8774,7 @@ class WidgetController
         }, $text);
         // As an extra guard, remove any lingering tags
         $text = strip_tags($text);
+        $text = $this->decodeHtmlEntitiesRecursively($text);
         // Normalize line endings then collapse only horizontal whitespace, preserving newlines.
         // Collapsing \n breaks formatted order/product responses into a single unreadable line.
         $text = str_replace(["\r\n", "\r"], "\n", $text);
@@ -8752,6 +8785,24 @@ class WidgetController
         // The LLM sometimes omits the newline between a field value and the next label.
         $text = preg_replace('/([^\n])\*\*([A-Z][^*\n]{1,30}):\*\*/', "$1\n**$2:**", $text);
         return trim($text);
+    }
+
+    private function decodeHtmlEntitiesRecursively(string $text, int $maxPasses = 2): string
+    {
+        if ($text === '') {
+            return '';
+        }
+
+        for ($pass = 0; $pass < $maxPasses; $pass++) {
+            $decoded = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($decoded === $text) {
+                break;
+            }
+
+            $text = $decoded;
+        }
+
+        return $text;
     }
 
     private function normalizeShopifyResponseText(string $text): string
@@ -8870,6 +8921,101 @@ class WidgetController
         }
 
         return empty($lines) ? null : implode("\n", $lines);
+    }
+
+    private function buildStructuredShopifyProductResponse(string $message, $shopifyData): ?string
+    {
+        if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
+            return null;
+        }
+
+        if (!preg_match('/\b(price|pricing|cost|amount|how\s+much|cheap|cheapest|lowest|under|below|less\s+than|inr|usd|rs\.?|₹|\$)\b/i', $message)) {
+            return null;
+        }
+
+        $products = array_values(array_filter($shopifyData['data'] ?? [], static function ($product) {
+            return is_array($product) && isset($product['title'], $product['price']);
+        }));
+
+        if (empty($products)) {
+            return null;
+        }
+
+        usort($products, static function (array $left, array $right) {
+            return (float) ($left['price'] ?? 0) <=> (float) ($right['price'] ?? 0);
+        });
+
+        $storeCurrency = strtoupper(trim((string) ($products[0]['currency'] ?? 'USD')));
+        [$budgetAmount, $budgetCurrency] = $this->extractShopifyBudgetFromMessage($message);
+        $topProducts = array_slice($products, 0, min(3, count($products)));
+
+        if ($budgetAmount !== null && $budgetCurrency !== null && $budgetCurrency !== $storeCurrency) {
+            $lines = [
+                "I found matching products, but the live store prices are listed in {$storeCurrency}, not {$budgetCurrency}.",
+                "The lowest matching price is {$storeCurrency} " . number_format((float) ($products[0]['price'] ?? 0), 2) . " for {$products[0]['title']}.",
+                'Lowest-priced matching products:',
+            ];
+
+            foreach ($topProducts as $product) {
+                $lines[] = $this->formatStructuredShopifyProductLine($product, $storeCurrency);
+            }
+
+            $lines[] = "I can confirm the exact {$storeCurrency} prices from the live store data, but I won't invent an INR conversion.";
+
+            return implode("\n", $lines);
+        }
+
+        $matchingProducts = $products;
+        if ($budgetAmount !== null && $budgetCurrency === $storeCurrency) {
+            $matchingProducts = array_values(array_filter($products, static function (array $product) use ($budgetAmount) {
+                return (float) ($product['price'] ?? 0) <= $budgetAmount;
+            }));
+        }
+
+        if (empty($matchingProducts)) {
+            return implode("\n", [
+                "I couldn't find a matching product at or below {$storeCurrency} " . number_format((float) $budgetAmount, 2) . ' in the live store data.',
+                "The lowest matching price I found is {$storeCurrency} " . number_format((float) ($products[0]['price'] ?? 0), 2) . " for {$products[0]['title']}.",
+            ]);
+        }
+
+        $matchingProducts = array_slice($matchingProducts, 0, min(3, count($matchingProducts)));
+        $intro = $budgetAmount !== null && $budgetCurrency === $storeCurrency
+            ? "I found these matching products at or below {$storeCurrency} " . number_format((float) $budgetAmount, 2) . ':'
+            : 'Here are the lowest-priced matching products from the live store data:';
+
+        $lines = [$intro];
+        foreach ($matchingProducts as $product) {
+            $lines[] = $this->formatStructuredShopifyProductLine($product, $storeCurrency);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function extractShopifyBudgetFromMessage(string $message): array
+    {
+        $currency = null;
+        if (preg_match('/₹|\binr\b|\brs\.?\b/i', $message)) {
+            $currency = 'INR';
+        } elseif (preg_match('/\$|\busd\b/i', $message)) {
+            $currency = 'USD';
+        }
+
+        if (preg_match('/\b(?:under|below|less\s+than|upto|up\s+to|at\s+most|max(?:imum)?)\b[^\d]*(\d+(?:,\d{3})*(?:\.\d+)?)/i', $message, $matches)) {
+            return [(float) str_replace(',', '', $matches[1]), $currency];
+        }
+
+        return [null, $currency];
+    }
+
+    private function formatStructuredShopifyProductLine(array $product, string $currency): string
+    {
+        $price = number_format((float) ($product['price'] ?? 0), 2);
+        $stock = !empty($product['available'])
+            ? 'In stock' . (isset($product['inventory']) ? ': ' . (int) $product['inventory'] : '')
+            : 'Out of stock';
+
+        return '- ' . trim((string) ($product['title'] ?? 'Product')) . ': ' . $currency . ' ' . $price . ' (' . $stock . ')';
     }
 
     private function deriveStructuredShopifyOrderStatus(array $order): string
