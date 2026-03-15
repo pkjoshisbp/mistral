@@ -34,6 +34,9 @@ class WidgetController
     private $faqFollowUpService;
     private $followUpStateService;
 
+    /** Accumulated debug fields for a single chat request — written once per request. */
+    private array $debugData = [];
+
     public function __construct(AiAgentService $aiAgentService, FaqFollowUpService $faqFollowUpService, FollowUpStateService $followUpStateService)
     {
         $this->aiAgentService = $aiAgentService;
@@ -383,6 +386,8 @@ class WidgetController
      */
     public function chat(Request $request, $orgId)
     {
+        $requestStartedAt = microtime(true);
+        $this->debugData = ['request_type' => 'chat'];
         try {
             // Try to find organization by ID first, then by slug
             $organization = is_numeric($orgId) 
@@ -573,6 +578,14 @@ class WidgetController
                 ];
             }
 
+            // Capture intent into debug payload
+            $this->debugData['organization_id'] = $organization->id;
+            $this->debugData['session_id']       = $sessionId;
+            $this->debugData['user_message']     = $message;
+            $this->debugData['intent']            = $intentResult['intent']      ?? null;
+            $this->debugData['intent_confidence'] = $intentResult['confidence']  ?? null;
+            $this->debugData['intent_method']     = $intentResult['method']      ?? null;
+
 
             if ($existingConversation && in_array($existingConversation->agent_status, ['agent_assigned', 'agent_active'], true)) {
                 $handoffText = 'A human agent is reviewing your message and will reply shortly.';
@@ -730,7 +743,17 @@ class WidgetController
                 }
             }
 
-            if (($isContextualShortFollowUp || $isReferentialFollowUp || $isAffirmativeFollowUp) && !$canReusePreviousContext) {
+            // Load Shopify integration early — before the query rewrite — so we can skip
+            // the LLM rewrite call for Shopify orgs. Shopify queries already have entity
+            // context (order ID, product name) in $searchQuery from the combined-query step
+            // above; an extra LLM rewrite call wastes ~15 s and risks dropping the entity.
+            $shopifyIntegration = $organization->integrations()
+                ->where('provider', 'shopify')
+                ->where('active', true)
+                ->first();
+
+            // Only run the LLM rewrite for non-Shopify orgs (Qdrant semantic search benefit).
+            if (!$shopifyIntegration && ($isContextualShortFollowUp || $isReferentialFollowUp || $isAffirmativeFollowUp) && !$canReusePreviousContext) {
                 $searchQuery = $this->rewriteFollowUpSearchQueryWithContext(
                     $organization,
                     (string) $sessionId,
@@ -740,144 +763,212 @@ class WidgetController
                 );
             }
 
+            // Determine once whether this turn has prior cached LLM context.
+            // Used both to skip redundant Shopify calls and to bypass the Qdrant
+            // low-confidence clarification gate when the LLM already has the data.
+            $hasCachedTurns = !empty($this->getCachedChatMessages($sessionId));
+
             // ---- SHOPIFY API INTEGRATION (SMART PATH) ----
             $shopifyContext = '';
             $shopifyData = null;
             $hasShopifyData = false;
-            
+
             try {
-                // First check if organization has active Shopify integration
-                $integration = $organization->integrations()
-                    ->where('provider', 'shopify')
-                    ->where('active', true)
-                    ->first();
-                
-                // Only check for Shopify patterns if integration exists
-                $shouldCheckShopify = false;
-                if ($integration) {
-                    $shouldCheckShopify = $isShopify || $this->detectShopifyQuery($message);
-                }
-                
-                if ($shouldCheckShopify) {
-                    Log::info('Shopify query detected in widget', [
-                        'org_id' => $organization->id,
-                        'query' => $message,
-                        'source' => $isShopify ? 'widget_flag' : 'pattern_detection'
-                    ]);
-                    
-                    if ($integration && $integration->shop) {
+                $integration = $shopifyIntegration; // already loaded above
+
+                if ($integration !== null) {
+                    // If this is a short referential follow-up (e.g. "track it for me",
+                    // "where is it") AND we already have prior turns in Redis, skip the
+                    // Shopify API call entirely. The LLM already has the order/tracking
+                    // data in the conversation history — calling Shopify again is redundant
+                    // and adds 30-40s with no benefit. The system prompt already tells the
+                    // LLM it cannot check live carrier status and to direct the user to
+                    // click the tracking link.
+                    // Cache-first: if we already fetched order/product data this session
+                    // and the current message does NOT reference a NEW explicit order ID,
+                    // re-inject the cached data instead of calling the API again.
+                    // This covers any follow-up phrasing regardless of length:
+                    // "what's the tracking number?", "when was it delivered?",
+                    // "can you share the shipping details?", etc.
+                    $cachedShopifyData = $this->getCachedShopifyData($sessionId);
+                    $messageHasNewOrderRef = $this->shopifyMessageContainsOrderEntity($message, $searchQuery);
+
+                    if (!empty($cachedShopifyData) && !$messageHasNewOrderRef) {
+                        $shopifyContext = $cachedShopifyData;
+                        $hasShopifyData = true;
+                        Log::info('[SHOPIFY] Cache-first: re-injecting cached Shopify data', [
+                            'org_id'  => $organization->id,
+                            'session' => $sessionId,
+                            'message' => $message,
+                        ]);
+                    } elseif ($integration->shop) {
                         try {
-                            $response = \Illuminate\Support\Facades\Http::timeout(10)->post(config('app.url') . '/api/shopify/query', [
-                                'shop_domain' => $integration->shop,
-                                'query' => $message,
-                            ]);
-                            
-                            if ($response->successful()) {
-                                $data = $response->json();
-                                if ($data['success'] ?? false) {
-                                    $shopifyData = $data;
-                                    $hasShopifyData = !empty($data['data']);
-                                    $shopifySpecificMatch = $data['specific_match'] ?? true;
-                                    
-                                    // Build concise context for LLM
-                                    if ($hasShopifyData && ($data['query_type'] ?? '') === 'products') {
-                                        $products = $data['data'];
-                                        $productCount = count($products);
-                                        
-                                        // Sort products by price (ascending) for accurate price queries
-                                        usort($products, function($a, $b) {
-                                            return floatval($a['price']) <=> floatval($b['price']);
-                                        });
-                                        
-                                        Log::info('[SHOPIFY] Products sorted by price', [
-                                            'first' => $products[0]['title'] ?? 'N/A',
-                                            'first_price' => $products[0]['price'] ?? 'N/A',
-                                            'last' => $products[count($products)-1]['title'] ?? 'N/A',
-                                            'last_price' => $products[count($products)-1]['price'] ?? 'N/A'
-                                        ]);
-                                        
-                                        // Extract product categories/types
-                                        $categories = array_unique(array_map(function($p) {
-                                            $title = $p['title'] ?? '';
-                                            // Extract category from title (e.g., "Snowboard", "Ski Wax", etc.)
-                                            if (stripos($title, 'snowboard') !== false) return 'Snowboards';
-                                            if (stripos($title, 'ski') !== false) return 'Ski Equipment';
-                                            if (stripos($title, 'gift') !== false) return 'Gift Cards';
-                                            return 'Products';
-                                        }, $products));
-                                        
-                                        $isSpecificMatch = $shopifySpecificMatch ?? true;
+                            // $searchQuery already contains rich context (prev message + current)
+                            // so always use it; fall back to raw $message only if empty.
+                            $shopifyApiQuery = !empty($searchQuery) ? $searchQuery : $message;
+                            $customerEmail   = $allUserInfo['email'] ?? $allUserInfo['customer_email'] ?? null;
+                            if (!filter_var((string) $customerEmail, FILTER_VALIDATE_EMAIL)) {
+                                $customerEmail = null;
+                            }
 
-                                        // Build smart context with price range and examples
-                                        $shopifyContext = "Available Products ({$productCount} total):\n";
-                                        $shopifyContext .= "Categories: " . implode(', ', $categories) . "\n";
-                                        
-                                        // Add price range
-                                        $availableProducts = array_filter($products, fn($p) => $p['available']);
-                                        if (!empty($availableProducts)) {
-                                            $minPrice = min(array_map(fn($p) => floatval($p['price']), $availableProducts));
-                                            $maxPrice = max(array_map(fn($p) => floatval($p['price']), $availableProducts));
-                                            $currency = $products[0]['currency'] ?? 'USD';
-                                            $shopifyContext .= "Price Range: {$currency} {$minPrice} - {$currency} {$maxPrice}\n\n";
-                                        } else {
-                                            $shopifyContext .= "\n";
-                                        }
-                                        
-                                        $exampleCount = min(5, $productCount);
-                                        $shopifyContext .= "Products (sorted by price):\n";
-                                        for ($i = 0; $i < $exampleCount; $i++) {
-                                            $p = $products[$i];
-                                            $shopifyContext .= "- {$p['title']}: {$p['currency']} {$p['price']}";
-                                            if ($p['available']) {
-                                                $shopifyContext .= " (In stock: {$p['inventory']})";
-                                            } else {
-                                                $shopifyContext .= " (Out of stock)";
-                                            }
-                                            $shopifyContext .= "\n";
+                            // Direct PHP call — no Apache/HTTP self-loop
+                            $shopifyController = app(\App\Http\Controllers\Api\ShopifyDataController::class);
+                            $data = $shopifyController->queryDirect($integration->shop, $shopifyApiQuery, $customerEmail);
 
-                                            // For specific-match results include description + variants so LLM can answer size/spec questions
-                                            if ($isSpecificMatch && !empty($p['description'])) {
-                                                $shopifyContext .= "  Details: " . substr(strip_tags($p['description']), 0, 400) . "\n";
-                                            }
-                                            if ($isSpecificMatch && !empty($p['variants'])) {
-                                                $variantTitles = array_column($p['variants'], 'title');
-                                                $variantTitles = array_filter($variantTitles, fn($v) => $v !== 'Default Title');
-                                                if (!empty($variantTitles)) {
-                                                    $shopifyContext .= "  Available sizes/variants: " . implode(', ', $variantTitles) . "\n";
-                                                }
-                                            }
-                                            if (!empty($p['url'])) {
-                                                $shopifyContext .= "  URL: {$p['url']}\n";
-                                            }
-                                        }
-                                        
-                                        if ($productCount > $exampleCount) {
-                                            $shopifyContext .= "... and " . ($productCount - $exampleCount) . " more products\n";
-                                        }
-                                        
-                                        $orgSiteUrl = $organization->website ?: ($organization->website_url ?? null) ?: $integration->shop;
-                                        $shopifyContext .= "\nWebsite: {$orgSiteUrl}";
+                            if ($data['success'] ?? false) {
+                                $shopifyData = $data;
+                                $hasShopifyData = !empty($data['data']);
+                                $shopifySpecificMatch = $data['specific_match'] ?? true;
+
+                                // Build concise context for LLM
+                                if ($hasShopifyData && ($data['query_type'] ?? '') === 'products') {
+                                    $products = $data['data'];
+                                    $productCount = count($products);
+
+                                    // Sort products by price (ascending) for accurate price queries
+                                    usort($products, function($a, $b) {
+                                        return floatval($a['price']) <=> floatval($b['price']);
+                                    });
+
+                                    Log::info('[SHOPIFY] Products sorted by price', [
+                                        'first'       => $products[0]['title'] ?? 'N/A',
+                                        'first_price' => $products[0]['price'] ?? 'N/A',
+                                        'last'        => $products[count($products)-1]['title'] ?? 'N/A',
+                                        'last_price'  => $products[count($products)-1]['price'] ?? 'N/A'
+                                    ]);
+
+                                    // Extract product categories/types
+                                    $categories = array_unique(array_map(function($p) {
+                                        $title = $p['title'] ?? '';
+                                        if (stripos($title, 'snowboard') !== false) return 'Snowboards';
+                                        if (stripos($title, 'ski')       !== false) return 'Ski Equipment';
+                                        if (stripos($title, 'gift')      !== false) return 'Gift Cards';
+                                        return 'Products';
+                                    }, $products));
+
+                                    $isSpecificMatch = $shopifySpecificMatch ?? true;
+
+                                    $shopifyContext  = "Available Products ({$productCount} total):\n";
+                                    $shopifyContext .= "Categories: " . implode(', ', $categories) . "\n";
+
+                                    $availableProducts = array_filter($products, fn($p) => $p['available']);
+                                    if (!empty($availableProducts)) {
+                                        $minPrice = min(array_map(fn($p) => floatval($p['price']), $availableProducts));
+                                        $maxPrice = max(array_map(fn($p) => floatval($p['price']), $availableProducts));
+                                        $currency = $products[0]['currency'] ?? 'USD';
+                                        $shopifyContext .= "Price Range: {$currency} {$minPrice} - {$currency} {$maxPrice}\n\n";
                                     } else {
-                                        $shopifyContext = $data['formatted_text'] ?? '';
+                                        $shopifyContext .= "\n";
                                     }
-                                    
-                                    Log::info('Shopify data fetched for widget', [
-                                        'query_type' => $data['query_type'] ?? 'unknown',
-                                        'data_count' => count($data['data'] ?? []),
-                                        'has_data' => $hasShopifyData
+
+                                    $exampleCount    = min(5, $productCount);
+                                    $shopifyContext .= "Products (sorted by price):\n";
+                                    for ($i = 0; $i < $exampleCount; $i++) {
+                                        $p = $products[$i];
+                                        $shopifyContext .= "- {$p['title']}: {$p['currency']} {$p['price']}";
+                                        if ($p['available']) {
+                                            $shopifyContext .= " (In stock: {$p['inventory']})";
+                                        } else {
+                                            $shopifyContext .= " (Out of stock)";
+                                        }
+                                        $shopifyContext .= "\n";
+
+                                        if ($isSpecificMatch && !empty($p['description'])) {
+                                            $shopifyContext .= "  Details: " . substr(strip_tags($p['description']), 0, 400) . "\n";
+                                        }
+                                        if ($isSpecificMatch && !empty($p['variants'])) {
+                                            $variantTitles = array_filter(array_column($p['variants'], 'title'), fn($v) => $v !== 'Default Title');
+                                            if (!empty($variantTitles)) {
+                                                $shopifyContext .= "  Available sizes/variants: " . implode(', ', $variantTitles) . "\n";
+                                            }
+                                        }
+                                        if (!empty($p['url'])) {
+                                            $shopifyContext .= "  URL: {$p['url']}\n";
+                                        }
+                                    }
+
+                                    if ($productCount > $exampleCount) {
+                                        $shopifyContext .= "... and " . ($productCount - $exampleCount) . " more products\n";
+                                    }
+
+                                    $orgSiteUrl      = $organization->website ?: ($organization->website_url ?? null) ?: $integration->shop;
+                                    $shopifyContext .= "\nWebsite: {$orgSiteUrl}";
+
+                                } else {
+                                    $shopifyContext = $data['formatted_text'] ?? '';
+                                    if (($data['query_type'] ?? '') === 'order' && !empty($shopifyContext)) {
+                                        $shopifyContext .= "\n\nINSTRUCTIONS FOR ORDER RESPONSES:"
+                                            . "\n- Present each field on its own separate line. Use this exact format (one field per line):"
+                                            . "\n  **Status:** [value]"
+                                            . "\n  **Tracking Number:** [value]"
+                                            . "\n  **Carrier:** [value]"
+                                            . "\n  **Tracking Link:** [url]"
+                                            . "\n- Include ALL available fields from the data. Do NOT omit tracking number or link."
+                                            . "\n- You CANNOT check real-time carrier location. Direct the customer to click the tracking link above.";
+                                    }
+                                }
+
+                                // Cache ONLY when the API returned actual data.
+                                // Never overwrite existing cached order data with an empty result.
+                                if ($hasShopifyData && !empty($shopifyContext)) {
+                                    $ttlH = (int)(($organization->settings['chat_history_ttl_hours'] ?? null) ?: 24);
+                                    $this->cacheShopifyData($sessionId, $shopifyContext, $ttlH);
+                                } elseif (!$hasShopifyData && !empty($cachedShopifyData)) {
+                                    // API returned nothing — fall back to data cached earlier this session.
+                                    $shopifyContext = $cachedShopifyData;
+                                    $hasShopifyData = true;
+                                    Log::info('[SHOPIFY] API no-data — falling back to cached Shopify context', [
+                                        'org_id'  => $organization->id,
+                                        'session' => $sessionId,
                                     ]);
                                 }
+
+                                Log::info('Shopify data fetched for widget', [
+                                    'query_type' => $data['query_type'] ?? 'unknown',
+                                    'data_count' => count($data['data'] ?? []),
+                                    'has_data'   => $hasShopifyData
+                                ]);
                             }
                         } catch (\Exception $e) {
                             Log::error('Shopify API request failed in widget', [
                                 'error' => $e->getMessage(),
-                                'shop' => $integration->shop
+                                'shop'  => $integration->shop
                             ]);
                         }
-                    }
-                }
+                    } // end elseif ($integration->shop)
+                } // end if ($integration !== null)
             } catch (\Exception $e) {
                 Log::error('Shopify integration error in widget', ['error' => $e->getMessage()]);
+            }
+
+            // ---- ACTION SERVICE ----
+            // Execute org-configured actions (live API, DB, Sheets, CSV) when Shopify
+            // didn't already provide context for this turn.
+            $liveData   = null;
+            $actionResult = null;
+            if (empty($shopifyContext)) {
+                try {
+                    $actionService = app(\App\Services\ActionService::class);
+                    $actionQuery   = $message;
+                    if ($this->isPricingFollowUp($message)) {
+                        $prevMsg = $this->getLastUserMessageForSession($organization->id, $sessionId);
+                        if ($prevMsg) {
+                            $actionQuery = trim($prevMsg . ' ' . $message);
+                        }
+                    }
+                    $actionResult = $actionService->processQuery($actionQuery, $organization->id);
+                    if (($actionResult['type'] ?? '') === 'action_executed'
+                        && ($actionResult['result']['success'] ?? false)) {
+                        $liveData = $actionResult['result']['data'] ?? null;
+                        Log::info('[ACTION] Live data returned by ActionService in chat()', [
+                            'org_id'      => $organization->id,
+                            'action_name' => $actionResult['action']['name'] ?? 'unknown',
+                            'query'       => $actionQuery,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('[ACTION] ActionService failed in chat()', ['error' => $e->getMessage()]);
+                }
             }
 
             // Search organization's Qdrant collection for context using enhanced search (or reuse last context on affirmatives)
@@ -895,7 +986,7 @@ class WidgetController
             
             $searchResults = null;
             $anchoredEntityResults = [];
-            if (!$canReusePreviousContext) {
+            if (!$canReusePreviousContext && !$liveData) {
                 $anchoredEntityResults = $this->resolveEntityAnchoredResults(
                     $organization,
                     (string) $searchQuery
@@ -920,7 +1011,13 @@ class WidgetController
             
             $context = '';
             $orderedResults = [];
-            if ($canReusePreviousContext) {
+            if ($liveData !== null) {
+                // ActionService returned fresh live data — use it directly as LLM context.
+                $actionName = $actionResult['action']['name'] ?? 'live source';
+                $context = "[LIVE DATA from {$actionName}]:\n"
+                    . json_encode($liveData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                    . "\n[END LIVE DATA]\n\nIMPORTANT: Use ONLY the LIVE DATA above to answer. Format it in a user-friendly way.\n\n";
+            } elseif ($canReusePreviousContext) {
                 // Reuse last context payloads for follow-up continuity
                 $orderedResults = array_map(function ($p) {
                     return ['payload' => $p];
@@ -1012,6 +1109,23 @@ class WidgetController
                 $maxResultScore = 0.0;
                 foreach ($searchResults['results'] as $_r) {
                     $maxResultScore = max($maxResultScore, (float) ($_r['score'] ?? 0));
+                }
+
+                // Capture search debug info — available for all code paths below
+                $this->debugData['original_query']      = $message;
+                $this->debugData['final_search_query']  = (string) $searchQuery;
+                $this->debugData['query_was_rewritten'] = trim((string) $searchQuery) !== trim((string) $message);
+                $this->debugData['best_qdrant_score']   = $maxResultScore;
+                // Expansion data surfaced by AiAgentService (if any this call)
+                $searchDebug = $this->aiAgentService->getLastSearchDebug();
+                if ($searchDebug) {
+                    $this->debugData['expansion_attempted']   = (bool) ($searchDebug['expansion_attempted'] ?? false);
+                    $this->debugData['expanded_query']        = $searchDebug['expanded_query'] ?? null;
+                    $this->debugData['expansion_score_gain']  = $searchDebug['expansion_score_gain'] ?? null;
+                    $this->debugData['search_elapsed_ms']     = $searchDebug['total_elapsed_ms'] ?? null;
+                    if (!empty($searchDebug['rewritten_query'])) {
+                        $this->debugData['rewritten_query'] = $searchDebug['rewritten_query'];
+                    }
                 }
                 
                 // Deduplicate results: skip items whose URL or content we've already added to context
@@ -1411,20 +1525,28 @@ class WidgetController
                 $directResponse = $exactFaqMatch['response'];
                 $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
                 $paraphrasedResponse = null;
+                // Only skip paraphrase for keyword-fallback matches (plain-text only).
+                // All semantic/HTML FAQ matches ALWAYS go through LLM so responses
+                // are polished, properly attributed, and billed for token usage.
                 $skipParaphrase = (($exactFaqMatch['match_source'] ?? '') === 'keyword_fallback');
 
                 if (!$skipParaphrase) {
                     try {
-                        // Dynamic token budget proportional to answer length so the LLM
-                        // is never forced to truncate or compress the response.
-                        $dynamicNumPredict = min(400, max(150, (int) (mb_strlen($directResponse) / 3)));
+                        // Send the raw HTML to the LLM so it preserves all formatting
+                        // (tags, lists, bold, images). The LLM only touches the wording.
+                        $htmlFaqContent = trim((string) $directResponse);
+                        $dynamicNumPredict = min(800, max(200, (int) (mb_strlen($htmlFaqContent) * 0.8)));
 
                         $paraphrasePrompt = "You are {$assistantName} for {$organization->name}. "
                             . "Tone: {$responseTone}. Language: {$responseLanguage}. "
-                            . "Rephrase the following FAQ answer in first-person plural (we/our). "
-                            . "Preserve all line breaks, paragraph structure, and formatting exactly as in the original. "
-                            . "Answer only with the rephrased response.\n\n"
-                            . "FAQ Answer: \"{$directResponse}\"";
+                            . "The FAQ answer below is already formatted in HTML. Your job is to lightly rephrase it in first-person plural (we/our) to sound professional and natural — do NOT invent new information. "
+                            . "STRICT HTML RULES:\n"
+                            . "- Preserve ALL HTML tags exactly as they appear: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
+                            . "- Do NOT remove, add, or restructure any HTML tags.\n"
+                            . "- Only rephrase the visible TEXT inside the tags — never alter tag names, attributes (href, src, style, alt), or tag structure.\n"
+                            . "- If the answer already sounds perfect, return it verbatim.\n"
+                            . "- Output ONLY the HTML — no explanation, no preamble, no markdown fences.\n\n"
+                            . "FAQ HTML Answer:\n{$htmlFaqContent}";
 
                         $paraphraseMessages = [
                             ['role' => 'system', 'content' => $paraphrasePrompt],
@@ -1434,7 +1556,7 @@ class WidgetController
                         // Always use the org's configured model — it is the same model
                         // used for main chat, so it is already warm on vast.ai from recent
                         // queries. Switching to a different model causes a cold load (~24 s).
-                        $paraphraseOptions = ['num_predict' => $dynamicNumPredict, 'temperature' => 0.4];
+                        $paraphraseOptions = ['num_predict' => $dynamicNumPredict, 'temperature' => 0.3];
                         $paraphraseModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
                         $paraphraseResponse = $this->aiAgentService->llmChat(
                             $paraphraseMessages,
@@ -1493,6 +1615,16 @@ class WidgetController
                     compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
+
+                $this->debugData['faq_matched']       = true;
+                $this->debugData['faq_match_type']    = 'direct';
+                $this->debugData['response_path']     = 'faq_direct';
+                $this->debugData['ai_provider']       = $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                $this->debugData['model_used']        = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                $this->debugData['llm_elapsed_ms']    = 0; // No LLM call for FAQ direct
+                $this->debugData['max_tokens']        = 0; // No LLM call for FAQ direct
+                $this->debugData['total_elapsed_ms']  = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->writeDebugLog($conversation);
 
                 $this->logIntentAnalytics(
                     $organization->id,
@@ -1711,7 +1843,7 @@ class WidgetController
                 $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n";
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity.\n";
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\".\n";
-                $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. If listing multiple items, put EACH item on its own separate line — start each item with its own number on a new line, then the details. Never run numbers into the end of a previous sentence. If the answer is not in the provided context, say so and ask one clarifying question.\n";
+                $systemPrompt .= "Be concise. Use well-formatted responses with clear structure: bold key terms, bullet points for lists, separate lines for each detail. If the answer is not in the provided context, say so and ask one clarifying question.\n";
                 $systemPrompt .= "Never expose internal metadata fields (for example: keywords, semantic scores, candidate scores, internal limits) unless the user explicitly asks for those exact fields and they are customer-facing.\n";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n";
                 $systemPrompt .= $supplementaryInstruction . "\n";
@@ -1736,6 +1868,7 @@ class WidgetController
                 $systemPrompt .= "- For return policy, refund, warranty/guarantee, shipping, or store rules, use the Knowledge Base if available\n";
                 $systemPrompt .= "- ALWAYS use EXACT prices from the product data above\n";
                 $systemPrompt .= "- Keep responses brief (2-3 sentences, max 60 words), friendly, and helpful\n";
+                $systemPrompt .= "- For order tracking: you can provide the tracking number and link, but you CANNOT check the live carrier status yourself. If asked to 'track it' or 'check the status', politely explain this and direct the customer to click the tracking link to see real-time status from the carrier.\n";
                 $systemPrompt .= "Website: {$orgWebsite}";
             } else {
                 // No Shopify data - standard prompt
@@ -1791,6 +1924,81 @@ class WidgetController
                     $lowRelevanceWarning = '';
                 }
 
+                // When search confidence is too low to give a reliable answer, skip the LLM
+                // and ask the visitor to clarify — this prevents hallucination and wrong answers.
+                if (isset($maxResultScore)
+                    && $maxResultScore > 0.0
+                    && $maxResultScore < 0.60
+                    && !$this->isContactQuery($message)
+                    && empty($shopifyContext)
+                    && !($hasCachedTurns && ($isContextualShortFollowUp || $isReferentialFollowUp))) {
+                    // ^^ Skip clarification when LLM already has cached context for this follow-up.
+                    //    The LLM can answer from conversation history — no Qdrant context needed.
+                    $clarificationResponse = $this->buildGeneralClarificationResponse($message);
+
+                    Log::info('Widget low-confidence clarification returned (non-stream)', [
+                        'org_id' => $organization->id,
+                        'session_id' => $sessionId,
+                        'best_score' => $maxResultScore,
+                        'message' => $message,
+                    ]);
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $clarificationResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location', 'city'),
+                        $intentResult
+                    );
+
+                    $this->debugData['clarification_sought'] = true;
+                    $this->debugData['response_path']        = 'clarification';
+                    $this->debugData['ai_provider']          = $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                    $this->debugData['model_used']           = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                    $this->debugData['llm_elapsed_ms']       = 0;
+                    $this->debugData['total_elapsed_ms']     = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                    $this->writeDebugLog($conversation);
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+
+                    // Always log as unanswered so admins can review these gaps
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $clarificationResponse,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $clarificationResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return response()->json([
+                        'response' => $clarificationResponse,
+                        'session_id' => $sessionId,
+                        'timestamp' => now()->toISOString()
+                    ])->header('X-Robots-Tag', 'noindex, nofollow');
+                }
+
                 if ($context) {
                     $systemPrompt .= "\nUSER'S QUESTION: {$message}\n\nCURRENT CONTEXT:\n" . $lowRelevanceWarning . $context . "\n";
                 } else {
@@ -1801,7 +2009,7 @@ class WidgetController
                 }
 
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\". ";
-                $systemPrompt .= "Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. If listing multiple items, put EACH item on its own separate line — start each item with its own number on a new line, then the details. Never run numbers into the end of a previous sentence. If the answer is not in the provided context, say so and ask one clarifying question. ";
+                $systemPrompt .= "Be concise. Use well-formatted responses with clear structure: bold key terms, bullet points for lists, separate lines for each detail. If the answer is not in the provided context, say so and ask one clarifying question. ";
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
                 $systemPrompt .= "CRITICAL: NEVER invent or assume URLs, phone numbers, email addresses, prices, or factual details not explicitly stated in this system prompt or CURRENT CONTEXT. ";
                 $systemPrompt .= "STRICT KNOWLEDGE BASE POLICY: Only confirm that a test, service, product, or feature is offered if it is EXPLICITLY listed BY NAME in CURRENT CONTEXT. NEVER infer that because a related or parent service is available (e.g., MRI), a specific variant or sub-procedure (e.g., MR Enterography, MR Arthrography) is also available. If the exact item the user asked about is NOT present by name in CURRENT CONTEXT, respond: 'I don't have specific information about [item name] in our knowledge base. For further details, please contact us at [contact info].' Do NOT speculate, infer, or expand beyond what is explicitly stated. ";
@@ -1841,6 +2049,9 @@ class WidgetController
             $affirmativeMaxTokens = (int) ($rulePolicy['affirmative_follow_up_max_tokens'] ?? 140);
             if ($isAffirmativeContinuation) {
                 $maxTokens = max(80, min(300, $affirmativeMaxTokens));
+            } elseif (!empty($hasShopifyData)) {
+                // Order summaries with tracking numbers, URLs, and multiple fields need more room.
+                $maxTokens = 600;
             } elseif ($isPricingLikeQuery) {
                 $maxTokens = 620;
             } elseif (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
@@ -1860,6 +2071,9 @@ class WidgetController
             } else {
                 // Use local LLM with organization-specific or global model
                 $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                // Always route to vast.ai GPU — it is faster than local CPU inference and
+                // ensures the model is warm from previous requests.
+                $localOptions['use_vastai'] = true;
                 $aiResponse = $this->aiAgentService->llmChat($messages, $model, null, $organization->id, $localOptions);
             }
 
@@ -1871,7 +2085,18 @@ class WidgetController
                 // Fallback to old method
                 $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt);
                 $rawResponseText = $aiResponse['answer'] ?? null;
-                $responseText = $rawResponseText ?? 'I apologize, but I\'m experiencing technical difficulties. Please try again later.';
+                if ($rawResponseText === null) {
+                    // Both LLM paths failed — return a helpful fallback with org contact details
+                    $fallbackContact = $this->buildContactResponse(
+                        $organization->contact_email ?? ($organization->settings['contact_email'] ?? null),
+                        $organization->contact_phone ?? ($organization->settings['contact_phone'] ?? null),
+                        $organization->website ?? null
+                    );
+                    $responseText = "I'm sorry, I wasn't able to retrieve that information right now. Please try again in a moment"
+                        . ($fallbackContact ? ', or ' . $fallbackContact : '.');
+                } else {
+                    $responseText = $rawResponseText;
+                }
                 // Attempt envelope extraction even in the fallback path so raw JSON is never shown
                 if ($rawResponseText) {
                     $fallbackEnvelope = $this->extractOneCallEnvelope((string) $rawResponseText);
@@ -2028,6 +2253,24 @@ class WidgetController
                 $structuredFollowUpState
             );
 
+            // Write LLM debug log for this request
+            $this->debugData['model_used']          = $model ?? null;
+            $this->debugData['ai_provider']         = $aiProvider ?? null;
+            $this->debugData['max_tokens']          = $maxTokens ?? null;
+            $this->debugData['llm_elapsed_ms']      = isset($llmElapsedMs) ? (int) $llmElapsedMs : null;
+            $this->debugData['total_elapsed_ms']    = (int) round((microtime(true) - $requestStartedAt) * 1000);
+            $this->debugData['context_length']      = strlen((string) ($finalContext ?? $context ?? ''));
+            $this->debugData['context_cleared']     = isset($maxResultScore) && $maxResultScore < 0.52;
+            $this->debugData['low_relevance_warning'] = isset($lowRelevanceWarning) && $lowRelevanceWarning !== '';
+            $this->debugData['envelope_parse_ok']   = $oneCallEnvelopeParseOk ?? false;
+            $this->debugData['response_path']       = 'llm';
+            // Token usage from last LLM call
+            $promptEval  = $aiResponse['prompt_eval_count']  ?? ($aiResponse['metadata']['prompt_eval_count']  ?? null);
+            $evalCount   = $aiResponse['eval_count']         ?? ($aiResponse['metadata']['eval_count']         ?? null);
+            if ($promptEval !== null) $this->debugData['input_tokens']  = (int) $promptEval;
+            if ($evalCount   !== null) $this->debugData['output_tokens'] = (int) $evalCount;
+            $this->writeDebugLog($conversation);
+
             // Log intent distribution analytics
             $this->logIntentAnalytics(
                 $organization->id,
@@ -2072,6 +2315,10 @@ class WidgetController
                 'llm_elapsed_ms' => $llmElapsedMs,
             ]);
 
+            // Cache this exchange so the next turn has native conversational context
+            $chatHistoryTtl = (int) (($organization->settings['chat_history_ttl_hours'] ?? null) ?: 24);
+            $this->appendToChatContextCache($sessionId, (string) $message, (string) $responseText, $chatHistoryTtl);
+
             return response()->json([
                 'response' => $responseText,
                 'session_id' => $sessionId,
@@ -2097,8 +2344,10 @@ class WidgetController
      */
     public function streamChat(Request $request, $orgId)
     {
-        $organization = is_numeric($orgId) 
-            ? Organization::find($orgId) 
+        $requestStartedAt = microtime(true);
+        $this->debugData = ['request_type' => 'stream'];
+        $organization = is_numeric($orgId)
+            ? Organization::find($orgId)
             : Organization::where('slug', $orgId)->first();
         
         if (!$organization || !$organization->is_active) {
@@ -3038,6 +3287,47 @@ class WidgetController
                 $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization, (string) $message);
                 if ($exactFaqMatch && !$liveData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                     $directResponse = $exactFaqMatch['response'];
+                    $streamAssistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
+                    // Always pass through LLM to polish the response and track token usage.
+                    // Keyword-fallback matches are plain text only, skip paraphrase.
+                    $streamSkipParaphrase = (($exactFaqMatch['match_source'] ?? '') === 'keyword_fallback');
+                    if (!$streamSkipParaphrase) {
+                        try {
+                            $htmlFaqContent = trim((string) $directResponse);
+                            $dynTokens = min(800, max(200, (int) (mb_strlen($htmlFaqContent) * 0.8)));
+                            $streamParaPrompt = "You are {$streamAssistantName} for {$organization->name}. "
+                                . "Tone: {$responseTone}. Language: {$responseLanguage}. "
+                                . "The FAQ answer below is already formatted in HTML. Lightly rephrase it in first-person plural (we/our) to sound professional and natural — do NOT invent new information. "
+                                . "STRICT HTML RULES:\n"
+                                . "- Preserve ALL HTML tags exactly: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
+                                . "- Do NOT remove, add, or restructure any HTML tags.\n"
+                                . "- Only rephrase visible TEXT inside the tags — never alter tag names, attributes (href, src, style, alt), or structure.\n"
+                                . "- If the answer already sounds perfect, return it verbatim.\n"
+                                . "- Output ONLY the HTML — no explanation, no preamble, no markdown fences.\n\n"
+                                . "FAQ HTML Answer:\n{$htmlFaqContent}";
+                            $streamParaMessages = [
+                                ['role' => 'system', 'content' => $streamParaPrompt],
+                                ['role' => 'user', 'content' => $message],
+                            ];
+                            $streamParaModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                            $streamParaResp = $this->aiAgentService->llmChat(
+                                $streamParaMessages,
+                                $streamParaModel,
+                                null,
+                                $organization->id,
+                                ['num_predict' => $dynTokens, 'temperature' => 0.3]
+                            );
+                            if ($streamParaResp && isset($streamParaResp['message']['content'])) {
+                                $directResponse = trim($streamParaResp['message']['content']);
+                            }
+                        } catch (\Throwable $e) {
+                            Log::warning('Widget stream FAQ paraphrase failed', [
+                                'org_id' => $organization->id,
+                                'session_id' => $sessionId,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
                     $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
                         $organization,
                         $directResponse,
@@ -3058,12 +3348,16 @@ class WidgetController
                     $tokenMessages = [
                         ['role' => 'user', 'content' => $message],
                     ];
-                    $this->aiAgentService->logWidgetTokenUsage(
-                        $organization->id,
-                        $tokenMessages,
-                        $directResponse,
-                        'llm_chat_stream'
-                    );
+                    // Only log here when paraphrase was skipped (keyword fallback, no LLM call).
+                    // When paraphrase ran, llmChat() already logged tokens internally.
+                    if ($streamSkipParaphrase) {
+                        $this->aiAgentService->logWidgetTokenUsage(
+                            $organization->id,
+                            $tokenMessages,
+                            $directResponse,
+                            'faq_direct'
+                        );
+                    }
 
                     echo "data: " . json_encode(['content' => $directResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
@@ -3391,7 +3685,7 @@ class WidgetController
                 $isAppointmentQuery = $isRealtimeSlotQuery || $isScheduleQuery;
                 $systemPrompt .= " Tone: {$responseTone}. Language: {$responseLanguage}.";
                 $systemPrompt .= " Write in first-person plural as the business (use \"we/our\"), not \"they\".";
-                $systemPrompt .= " Be concise and precise. Prefer 1-2 short sentences unless the user asks for more detail. If listing multiple items, put EACH item on its own separate line starting with its number — never run numbers inline into a paragraph. If the answer is not in the provided context, say so and ask one clarifying question.";
+                $systemPrompt .= " Be concise and precise. Use **bold** for key terms and prices. For unordered lists use - bullet points; for sequential steps use numbered lists. Put each item on its own line. If the answer is not in the provided context, say so and ask one clarifying question.";
                 $systemPrompt .= " If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
                 $systemPrompt .= " " . $supplementaryInstruction;
                 $systemPrompt .= " Website: {$orgWebsite}";
@@ -3437,6 +3731,76 @@ class WidgetController
                     } else {
                         $streamLowRelevanceWarning = "[CRITICAL — KNOWLEDGE BASE MISMATCH: The user asked about '" . addslashes($message) . "' but NO entry with that exact name was found in the knowledge base (best match score: " . round($streamMaxResultScore, 2) . ", below required confidence). The context below is for a DIFFERENT item and MUST NOT be used to confirm availability of the queried item. STRICT RULE: Do NOT state, imply, or infer that '" . addslashes($message) . "' is offered. Instead respond: 'I don't have specific information about this in our knowledge base. For further details, please contact us.' followed by contact info.]\n";
                     }
+                }
+
+                // When search confidence is too low, skip the LLM and ask for clarification
+                if ($streamMaxResultScore > 0.0
+                    && $streamMaxResultScore < 0.60
+                    && !$liveData
+                    && !$this->isContactQuery($message)) {
+                    $clarificationResponse = $this->buildGeneralClarificationResponse($message);
+
+                    echo "data: " . json_encode(['content' => $clarificationResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    Log::info('Widget low-confidence clarification returned (stream)', [
+                        'org_id' => $organization->id,
+                        'session_id' => $sessionId,
+                        'best_score' => $streamMaxResultScore,
+                        'message' => $message,
+                    ]);
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $clarificationResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location', 'city'),
+                        $intentResult
+                    );
+
+                    $this->debugData['clarification_sought'] = true;
+                    $this->debugData['best_qdrant_score']    = $streamMaxResultScore;
+                    $this->debugData['response_path']        = 'clarification';
+                    $this->debugData['ai_provider']          = $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                    $this->debugData['model_used']           = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                    $this->debugData['llm_elapsed_ms']       = 0;
+                    $this->debugData['total_elapsed_ms']     = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                    $this->writeDebugLog($conversation);
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+
+                    // Always log as unanswered so admins can review knowledge gaps
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $clarificationResponse,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $clarificationResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
                 }
 
                 if ($contextForPrompt) {
@@ -3959,6 +4323,23 @@ class WidgetController
                         compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
+
+                    // Write LLM debug log for stream path
+                    $this->debugData['model_used']            = $streamBackendUsed ?? null;
+                    $this->debugData['ai_provider']           = $useOpenAiFallback ? 'openai' : ($aiProvider ?? null);
+                    $this->debugData['max_tokens']            = $maxTokens ?? null;
+                    $this->debugData['llm_elapsed_ms']        = isset($responseElapsedMs) ? (int) $responseElapsedMs : null;
+                    $this->debugData['total_elapsed_ms']      = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                    $this->debugData['context_length']        = strlen((string) ($contextForPrompt ?? $context ?? ''));
+                    $this->debugData['context_cleared']       = $streamMaxResultScore > 0 && $streamMaxResultScore < 0.52;
+                    $this->debugData['low_relevance_warning'] = isset($streamLowRelevanceWarning) && $streamLowRelevanceWarning !== '';
+                    $this->debugData['best_qdrant_score']     = $streamMaxResultScore ?? null;
+                    $this->debugData['response_path']         = 'stream_llm';
+                    $this->writeDebugLog($conversation);
+
+                    // Cache this exchange in Redis for the next turn
+                    $streamChatHistoryTtl = (int) (($organization->settings['chat_history_ttl_hours'] ?? null) ?: 24);
+                    $this->appendToChatContextCache($sessionId, (string) $message, (string) $finalResponse, $streamChatHistoryTtl);
 
                     $this->logIntentAnalytics(
                         $organization->id,
@@ -4666,7 +5047,7 @@ class WidgetController
             return $this->getKeywordFaqMatchResponse($organization, $message);
         }
 
-        $threshold = 0.72;
+        $threshold = 0.62;
         $best = null;
         $queryTerms = $this->extractKeywordTerms($this->normalizeKeywordMatchText((string) $message));
         $queryTermCount = count($queryTerms);
@@ -4690,16 +5071,12 @@ class WidgetController
                 continue;
             }
 
-            $title = trim((string) ($payload['title'] ?? $payload['question'] ?? ''));
-            if ($queryTermCount >= 2 && $title !== '') {
-                $titleTerms = $this->extractKeywordTerms($this->normalizeKeywordMatchText($title));
-                $titleOverlap = count(array_intersect($queryTerms, $titleTerms));
-                $titleOverlapRatio = $queryTermCount > 0 ? ($titleOverlap / $queryTermCount) : 0.0;
-
-                if ($titleOverlapRatio < 0.5) {
-                    continue;
-                }
-            }
+            // The vector score already encodes semantic relevance — a score above
+            // threshold means the FAQ is a good match regardless of word overlap
+            // between the user's phrasing and the FAQ title.
+            // A title-overlap guard would wrongly reject FAQs that are semantically
+            // identical but phrased differently (e.g. user asks "job vacancies?"
+            // while the FAQ title is "How can teachers apply for jobs?").
 
             if (!$best || $score > ($best['score'] ?? 0)) {
                 $best = [
@@ -4715,8 +5092,17 @@ class WidgetController
 
         $payload = $best['payload'] ?? [];
         $content = $payload['content'] ?? ($payload['title'] ?? '');
-        $response = $this->htmlToPlainWithLinks((string) $content);
-        $response = trim($response);
+        // Load full HTML answer from DB so the widget can render formatted content
+        $itemId = (string) ($payload['item_id'] ?? '');
+        $numericId = (int) preg_replace('/^faq_/', '', $itemId);
+        $htmlResponse = '';
+        if ($numericId > 0) {
+            $faqModel = OrganizationFaq::find($numericId);
+            if ($faqModel) {
+                $htmlResponse = trim((string) $faqModel->answer);
+            }
+        }
+        $response = $htmlResponse !== '' ? $htmlResponse : trim($this->htmlToPlainWithLinks((string) $content));
 
         if ($response === '') {
             return null;
@@ -4765,6 +5151,16 @@ class WidgetController
             $score = 0.0;
             $strongKeywordHit = false;
 
+            // Generic single short words that appear in many queries should
+            // not count as a "strong" keyword hit on their own (e.g. "apply",
+            // "info", "get", "know").  A strong hit requires either a multi-word
+            // phrase match OR a single word that is meaningfully specific (> 6 chars).
+            $genericSingleWords = [
+                'apply', 'get', 'know', 'info', 'help', 'need', 'find', 'view',
+                'list', 'show', 'tell', 'give', 'want', 'more', 'have', 'ask',
+                'what', 'when', 'where', 'how', 'why', 'who', 'can', 'is', 'are',
+            ];
+
             $keywordParts = preg_split('/[,|]/', (string) ($faq->keywords ?? '')) ?: [];
             foreach ($keywordParts as $keywordPart) {
                 $keywordNorm = $this->normalizeKeywordMatchText((string) $keywordPart);
@@ -4773,6 +5169,14 @@ class WidgetController
                 }
 
                 if (str_contains($query, $keywordNorm)) {
+                    // Single short/generic keyword: demote to normal overlap score
+                    $kwWords = preg_split('/\s+/', trim($keywordNorm));
+                    $isGenericSingle = count($kwWords) === 1
+                        && (mb_strlen($keywordNorm) <= 6 || in_array($keywordNorm, $genericSingleWords, true));
+                    if ($isGenericSingle) {
+                        $score += 0.9; // not a strong hit — no strongKeywordHit flag
+                        continue;
+                    }
                     $score += 2.25;
                     $strongKeywordHit = true;
                     continue;
@@ -4801,7 +5205,7 @@ class WidgetController
                 $score += 0.9;
             }
 
-            if (!$strongKeywordHit && $score < 2.3) {
+            if (!$strongKeywordHit && $score < 1.8) {
                 continue;
             }
 
@@ -4810,7 +5214,7 @@ class WidgetController
                 || $score > $best['score']
                 || ($score === $best['score'] && (string) $faq->updated_at > (string) ($best['updated_at'] ?? ''))
             ) {
-                $answer = trim($this->htmlToPlainWithLinks((string) $faq->answer));
+                $answer = trim((string) $faq->answer);
                 if ($answer === '') {
                     continue;
                 }
@@ -4833,7 +5237,7 @@ class WidgetController
             }
         }
 
-        if (!$best || ($best['score'] ?? 0) < 2.6) {
+        if (!$best || ($best['score'] ?? 0) < 1.8) {
             return null;
         }
 
@@ -5127,11 +5531,168 @@ class WidgetController
         return $best;
     }
 
+    // -------------------------------------------------------------------------
+    // Redis-backed per-session LLM message context cache
+    // -------------------------------------------------------------------------
+
+    /**
+     * Cache the raw Shopify-formatted context string for this session.
+     * Allows follow-up questions to access order/product details (tracking number,
+     * dates, etc.) without re-calling the Shopify API every turn.
+     */
+    private function cacheShopifyData(string $sessionId, string $context, int $ttlHours = 24): void
+    {
+        if ($sessionId === '' || $context === '') {
+            return;
+        }
+        try {
+            $store   = \Illuminate\Support\Facades\Cache::store('redis');
+            $key     = "widget_shopify_data:{$sessionId}";
+            $existing = (string) ($store->get($key) ?? '');
+
+            if ($existing !== '' && $existing !== $context) {
+                // Append new data only if it is not already present in the cache,
+                // so repeated fetches of the same order don't bloat the context.
+                if (str_contains($existing, trim($context))) {
+                    // Identical block already cached — no change needed.
+                    return;
+                }
+                $merged = $existing . "\n\n---\n\n" . $context;
+            } else {
+                $merged = $context;
+            }
+
+            $store->put($key, $merged, now()->addHours(max(1, $ttlHours)));
+        } catch (\Throwable $e) {
+            // Non-fatal
+        }
+    }
+
+    /**
+     * Retrieve the previously cached Shopify context for this session.
+     * Returns empty string when nothing is cached or Redis is unavailable.
+     */
+    private function getCachedShopifyData(string $sessionId): string
+    {
+        if ($sessionId === '') {
+            return '';
+        }
+        try {
+            return (string) (\Illuminate\Support\Facades\Cache::store('redis')
+                ->get("widget_shopify_data:{$sessionId}") ?? '');
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
+    /**
+     * Returns true if the message (or enriched search query) appears to reference
+     * a NEW explicit order/product entity — meaning a fresh Shopify API call is
+     * needed instead of reusing the cached result from an earlier turn.
+     * Recognises patterns like: SPF2606, #1234, order 1234, order no. 5678.
+     */
+    private function shopifyMessageContainsOrderEntity(string $message, string $searchQuery = ''): bool
+    {
+        $combined = $message . ' ' . $searchQuery;
+        return (bool) preg_match(
+            '/\b(?:[A-Z]{2,6}\d{3,10}|#\d{3,}|order\s+(?:no\.?\s*|#\s*)?\d{3,})\b/i',
+            $combined
+        );
+    }
+
+    // -------------------------------------------------------------------------
+
+    /**
+     * Retrieve the cached message history (role/content pairs) for a session.
+     * Returns an array of ['role' => 'user'|'assistant', 'content' => '...'].
+     */
+    private function getCachedChatMessages(string $sessionId): array
+    {
+        if ($sessionId === '') {
+            return [];
+        }
+        try {
+            $cached = \Illuminate\Support\Facades\Cache::store('redis')
+                ->get("widget_chat_ctx:{$sessionId}");
+            if (is_array($cached) && !empty($cached)) {
+                return $cached;
+            }
+        } catch (\Throwable $e) {
+            // Redis unavailable — degrade gracefully to DB fallback
+        }
+        return [];
+    }
+
+    /**
+     * Append a user+assistant exchange to the Redis context cache for this session.
+     * Keeps the last MAX_CACHED_TURNS turns (pairs) to avoid unbounded growth.
+     */
+    private const MAX_CACHED_TURNS = 6; // 6 turns = 12 messages
+
+    private function appendToChatContextCache(
+        string $sessionId,
+        string $userMessage,
+        string $assistantResponse,
+        int $ttlHours = 24
+    ): void {
+        if ($sessionId === '') {
+            return;
+        }
+        try {
+            $store = \Illuminate\Support\Facades\Cache::store('redis');
+            $existing = $store->get("widget_chat_ctx:{$sessionId}") ?? [];
+            if (!is_array($existing)) {
+                $existing = [];
+            }
+
+            // Strip HTML from assistant response so LLM sees clean text in history
+            $cleanResponse = trim(strip_tags($assistantResponse));
+            $cleanUser     = trim(strip_tags($userMessage));
+
+            if ($cleanUser !== '' && $cleanResponse !== '') {
+                $existing[] = ['role' => 'user',      'content' => $cleanUser];
+                $existing[] = ['role' => 'assistant', 'content' => $cleanResponse];
+            }
+
+            // Keep only the last MAX_CACHED_TURNS * 2 messages (pairs of user+assistant)
+            $maxMessages = self::MAX_CACHED_TURNS * 2;
+            if (count($existing) > $maxMessages) {
+                $existing = array_slice($existing, -$maxMessages);
+            }
+
+            $store->put(
+                "widget_chat_ctx:{$sessionId}",
+                $existing,
+                now()->addHours(max(1, $ttlHours))
+            );
+        } catch (\Throwable $e) {
+            // Non-fatal — Redis unavailable or serialization error
+        }
+    }
+
+    /**
+     * Invalidate the context cache for a session (e.g. when a new session starts
+     * or the user explicitly resets the conversation).
+     */
+    private function clearChatContextCache(string $sessionId): void
+    {
+        if ($sessionId === '') {
+            return;
+        }
+        try {
+            \Illuminate\Support\Facades\Cache::store('redis')
+                ->forget("widget_chat_ctx:{$sessionId}");
+        } catch (\Throwable $e) {
+            // Non-fatal
+        }
+    }
+
+    // -------------------------------------------------------------------------
+
     private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message, string $context = ''): array
     {
         $hasContext = trim($context) !== '';
-        $includeHistory = false;
-        $historyLimit = 0;
+        $historyLimit = 4; // default
         $isShortFollowUp = $this->isShortFollowUp($message);
         $messageHasUrl = $this->containsUrl($message);
         $referencesSharedLink = $this->referencesPreviouslySharedLink($message);
@@ -5140,62 +5701,67 @@ class WidgetController
         $lastAssistantAskedQuestion = $lastAssistant !== null && $this->responseHasQuestion($lastAssistant);
         $isLikelyShortReply = $isShortFollowUp || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion);
 
+        // Determine how many prior message pairs we want
         if ($isLikelyShortReply && $lastAssistantAskedQuestion) {
-            $includeHistory = true;
             $historyLimit = 4;
         }
-
         if (!$hasContext) {
-            $includeHistory = true;
             $historyLimit = max($historyLimit, 4);
         }
-
         if ($this->isAffirmativeFollowUp($message) && $this->isPreviousUserAffirmative($organization, $sessionId)) {
-            $includeHistory = true;
             $historyLimit = max($historyLimit, 10);
         }
-
         if ($messageHasUrl || $referencesSharedLink) {
-            $includeHistory = true;
             $historyLimit = max($historyLimit, 8);
         }
 
-        if ($includeHistory) {
-            $recentMessages = $this->getRecentConversationMessages($organization, $sessionId, $message, $historyLimit);
-            if (!empty($recentMessages)) {
-                $systemPrompt .= "\n\nPRIOR HISTORY (use only if the user explicitly refers to it):\n";
-                foreach ($recentMessages as $rm) {
-                    $label = $rm['role'] === 'user' ? 'User' : 'Assistant';
-                    $systemPrompt .= $label . ": " . $rm['content'] . "\n";
-                }
+        // -- Resolve prior conversation turns ----------------------------------
+        // 1. Try Redis cache (fast, no DB query) — populated after each LLM turn
+        // 2. Fall back to DB if cache is cold (e.g. server restart, first visit)
+        $priorMessages = $this->getCachedChatMessages($sessionId);
+        if (empty($priorMessages)) {
+            $priorMessages = $this->getRecentConversationMessages($organization, $sessionId, $message, $historyLimit);
+        } else {
+            // Slice to the requested limit from the end (newest turns)
+            $priorMessages = array_slice($priorMessages, -$historyLimit);
+        }
 
-                $sharedLinks = $this->extractRecentSharedLinks($recentMessages);
-                if (!empty($sharedLinks)) {
-                    $systemPrompt .= "\nRECENT USER-SHARED LINKS:\n";
-                    foreach ($sharedLinks as $link) {
-                        $systemPrompt .= "- {$link}\n";
-                    }
-                    if ($referencesSharedLink) {
-                        $systemPrompt .= "If the user refers to 'the link' or 'shared link', use the RECENT USER-SHARED LINKS above and do not claim that no link was provided.\n";
-                    }
+        // -- Extract shared links from prior turns (for referential queries) --
+        if (!empty($priorMessages) && ($messageHasUrl || $referencesSharedLink)) {
+            $sharedLinks = $this->extractRecentSharedLinks($priorMessages);
+            if (!empty($sharedLinks)) {
+                $systemPrompt .= "\nRECENT USER-SHARED LINKS:\n";
+                foreach ($sharedLinks as $link) {
+                    $systemPrompt .= "- {$link}\n";
+                }
+                if ($referencesSharedLink) {
+                    $systemPrompt .= "If the user refers to 'the link' or 'shared link', use the RECENT USER-SHARED LINKS above and do not claim that no link was provided.\n";
                 }
             }
         }
 
+        // -- Contextual follow-up hints in system prompt -----------------------
         if ($isLikelyShortReply && $lastAssistantAskedQuestion) {
-            $systemPrompt .= "\nFOLLOW-UP MODE: The user's latest message is likely a short answer to the assistant's previous question. Interpret it using the immediately preceding question and context.\n";
+            $systemPrompt .= "\nFOLLOW-UP MODE: The user's latest message is a short reply to your previous question. Use the conversation history to interpret it correctly.\n";
         }
-
         if ($this->isAffirmativeFollowUp($message) && $lastAssistantAskedQuestion) {
             $systemPrompt .= "\nAFFIRMATIVE CONTINUATION: The user accepted your previous follow-up question. Continue with one relevant detail from the option(s) you just offered, grounded in CURRENT CONTEXT. Do not reset the conversation or ask 'what would you like help with?'.\n";
         }
 
         $systemPrompt .= "\nCURRENT QUERY:\n" . $message . "\n";
 
-        return [
-            ['role' => 'system', 'content' => trim($systemPrompt)],
-            ['role' => 'user', 'content' => $message],
-        ];
+        // -- Build messages array with proper role messages --------------------
+        // Format: [system, user_1, assistant_1, user_2, assistant_2, ..., user_current]
+        // The LLM sees actual conversation turns — not text injected in the system prompt.
+        $result = [['role' => 'system', 'content' => trim($systemPrompt)]];
+        foreach ($priorMessages as $pm) {
+            if (isset($pm['role'], $pm['content']) && $pm['content'] !== '') {
+                $result[] = ['role' => $pm['role'], 'content' => $pm['content']];
+            }
+        }
+        $result[] = ['role' => 'user', 'content' => $message];
+
+        return $result;
     }
 
     private function getRecentConversationMessages(Organization $organization, string $sessionId, string $message, int $limit = 4): array
@@ -5568,7 +6134,9 @@ class WidgetController
             return true;
         }
 
-        return !preg_match('/\b(price|pricing|cost|plan|package|\$|₹|€|£)\b/i', $combined);
+        // Include "fee", "fees", "tuition", "charges", "admission" as valid pricing indicators
+        // so that schools/orgs using these terms in their KB don't trigger the no-pricing fallback
+        return !preg_match('/\b(price|pricing|cost|fee|fees|tuition|charges|charge|admission|rate|rates|plan|package|\$|₹|€|£)\b/i', $combined);
     }
 
     private function buildPricingUnavailableResponse(Organization $organization): string
@@ -6566,6 +7134,41 @@ class WidgetController
     private function buildClarifyResponse(): string
     {
         return "I didn't understand that. Could you please share a bit more detail?";
+    }
+
+    /**
+     * Persist the accumulated debug payload for one chat request to llm_debug_logs.
+     * Safe to call from any response path; silently swallows exceptions so a DB
+     * write failure never breaks the user-facing response.
+     */
+    private function writeDebugLog($conversation): void
+    {
+        try {
+            $data = $this->debugData;
+            if (empty($data['session_id']) && $conversation) {
+                $data['session_id'] = $conversation->conversation_id ?? $conversation->visitor_id ?? '';
+            }
+            if (empty($data['organization_id']) && $conversation) {
+                $data['organization_id'] = $conversation->organization_id ?? null;
+            }
+            if (empty($data['session_id']) || empty($data['organization_id'])) {
+                return;
+            }
+            $data['conversation_id'] = $conversation->id ?? null;
+
+            \App\Models\LlmDebugLog::create(array_filter($data, fn ($v) => $v !== null));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('LlmDebugLog write failed', ['error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Generic clarification response when no relevant knowledge base content was found.
+     * Asks the visitor to rephrase instead of attempting a low-confidence LLM answer.
+     */
+    private function buildGeneralClarificationResponse(string $message): string
+    {
+        return "I'm sorry, I couldn't find specific information about that in our knowledge base. Could you describe what you're looking for in a little more detail? That will help me give you the most accurate answer!";
     }
 
     private function buildLowConfidenceClarificationResponse(string $message, ?array $searchResults): ?string
@@ -7726,7 +8329,9 @@ class WidgetController
             $followUpQuestion
         ));
 
-        if ($rewritten === '') {
+        if ($rewritten === '' || $rewritten === $followUpQuestion) {
+            // Rewrite added no value — fall back to the pre-built combined query which already
+            // includes the prior user message (and any entity like an order ID).
             return trim($currentSearchQuery);
         }
 
@@ -8102,12 +8707,12 @@ class WidgetController
         }, $text);
         // As an extra guard, remove any lingering tags
         $text = strip_tags($text);
-        // Collapse excessive whitespace
-        $text = preg_replace('/\s+/', ' ', str_replace(["\r", "\t"], [' ', ' '], $text));
-        // Re-insert line breaks around bullets or list markers if any were present
-        $text = preg_replace('/\*\s+/', "\n* ", $text);
-        // Restore paragraph-like breaks after periods followed by asterisk bullets
-        $text = preg_replace('/\.\s+\*/', ".\n*", $text);
+        // Normalize line endings then collapse only horizontal whitespace, preserving newlines.
+        // Collapsing \n breaks formatted order/product responses into a single unreadable line.
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $text = str_replace("\t", ' ', $text);
+        $text = preg_replace('/[^\S\n]+/', ' ', $text); // collapse spaces/tabs, keep \n
+        $text = preg_replace('/\n{3,}/', "\n\n", $text); // collapse 3+ newlines to 2
         return trim($text);
     }
 
@@ -8324,10 +8929,22 @@ class WidgetController
         $out = $text;
 
         try {
-            // Email normalization (no lookbehind)
+            // Email normalization: replace only emails from a different domain than the official one.
+            // This allows validated sub-addresses (e.g. hr@domain.com) when official is info@domain.com.
             $emailPattern = '/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i';
             if (!empty($officialEmail)) {
-                $out = preg_replace($emailPattern, $officialEmail, $out) ?? $out;
+                $officialDomain = strtolower(ltrim(strstr($officialEmail, '@'), '@'));
+                $out = preg_replace_callback($emailPattern, function ($m) use ($officialEmail, $officialDomain) {
+                    $found = $m[0];
+                    $atPos = strrpos($found, '@');
+                    if ($atPos !== false) {
+                        $foundDomain = strtolower(substr($found, $atPos + 1));
+                        if ($foundDomain === $officialDomain) {
+                            return $found; // same domain — keep as-is
+                        }
+                    }
+                    return $officialEmail; // different or unknown domain — replace
+                }, $out) ?? $out;
                 $out = preg_replace('/(' . preg_quote($officialEmail, '/') . ')(\s*,\s*\1)+/i', '$1', $out) ?? $out;
             } else {
                 $out = preg_replace($emailPattern, '', $out) ?? $out;
@@ -8916,6 +9533,28 @@ class WidgetController
     private function retryStrictEnvelopeExtraction(string $rawResponseText, string $userMessage, Organization $organization, int $organizationId, string $aiProvider): ?array
     {
         try {
+            // If the raw response is already clean readable prose (no JSON braces, no truncation
+            // artifacts) we can skip the second LLM call entirely and wrap it ourselves.
+            // This avoids the common failure mode where the retry LLM truncates a long order
+            // summary or product list because it runs out of tokens.
+            $looksLikeProse = !str_contains($rawResponseText, '{')
+                && !str_contains($rawResponseText, '"response"')
+                && trim($rawResponseText) !== ''
+                && strlen($rawResponseText) > 20;
+
+            if ($looksLikeProse) {
+                // Strip the trailing pseudo-envelope metadata block the LLM sometimes appends,
+                // whether inline or on new lines, e.g.:
+                //   "...answer text **Entity:** Foo **Topics Covered:** Bar **Follow-up:** null"
+                // We strip from the FIRST occurrence of any envelope key to end-of-string.
+                $metaPattern = '/\s*\*{0,2}\s*(?:entity|topics[_\s]covered|follow[_\s\-]?up|details)\s*\*{0,2}\s*:.*/is';
+                $cleaned = preg_replace($metaPattern, '', $rawResponseText) ?? $rawResponseText;
+                // Strip leading **Response**: or *Response*: prefix if present
+                $cleaned = preg_replace('/^\*{0,2}\s*Response\s*\*{0,2}\s*:?\s*/i', '', trim((string) $cleaned));
+                $cleaned = trim(preg_replace('/\n{3,}/', "\n\n", (string) $cleaned) ?? '');
+                return ['response' => $cleaned !== '' ? $cleaned : trim($rawResponseText), 'entity' => '', 'topics_covered' => [], 'follow_up' => null];
+            }
+
             $system = 'Convert assistant output into strict JSON only. Return exactly one JSON object with keys: response (string), entity (string), topics_covered (array of strings), follow_up (object|null with keys type and topic array). No markdown, no extra text.';
             $user = "User message:\n{$userMessage}\n\nAssistant output:\n{$rawResponseText}";
 
@@ -8941,7 +9580,7 @@ class WidgetController
                     null,
                     $organizationId,
                     [
-                        'num_predict' => 140,
+                        'num_predict' => 600,
                         'temperature' => 0.0,
                         'use_vastai' => true,
                     ]

@@ -59,9 +59,6 @@
                         <div class="col-md-12 mb-2">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <label class="form-label mb-0">Answer * (HTML)</label>
-                                <button type="button" class="btn btn-outline-info btn-sm" wire:click="togglePreview">
-                                    @if($showPreview) Hide Preview @else Show Preview @endif
-                                </button>
                             </div>
                             
                             <!-- Simple HTML Toolbar with wire:ignore -->
@@ -99,7 +96,7 @@
                                             📷 Image
                                         </button>
                                     </div>
-                                    <div class="btn-group btn-group-sm" role="group">
+                                    <div class="btn-group btn-group-sm me-2" role="group">
                                         <button type="button" class="btn btn-outline-secondary" data-html-action="code" title="Inline Code">
                                             &lt;code&gt;
                                         </button>
@@ -107,22 +104,37 @@
                                             &lt;pre&gt;
                                         </button>
                                     </div>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-primary" data-html-action="pastehtml" title="Paste raw HTML (will be sanitized)">
+                                            &#128203; HTML
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" id="faq-source-toggle" title="Edit HTML source">
+                                            &lt;&gt;
+                                        </button>
+                                    </div>
                                 </div>
                                 <!-- No inline JS here; toolbar is initialized by the global script below via browser events -->
                             </div>
-                            
-                            @if($showPreview)
-                                <div class="card mb-3">
-                                    <div class="card-header">
-                                        <strong>Preview</strong>
-                                    </div>
-                                    <div class="card-body">
-                                        {!! $this->previewHtml !!}
+                            <!-- Raw HTML Paste Modal -->
+                            <div id="paste-html-modal" style="display:none;position:fixed;z-index:99999;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);">
+                                <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:8px;padding:24px;width:min(640px,95vw);max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+                                    <h5 class="mb-2">Paste Raw HTML</h5>
+                                    <p class="text-muted small mb-3">Only safe tags are kept: <code>p, br, strong, b, em, i, u, ul, ol, li, a, img, code, pre, blockquote, h1–h6</code>. Event handlers and <code>javascript:</code> are stripped automatically.</p>
+                                    <textarea id="paste-html-source" rows="12" class="form-control font-monospace mb-3" style="font-size:12px;" placeholder="Paste your HTML here…"></textarea>
+                                    <div class="d-flex justify-content-end gap-2">
+                                        <button type="button" class="btn btn-secondary btn-sm" id="paste-html-cancel">Cancel</button>
+                                        <button type="button" class="btn btn-primary btn-sm" id="paste-html-insert">Insert HTML</button>
                                     </div>
                                 </div>
-                            @endif
-                            
-                            <textarea id="faq-answer-editor" wire:model.live="answer" rows="8" class="form-control font-monospace" placeholder="Enter your answer using simple HTML (e.g., &lt;strong&gt;bold&lt;/strong&gt;, &lt;a href='https://example.com'&gt;link&lt;/a&gt;)" ></textarea>
+                            </div>
+                            <div wire:ignore>
+                                {{-- WYSIWYG editor: IS the live preview (renders HTML as you type) --}}
+                                <div id="faq-answer-editor" contenteditable="true" class="form-control wysiwyg-editor" data-placeholder="Enter your answer here…"></div>
+                                {{-- Raw HTML source view (toggle with &lt;&gt; button) --}}
+                                <textarea id="faq-answer-source" class="form-control font-monospace mt-1" rows="8" style="display:none;" placeholder="HTML source…"></textarea>
+                            </div>
+                            {{-- Hidden sync textarea — outside wire:ignore so Livewire can update it --}}
+                            <textarea id="faq-answer-livewire" wire:model.live="answer" style="display:none;"></textarea>
                             <small class="text-muted d-block mt-1">Write concise factual content. Keep phone/address/map details exactly as stored.</small>
                             <small class="form-text text-muted">
                                 Allowed tags: p, br, strong, b, em, i, u, ul, ol, li, a, img, code, pre, blockquote, h1–h6. Links will open in a new tab and are marked nofollow.
@@ -174,121 +186,266 @@
         </div></div>
     </div></section>
     <div wire:ignore>
+        <style>
+.wysiwyg-editor { min-height: 180px; overflow-y: auto; cursor: text; line-height: 1.6; }
+.wysiwyg-editor:focus { border-color: #86b7fe; outline: 0; box-shadow: 0 0 0 0.25rem rgba(13,110,253,.25); }
+.wysiwyg-editor:empty::before { content: attr(data-placeholder); color: #6c757d; pointer-events: none; }
+.wysiwyg-editor p { margin: 0 0 0.5em; }
+.wysiwyg-editor ul, .wysiwyg-editor ol { padding-left: 1.5em; margin-bottom: 0.5em; }
+.wysiwyg-editor h1,.wysiwyg-editor h2,.wysiwyg-editor h3,.wysiwyg-editor h4 { font-weight: 600; margin: 0.5em 0 0.3em; }
+.wysiwyg-editor a { color: #0d6efd; }
+.wysiwyg-editor img { max-width: 100%; height: auto; }
+.wysiwyg-editor code { background: #f8f9fa; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+.wysiwyg-editor pre { background: #f8f9fa; padding: 0.75em; border-radius: 4px; overflow-x: auto; white-space: pre; }
+.wysiwyg-editor blockquote { border-left: 3px solid #dee2e6; padding-left: 1em; color: #6c757d; margin: 0.5em 0; }
+        </style>
         <script>
 console.log('🚀 Script loaded outside Livewire component');
 
-// Global HTML toolbar handler
+// Sanitises HTML to safe tags — strips event handlers, javascript:, and disallowed elements.
+// Uses browser's DOMParser so HTML entities are handled correctly.
+window.sanitizeFaqHtml = function(html) {
+    if (!html) return '';
+    html = html.replace(/<\?[^>]*>/g, '').replace(/<!DOCTYPE[^>]*>/gi, '');
+    const doc     = (new DOMParser()).parseFromString('<body>' + html + '</body>', 'text/html');
+    const allowed = new Set(['p','br','strong','b','em','i','u','ul','ol','li','a','img','code','pre','blockquote','h1','h2','h3','h4','h5','h6','hr']);
+    const self    = new Set(['br','hr','img']);
+    function cleanNode(node) {
+        const out = [];
+        node.childNodes.forEach(function(child) {
+            if (child.nodeType === 3) {
+                // Text node — encode special chars
+                out.push(child.textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+                return;
+            }
+            if (child.nodeType !== 1) return;
+            const tag = child.tagName.toLowerCase();
+            if (!allowed.has(tag)) { out.push(cleanNode(child)); return; } // recurse, drop tag
+            let attrs = '';
+            for (const attr of child.attributes) {
+                const n = attr.name.toLowerCase(), v = attr.value;
+                if (/^on/.test(n)) continue;                          // strip on* handlers
+                if (/javascript\s*:/i.test(v)) continue;              // strip javascript:
+                if (n === 'src' && !/^(https?:\/\/|data:image\/)/i.test(v)) continue; // img src only http/data:image
+                attrs += ' ' + attr.name + '="' + v.replace(/"/g, '&quot;') + '"';
+            }
+            if (self.has(tag)) { out.push('<' + tag + attrs + ' />'); }
+            else { out.push('<' + tag + attrs + '>' + cleanNode(child) + '</' + tag + '>'); }
+        });
+        return out.join('');
+    }
+    return cleanNode(doc.body);
+};
+
+// Global HTML toolbar handler (WYSIWYG contenteditable)
 window.initHtmlToolbar = function() {
-    console.log('🔍 Looking for toolbar elements...');
-    
-    const toolbar = document.getElementById('html-toolbar');
-    const textarea = document.getElementById('faq-answer-editor');
-    
-    console.log('Toolbar element:', toolbar);
-    console.log('Textarea element:', textarea);
-    
-    if (!toolbar || !textarea) {
-        console.log('⏳ Elements not ready, will retry...');
-        return false;
+    const toolbar   = document.getElementById('html-toolbar');
+    const editor    = document.getElementById('faq-answer-editor');   // contenteditable
+    const source    = document.getElementById('faq-answer-source');   // raw HTML view
+    const hidden    = document.getElementById('faq-answer-livewire'); // wire:model sync
+    const srcToggle = document.getElementById('faq-source-toggle');
+    if (!toolbar || !editor || !hidden) return false;
+
+    // Set <p> as default block element (Chrome uses <div> by default)
+    try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch(e) {}
+
+    // ── Sync contenteditable → hidden Livewire textarea ──────────────────
+    function syncToLivewire() {
+        hidden.value = editor.innerHTML.replace(/<br\s*\/?>/i, '').trim();
+        hidden.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    
-    console.log('✅ Elements found! Setting up click handler...');
-    
-    // Remove any existing handlers
-    if (toolbar._htmlHandler) {
-        toolbar.removeEventListener('click', toolbar._htmlHandler);
+
+    // ── Load current Livewire value into editor ───────────────────────────
+    editor.innerHTML = hidden.value || '';
+
+    // ── Bind input → sync (re-bind each init to avoid duplicates) ─────────
+    if (editor._syncHandler) editor.removeEventListener('input', editor._syncHandler);
+    editor._syncHandler = function() { syncToLivewire(); };
+    editor.addEventListener('input', editor._syncHandler);
+
+    // ── Source toggle (<> button) ─────────────────────────────────────────
+    if (srcToggle) {
+        srcToggle.onclick = function() {
+            const inSource = source && source.style.display !== 'none';
+            if (!inSource) {
+                if (source) { source.value = editor.innerHTML; source.style.display = ''; source.focus(); }
+                editor.style.display = 'none';
+                srcToggle.classList.add('active');
+                srcToggle.title = 'Switch to visual editor';
+            } else {
+                const cleaned = window.sanitizeFaqHtml ? window.sanitizeFaqHtml(source.value) : source.value;
+                editor.innerHTML = cleaned;
+                if (source) source.style.display = 'none';
+                editor.style.display = '';
+                editor.focus();
+                srcToggle.classList.remove('active');
+                srcToggle.title = 'Edit HTML source';
+                syncToLivewire();
+            }
+        };
+        if (source && !source._srcSyncHandler) {
+            source._srcSyncHandler = function() {
+                hidden.value = source.value;
+                hidden.dispatchEvent(new Event('input', { bubbles: true }));
+            };
+            source.addEventListener('input', source._srcSyncHandler);
+        }
     }
+
+    // ── Remove any existing toolbar handler ──────────────────────────────
+    if (toolbar._htmlHandler) toolbar.removeEventListener('click', toolbar._htmlHandler);
     
-    // Create the handler
+    // ── Toolbar click handler ─────────────────────────────────────────────
     toolbar._htmlHandler = function(e) {
-        console.log('🖱️ Toolbar clicked:', e.target);
-        
         const button = e.target.closest('button[data-html-action]');
-        if (!button) {
-            console.log('❌ Not a html button');
+        if (!button) return;
+        e.preventDefault(); e.stopPropagation();
+        const action = button.getAttribute('data-html-action');
+
+        if (action === 'pastehtml') {
+            const phModal = document.getElementById('paste-html-modal');
+            const phSrc   = document.getElementById('paste-html-source');
+            if (phModal && phSrc) { phModal.style.display = 'block'; phSrc.value = ''; setTimeout(() => phSrc.focus(), 50); }
             return;
         }
-        
-        e.preventDefault();
-        e.stopPropagation();
-        
-    const action = button.getAttribute('data-html-action');
-        console.log('🎯 Action:', action);
-        
-        const start = textarea.selectionStart || 0;
-        const end = textarea.selectionEnd || 0;
-        const selectedText = textarea.value.substring(start, end);
-        
-        console.log('📝 Selection:', {start, end, text: selectedText});
-        
-        let replacement = '';
-        
-        switch(action) {
-            case 'bold':
-                replacement = selectedText ? `<strong>${selectedText}</strong>` : '<strong>bold text</strong>';
-                break;
-            case 'italic':
-                replacement = selectedText ? `<em>${selectedText}</em>` : '<em>italic text</em>';
-                break;
-            case 'heading':
-                replacement = selectedText ? `<h3>${selectedText}</h3>` : '<h3>Heading</h3>';
-                break;
-            case 'quote':
-                replacement = selectedText ? `<blockquote>${selectedText}</blockquote>` : '<blockquote>Quote text</blockquote>';
-                break;
-            case 'ul':
-                replacement = selectedText ? `<ul><li>${selectedText}</li></ul>` : '<ul><li>List item</li></ul>';
-                break;
-            case 'ol':
-                replacement = selectedText ? `<ol><li>${selectedText}</li></ol>` : '<ol><li>Numbered item</li></ol>';
-                break;
-            case 'link':
-                const url = prompt('Enter URL:', 'https://example.com');
-                if (url && url !== 'https://example.com') {
-                    const text = selectedText || url; // if no selection, use the URL itself as text
-                    replacement = `<a href="${url}" target="_blank" rel="nofollow noopener noreferrer">${text}</a>`;
-                } else {
-                    return;
-                }
-                break;
-            case 'image':
-                const imgUrl = prompt('Enter image URL:', 'https://example.com/image.jpg');
-                if (imgUrl && imgUrl !== 'https://example.com/image.jpg') {
-                    const altText = prompt('Enter alt text:', 'Image') || 'Image';
-                    replacement = `<img src="${imgUrl}" alt="${altText}">`;
-                } else {
-                    return;
-                }
-                break;
-            case 'code':
-                replacement = selectedText ? `<code>${selectedText}</code>` : '<code>code</code>';
-                break;
-            case 'codeblock':
-                replacement = selectedText ? `<pre><code>${selectedText}</code></pre>` : '<pre><code>code here</code></pre>';
-                break;
-            default:
-                console.log('❌ Unknown action:', action);
-                return;
+
+        // Source mode: plain tag insertion
+        const inSourceMode = source && source.style.display !== 'none';
+        if (inSourceMode) {
+            const ss = source.selectionStart || 0, se = source.selectionEnd || 0;
+            const sel = source.value.substring(ss, se);
+            let r = '';
+            switch (action) {
+                case 'bold':      r = sel ? `<strong>${sel}</strong>` : '<strong>bold text</strong>'; break;
+                case 'italic':    r = sel ? `<em>${sel}</em>` : '<em>italic text</em>'; break;
+                case 'heading':   r = sel ? `<h3>${sel}</h3>` : '<h3>Heading</h3>'; break;
+                case 'quote':     r = sel ? `<blockquote>${sel}</blockquote>` : '<blockquote>Quote</blockquote>'; break;
+                case 'ul':        r = sel ? `<ul><li>${sel}</li></ul>` : '<ul><li>List item</li></ul>'; break;
+                case 'ol':        r = sel ? `<ol><li>${sel}</li></ol>` : '<ol><li>Numbered item</li></ol>'; break;
+                case 'link':      { const u = prompt('URL:', 'https://'); if (u && u !== 'https://') r = `<a href="${u}" target="_blank" rel="nofollow noopener noreferrer">${sel||u}</a>`; else return; break; }
+                case 'image':     { const i = prompt('Image URL:', 'https://'); if (i && i !== 'https://') r = `<img src="${i}" alt="${sel||'image'}" style="max-width:100%;height:auto;" />`; else return; break; }
+                case 'code':      r = sel ? `<code>${sel}</code>` : '<code>code</code>'; break;
+                case 'codeblock': r = sel ? `<pre><code>${sel}</code></pre>` : '<pre><code>code here</code></pre>'; break;
+                default: return;
+            }
+            source.setRangeText(r, ss, se, 'end');
+            source.dispatchEvent(new Event('input', { bubbles: true }));
+            source.focus();
+            return;
         }
-        
-        console.log('💫 Inserting:', replacement);
-        
-        // Insert the text
-        textarea.setRangeText(replacement, start, end, 'end');
-        
-        // Trigger Livewire update
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        
-        // Focus textarea
-        textarea.focus();
-        
-        console.log('✨ Success!');
+
+        // WYSIWYG mode: execCommand
+        editor.focus();
+        const sel = window.getSelection()?.toString() || '';
+        switch (action) {
+            case 'bold':      document.execCommand('bold');   break;
+            case 'italic':    document.execCommand('italic'); break;
+            case 'heading':   document.execCommand('formatBlock', false, 'h3'); break;
+            case 'quote':     document.execCommand('formatBlock', false, 'blockquote'); break;
+            case 'ul':        document.execCommand('insertUnorderedList'); break;
+            case 'ol':        document.execCommand('insertOrderedList');   break;
+            case 'link': {
+                const url = prompt('URL:', 'https://');
+                if (!url || url === 'https://') return;
+                document.execCommand('insertHTML', false, `<a href="${url}" target="_blank" rel="nofollow noopener noreferrer">${sel || url}</a>`);
+                break;
+            }
+            case 'image': {
+                const imgUrl = prompt('Image URL:', 'https://');
+                if (!imgUrl || imgUrl === 'https://') return;
+                const alt = prompt('Alt text:', 'Image') || 'Image';
+                document.execCommand('insertHTML', false, `<img src="${imgUrl}" alt="${alt}" style="max-width:100%;height:auto;" />`);
+                break;
+            }
+            case 'code':      document.execCommand('insertHTML', false, sel ? `<code>${sel}</code>` : '<code>code</code>'); break;
+            case 'codeblock': document.execCommand('insertHTML', false, sel ? `<pre><code>${sel}</code></pre>` : '<pre><code>code here</code></pre>'); break;
+            default: return;
+        }
+        syncToLivewire();
     };
-    
-    // Bind the handler
     toolbar.addEventListener('click', toolbar._htmlHandler);
-    
-    console.log('🎉 HTML toolbar ready!');
+
+    // ── Paste HTML modal ──────────────────────────────────────────────────
+    const _phModal  = document.getElementById('paste-html-modal');
+    const _phInsert = document.getElementById('paste-html-insert');
+    const _phCancel = document.getElementById('paste-html-cancel');
+    if (_phInsert) {
+        _phInsert.onclick = function() {
+            const raw     = document.getElementById('paste-html-source').value;
+            const cleaned = window.sanitizeFaqHtml ? window.sanitizeFaqHtml(raw) : raw;
+            if (cleaned.trim()) {
+                const inSrcMode = source && source.style.display !== 'none';
+                if (inSrcMode) {
+                    const s = source.selectionStart || 0, e2 = source.selectionEnd || s;
+                    source.setRangeText(cleaned, s, e2, 'end');
+                    source.dispatchEvent(new Event('input', { bubbles: true }));
+                } else {
+                    editor.focus();
+                    document.execCommand('insertHTML', false, cleaned);
+                    syncToLivewire();
+                }
+            }
+            if (_phModal) _phModal.style.display = 'none';
+        };
+    }
+    if (_phCancel) { _phCancel.onclick = function() { if (_phModal) _phModal.style.display = 'none'; }; }
+    if (_phModal)  { _phModal.addEventListener('click', function(ev) { if (ev.target === _phModal) _phModal.style.display = 'none'; }); }
+
+    // ── Image paste from clipboard (resize + upload as WebP) ─────────────
+    if (editor._imgPasteHandler) editor.removeEventListener('paste', editor._imgPasteHandler);
+    editor._imgPasteHandler = function(ev) {
+        const items   = [...(ev.clipboardData?.items || [])];
+        const imgItem = items.find(i => i.type.startsWith('image/'));
+        if (!imgItem) return;
+        ev.preventDefault();
+        const file = imgItem.getAsFile();
+        if (!file) return;
+        const placeholderId = 'img-up-' + Date.now();
+        document.execCommand('insertHTML', false, `<span id="${placeholderId}" style="color:#999;font-style:italic;">[Uploading image…]</span>`);
+        syncToLivewire();
+        const reader = new FileReader();
+        reader.onload = function(re) {
+            const maxDim = 1200, tmpImg = new Image();
+            tmpImg.onload = function() {
+                let w = tmpImg.width, h = tmpImg.height;
+                if (w > maxDim || h > maxDim) {
+                    if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+                    else       { w = Math.round(w * maxDim / h); h = maxDim; }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d').drawImage(tmpImg, 0, 0, w, h);
+                const dataUrl = canvas.toDataURL('image/webp', 0.85);
+                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                fetch('{{ route("customer.faqs.upload-image") }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                    body: JSON.stringify({ image: dataUrl })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    const ph = document.getElementById(placeholderId);
+                    if (ph) {
+                        if (data.url) {
+                            const img = document.createElement('img');
+                            img.src = data.url; img.alt = 'pasted image';
+                            img.style.cssText = 'max-width:200px;max-height:200px;height:auto;cursor:pointer;';
+                            ph.replaceWith(img);
+                        } else { ph.replaceWith(document.createTextNode('[Upload failed]')); }
+                        syncToLivewire();
+                    }
+                })
+                .catch(() => {
+                    const ph = document.getElementById(placeholderId);
+                    if (ph) { ph.replaceWith(document.createTextNode('[Upload failed]')); syncToLivewire(); }
+                });
+            };
+            tmpImg.src = re.target.result;
+        };
+        reader.readAsDataURL(file);
+    };
+    editor.addEventListener('paste', editor._imgPasteHandler);
+
     return true;
 };
 

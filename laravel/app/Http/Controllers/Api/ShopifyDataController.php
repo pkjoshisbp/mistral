@@ -29,19 +29,22 @@ class ShopifyDataController extends Controller
     public function query(Request $request)
     {
         $validated = $request->validate([
-            'shop_domain' => 'required|string',
-            'query' => 'required|string',
-            'query_type' => 'sometimes|string|in:products,order,shop_info,auto',
+            'shop_domain'    => 'required|string',
+            'query'          => 'required|string',
+            'query_type'     => 'sometimes|string|in:products,order,shop_info,auto',
+            'customer_email' => 'sometimes|nullable|email',
         ]);
 
-        $shopDomain = $validated['shop_domain'];
-        $query = $validated['query'];
-        $queryType = $validated['query_type'] ?? 'auto';
+        $shopDomain    = $validated['shop_domain'];
+        $query         = $validated['query'];
+        $queryType     = $validated['query_type'] ?? 'auto';
+        $customerEmail = $validated['customer_email'] ?? null;
 
         Log::info('[SHOPIFY API] Query received', [
-            'shop_domain' => $shopDomain,
-            'query' => $query,
-            'query_type' => $queryType
+            'shop_domain'    => $shopDomain,
+            'query'          => $query,
+            'query_type'     => $queryType,
+            'has_customer'   => $customerEmail !== null,
         ]);
 
         // Get integration for this shop
@@ -78,6 +81,16 @@ class ShopifyDataController extends Controller
 
                 case 'order':
                     $data = $this->handleOrderQuery($query);
+                    // If no order found by ID/name in query, try customer email if provided (logged-in Shopify customer)
+                    if (!$data && $customerEmail) {
+                        Log::info('[SHOPIFY API] No order in query text — trying customer email lookup', [
+                            'customer_email' => $customerEmail,
+                        ]);
+                        $customerOrders = $this->shopifyService->getCustomerOrders($customerEmail, 3);
+                        if (!empty($customerOrders)) {
+                            $data = $customerOrders[0]; // Most recent order
+                        }
+                    }
                     $formattedText = $data ? $this->shopifyService->formatForAI($data, 'order') : 'No order found with that order number or email.';
                     break;
 
@@ -124,14 +137,87 @@ class ShopifyDataController extends Controller
     }
 
     /**
+     * Direct PHP call — same logic as query() but returns a plain array instead of a JsonResponse.
+     * Use this from within the application to avoid an Apache/HTTP self-loop.
+     */
+    public function queryDirect(string $shopDomain, string $query, ?string $customerEmail = null): array
+    {
+        $integration = ShopifyApiService::getIntegrationByShop($shopDomain);
+        if (!$integration) {
+            Log::warning('[SHOPIFY DIRECT] No integration found', ['shop_domain' => $shopDomain]);
+            return ['success' => false, 'error' => 'Shop not connected', 'data' => null, 'formatted_text' => null, 'query_type' => 'auto', 'specific_match' => true];
+        }
+
+        $this->shopifyService->setIntegration($integration);
+
+        try {
+            $queryType  = $this->detectQueryType($query);
+            $data       = null;
+            $formattedText = null;
+            $specificMatch = true;
+
+            switch ($queryType) {
+                case 'products':
+                    $productResult = $this->handleProductQuery($query);
+                    $data          = $productResult['results'] ?? $productResult;
+                    $specificMatch = $productResult['specific_match'] ?? true;
+                    $formattedText = $this->shopifyService->formatForAI($data, 'products');
+                    break;
+
+                case 'order':
+                    $data = $this->handleOrderQuery($query);
+                    if (!$data && $customerEmail) {
+                        Log::info('[SHOPIFY DIRECT] No order in query — trying customer email', ['customer_email' => $customerEmail]);
+                        $customerOrders = $this->shopifyService->getCustomerOrders($customerEmail, 3);
+                        if (!empty($customerOrders)) {
+                            $data = $customerOrders[0];
+                        }
+                    }
+                    $formattedText = $data
+                        ? $this->shopifyService->formatForAI($data, 'order')
+                        : 'No order found with that order number or email.';
+                    break;
+
+                case 'shop_info':
+                    $data          = $this->shopifyService->getShopInfo();
+                    $formattedText = $this->shopifyService->formatForAI($data, 'shop_info');
+                    break;
+
+                default:
+                    $data          = $this->shopifyService->searchAll($query);
+                    $formattedText = $this->formatMixedResults($data);
+                    break;
+            }
+
+            return [
+                'success'        => true,
+                'query_type'     => $queryType,
+                'data'           => $data,
+                'formatted_text' => $formattedText,
+                'specific_match' => $specificMatch,
+            ];
+        } catch (\Exception $e) {
+            Log::error('[SHOPIFY DIRECT] Query failed', ['shop_domain' => $shopDomain, 'error' => $e->getMessage()]);
+            return ['success' => false, 'error' => 'Failed to fetch data from Shopify', 'data' => null, 'formatted_text' => null, 'query_type' => 'auto', 'specific_match' => true];
+        }
+    }
+
+    /**
      * Detect query type from user message
      */
     protected function detectQueryType(string $query): string
     {
+        $original = $query;
         $query = strtolower($query);
 
         // Order tracking patterns
         if (preg_match('/\b(order|tracking|track|shipment|delivery|where is my|order number|#\d+)\b/', $query)) {
+            return 'order';
+        }
+
+        // Alphanumeric order number patterns (e.g. SPF2606, DR-1023, #1001, ORD-2024-001)
+        // These look like order references even without the word "order" — check on the original (case-preserved)
+        if (preg_match('/\b[A-Z]{1,6}-?\d{3,}\b/i', $original) || preg_match('/#\d{3,}/', $original)) {
             return 'order';
         }
 

@@ -128,6 +128,7 @@ class FaqsManager extends Component
         $this->sort_order = 0;
         $this->is_starter_prompt = false;
         $this->starter_sort_order = 0;
+        $this->dispatch('activate-admin-toolbar');
     }
 
     public function previewFunnelBranch()
@@ -376,6 +377,7 @@ class FaqsManager extends Component
         $this->is_starter_prompt = (bool) ($f->is_starter_prompt ?? false);
         $this->starter_sort_order = (int) ($f->starter_sort_order ?? 0);
         $this->showForm = true;
+        $this->dispatch('activate-admin-toolbar');
     }
 
     public function update()

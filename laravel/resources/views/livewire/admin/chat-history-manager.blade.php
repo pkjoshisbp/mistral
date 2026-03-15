@@ -53,6 +53,9 @@
                                     <a class="btn btn-sm btn-outline-success" href="{{ route('admin.chat-history.export', ['id' => $conversation->id]) }}" title="Export conversation">
                                         <i class="fas fa-file-export"></i> Export
                                     </a>
+                                    <button class="btn btn-sm btn-outline-warning" wire:click="openDebugModal({{ $conversation->id }})" title="AI Debug Info">
+                                        <i class="fas fa-bug"></i> Debug
+                                    </button>
                                 </div>
                             </div>
                             {{-- Card body: visitor info + message count --}}
@@ -192,8 +195,184 @@ document.addEventListener('DOMContentLoaded', function () {
             if (id) Livewire.find(id).call('closeConversationModal');
         }
     });
+
+    // Debug modal
+    window.addEventListener('show-debug-modal', function () {
+        if (typeof $ !== 'undefined') {
+            $('#debugModal').modal('show');
+            // Convert timestamps inside the modal after Livewire populates it
+            setTimeout(function () { convertLocalTs(); }, 100);
+        }
+    });
+    window.addEventListener('hide-debug-modal', function () {
+        if (typeof $ !== 'undefined') {
+            $('#debugModal').modal('hide');
+        }
+    });
+    $(document).on('hidden.bs.modal', '#debugModal', function () {
+        var component = window.Livewire && document.querySelector('[wire\\:id]');
+        if (component) {
+            var id = component.getAttribute('wire:id');
+            if (id) Livewire.find(id).call('closeDebugModal');
+        }
+    });
 });
 </script>
+
+{{-- LLM Debug Modal --}}
+<div class="modal fade" id="debugModal" tabindex="-1" role="dialog" aria-labelledby="debugModalLabel" aria-hidden="true" wire:ignore.self>
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title" id="debugModalLabel">
+                    <i class="fas fa-bug mr-2"></i> AI Debug Info
+                    @if($debugConversationId)
+                        <small class="ml-2 text-muted">#{{ $debugConversationId }}</small>
+                    @endif
+                </h5>
+                <button type="button" class="close" wire:click="closeDebugModal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body p-0" style="max-height:72vh;overflow-y:auto;">
+                @if(empty($debugLogs))
+                    <div class="text-center p-5 text-muted">
+                        <i class="fas fa-info-circle fa-2x mb-2 d-block"></i>
+                        No debug records found for this conversation.<br>
+                        <small>Debug logs are written from the next chat message onward.</small>
+                    </div>
+                @else
+                    @foreach($debugLogs as $idx => $log)
+                    <div class="border-bottom p-3 {{ $idx % 2 === 0 ? 'bg-white' : 'bg-light' }}">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <div>
+                                <span class="badge badge-{{ match($log['response_path'] ?? '') {
+                                    'faq_direct'  => 'success',
+                                    'faq_keyword' => 'info',
+                                    'clarification' => 'warning',
+                                    default => 'secondary'
+                                } }} mr-1">{{ strtoupper($log['response_path'] ?? 'llm') }}</span>
+                                @if($log['clarification_sought'] ?? false)
+                                    <span class="badge badge-warning mr-1"><i class="fas fa-question-circle"></i> Clarification</span>
+                                @endif
+                                @if($log['faq_matched'] ?? false)
+                                    <span class="badge badge-success mr-1"><i class="fas fa-check"></i> FAQ Match</span>
+                                @endif
+                                @if($log['context_cleared'] ?? false)
+                                    <span class="badge badge-danger mr-1"><i class="fas fa-times-circle"></i> Context Cleared</span>
+                                @endif
+                                @if($log['low_relevance_warning'] ?? false)
+                                    <span class="badge badge-warning mr-1"><i class="fas fa-exclamation-triangle"></i> Low Relevance</span>
+                                @endif
+                            </div>
+                            <small class="text-muted"><time class="local-ts" data-utc="{{ \Carbon\Carbon::parse($log['created_at'])->utc()->toISOString() }}">{{ $log['created_at'] }}</time></small>
+                        </div>
+
+                        {{-- User message --}}
+                        @if($log['user_message'] ?? null)
+                            <div class="mb-2">
+                                <strong><i class="fas fa-comment mr-1 text-primary"></i>User:</strong>
+                                <span class="text-dark">{{ $log['user_message'] }}</span>
+                            </div>
+                        @endif
+
+                        <div class="row">
+                            {{-- Intent --}}
+                            <div class="col-12 col-md-4 mb-2">
+                                <div class="card card-body p-2 h-100 bg-light border">
+                                    <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-brain mr-1"></i>Intent Detection</div>
+                                    <div><strong>Intent:</strong> <code>{{ $log['intent'] ?? '—' }}</code></div>
+                                    <div><strong>Confidence:</strong>
+                                        @php $ic = $log['intent_confidence'] ?? null; @endphp
+                                        @if($ic !== null)
+                                            <span class="badge badge-{{ $ic >= 0.7 ? 'success' : ($ic >= 0.5 ? 'warning' : 'danger') }}">{{ number_format($ic * 100, 1) }}%</span>
+                                        @else —
+                                        @endif
+                                    </div>
+                                    <div><strong>Method:</strong> <code>{{ $log['intent_method'] ?? '—' }}</code></div>
+                                </div>
+                            </div>
+
+                            {{-- Search / Retrieval --}}
+                            <div class="col-12 col-md-4 mb-2">
+                                <div class="card card-body p-2 h-100 bg-light border">
+                                    <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-search mr-1"></i>Search / Retrieval</div>
+                                    <div><strong>Qdrant Score:</strong>
+                                        @php $score = $log['best_qdrant_score'] ?? null; @endphp
+                                        @if($score !== null)
+                                            <span class="badge badge-{{ $score >= 0.7 ? 'success' : ($score >= 0.6 ? 'warning' : 'danger') }}">{{ number_format($score, 4) }}</span>
+                                            @if($score < 0.60) <small class="text-danger">(low → clarification)</small> @endif
+                                        @else —
+                                        @endif
+                                    </div>
+                                    <div><strong>Rewritten?</strong> {{ ($log['query_was_rewritten'] ?? false) ? '✅ Yes' : '❌ No' }}</div>
+                                    @if(($log['rewritten_query'] ?? null) && $log['rewritten_query'] !== $log['original_query'])
+                                        <div><strong>Rewrite:</strong> <em class="text-muted">{{ Str::limit($log['rewritten_query'] ?? '', 80) }}</em></div>
+                                    @endif
+                                    <div><strong>Context len:</strong> {{ $log['context_length'] ?? '—' }} chars</div>
+                                    @if($log['search_elapsed_ms'] ?? null)
+                                        <div><strong>Search time:</strong> {{ $log['search_elapsed_ms'] }}ms</div>
+                                    @endif
+                                </div>
+                            </div>
+
+                            {{-- LLM --}}
+                            <div class="col-12 col-md-4 mb-2">
+                                <div class="card card-body p-2 h-100 bg-light border">
+                                    <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-robot mr-1"></i>Model / Timing</div>
+                                    <div><strong>Model:</strong> <code>{{ $log['model_used'] ?? '—' }}</code></div>
+                                    <div><strong>Provider:</strong> <code>{{ $log['ai_provider'] ?? '—' }}</code></div>
+                                    <div><strong>Max tokens:</strong> {{ $log['max_tokens'] ?? '—' }}</div>
+                                    @if($log['input_tokens'] ?? null)
+                                        <div><strong>Tokens in/out:</strong> {{ $log['input_tokens'] }} / {{ $log['output_tokens'] ?? '?' }}</div>
+                                    @endif
+                                    <div><strong>LLM time:</strong> {{ $log['llm_elapsed_ms'] ? $log['llm_elapsed_ms'].'ms' : '—' }}</div>
+                                    <div><strong>Total time:</strong> {{ $log['total_elapsed_ms'] ? $log['total_elapsed_ms'].'ms' : '—' }}</div>
+                                    <div><strong>Envelope OK:</strong> {{ ($log['envelope_parse_ok'] ?? false) ? '✅' : '❌' }}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Query expansion --}}
+                        @if($log['expansion_attempted'] ?? false)
+                            <div class="alert alert-info py-1 px-2 mt-1 small mb-1">
+                                <i class="fas fa-expand-arrows-alt mr-1"></i>
+                                <strong>Query Expansion attempted.</strong>
+                                @if($log['expanded_query'] ?? null)
+                                    Expanded to: <em>"{{ $log['expanded_query'] }}"</em>
+                                    @if($log['expansion_score_gain'] ?? null)
+                                        — score gain: <strong>+{{ number_format($log['expansion_score_gain'], 4) }}</strong>
+                                    @endif
+                                @else
+                                    (expansion returned no improvement)
+                                @endif
+                            </div>
+                        @endif
+
+                        {{-- Queries detail row --}}
+                        <div class="row mt-1">
+                            <div class="col-12 col-md-6 small">
+                                <strong><i class="fas fa-pencil-alt mr-1"></i>Original query:</strong>
+                                <span class="text-muted">{{ $log['original_query'] ?? '—' }}</span>
+                            </div>
+                            @if(($log['final_search_query'] ?? '') !== ($log['original_query'] ?? ''))
+                            <div class="col-12 col-md-6 small">
+                                <strong><i class="fas fa-arrow-right mr-1"></i>Final search query:</strong>
+                                <span class="text-info">{{ $log['final_search_query'] ?? '—' }}</span>
+                            </div>
+                            @endif
+                        </div>
+                    </div>
+                    @endforeach
+                @endif
+            </div>
+            <div class="modal-footer">
+                <small class="text-muted mr-auto">Showing {{ count($debugLogs) }} debug record(s). Auto-cleaned after 15 days.</small>
+                <button type="button" class="btn btn-secondary btn-sm" wire:click="closeDebugModal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 {{-- Conversation Detail Modal --}}
 <div class="modal fade" id="chatConvModal" tabindex="-1" role="dialog" aria-labelledby="chatConvModalLabel" aria-hidden="true" wire:ignore.self>

@@ -10,6 +10,14 @@ class AiAgentService
 {
     private $baseUrl;
 
+    /** Debug data captured during the most recent enhancedSearch() call. */
+    public array $lastSearchDebug = [];
+
+    public function getLastSearchDebug(): array
+    {
+        return $this->lastSearchDebug;
+    }
+
     public function __construct()
     {
         $this->baseUrl = config('services.ai_agent.url', 'http://localhost:8111');
@@ -177,12 +185,14 @@ class AiAgentService
                         return $llamacppRepo;
                     }
                 } else {
-                    // Check organization-specific llama model
-                    if (isset($organization->settings['llama_model'])) {
-                        return $organization->settings['llama_model'];
-                    }
+                    // Check organization-specific llama model.
+                    // Prefer 'ai_model' (the current admin-panel setting) over the legacy
+                    // 'llama_model' key which may hold a stale model name from older deployments.
                     if (isset($organization->settings['ai_model'])) {
                         return $organization->settings['ai_model'];
+                    }
+                    if (isset($organization->settings['llama_model'])) {
+                        return $organization->settings['llama_model'];
                     }
                 }
             }
@@ -235,12 +245,13 @@ class AiAgentService
      */
     public function useIntentAndRewrite(): bool
     {
-        if (class_exists(\App\Models\AdminSetting::class)) {
-            $value = \App\Models\AdminSetting::get('ai_use_intent_rewrite', true);
-            return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? true;
-        }
-
-        return true;
+        // Pre-Qdrant LLM rewrite adds 2+ LLM calls (rewriteQueryForSearch + selectBestAnswerWithLLM)
+        // on every single query, including simple first-turn messages. The vector
+        // embeddings from nomic-embed-text handle semantic similarity well enough
+        // (job ≈ vacancy ≈ hiring) without a pre-rewrite step. Post-Qdrant expansion
+        // (expandQueryForLowConfidence) is the correct place to add an LLM fallback
+        // only when confidence is actually low. Always return false here.
+        return false;
     }
 
     /**
@@ -647,14 +658,99 @@ PROMPT;
                 $results = [
                     'results' => array_slice($rerankedResults, 0, (int) $limit),
                 ];
+
+                // ── Low-confidence expansion fallback ──────────────────────────
+                // If best score < 0.72, the original query may be ambiguous or
+                // use abbreviations/domain jargon the embedding model doesn't
+                // recognise well (e.g. "TGT" = Trained Graduate Teacher).
+                // Expand the query via LLM and retry; keep whichever pass wins.
+                $firstPassMaxScore = 0.0;
+                foreach ($rerankedResults as $_r) {
+                    $firstPassMaxScore = max($firstPassMaxScore, (float) ($_r['semantic_score'] ?? $_r['score'] ?? 0));
+                }
+
+                $expansionThreshold = (float) ($options['expansion_threshold'] ?? 0.72);
+                $skipExpansion      = (bool)  ($options['skip_expansion']      ?? false);
+
+                // Also skip when any result already has a strong hybrid/keyword score (>1.5).
+                // A high hybrid score means keyword coverage is good — LLM expansion
+                // adds latency (~7s) with no retrieval benefit.
+                if (!$skipExpansion) {
+                    foreach ($rerankedResults as $_hr) {
+                        if ((float) ($_hr['score'] ?? $_hr['hybrid_score'] ?? 0) > 1.5) {
+                            $skipExpansion = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!$skipExpansion && $firstPassMaxScore < $expansionThreshold) {
+                    Log::info('Low-confidence result, attempting query expansion', [
+                        'collection'         => $collectionName,
+                        'original_query'     => $originalQuery,
+                        'first_pass_score'   => round($firstPassMaxScore, 4),
+                        'expansion_threshold' => $expansionThreshold,
+                    ]);
+
+                    $expandedQuery = $this->expandQueryForLowConfidence($originalQuery, $firstPassMaxScore);
+
+                    if ($expandedQuery !== $originalQuery) {
+                        $expandedEmbedding = $this->embed($expandedQuery);
+
+                        if ($expandedEmbedding && is_array($expandedEmbedding)) {
+                            $expandedResults   = $this->searchQdrant($collectionName, $expandedEmbedding, $searchLimit);
+                            $expandedTermBoost = $this->searchQdrantByTerms($collectionName, $expandedQuery, max((int) $limit, 8));
+
+                            $expandedMerged  = $this->mergeSearchResultsById([
+                                $expandedTermBoost['results'] ?? [],
+                                $expandedResults['results']   ?? [],
+                            ]);
+                            $expandedReranked = $this->applyHybridLexicalReranking($expandedMerged, $expandedQuery);
+
+                            $expandedMaxScore = 0.0;
+                            foreach ($expandedReranked as $_r) {
+                                $expandedMaxScore = max($expandedMaxScore, (float) ($_r['semantic_score'] ?? $_r['score'] ?? 0));
+                            }
+
+                            Log::info('Query expansion completed', [
+                                'collection'           => $collectionName,
+                                'original_query'       => $originalQuery,
+                                'expanded_query'       => $expandedQuery,
+                                'first_pass_max_score' => round($firstPassMaxScore, 4),
+                                'expanded_max_score'   => round($expandedMaxScore, 4),
+                                'used_expansion'       => $expandedMaxScore > $firstPassMaxScore,
+                            ]);
+
+                            if ($expandedMaxScore > $firstPassMaxScore) {
+                                $results = [
+                                    'results'        => array_slice($expandedReranked, 0, (int) $limit),
+                                    'expanded_query' => $expandedQuery,
+                                    'expansion_score_gain' => round($expandedMaxScore - $firstPassMaxScore, 4),
+                                ];
+                            }
+                        }
+                    }
+                }
+
                 $searchElapsed = round((microtime(true) - $searchStartTime) * 1000, 2);
 
                 Log::info('Semantic search completed (rewrite/intent disabled)', [
-                    'collection' => $collectionName,
-                    'original_query' => $originalQuery,
-                    'results_count' => isset($results['results']) ? count($results['results']) : 0,
-                    'total_elapsed_ms' => $searchElapsed
+                    'collection'        => $collectionName,
+                    'original_query'    => $originalQuery,
+                    'first_pass_score'  => round($firstPassMaxScore, 4),
+                    'expansion_attempted' => (!$skipExpansion && $firstPassMaxScore < $expansionThreshold),
+                    'results_count'     => isset($results['results']) ? count($results['results']) : 0,
+                    'total_elapsed_ms'  => $searchElapsed,
                 ]);
+
+                // Surface debug data for WidgetController
+                $this->lastSearchDebug = [
+                    'expansion_attempted'  => (!$skipExpansion && $firstPassMaxScore < $expansionThreshold),
+                    'expanded_query'       => $results['expanded_query'] ?? null,
+                    'expansion_score_gain' => $results['expansion_score_gain'] ?? null,
+                    'first_pass_score'     => round($firstPassMaxScore, 4),
+                    'total_elapsed_ms'     => $searchElapsed,
+                ];
 
                 return $results;
             }
@@ -1606,6 +1702,80 @@ Rules:
     }
 
     /**
+     * Expand a low-confidence query using LLM (llama3.2:3b via vast.ai).
+     *
+     * Used as a second-pass retrieval when the first Qdrant search returns a
+     * poor semantic score.  The model is asked to unfold abbreviations, add
+     * domain-specific synonyms, and produce a richer retrieval phrase.
+     *
+     * Examples:
+     *   "Apply for tgt hindi sanskrit"  →  "TGT teacher vacancy job opening Hindi Sanskrit teaching position recruitment"
+     *   "cbc test price"                →  "complete blood count CBC test cost price charges"
+     *
+     * @param  string $originalQuery
+     * @param  float  $bestScore      Score of the best first-pass result (for logging)
+     * @return string  Expanded query, or original if expansion fails / adds nothing
+     */
+    private function expandQueryForLowConfidence(string $originalQuery, float $bestScore): string
+    {
+        try {
+            $systemPrompt = <<<'PROMPT'
+You are a search query expander for a knowledge-base retrieval system.
+Given a user query, rewrite it into a richer retrieval phrase by:
+- Spelling out abbreviations (e.g. TGT → Trained Graduate Teacher, CBC → Complete Blood Count)
+- Adding domain-specific synonyms (e.g. "apply" → "apply vacancy job opening recruitment")
+- Keeping all original keywords
+- Removing filler words (for, the, a, an)
+- Output a SINGLE short phrase (max 15 words). No lists, no explanation.
+PROMPT;
+
+            $messages = [
+                ['role' => 'system', 'content' => trim($systemPrompt)],
+                ['role' => 'user',   'content' => $originalQuery],
+            ];
+
+            // Use a small fast model for expansion — it is a simple synonym/phrase task.
+            // Avoid using mistral-nemo or other large models here as they add 7+ seconds.
+            $response = $this->llmChat($messages, 'llama3.2:3b', null, null, [
+                'use_vastai'   => true,
+                'temperature'  => 0.0,
+                'num_predict'  => 60,
+            ]);
+
+            if ($response && isset($response['message']['content'])) {
+                $expanded = trim((string) $response['message']['content']);
+                // Strip leading/trailing quotes if model added them
+                $expanded = trim($expanded, '"\' ');
+                // Reject if too long or conversational
+                if ($expanded === '' ||
+                    strlen($expanded) > 200 ||
+                    str_word_count($expanded) > 18 ||
+                    stripos($expanded, 'I ') === 0 ||
+                    stripos($expanded, 'Here') === 0 ||
+                    stripos($expanded, 'This') === 0) {
+                    return $originalQuery;
+                }
+                // Reject if the expansion is identical to original (case-insensitive)
+                if (strtolower($expanded) === strtolower($originalQuery)) {
+                    return $originalQuery;
+                }
+                Log::info('Query expansion LLM result', [
+                    'original'    => $originalQuery,
+                    'expanded'    => $expanded,
+                    'first_score' => round($bestScore, 4),
+                ]);
+                return $expanded;
+            }
+        } catch (\Exception $e) {
+            Log::warning('Query expansion failed, using original', [
+                'original' => $originalQuery,
+                'error'    => $e->getMessage(),
+            ]);
+        }
+        return $originalQuery;
+    }
+
+    /**
      * Rewrite follow-up query using explicit conversational context:
      * original user question + assistant answer + current follow-up.
      */
@@ -1675,7 +1845,8 @@ Rules:
                         'rewritten_query' => $rewrittenQuery,
                     ]);
 
-                    return trim($followUpQuestion);
+                    // Preserve the original question so any entity (order ID, product name) is not lost
+                    return trim($originalQuestion . ' ' . $followUpQuestion);
                 }
 
                 return $rewrittenQuery;
@@ -1686,14 +1857,14 @@ Rules:
                 'rewrite_model' => $rewriteModel,
             ]);
 
-            return $followUpQuestion;
+            return trim($originalQuestion . ' ' . $followUpQuestion);
         } catch (\Throwable $e) {
             Log::warning('Follow-up rewrite exception; using follow-up question directly', [
                 'follow_up_question' => $followUpQuestion,
                 'error' => $e->getMessage(),
             ]);
 
-            return $followUpQuestion;
+            return trim($originalQuestion . ' ' . $followUpQuestion);
         }
     }
 
@@ -1835,23 +2006,38 @@ Rules:
                 // Log token usage if organization is provided
                 if ($organizationId) {
                     $tokensUsed = 0;
-                    
+                    $inputTokens = 0;
+                    $outputTokens = 0;
+
                     // Try to get tokens from response first
                     if (isset($result['usage']['total_tokens'])) {
-                        $tokensUsed = $result['usage']['total_tokens'];
+                        $tokensUsed    = (int) $result['usage']['total_tokens'];
+                        $inputTokens   = (int) ($result['usage']['prompt_tokens'] ?? 0);
+                        $outputTokens  = (int) ($result['usage']['completion_tokens'] ?? 0);
+                        // Fallback if breakdown missing but total present
+                        if ($inputTokens === 0 && $outputTokens === 0 && $tokensUsed > 0) {
+                            $inputText    = json_encode($messages);
+                            $outputText   = $result['message']['content'] ?? '';
+                            $inputTokens  = max(1, (int) (strlen($inputText) / 4));
+                            $outputTokens = max(1, (int) (strlen($outputText) / 4));
+                        }
                     } else {
                         // Estimate tokens if not provided by FastAPI
-                        $inputText = json_encode($messages);
-                        $outputText = isset($result['message']['content']) ? $result['message']['content'] : '';
-                        $tokensUsed = (int)((strlen($inputText) + strlen($outputText)) / 4); // Rough estimate: 4 chars per token
+                        $inputText    = json_encode($messages);
+                        $outputText   = isset($result['message']['content']) ? $result['message']['content'] : '';
+                        $inputTokens  = max(1, (int) (strlen($inputText) / 4));
+                        $outputTokens = max(1, (int) (strlen($outputText) / 4));
+                        $tokensUsed   = $inputTokens + $outputTokens;
                     }
-                    
+
                     $this->logTokenUsage(
                         $userId,
                         $organizationId,
                         'llm_chat',
                         $tokensUsed,
-                        substr($payloadPreview, 0, 255)
+                        substr($payloadPreview, 0, 255),
+                        $inputTokens,
+                        $outputTokens
                     );
                 }
                 
@@ -2003,12 +2189,12 @@ Rules:
     public function logWidgetTokenUsage(int $organizationId, array $messages, string $responseText, string $endpointType = 'llm_chat_stream'): void
     {
         try {
-            $inputTokens = (int) $this->estimateTokenCount($messages);
+            $inputTokens  = max(1, (int) $this->estimateTokenCount($messages));
             $outputTokens = max(1, (int) (strlen($responseText) / 4));
-            $totalTokens = $inputTokens + $outputTokens;
-            $summary = substr(json_encode($messages), 0, 255);
+            $totalTokens  = $inputTokens + $outputTokens;
+            $summary = 'in:' . $inputTokens . ' out:' . $outputTokens . ' | ' . substr(json_encode($messages), 0, 200);
 
-            $this->logTokenUsage(null, $organizationId, $endpointType, $totalTokens, $summary);
+            $this->logTokenUsage(null, $organizationId, $endpointType, $totalTokens, $summary, $inputTokens, $outputTokens);
         } catch (\Exception $e) {
             Log::error('Failed to log widget token usage', [
                 'organization_id' => $organizationId,
@@ -2563,7 +2749,7 @@ Rules:
     /**
      * Log token usage for billing and monitoring purposes
      */
-    private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary)
+    private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary, int $inputTokens = 0, int $outputTokens = 0)
     {
         try {
             $subscription = null;
@@ -2601,6 +2787,8 @@ Rules:
                 'subscription_id' => $subscription ? $subscription->id : null,
                 'endpoint_type' => $endpointType,
                 'tokens_used' => $tokensUsed,
+                'input_tokens' => $inputTokens > 0 ? $inputTokens : null,
+                'output_tokens' => $outputTokens > 0 ? $outputTokens : null,
                 'request_summary' => $requestSummary,
                 'used_at' => now()
             ]);

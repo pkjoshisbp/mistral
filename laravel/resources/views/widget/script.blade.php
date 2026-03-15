@@ -817,6 +817,18 @@
                     notification.style.display = 'none';
                 }
             });
+
+            // Delegated click on images in chat messages — open full image in new tab
+            const _msgEl = document.getElementById(this.ids.messages);
+            if (_msgEl) {
+                _msgEl.addEventListener('click', (e) => {
+                    const img = e.target.closest('.ai-chat-message-content img');
+                    if (img && img.src) {
+                        e.preventDefault();
+                        window.open(img.src, '_blank', 'noopener,noreferrer');
+                    }
+                });
+            }
         }
 
         toggle() {
@@ -966,7 +978,7 @@
         linkify(text) {
             if (!text) return '';
 
-            // Strip XML/HTML processing instructions (<?xml ...?>, <!DOCTYPE ...>)
+            // Strip XML/HTML processing instructions (xml-pi tags, <!DOCTYPE ...>)
             text = text.replace(/<\?[^>]*>/g, '').replace(/<!DOCTYPE[^>]*>/gi, '');
 
             // ── Numbered list normalisation (text-only, safe before HTML processing) ──
@@ -1005,13 +1017,20 @@
 
             // ── Preserve safe HTML tags so FAQ/answer HTML renders properly ──────
             // Tags are sanitized (event handlers, javascript: stripped) to prevent XSS.
-            const safeTags = 'p|ul|ol|li|strong|em|b|i|br|h[1-6]|blockquote|code|pre|hr';
+            const safeTags = 'p|ul|ol|li|strong|em|b|i|br|h[1-6]|blockquote|code|pre|hr|img';
             const safeTagRx = new RegExp(`</?(?:${safeTags})(?:\\s[^>]*)?>`, 'gi');
             const safeTagPlaceholders = [];
             let safeTagIdx = 0;
             text = text.replace(safeTagRx, (m) => {
                 let safe = m.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '');
                 safe = safe.replace(/javascript\s*:/gi, '');
+                // For <img>: sanitize src — allow only data:image/* and http/https
+                if (/^<img\b/i.test(safe)) {
+                    safe = safe.replace(/\bsrc\s*=\s*"([^"]*)"/gi, (orig, v) =>
+                        /^(data:image\/|https?:\/\/)/i.test(v) ? orig : '');
+                    safe = safe.replace(/\bsrc\s*=\s*'([^']*)'/gi, (orig, v) =>
+                        /^(data:image\/|https?:\/\/)/i.test(v) ? orig : '');
+                }
                 const ph = `__SAFETAG_${safeTagIdx}__`;
                 safeTagPlaceholders.push(safe);
                 safeTagIdx++;
@@ -1143,6 +1162,31 @@
             // whitespace between tags to prevent spurious <br> inside <ul>/<li> etc.
             const hasBlockHtml = safeTagPlaceholders.some(t => /^<(?:p|ul|ol|li|h[1-6]|blockquote|pre)/i.test(t));
             if (hasBlockHtml) {
+                processed = processed.replace(/>\n+/g, '>').replace(/\n+</g, '<').replace(/\n/g, '<br>');
+                return processed;
+            }
+
+            // ── Markdown bullet list grouping ─────────────────────────────────────
+            // Groups consecutive "- text", "• text", or "* text" (not "**bold**") lines
+            // into <ul><li>…</li></ul> blocks. Runs after all placeholder restorations.
+            processed = (function(t) {
+                const ls = t.split('\n');
+                const out = [];
+                let items = [];
+                const flush = () => {
+                    if (!items.length) return;
+                    out.push('<ul>' + items.map(x => '<li>' + x + '</li>').join('') + '</ul>');
+                    items = [];
+                };
+                for (const line of ls) {
+                    const m = line.match(/^[ \t]*(?:[-•]|\*(?!\S))[ \t]+(.+)$/);
+                    if (m) { items.push(m[1]); }
+                    else   { flush(); out.push(line); }
+                }
+                flush();
+                return out.join('\n');
+            })(processed);
+            if (processed.includes('<ul>')) {
                 processed = processed.replace(/>\n+/g, '>').replace(/\n+</g, '<').replace(/\n/g, '<br>');
                 return processed;
             }

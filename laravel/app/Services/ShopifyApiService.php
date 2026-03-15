@@ -357,9 +357,11 @@ class ShopifyApiService
         if (count($fulfillments) > 0) {
             $trackingInfo = [
                 'tracking_number' => $fulfillments[0]['tracking_number'] ?? null,
-                'tracking_url' => $fulfillments[0]['tracking_url'] ?? null,
+                'tracking_url'     => $fulfillments[0]['tracking_url'] ?? null,
                 'tracking_company' => $fulfillments[0]['tracking_company'] ?? null,
-                'status' => $fulfillments[0]['status'] ?? null,
+                'status'           => $fulfillments[0]['status'] ?? null,
+                'shipped_at'       => $fulfillments[0]['created_at'] ?? null,
+                'updated_at'       => $fulfillments[0]['updated_at'] ?? null,
             ];
         }
 
@@ -385,6 +387,7 @@ class ShopifyApiService
                 'country' => $order['shipping_address']['country'] ?? null,
             ],
             'tracking' => $trackingInfo,
+            'fulfilled_at' => count($fulfillments) > 0 ? ($fulfillments[0]['created_at'] ?? null) : null,
         ];
     }
 
@@ -504,12 +507,46 @@ class ShopifyApiService
                 }
                 
                 $formatted = "Order {$data['name']}:\n";
-                $formatted .= "Status: " . ucfirst($data['fulfillment_status'] ?? 'pending') . "\n";
+                // Map Shopify fulfillment_status to plain English so the LLM does not
+                // misinterpret "fulfilled" as "ready to ship" — it means already shipped.
+                $fsRaw = strtolower(trim((string)($data['fulfillment_status'] ?? '')));
+                $fsLabel = match($fsRaw) {
+                    'fulfilled' => 'Shipped (Fulfilled)',
+                    'partial'   => 'Partially Shipped',
+                    'restocked' => 'Restocked / Returned',
+                    default     => 'Not Yet Shipped',
+                };
+                $formatted .= "Fulfillment Status: {$fsLabel}\n";
+                // Include shipped date from the first fulfillment if available
+                if (!empty($data['tracking']['shipped_at'])) {
+                    $formatted .= "Shipped On: {$data['tracking']['shipped_at']}\n";
+                } elseif (!empty($data['tracking']['updated_at'])) {
+                    $formatted .= "Last Updated: {$data['tracking']['updated_at']}\n";
+                }
                 $formatted .= "Payment: " . ucfirst($data['financial_status']) . "\n";
                 $formatted .= "Total: {$data['currency']} {$data['total_price']}\n";
                 
                 if (!empty($data['tracking']['tracking_number'])) {
-                    $formatted .= "Tracking: {$data['tracking']['tracking_number']}\n";
+                    $trackingCompany = $data['tracking']['tracking_company'] ?? null;
+                    if ($trackingCompany) {
+                        $formatted .= "Carrier: {$trackingCompany}\n";
+                    }
+                    $formatted .= "Tracking Number: {$data['tracking']['tracking_number']}\n";
+                    // Shopify shipment status: success=delivered, in_transit, out_for_delivery, etc.
+                    if (!empty($data['tracking']['status'])) {
+                        $deliveryStatusMap = [
+                            'success'          => 'Delivered',
+                            'in_transit'       => 'In Transit',
+                            'out_for_delivery' => 'Out For Delivery',
+                            'attempted_delivery' => 'Delivery Attempted',
+                            'ready_for_pickup' => 'Ready For Pickup',
+                            'confirmed'        => 'Shipping Confirmed',
+                            'failure'          => 'Delivery Failed',
+                        ];
+                        $dStatus = strtolower(trim($data['tracking']['status']));
+                        $dLabel  = $deliveryStatusMap[$dStatus] ?? ucwords(str_replace('_', ' ', $dStatus));
+                        $formatted .= "Delivery Status: {$dLabel}\n";
+                    }
                     if (!empty($data['tracking']['tracking_url'])) {
                         $formatted .= "Track at: {$data['tracking']['tracking_url']}\n";
                     }

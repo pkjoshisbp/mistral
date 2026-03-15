@@ -15,6 +15,8 @@ class TokenUsageLog extends Model
         'subscription_id',
         'endpoint_type',
         'tokens_used',
+        'input_tokens',
+        'output_tokens',
         'request_summary',
         'used_at'
     ];

@@ -27,6 +27,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('whatsapp:sync-templates')->dailyAt('02:00')->withoutOverlapping();
         $schedule->command('credits:scan-expiry --days=7')->dailyAt('01:30')->withoutOverlapping();
         $schedule->command('vastai:check-connectivity')->everyFiveMinutes()->withoutOverlapping();
+        $schedule->command('debug-logs:prune --days=15')->dailyAt('03:00')->withoutOverlapping();
     }
 
     /**

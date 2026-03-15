@@ -685,6 +685,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/settings', \App\Livewire\Admin\SettingsManager::class)->name('settings');
     Route::get('/services', \App\Livewire\Admin\ServicesManager::class)->name('services');
     Route::get('/faqs', \App\Livewire\Admin\FaqsManager::class)->name('faqs');
+    Route::post('/faqs/upload-image', [\App\Http\Controllers\FaqImageController::class, 'upload'])->name('faqs.upload-image');
     Route::get('/general-info', \App\Livewire\Admin\GeneralInfoManager::class)->name('general-info');
     Route::get('/documents', \App\Livewire\Admin\DocumentsManager::class)->name('documents');
     Route::get('/video-generation', \App\Livewire\Admin\VideoGenerationManager::class)->name('video-generation');
@@ -819,6 +820,7 @@ Route::middleware(['auth', 'customer'])->prefix('customer')->name('customer.')->
         Route::get('/organization', \App\Livewire\Customer\OrganizationManager::class)->name('organization');
         Route::get('/services', \App\Livewire\Customer\Services::class)->name('services');
         Route::get('/faqs', \App\Livewire\Customer\Faqs::class)->name('faqs');
+        Route::post('/faqs/upload-image', [\App\Http\Controllers\FaqImageController::class, 'upload'])->name('faqs.upload-image');
         Route::get('/general-info', \App\Livewire\Customer\GeneralInfo::class)->name('general-info');
         Route::get('/documents', \App\Livewire\Customer\Documents::class)->name('documents');
         Route::get('/website-crawler', \App\Livewire\Customer\WebsiteCrawler::class)->name('crawler');

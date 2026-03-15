@@ -80,7 +80,7 @@ class OrganizationFaq extends Model
         $allowedTags = ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'a', 'img', 'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
         $allowedAttributes = [
             'a' => ['href', 'target', 'rel'],
-            'img' => ['src', 'alt', 'title']
+            'img' => ['src', 'alt', 'title', 'style']
         ];
 
         $xpath = new \DOMXPath($dom);
@@ -115,6 +115,22 @@ class OrganizationFaq extends Model
                 if ($href && (strpos($href, 'http://') === 0 || strpos($href, 'https://') === 0)) {
                     $node->setAttribute('target', '_blank');
                     $node->setAttribute('rel', 'nofollow noopener noreferrer');
+                }
+            }
+
+            // Strip data: URIs from <img src> — only allow http/https URLs
+            if ($node->tagName === 'img') {
+                $src = $node->getAttribute('src');
+                if ($src !== '' && !preg_match('#^https?://#i', $src)) {
+                    $node->removeAttribute('src');
+                }
+                // Sanitize style — strip dangerous CSS (expression, javascript:, url())
+                $style = $node->getAttribute('style');
+                if ($style !== '') {
+                    $style = preg_replace('/expression\s*\(.*?\)/i', '', $style);
+                    $style = preg_replace('/javascript\s*:/i', '', $style);
+                    $style = preg_replace('/url\s*\(/i', '', $style);
+                    $node->setAttribute('style', trim($style));
                 }
             }
         }

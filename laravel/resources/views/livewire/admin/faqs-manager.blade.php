@@ -83,7 +83,62 @@
                         <div class="col-md-6 mb-2"><label>Question *</label><input type="text" wire:model="question" class="form-control">@error('question')<small class="text-danger">{{ $message }}</small>@enderror</div>
                         <div class="col-md-3 mb-2"><label>Category</label><input type="text" wire:model="category" class="form-control"></div>
                         <div class="col-md-3 mb-2"><label>Keywords</label><input type="text" wire:model="keywords" class="form-control" placeholder="comma separated"><small class="text-muted d-block mt-1">Use comma-separated keywords to improve retrieval quality.</small></div>
-                        <div class="col-md-12 mb-2"><label>Answer *</label><textarea wire:model="answer" rows="3" class="form-control"></textarea>@error('answer')<small class="text-danger">{{ $message }}</small>@enderror</div>
+                        <div class="col-md-12 mb-2">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label mb-0">Answer * (HTML)</label>
+                            </div>
+                            <!-- Admin HTML Toolbar -->
+                            <div wire:ignore>
+                                <div class="btn-toolbar mb-2" id="admin-html-toolbar" role="toolbar" aria-label="HTML formatting toolbar">
+                                    <div class="btn-group btn-group-sm me-2" role="group">
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="bold" title="Bold"><strong>B</strong></button>
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="italic" title="Italic"><em>I</em></button>
+                                    </div>
+                                    <div class="btn-group btn-group-sm me-2" role="group">
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="heading" title="Heading">H3</button>
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="quote" title="Quote">&ldquo;&rdquo;</button>
+                                    </div>
+                                    <div class="btn-group btn-group-sm me-2" role="group">
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="ul" title="Bullet List">&bull; List</button>
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="ol" title="Numbered List">1. List</button>
+                                    </div>
+                                    <div class="btn-group btn-group-sm me-2" role="group">
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="link" title="Link">&#128279; Link</button>
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="image" title="Image URL">&#128247; Image</button>
+                                    </div>
+                                    <div class="btn-group btn-group-sm me-2" role="group">
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="code" title="Inline Code">&lt;code&gt;</button>
+                                        <button type="button" class="btn btn-outline-secondary" data-admin-html-action="codeblock" title="Code Block">&lt;pre&gt;</button>
+                                    </div>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-primary" data-admin-html-action="pastehtml" title="Paste raw HTML (sanitized)">&#128203; HTML</button>
+                                        <button type="button" class="btn btn-outline-secondary" id="admin-source-toggle" title="Edit HTML source">&lt;&gt;</button>
+                                    </div>
+                                </div>
+                                <!-- Admin Paste HTML Modal -->
+                                <div id="admin-paste-html-modal" style="display:none;position:fixed;z-index:99999;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);">
+                                    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:8px;padding:24px;width:min(640px,95vw);max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+                                        <h5 class="mb-2">Paste Raw HTML</h5>
+                                        <p class="text-muted small mb-3">Only safe tags are kept: <code>p, br, strong, b, em, i, u, ul, ol, li, a, img, code, pre, blockquote, h1–h6</code>. Event handlers and <code>javascript:</code> are stripped automatically.</p>
+                                        <textarea id="admin-paste-html-source" rows="12" class="form-control font-monospace mb-3" style="font-size:12px;" placeholder="Paste your HTML here…"></textarea>
+                                        <div class="d-flex justify-content-end gap-2">
+                                            <button type="button" class="btn btn-secondary btn-sm" id="admin-paste-html-cancel">Cancel</button>
+                                            <button type="button" class="btn btn-primary btn-sm" id="admin-paste-html-insert">Insert HTML</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div wire:ignore>
+                                {{-- WYSIWYG editor: IS the live preview (renders HTML as you type) --}}
+                                <div id="admin-faq-answer-editor" contenteditable="true" class="form-control wysiwyg-editor" data-placeholder="Enter your answer here…"></div>
+                                {{-- Raw HTML source view (toggle with &lt;&gt; button) --}}
+                                <textarea id="admin-faq-answer-source" class="form-control font-monospace mt-1" rows="8" style="display:none;" placeholder="HTML source…"></textarea>
+                            </div>
+                            {{-- Hidden sync textarea — outside wire:ignore so Livewire can update it --}}
+                            <textarea id="admin-faq-answer-livewire" wire:model.live="answer" style="display:none;"></textarea>
+                            <small class="text-muted d-block mt-1">Tip: paste images directly into the text area (max 1200px). Allowed tags: p, br, strong, b, em, i, ul, ol, li, a, img, code, pre, blockquote, h1–h6.</small>
+                            @error('answer')<small class="text-danger">{{ $message }}</small>@enderror
+                        </div>
                         <div class="col-md-12 mb-2"><label>Follow-up Question <small class="text-muted">(Optional - shown after answer)</small></label><input type="text" wire:model="follow_up" class="form-control" placeholder="e.g., We also offer related services. Would you like to know more about them?"><small class="text-muted d-block mt-1">Keep follow-up short and relevant to the current answer.</small></div>
                         <div class="col-md-3 mb-2"><label>Sort Order</label><input type="number" wire:model="sort_order" class="form-control"></div>
                         <div class="col-md-3 mb-2"><label>Status</label><select wire:model="is_active" class="form-control"><option value="1">Active</option><option value="0">Inactive</option></select></div>
@@ -99,4 +154,252 @@
             <div class="alert alert-info mt-3"><i class="fas fa-info-circle"></i> FAQs embedded for AI retrieval.</div>
         </div></div>
     </div></section>
+    <div wire:ignore>
+        <style>
+.wysiwyg-editor { min-height: 180px; overflow-y: auto; cursor: text; line-height: 1.6; }
+.wysiwyg-editor:focus { border-color: #86b7fe; outline: 0; box-shadow: 0 0 0 0.25rem rgba(13,110,253,.25); }
+.wysiwyg-editor:empty::before { content: attr(data-placeholder); color: #6c757d; pointer-events: none; }
+.wysiwyg-editor p { margin: 0 0 0.5em; }
+.wysiwyg-editor ul, .wysiwyg-editor ol { padding-left: 1.5em; margin-bottom: 0.5em; }
+.wysiwyg-editor h1,.wysiwyg-editor h2,.wysiwyg-editor h3,.wysiwyg-editor h4 { font-weight: 600; margin: 0.5em 0 0.3em; }
+.wysiwyg-editor a { color: #0d6efd; }
+.wysiwyg-editor img { max-width: 100%; height: auto; }
+.wysiwyg-editor code { background: #f8f9fa; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+.wysiwyg-editor pre { background: #f8f9fa; padding: 0.75em; border-radius: 4px; overflow-x: auto; white-space: pre; }
+.wysiwyg-editor blockquote { border-left: 3px solid #dee2e6; padding-left: 1em; color: #6c757d; margin: 0.5em 0; }
+        </style>
+        <script>
+// Admin HTML toolbar
+(function() {
+
+window.sanitizeFaqHtml = window.sanitizeFaqHtml || function(html) {
+    if (!html) return '';
+    html = html.replace(/<\?[^>]*>/g, '').replace(/<!DOCTYPE[^>]*>/gi, '');
+    const doc = (new DOMParser()).parseFromString('<body>' + html + '</body>', 'text/html');
+    const allowed = new Set(['p','br','strong','b','em','i','u','ul','ol','li','a','img','code','pre','blockquote','h1','h2','h3','h4','h5','h6','hr']);
+    const self = new Set(['br','hr','img']);
+    function cleanNode(node) {
+        const out = [];
+        node.childNodes.forEach(function(child) {
+            if (child.nodeType === 3) { out.push(child.textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')); return; }
+            if (child.nodeType !== 1) return;
+            const tag = child.tagName.toLowerCase();
+            if (!allowed.has(tag)) { out.push(cleanNode(child)); return; }
+            let attrs = '';
+            for (const attr of child.attributes) {
+                const n = attr.name.toLowerCase(), v = attr.value;
+                if (/^on/.test(n)) continue;
+                if (/javascript\s*:/i.test(v)) continue;
+                if (n === 'src' && !/^(https?:\/\/|data:image\/)/i.test(v)) continue;
+                attrs += ' ' + attr.name + '="' + v.replace(/"/g, '&quot;') + '"';
+            }
+            if (self.has(tag)) { out.push('<' + tag + attrs + ' />'); }
+            else { out.push('<' + tag + attrs + '>' + cleanNode(child) + '</' + tag + '>'); }
+        });
+        return out.join('');
+    }
+    return cleanNode(doc.body);
+};
+
+window.initAdminHtmlToolbar = function() {
+    const toolbar   = document.getElementById('admin-html-toolbar');
+    const editor    = document.getElementById('admin-faq-answer-editor');   // contenteditable
+    const source    = document.getElementById('admin-faq-answer-source');   // raw HTML view
+    const hidden    = document.getElementById('admin-faq-answer-livewire'); // wire:model sync
+    const srcToggle = document.getElementById('admin-source-toggle');
+    if (!toolbar || !editor || !hidden) return false;
+
+    try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch(e) {}
+
+    function syncToLivewire() {
+        hidden.value = editor.innerHTML.replace(/<br\s*\/?>/i, '').trim();
+        hidden.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    editor.innerHTML = hidden.value || '';
+
+    if (editor._syncHandler) editor.removeEventListener('input', editor._syncHandler);
+    editor._syncHandler = function() { syncToLivewire(); };
+    editor.addEventListener('input', editor._syncHandler);
+
+    if (srcToggle) {
+        srcToggle.onclick = function() {
+            const inSource = source && source.style.display !== 'none';
+            if (!inSource) {
+                if (source) { source.value = editor.innerHTML; source.style.display = ''; source.focus(); }
+                editor.style.display = 'none';
+                srcToggle.classList.add('active');
+                srcToggle.title = 'Switch to visual editor';
+            } else {
+                const cleaned = window.sanitizeFaqHtml ? window.sanitizeFaqHtml(source.value) : source.value;
+                editor.innerHTML = cleaned;
+                if (source) source.style.display = 'none';
+                editor.style.display = '';
+                editor.focus();
+                srcToggle.classList.remove('active');
+                srcToggle.title = 'Edit HTML source';
+                syncToLivewire();
+            }
+        };
+        if (source && !source._srcSyncHandler) {
+            source._srcSyncHandler = function() {
+                hidden.value = source.value;
+                hidden.dispatchEvent(new Event('input', { bubbles: true }));
+            };
+            source.addEventListener('input', source._srcSyncHandler);
+        }
+    }
+
+    if (toolbar._adminHtmlHandler) toolbar.removeEventListener('click', toolbar._adminHtmlHandler);
+    toolbar._adminHtmlHandler = function(e) {
+        const button = e.target.closest('button[data-admin-html-action]');
+        if (!button) return;
+        e.preventDefault(); e.stopPropagation();
+        const action = button.getAttribute('data-admin-html-action');
+        if (action === 'pastehtml') {
+            const m = document.getElementById('admin-paste-html-modal');
+            const s = document.getElementById('admin-paste-html-source');
+            if (m && s) { m.style.display = 'block'; s.value = ''; setTimeout(() => s.focus(), 50); }
+            return;
+        }
+        const inSourceMode = source && source.style.display !== 'none';
+        if (inSourceMode) {
+            const ss = source.selectionStart || 0, se = source.selectionEnd || 0;
+            const sel = source.value.substring(ss, se);
+            let r = '';
+            switch (action) {
+                case 'bold':      r = sel ? `<strong>${sel}</strong>` : '<strong>bold text</strong>'; break;
+                case 'italic':    r = sel ? `<em>${sel}</em>` : '<em>italic text</em>'; break;
+                case 'heading':   r = sel ? `<h3>${sel}</h3>` : '<h3>Heading</h3>'; break;
+                case 'quote':     r = sel ? `<blockquote>${sel}</blockquote>` : '<blockquote>Quote</blockquote>'; break;
+                case 'ul':        r = sel ? `<ul><li>${sel}</li></ul>` : '<ul><li>List item</li></ul>'; break;
+                case 'ol':        r = sel ? `<ol><li>${sel}</li></ol>` : '<ol><li>Numbered item</li></ol>'; break;
+                case 'link':      { const u = prompt('URL:', 'https://'); if (u && u !== 'https://') r = `<a href="${u}" target="_blank" rel="nofollow noopener noreferrer">${sel||u}</a>`; else return; break; }
+                case 'image':     { const i = prompt('Image URL:', 'https://'); if (i && i !== 'https://') r = `<img src="${i}" alt="${sel||'image'}" style="max-width:100%;height:auto;" />`; else return; break; }
+                case 'code':      r = sel ? `<code>${sel}</code>` : '<code>code</code>'; break;
+                case 'codeblock': r = sel ? `<pre><code>${sel}</code></pre>` : '<pre><code>code here</code></pre>'; break;
+                default: return;
+            }
+            source.setRangeText(r, ss, se, 'end');
+            source.dispatchEvent(new Event('input', { bubbles: true }));
+            source.focus();
+            return;
+        }
+        editor.focus();
+        const sel = window.getSelection()?.toString() || '';
+        switch (action) {
+            case 'bold':      document.execCommand('bold');   break;
+            case 'italic':    document.execCommand('italic'); break;
+            case 'heading':   document.execCommand('formatBlock', false, 'h3'); break;
+            case 'quote':     document.execCommand('formatBlock', false, 'blockquote'); break;
+            case 'ul':        document.execCommand('insertUnorderedList'); break;
+            case 'ol':        document.execCommand('insertOrderedList');   break;
+            case 'link': {
+                const url = prompt('URL:', 'https://');
+                if (!url || url === 'https://') return;
+                document.execCommand('insertHTML', false, `<a href="${url}" target="_blank" rel="nofollow noopener noreferrer">${sel || url}</a>`);
+                break;
+            }
+            case 'image': {
+                const imgUrl = prompt('Image URL:', 'https://');
+                if (!imgUrl || imgUrl === 'https://') return;
+                const alt = prompt('Alt text:', 'Image') || 'Image';
+                document.execCommand('insertHTML', false, `<img src="${imgUrl}" alt="${alt}" style="max-width:100%;height:auto;" />`);
+                break;
+            }
+            case 'code':      document.execCommand('insertHTML', false, sel ? `<code>${sel}</code>` : '<code>code</code>'); break;
+            case 'codeblock': document.execCommand('insertHTML', false, sel ? `<pre><code>${sel}</code></pre>` : '<pre><code>code here</code></pre>'); break;
+            default: return;
+        }
+        syncToLivewire();
+    };
+    toolbar.addEventListener('click', toolbar._adminHtmlHandler);
+
+    const _m = document.getElementById('admin-paste-html-modal');
+    const _i = document.getElementById('admin-paste-html-insert');
+    const _c = document.getElementById('admin-paste-html-cancel');
+    if (_i) { _i.onclick = function() {
+        const cleaned = window.sanitizeFaqHtml(document.getElementById('admin-paste-html-source').value);
+        if (cleaned.trim()) {
+            const inSrcMode = source && source.style.display !== 'none';
+            if (inSrcMode) {
+                const s = source.selectionStart || 0, e2 = source.selectionEnd || s;
+                source.setRangeText(cleaned, s, e2, 'end');
+                source.dispatchEvent(new Event('input', { bubbles: true }));
+            } else {
+                editor.focus();
+                document.execCommand('insertHTML', false, cleaned);
+                syncToLivewire();
+            }
+        }
+        if (_m) _m.style.display = 'none';
+    }; }
+    if (_c) { _c.onclick = function() { if (_m) _m.style.display = 'none'; }; }
+    if (_m) { _m.addEventListener('click', function(ev) { if (ev.target === _m) _m.style.display = 'none'; }); }
+
+    if (editor._imgPasteHandler) editor.removeEventListener('paste', editor._imgPasteHandler);
+    editor._imgPasteHandler = function(ev) {
+        const items = [...(ev.clipboardData?.items || [])];
+        const imgItem = items.find(i => i.type.startsWith('image/'));
+        if (!imgItem) return;
+        ev.preventDefault();
+        const file = imgItem.getAsFile();
+        if (!file) return;
+        const placeholderId = 'img-up-' + Date.now();
+        document.execCommand('insertHTML', false, `<span id="${placeholderId}" style="color:#999;font-style:italic;">[Uploading image…]</span>`);
+        syncToLivewire();
+        const reader = new FileReader();
+        reader.onload = function(re) {
+            const maxDim = 1200, tmpImg = new Image();
+            tmpImg.onload = function() {
+                let w = tmpImg.width, h = tmpImg.height;
+                if (w > maxDim || h > maxDim) {
+                    if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+                    else       { w = Math.round(w * maxDim / h); h = maxDim; }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d').drawImage(tmpImg, 0, 0, w, h);
+                const dataUrl = canvas.toDataURL('image/webp', 0.85);
+                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                fetch('{{ route("admin.faqs.upload-image") }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                    body: JSON.stringify({ image: dataUrl })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    const ph = document.getElementById(placeholderId);
+                    if (ph) {
+                        if (data.url) {
+                            const img = document.createElement('img');
+                            img.src = data.url; img.alt = 'pasted image';
+                            img.style.cssText = 'max-width:200px;max-height:200px;height:auto;cursor:pointer;';
+                            ph.replaceWith(img);
+                        } else { ph.replaceWith(document.createTextNode('[Upload failed]')); }
+                        syncToLivewire();
+                    }
+                })
+                .catch(() => {
+                    const ph = document.getElementById(placeholderId);
+                    if (ph) { ph.replaceWith(document.createTextNode('[Upload failed]')); syncToLivewire(); }
+                });
+            };
+            tmpImg.src = re.target.result;
+        };
+        reader.readAsDataURL(file);
+    };
+    editor.addEventListener('paste', editor._imgPasteHandler);
+
+    return true;
+};
+
+window.addEventListener('activate-admin-toolbar', function() { setTimeout(window.initAdminHtmlToolbar, 50); });
+document.addEventListener('livewire:init', function() { setTimeout(window.initAdminHtmlToolbar, 100); });
+document.addEventListener('DOMContentLoaded', function() { setTimeout(window.initAdminHtmlToolbar, 150); });
+document.addEventListener('livewire:navigated', function() { setTimeout(window.initAdminHtmlToolbar, 100); });
+
+})();
+        </script>
+    </div>
 </div>

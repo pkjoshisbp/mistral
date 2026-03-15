@@ -73,6 +73,7 @@
 .ai-chat-message-content code { background:rgba(0,0,0,.07) !important; padding:1px 4px !important; border-radius:3px !important; font-size:13px !important; font-family:monospace !important; }
 .ai-chat-message-content pre { background:rgba(0,0,0,.07) !important; padding:8px !important; border-radius:6px !important; overflow-x:auto !important; margin:6px 0 !important; display:block !important; }
 .ai-chat-message-content blockquote { border-left:3px solid rgba(0,0,0,.2) !important; margin:6px 0 !important; padding:2px 0 2px 10px !important; opacity:.85 !important; display:block !important; }
+.ai-chat-message-content img { max-width:100% !important; height:auto !important; border-radius:6px !important; cursor:pointer !important; margin:4px 0 !important; display:block !important; }
 .ai-chat-message-user .ai-chat-message-content { background:{{ $theme['primaryColor'] }} !important; color:#ffffff !important; }
 .ai-chat-message-bot .ai-chat-message-content { background:{{ $theme['botBubbleBgColor'] ?? '#f4f8f6' }} !important; color:{{ $theme['botBubbleTextColor'] ?? '#000000' }} !important; border:none !important; border-radius:0px 12px 12px !important; }
 .ai-chat-message-agent .ai-chat-message-content { background:#f1f5ff !important; color:#1f2a44 !important; border:none !important; }

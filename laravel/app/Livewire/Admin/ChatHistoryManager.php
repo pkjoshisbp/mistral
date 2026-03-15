@@ -6,6 +6,7 @@ use Livewire\Component;
 use Livewire\WithPagination;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
+use App\Models\LlmDebugLog;
 use App\Models\Organization;
 use Illuminate\Support\Facades\Auth;
 
@@ -21,6 +22,8 @@ class ChatHistoryManager extends Component
     public $focusConversation;
     public $replyMessage = [];
     public $modalConversation = null;
+    public $debugLogs = [];        // debug records for the open debug modal
+    public $debugConversationId = null;
 
     protected $queryString = [
         'search' => ['except' => ''],
@@ -64,6 +67,23 @@ class ChatHistoryManager extends Component
     {
         $this->modalConversation = null;
         $this->dispatch('hide-chat-modal');
+    }
+
+    public function openDebugModal($conversationId)
+    {
+        $this->debugConversationId = $conversationId;
+        $this->debugLogs = LlmDebugLog::where('conversation_id', $conversationId)
+            ->orderByDesc('created_at')
+            ->get()
+            ->toArray();
+        $this->dispatch('show-debug-modal');
+    }
+
+    public function closeDebugModal()
+    {
+        $this->debugConversationId = null;
+        $this->debugLogs = [];
+        $this->dispatch('hide-debug-modal');
     }
 
     public function exportSession($sessionId)
