@@ -2163,6 +2163,9 @@ class WidgetController
                 'session_id' => $sessionId,
                 'raw_ai_response_preview' => substr((string) $rawResponseText, 0, 300) . '...',
             ]);
+            if (!empty($hasShopifyData)) {
+                $responseText = $this->normalizeShopifyResponseText($responseText);
+            }
             $responseText = $this->normalizeAiResponse($responseText);
             // Enforce official contacts only (no hallucinated emails/phones)
             $responseTextBefore = $responseText;
@@ -8742,6 +8745,50 @@ class WidgetController
         // Ensure bold field labels (e.g. **Status:**, **Carrier:**) each start on their own line.
         // The LLM sometimes omits the newline between a field value and the next label.
         $text = preg_replace('/([^\n])\*\*([A-Z][^*\n]{1,30}):\*\*/', "$1\n**$2:**", $text);
+        return trim($text);
+    }
+
+    private function normalizeShopifyResponseText(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+
+        $looksLikeShopifyStatus = preg_match(
+            '/\b(tracking number|tracking link|carrier|status|shipped on|fulfilled on|delivered on|estimated delivery|order number)\b/i',
+            $text
+        );
+
+        if (!$looksLikeShopifyStatus) {
+            return $text;
+        }
+
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $text = preg_replace('/^\s*\*\*\s*$/m', '', $text) ?? $text;
+        $text = preg_replace(
+            '/\*\*\s*\n+\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:\*\*)/i',
+            '**$1',
+            $text
+        ) ?? $text;
+        $text = preg_replace(
+            '/\*\*\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)\s*\*\*/i',
+            '$1',
+            $text
+        ) ?? $text;
+        $text = preg_replace(
+            '/\*\*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)\*\*/i',
+            '$1',
+            $text
+        ) ?? $text;
+        $text = preg_replace(
+            '/([^\n])\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)/i',
+            "$1\n$2",
+            $text
+        ) ?? $text;
+        $text = preg_replace('/([^\n])\s+(UPS|FedEx|USPS|DHL)\b/i', "$1\n$2", $text) ?? $text;
+        $text = preg_replace('/\n{3,}/', "\n\n", $text) ?? $text;
+
         return trim($text);
     }
 
