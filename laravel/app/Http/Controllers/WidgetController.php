@@ -698,7 +698,10 @@ class WidgetController
             $isAffirmativeFollowUp = $this->isAffirmativeFollowUp($message);
             $isShortFollowUp = $this->isShortFollowUp($message);
             $isReferentialFollowUp = $this->isReferentialFollowUpMessage($message);
+            $isEllipticalFollowUp = $this->isEllipticalFollowUpMessage($message);
             $lastAssistantMessage = $this->getLastAssistantMessage($organization, $sessionId);
+            $lastUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
+            $lastUserMessage = is_string($lastUserMessage) ? trim($lastUserMessage) : '';
             $lastAssistantAskedQuestion = is_string($lastAssistantMessage)
                 && trim($lastAssistantMessage) !== ''
                 && $this->responseHasQuestion($lastAssistantMessage);
@@ -706,27 +709,34 @@ class WidgetController
                 || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion);
             $isAffirmativeContinuation = $isAffirmativeFollowUp && ($lastAssistantAskedQuestion || $hasPendingFollowUpState);
             $skipExactMatchOnAffirmative = (bool) ($rulePolicy['skip_exact_match_on_affirmative_follow_up'] ?? true);
+            $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
+                (string) $message,
+                $lastUserMessage,
+                is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
+                is_array($previousContextPayloads) ? $previousContextPayloads : [],
+                $hasPendingFollowUpState
+            );
 
             $canReusePreviousContext = !empty($previousContextPayloads)
-                && ($isAffirmativeFollowUp || $isContextualShortFollowUp);
+                && $isRelatedFollowUp;
 
             $searchQuery = $message;
-            if (($isContextualShortFollowUp || $isReferentialFollowUp) && !$canReusePreviousContext) {
+            if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp) && !$canReusePreviousContext) {
                 if ($isAffirmativeFollowUp && $hasPendingFollowUpState) {
                     $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
                     if ($this->isMinimalAcknowledgementMessage((string) $message)) {
-                        $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
-                        $previousUserMessage = is_string($previousUserMessage) ? trim($previousUserMessage) : '';
-                        if ($previousUserMessage !== '') {
-                            $searchQuery = trim($previousUserMessage . ' ' . $searchQuery);
+                        if ($lastUserMessage !== '') {
+                            $searchQuery = trim($lastUserMessage . ' ' . $searchQuery);
                         }
                     }
                 } else {
-                $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                 $queryParts = [];
+                $followUpTopicAnchor = $this->buildFollowUpTopicAnchor($lastUserMessage);
 
-                if (is_string($previousUserMessage) && trim($previousUserMessage) !== '') {
-                    $queryParts[] = trim($previousUserMessage);
+                if ($followUpTopicAnchor !== '') {
+                    $queryParts[] = $followUpTopicAnchor;
+                } elseif ($lastUserMessage !== '') {
+                    $queryParts[] = $lastUserMessage;
                 }
 
                 if ($isReferentialFollowUp && $hasPendingFollowUpState) {
@@ -755,7 +765,7 @@ class WidgetController
                 ->first();
 
             // Only run the LLM rewrite for non-Shopify orgs (Qdrant semantic search benefit).
-            if (!$shopifyIntegration && ($isContextualShortFollowUp || $isReferentialFollowUp || $isAffirmativeFollowUp) && !$canReusePreviousContext) {
+            if (!$shopifyIntegration && $isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $isAffirmativeFollowUp) && !$canReusePreviousContext) {
                 $searchQuery = $this->rewriteFollowUpSearchQueryWithContext(
                     $organization,
                     (string) $sessionId,
@@ -768,7 +778,7 @@ class WidgetController
             // Determine once whether this turn has prior cached LLM context.
             // Used both to skip redundant Shopify calls and to bypass the Qdrant
             // low-confidence clarification gate when the LLM already has the data.
-            $hasCachedTurns = !empty($this->getCachedChatMessages($sessionId));
+            $hasCachedTurns = $isRelatedFollowUp && !empty($this->getCachedChatMessages($sessionId));
 
             // ---- SHOPIFY API INTEGRATION (SMART PATH) ----
             $shopifyContext = '';
@@ -811,6 +821,12 @@ class WidgetController
                             // $searchQuery already contains rich context (prev message + current)
                             // so always use it; fall back to raw $message only if empty.
                             $shopifyApiQuery = !empty($searchQuery) ? $searchQuery : $message;
+                            if ($isRelatedFollowUp && $isEllipticalFollowUp) {
+                                $followUpTopicAnchor = $this->buildFollowUpTopicAnchor($lastUserMessage);
+                                if ($followUpTopicAnchor !== '') {
+                                    $shopifyApiQuery = trim($followUpTopicAnchor . ' ' . $message);
+                                }
+                            }
                             $customerEmail   = $allUserInfo['email'] ?? $allUserInfo['customer_email'] ?? null;
                             if (!filter_var((string) $customerEmail, FILTER_VALIDATE_EMAIL)) {
                                 $customerEmail = null;
@@ -985,6 +1001,8 @@ class WidgetController
                 'query' => $searchQuery,
                 'original_message' => $message,
                 'query_was_enriched' => trim((string) $searchQuery) !== trim((string) $message),
+                'is_related_follow_up' => $isRelatedFollowUp,
+                'is_elliptical_follow_up' => $isEllipticalFollowUp,
                 'is_short_follow_up' => $isShortFollowUp,
                 'is_contextual_short_follow_up' => $isContextualShortFollowUp
             ]);
@@ -2171,7 +2189,7 @@ class WidgetController
                 if ($structuredShopifyOrderResponse !== null) {
                     $responseText = $structuredShopifyOrderResponse;
                 } else {
-                    $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $message, $shopifyData);
+                    $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $searchQuery, $shopifyData);
                     if ($structuredShopifyProductResponse !== null) {
                         $responseText = $structuredShopifyProductResponse;
                     }
@@ -2709,6 +2727,7 @@ class WidgetController
                 $isAffirmativeFollowUp = $this->isAffirmativeFollowUp((string) $message);
                 $isShortFollowUp = $this->isShortFollowUp((string) $message);
                 $isReferentialFollowUp = $this->isReferentialFollowUpMessage((string) $message);
+                $isEllipticalFollowUp = $this->isEllipticalFollowUpMessage((string) $message);
                 $isAffirmativeContinuation = $isAffirmativeFollowUp && ($lastAssistantAskedQuestion || (is_array($pendingFollowUpState) && !empty($pendingFollowUpState)));
                 $isContextualShortFollowUp = $isShortFollowUp
                     || ($this->isOneOrTwoWordReply((string) $message) && $lastAssistantAskedQuestion);
@@ -2719,26 +2738,35 @@ class WidgetController
                     ->where('organization_id', $organization->id)
                     ->first();
                 $previousContextPayloads = $existingConversationForContext->metadata['last_context_payloads'] ?? [];
+                $lastUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
+                $lastUserMessage = is_string($lastUserMessage) ? trim($lastUserMessage) : '';
+                $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
+                    (string) $message,
+                    $lastUserMessage,
+                    is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
+                    is_array($previousContextPayloads) ? $previousContextPayloads : [],
+                    is_array($pendingFollowUpState) && !empty($pendingFollowUpState)
+                );
                 $canReusePreviousContext = !empty($previousContextPayloads)
-                    && ($isAffirmativeFollowUp || $isContextualShortFollowUp);
+                    && $isRelatedFollowUp;
 
                 $searchQuery = $message;
-                if (($isContextualShortFollowUp || $isReferentialFollowUp) && !$canReusePreviousContext) {
+                if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp) && !$canReusePreviousContext) {
                     if ($isAffirmativeFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
                         $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
                         if ($this->isMinimalAcknowledgementMessage((string) $message)) {
-                            $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
-                            $previousUserMessage = is_string($previousUserMessage) ? trim($previousUserMessage) : '';
-                            if ($previousUserMessage !== '') {
-                                $searchQuery = trim($previousUserMessage . ' ' . $searchQuery);
+                            if ($lastUserMessage !== '') {
+                                $searchQuery = trim($lastUserMessage . ' ' . $searchQuery);
                             }
                         }
                     } else {
-                        $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                         $queryParts = [];
+                        $followUpTopicAnchor = $this->buildFollowUpTopicAnchor($lastUserMessage);
 
-                        if (is_string($previousUserMessage) && trim($previousUserMessage) !== '') {
-                            $queryParts[] = trim($previousUserMessage);
+                        if ($followUpTopicAnchor !== '') {
+                            $queryParts[] = $followUpTopicAnchor;
+                        } elseif ($lastUserMessage !== '') {
+                            $queryParts[] = $lastUserMessage;
                         }
 
                         if ($isReferentialFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
@@ -2759,18 +2787,15 @@ class WidgetController
                     if ($isAffirmativeFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
                         $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
                         if ($this->isMinimalAcknowledgementMessage((string) $message)) {
-                            $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
-                            $previousUserMessage = is_string($previousUserMessage) ? trim($previousUserMessage) : '';
-                            if ($previousUserMessage !== '') {
-                                $searchQuery = trim($previousUserMessage . ' ' . $searchQuery);
+                            if ($lastUserMessage !== '') {
+                                $searchQuery = trim($lastUserMessage . ' ' . $searchQuery);
                             }
                         }
                     } else {
-                        $previousUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                         $queryParts = [];
 
-                        if (is_string($previousUserMessage) && trim($previousUserMessage) !== '') {
-                            $queryParts[] = trim($previousUserMessage);
+                        if ($lastUserMessage !== '') {
+                            $queryParts[] = $lastUserMessage;
                         }
 
                         if (is_string($lastAssistantMessage) && trim($lastAssistantMessage) !== '') {
@@ -2782,7 +2807,7 @@ class WidgetController
                     }
                 }
 
-                if (($isContextualShortFollowUp || $isReferentialFollowUp || $isAffirmativeFollowUp || $isAffirmativeContinuation) && !$canReusePreviousContext) {
+                if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $isAffirmativeFollowUp || $isAffirmativeContinuation) && !$canReusePreviousContext) {
                     $searchQuery = $this->rewriteFollowUpSearchQueryWithContext(
                         $organization,
                         (string) $sessionId,
@@ -5765,8 +5790,18 @@ class WidgetController
         $referencesSharedLink = $this->referencesPreviouslySharedLink($message);
 
         $lastAssistant = $this->getLastAssistantMessage($organization, $sessionId);
+        $lastUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
+        $lastUserMessage = is_string($lastUserMessage) ? trim($lastUserMessage) : '';
         $lastAssistantAskedQuestion = $lastAssistant !== null && $this->responseHasQuestion($lastAssistant);
-        $isLikelyShortReply = $isShortFollowUp || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion);
+        $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
+            $message,
+            $lastUserMessage,
+            is_string($lastAssistant) ? $lastAssistant : '',
+            [],
+            false
+        );
+        $isLikelyShortReply = $isRelatedFollowUp
+            && ($isShortFollowUp || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion));
 
         // Determine how many prior message pairs we want
         if ($isLikelyShortReply && $lastAssistantAskedQuestion) {
@@ -5785,12 +5820,15 @@ class WidgetController
         // -- Resolve prior conversation turns ----------------------------------
         // 1. Try Redis cache (fast, no DB query) — populated after each LLM turn
         // 2. Fall back to DB if cache is cold (e.g. server restart, first visit)
-        $priorMessages = $this->getCachedChatMessages($sessionId);
-        if (empty($priorMessages)) {
-            $priorMessages = $this->getRecentConversationMessages($organization, $sessionId, $message, $historyLimit);
-        } else {
-            // Slice to the requested limit from the end (newest turns)
-            $priorMessages = array_slice($priorMessages, -$historyLimit);
+        $priorMessages = [];
+        if ($isRelatedFollowUp || $messageHasUrl || $referencesSharedLink) {
+            $priorMessages = $this->getCachedChatMessages($sessionId);
+            if (empty($priorMessages)) {
+                $priorMessages = $this->getRecentConversationMessages($organization, $sessionId, $message, $historyLimit);
+            } else {
+                // Slice to the requested limit from the end (newest turns)
+                $priorMessages = array_slice($priorMessages, -$historyLimit);
+            }
         }
 
         // -- Extract shared links from prior turns (for referential queries) --
@@ -5811,7 +5849,7 @@ class WidgetController
         if ($isLikelyShortReply && $lastAssistantAskedQuestion) {
             $systemPrompt .= "\nFOLLOW-UP MODE: The user's latest message is a short reply to your previous question. Use the conversation history to interpret it correctly.\n";
         }
-        if ($this->isAffirmativeFollowUp($message) && $lastAssistantAskedQuestion) {
+        if ($isRelatedFollowUp && $this->isAffirmativeFollowUp($message) && $lastAssistantAskedQuestion) {
             $systemPrompt .= "\nAFFIRMATIVE CONTINUATION: The user accepted your previous follow-up question. Continue with one relevant detail from the option(s) you just offered, grounded in CURRENT CONTEXT. Do not reset the conversation or ask 'what would you like help with?'.\n";
         }
 
@@ -5981,6 +6019,157 @@ class WidgetController
         }
 
         return false;
+    }
+
+    private function isRelatedFollowUpTurn(
+        string $message,
+        ?string $lastUserMessage,
+        ?string $lastAssistantMessage = null,
+        array $previousContextPayloads = [],
+        bool $hasPendingFollowUpState = false
+    ): bool {
+        $current = trim(strip_tags($message));
+        if ($current === '') {
+            return false;
+        }
+
+        $lastUser = trim(strip_tags((string) ($lastUserMessage ?? '')));
+        $lastAssistant = trim(strip_tags((string) ($lastAssistantMessage ?? '')));
+        $lastAssistantAskedQuestion = $lastAssistant !== '' && $this->responseHasQuestion($lastAssistant);
+
+        if ($this->isAffirmativeFollowUp($current) || $this->isNegativeFollowUp($current)) {
+            return $lastAssistantAskedQuestion || $hasPendingFollowUpState;
+        }
+
+        if ($this->isReferentialFollowUpMessage($current)) {
+            return $lastUser !== '' || $lastAssistant !== '' || !empty($previousContextPayloads);
+        }
+
+        if ($this->isOneOrTwoWordReply($current) && $lastAssistantAskedQuestion) {
+            return true;
+        }
+
+        if (
+            $this->isEllipticalFollowUpMessage($current)
+            && !$this->hasFreshTopicSignal($current)
+            && $this->previousTurnProvidesFollowUpAnchor($lastUser, $lastAssistant, $previousContextPayloads)
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function isEllipticalFollowUpMessage(string $message): bool
+    {
+        $clean = trim(mb_strtolower(strip_tags($message)));
+        if ($clean === '') {
+            return false;
+        }
+
+        if ((bool) preg_match('/\b(any|what about|how about|between|from|under|below|above|around|within|same|another|other|more|cheaper|higher|lower|budget|range|options?|variants?|sizes?|colou?rs?)\b/', $clean)) {
+            return true;
+        }
+
+        if ((bool) preg_match('/\b\d{2,}(?:\s*(?:-|–|to)\s*|\s+to\s+)\d{2,}\b/', $clean)) {
+            return true;
+        }
+
+        return (bool) preg_match('/\b(?:under|below|above|between|from)\b[^\n]*\b(?:₹|\$|inr|usd|rs\.?)?\s*\d+/i', $clean);
+    }
+
+    private function previousTurnProvidesFollowUpAnchor(?string $lastUserMessage, ?string $lastAssistantMessage = null, array $previousContextPayloads = []): bool
+    {
+        if (!empty($previousContextPayloads)) {
+            return true;
+        }
+
+        $combined = trim((string) ($lastUserMessage ?? '') . ' ' . (string) ($lastAssistantMessage ?? ''));
+        if ($combined === '') {
+            return false;
+        }
+
+        if ($this->shopifyMessageContainsOrderEntity($combined)) {
+            return true;
+        }
+
+        if ($this->containsUrl($combined)) {
+            return true;
+        }
+
+        return !empty($this->extractMeaningfulFollowUpTerms($combined));
+    }
+
+    private function hasFreshTopicSignal(string $message): bool
+    {
+        $clean = trim(mb_strtolower(strip_tags($message)));
+        if ($clean === '') {
+            return false;
+        }
+
+        if ($this->shopifyMessageContainsOrderEntity($message)) {
+            return true;
+        }
+
+        if ((bool) preg_match('/\b(address|location|contact|email|phone|refund|return|hours|timing|appointment|book(?:ing)?|support|login|panel|dashboard|widget|integrations?)\b/', $clean)) {
+            return true;
+        }
+
+        return count($this->extractMeaningfulFollowUpTerms($clean)) >= 2;
+    }
+
+    private function extractMeaningfulFollowUpTerms(string $text): array
+    {
+        $normalized = mb_strtolower(strip_tags($text));
+        $normalized = preg_replace('/[^\p{L}\p{N}\s-]+/u', ' ', $normalized) ?? $normalized;
+        $normalized = trim((string) preg_replace('/\s+/', ' ', $normalized));
+        if ($normalized === '') {
+            return [];
+        }
+
+        $stopwords = [
+            'a', 'an', 'the', 'and', 'or', 'to', 'for', 'of', 'in', 'on', 'at', 'with', 'without', 'my', 'your', 'our', 'their',
+            'is', 'are', 'was', 'were', 'be', 'been', 'being', 'do', 'does', 'did', 'can', 'could', 'would', 'should', 'will',
+            'any', 'what', 'about', 'how', 'between', 'from', 'under', 'below', 'above', 'around', 'within', 'same', 'another',
+            'other', 'more', 'cheaper', 'higher', 'lower', 'budget', 'range', 'price', 'pricing', 'cost', 'amount', 'available',
+            'availability', 'stock', 'item', 'items', 'product', 'products', 'service', 'services', 'option', 'options', 'variant',
+            'variants', 'size', 'sizes', 'color', 'colors', 'colour', 'colours', 'rs', 'inr', 'usd', 'it', 'that', 'this', 'these',
+            'those', 'me', 'show', 'tell', 'please', 'one', 'ones'
+        ];
+
+        $tokens = array_values(array_filter(explode(' ', $normalized), function ($token) use ($stopwords) {
+            if ($token === '' || mb_strlen($token) < 2) {
+                return false;
+            }
+
+            if (in_array($token, $stopwords, true)) {
+                return false;
+            }
+
+            return !preg_match('/^\d+(?:[.,-]\d+)*$/', $token);
+        }));
+
+        return array_values(array_unique($tokens));
+    }
+
+    private function buildFollowUpTopicAnchor(?string $lastUserMessage): string
+    {
+        $lastUserMessage = trim((string) ($lastUserMessage ?? ''));
+        if ($lastUserMessage === '') {
+            return '';
+        }
+
+        $explicitTerms = $this->extractExplicitCatalogTerms($lastUserMessage);
+        if (!empty($explicitTerms)) {
+            return trim((string) $explicitTerms[0]);
+        }
+
+        $meaningfulTerms = $this->extractMeaningfulFollowUpTerms($lastUserMessage);
+        if (empty($meaningfulTerms)) {
+            return '';
+        }
+
+        return implode(' ', array_slice($meaningfulTerms, 0, 4));
     }
 
     private function isOneOrTwoWordReply(string $message): bool
@@ -8929,7 +9118,7 @@ class WidgetController
             return null;
         }
 
-        if (!preg_match('/\b(price|pricing|cost|amount|how\s+much|cheap|cheapest|lowest|under|below|less\s+than|inr|usd|rs\.?|₹|\$)\b/i', $message)) {
+        if (!preg_match('/\b(price|pricing|cost|amount|how\s+much|cheap|cheapest|lowest|under|below|between|from|less\s+than|up\s+to|upto|max(?:imum)?|inr|usd|rs\.?|₹|\$)\b/i', $message)) {
             return null;
         }
 
