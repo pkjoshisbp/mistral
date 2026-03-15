@@ -1525,27 +1525,31 @@ class WidgetController
                 $directResponse = $exactFaqMatch['response'];
                 $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
                 $paraphrasedResponse = null;
-                // Only skip paraphrase for keyword-fallback matches (plain-text only).
-                // All semantic/HTML FAQ matches ALWAYS go through LLM so responses
-                // are polished, properly attributed, and billed for token usage.
-                $skipParaphrase = (($exactFaqMatch['match_source'] ?? '') === 'keyword_fallback');
+                // Skip paraphrase ONLY for keyword-fallback matches with no HTML content.
+                // FAQ content stored as HTML must be paraphrased so XML/HTML markup is cleaned.
+                $rawFaqContent = trim((string) $directResponse);
+                $skipParaphrase = (($exactFaqMatch['match_source'] ?? '') === 'keyword_fallback')
+                    && !preg_match('/<[a-zA-Z][^>]*>/', $rawFaqContent);
 
                 if (!$skipParaphrase) {
                     try {
                         // Send the raw HTML to the LLM so it preserves all formatting
                         // (tags, lists, bold, images). The LLM only touches the wording.
+                        // Strip <?xml ...?> processing instructions - these are CMS
+                        // artefacts stored in the DB and must not be forwarded to the LLM.
                         $htmlFaqContent = trim((string) $directResponse);
+                        $htmlFaqContent = preg_replace('/<\?(?:xml|php)[^>]*>/', '', $htmlFaqContent);
+                        $htmlFaqContent = trim($htmlFaqContent);
                         $dynamicNumPredict = min(800, max(200, (int) (mb_strlen($htmlFaqContent) * 0.8)));
 
                         $paraphrasePrompt = "You are {$assistantName} for {$organization->name}. "
                             . "Tone: {$responseTone}. Language: {$responseLanguage}. "
-                            . "The FAQ answer below is already formatted in HTML. Your job is to lightly rephrase it in first-person plural (we/our) to sound professional and natural — do NOT invent new information. "
+                            . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply — do NOT invent new information, do NOT omit any key facts (including contact details, links, email addresses). "
                             . "STRICT HTML RULES:\n"
                             . "- Preserve ALL HTML tags exactly as they appear: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
                             . "- Do NOT remove, add, or restructure any HTML tags.\n"
                             . "- Only rephrase the visible TEXT inside the tags — never alter tag names, attributes (href, src, style, alt), or tag structure.\n"
-                            . "- If the answer already sounds perfect, return it verbatim.\n"
-                            . "- Output ONLY the HTML — no explanation, no preamble, no markdown fences.\n\n"
+                            . "- Output ONLY the rewritten HTML — no explanation, no preamble, no markdown fences.\n\n"
                             . "FAQ HTML Answer:\n{$htmlFaqContent}";
 
                         $paraphraseMessages = [
@@ -1553,10 +1557,9 @@ class WidgetController
                             ['role' => 'user', 'content' => $message]
                         ];
 
-                        // Always use the org's configured model — it is the same model
-                        // used for main chat, so it is already warm on vast.ai from recent
-                        // queries. Switching to a different model causes a cold load (~24 s).
-                        $paraphraseOptions = ['num_predict' => $dynamicNumPredict, 'temperature' => 0.3];
+                        // Always use the org's configured model routed to vast.ai GPU.
+                        // Same model used for main chat so it is already warm from recent queries.
+                        $paraphraseOptions = ['num_predict' => $dynamicNumPredict, 'temperature' => 0.3, 'use_vastai' => true];
                         $paraphraseModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
                         $paraphraseResponse = $this->aiAgentService->llmChat(
                             $paraphraseMessages,
@@ -3297,13 +3300,12 @@ class WidgetController
                             $dynTokens = min(800, max(200, (int) (mb_strlen($htmlFaqContent) * 0.8)));
                             $streamParaPrompt = "You are {$streamAssistantName} for {$organization->name}. "
                                 . "Tone: {$responseTone}. Language: {$responseLanguage}. "
-                                . "The FAQ answer below is already formatted in HTML. Lightly rephrase it in first-person plural (we/our) to sound professional and natural — do NOT invent new information. "
+                                . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply — do NOT invent new information, do NOT omit any key facts (including contact details, links, email addresses). "
                                 . "STRICT HTML RULES:\n"
                                 . "- Preserve ALL HTML tags exactly: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
                                 . "- Do NOT remove, add, or restructure any HTML tags.\n"
                                 . "- Only rephrase visible TEXT inside the tags — never alter tag names, attributes (href, src, style, alt), or structure.\n"
-                                . "- If the answer already sounds perfect, return it verbatim.\n"
-                                . "- Output ONLY the HTML — no explanation, no preamble, no markdown fences.\n\n"
+                                . "- Output ONLY the rewritten HTML — no explanation, no preamble, no markdown fences.\n\n"
                                 . "FAQ HTML Answer:\n{$htmlFaqContent}";
                             $streamParaMessages = [
                                 ['role' => 'system', 'content' => $streamParaPrompt],
@@ -8713,6 +8715,9 @@ class WidgetController
         $text = str_replace("\t", ' ', $text);
         $text = preg_replace('/[^\S\n]+/', ' ', $text); // collapse spaces/tabs, keep \n
         $text = preg_replace('/\n{3,}/', "\n\n", $text); // collapse 3+ newlines to 2
+        // Ensure bold field labels (e.g. **Status:**, **Carrier:**) each start on their own line.
+        // The LLM sometimes omits the newline between a field value and the next label.
+        $text = preg_replace('/([^\n])\*\*([A-Z][^*\n]{1,30}):\*\*/', "$1\n**$2:**", $text);
         return trim($text);
     }
 
