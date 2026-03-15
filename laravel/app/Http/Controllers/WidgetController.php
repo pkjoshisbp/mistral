@@ -2164,23 +2164,29 @@ class WidgetController
                 'raw_ai_response_preview' => substr((string) $rawResponseText, 0, 300) . '...',
             ]);
             if (!empty($hasShopifyData)) {
+                $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
+                if ($structuredShopifyOrderResponse !== null) {
+                    $responseText = $structuredShopifyOrderResponse;
+                }
                 $responseText = $this->normalizeShopifyResponseText($responseText);
             }
             $responseText = $this->normalizeAiResponse($responseText);
             // Enforce official contacts only (no hallucinated emails/phones)
             $responseTextBefore = $responseText;
-            $responseText = $this->enforceOfficialContacts(
-                $responseText,
-                $orgEmail,
-                $orgPhone,
-                $orgWebsite
-            );
-            if ($responseText !== $responseTextBefore) {
-                Log::info('Widget response contacts sanitized', [
-                    'org_id' => $orgId,
-                    'session_id' => $sessionId,
-                    'had_changes' => true
-                ]);
+            if (empty($hasShopifyData)) {
+                $responseText = $this->enforceOfficialContacts(
+                    $responseText,
+                    $orgEmail,
+                    $orgPhone,
+                    $orgWebsite
+                );
+                if ($responseText !== $responseTextBefore) {
+                    Log::info('Widget response contacts sanitized', [
+                        'org_id' => $orgId,
+                        'session_id' => $sessionId,
+                        'had_changes' => true
+                    ]);
+                }
             }
 
             $hallucinationBlocked = false;
@@ -8821,6 +8827,74 @@ class WidgetController
         }
 
         return trim(implode("\n", $normalizedLines));
+    }
+
+    private function buildStructuredShopifyOrderResponse($shopifyData): ?string
+    {
+        if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'order')) {
+            return null;
+        }
+
+        $order = $shopifyData['data'] ?? null;
+        if (!is_array($order)) {
+            return null;
+        }
+
+        $tracking = is_array($order['tracking'] ?? null) ? $order['tracking'] : [];
+        $trackingNumber = trim((string) ($tracking['tracking_number'] ?? ''));
+        $trackingUrl = trim((string) ($tracking['tracking_url'] ?? ''));
+        $carrier = trim(str_replace('UPS®', 'UPS', (string) ($tracking['tracking_company'] ?? '')));
+        $shippedOn = trim((string) ($tracking['shipped_at'] ?? ''));
+
+        if ($trackingNumber === '' && $trackingUrl === '' && $carrier === '' && $shippedOn === '') {
+            return null;
+        }
+
+        $status = $this->deriveStructuredShopifyOrderStatus($order);
+        $lines = [];
+
+        if ($status !== '') {
+            $lines[] = '**Status:** ' . $status;
+        }
+        if ($trackingNumber !== '') {
+            $lines[] = '**Tracking Number:** ' . $trackingNumber;
+        }
+        if ($carrier !== '') {
+            $lines[] = '**Carrier:** ' . $carrier;
+        }
+        if ($trackingUrl !== '') {
+            $lines[] = '**Tracking Link:** ' . rtrim($trackingUrl, '.');
+        }
+        if ($shippedOn !== '') {
+            $lines[] = '**Shipped On:** ' . $this->formatShopifyFieldValue('Shipped On', $shippedOn);
+        }
+
+        return empty($lines) ? null : implode("\n", $lines);
+    }
+
+    private function deriveStructuredShopifyOrderStatus(array $order): string
+    {
+        $trackingStatus = strtolower(trim((string) ($order['tracking']['status'] ?? '')));
+        if ($trackingStatus !== '') {
+            return match ($trackingStatus) {
+                'success' => 'Delivered',
+                'in_transit' => 'In Transit',
+                'out_for_delivery' => 'Out For Delivery',
+                'attempted_delivery' => 'Delivery Attempted',
+                'ready_for_pickup' => 'Ready For Pickup',
+                'confirmed' => 'Shipping Confirmed',
+                'failure' => 'Delivery Failed',
+                default => ucwords(str_replace('_', ' ', $trackingStatus)),
+            };
+        }
+
+        $fulfillmentStatus = strtolower(trim((string) ($order['fulfillment_status'] ?? '')));
+        return match ($fulfillmentStatus) {
+            'fulfilled' => 'Shipped (Fulfilled)',
+            'partial' => 'Partially Shipped',
+            'restocked' => 'Restocked / Returned',
+            default => 'Not Yet Shipped',
+        };
     }
 
     private function canonicalizeShopifyFieldLabel(string $label): string
