@@ -186,6 +186,8 @@ class WidgetController
             'offsetX' => (int)($settings['widget_offset_x'] ?? 20),
             'offsetY' => (int)($settings['widget_offset_y'] ?? 20),
             'primaryColor' => $settings['primary_color'] ?? '#007bff',
+            'botBubbleBgColor' => $this->normalizeHexColor($settings['widget_bot_bubble_bg_color'] ?? '#f4f8f6', '#f4f8f6'),
+            'botBubbleTextColor' => $this->normalizeHexColor($settings['widget_bot_bubble_text_color'] ?? '#000000', '#000000'),
             'widgetIconColor' => $resolvedIconColor,
             'widgetButtonBgType' => $settings['widget_button_bg_type'] ?? 'gradient',
             'widgetButtonSolidColor' => $settings['widget_button_solid_color'] ?? ($settings['primary_color'] ?? '#007bff'),

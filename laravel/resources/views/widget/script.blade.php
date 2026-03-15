@@ -978,6 +978,8 @@
         linkify(text) {
             if (!text) return '';
 
+            text = this.normalizeShopifyFieldLayout(String(text));
+
             // Strip XML/HTML processing instructions (xml-pi tags, <!DOCTYPE ...>)
             text = text.replace(/<\?[^>]*>/g, '').replace(/<!DOCTYPE[^>]*>/gi, '');
 
@@ -1193,6 +1195,34 @@
             return processed.replace(/\n/g, '<br>');
         }
 
+        normalizeShopifyFieldLayout(text) {
+            if (!text) {
+                return '';
+            }
+
+            const looksLikeShopifyStatus = /(tracking number|tracking link|carrier|status|shipped on|fulfilled on|delivered on|estimated delivery|order number)/i.test(text);
+            if (!looksLikeShopifyStatus) {
+                return text;
+            }
+
+            let normalized = String(text).replace(/\r\n?/g, '\n');
+
+            // Force each common Shopify field label onto its own line.
+            normalized = normalized.replace(
+                /([^\n])\s*(\*\*(?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:\*\*)/gi,
+                '$1\n$2'
+            );
+            normalized = normalized.replace(
+                /([^\n])\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)/gi,
+                '$1\n$2'
+            );
+
+            // Keep common trailing values from being glued to the previous field.
+            normalized = normalized.replace(/([^\n])\s+(UPS|FedEx|USPS|DHL)\b/g, '$1\n$2');
+
+            return normalized.replace(/\n{3,}/g, '\n\n').trim();
+        }
+
         applyMessageInlineStyles(el, sender) {
             // Inline styles beat ALL external CSS including hostile reset.css (margin:auto on div)
             el.style.setProperty('margin', '0', 'important');
@@ -1212,6 +1242,18 @@
                 el.style.setProperty('align-self', 'flex-start', 'important');
                 el.style.setProperty('margin-left', '0', 'important');
                 el.style.setProperty('margin-right', 'auto', 'important');
+            }
+
+            const contentEl = el.querySelector('.ai-chat-message-content');
+            if (contentEl) {
+                contentEl.style.setProperty('font-family', "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif", 'important');
+                contentEl.style.setProperty('font-size', '14px', 'important');
+                contentEl.style.setProperty('line-height', '1.5', 'important');
+                contentEl.style.setProperty('font-weight', '400', 'important');
+                contentEl.style.setProperty('letter-spacing', '0', 'important');
+                contentEl.style.setProperty('color', sender === 'user' ? '#ffffff' : (this.config.botBubbleTextColor || '#000000'), 'important');
+                contentEl.style.setProperty('background', sender === 'user' ? this.config.primaryColor : (this.config.botBubbleBgColor || '#f4f8f6'), 'important');
+                contentEl.style.setProperty('white-space', 'normal', 'important');
             }
         }
 
