@@ -1535,21 +1535,20 @@ class WidgetController
                     try {
                         // Send the raw HTML to the LLM so it preserves all formatting
                         // (tags, lists, bold, images). The LLM only touches the wording.
-                        // Strip <?xml ...?> processing instructions - these are CMS
-                        // artefacts stored in the DB and must not be forwarded to the LLM.
+                        // Strip XML processing instructions - CMS artefacts stored in the DB.
                         $htmlFaqContent = trim((string) $directResponse);
-                        $htmlFaqContent = preg_replace('/<\?(?:xml|php)[^>]*>/', '', $htmlFaqContent);
+                        $htmlFaqContent = preg_replace('/<\?(?:xml|php)[^>]*\?>/', '', $htmlFaqContent);
                         $htmlFaqContent = trim($htmlFaqContent);
                         $dynamicNumPredict = min(800, max(200, (int) (mb_strlen($htmlFaqContent) * 0.8)));
 
                         $paraphrasePrompt = "You are {$assistantName} for {$organization->name}. "
                             . "Tone: {$responseTone}. Language: {$responseLanguage}. "
-                            . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply — do NOT invent new information, do NOT omit any key facts (including contact details, links, email addresses). "
+                            . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply. Do NOT invent new information. Do NOT omit any key facts (contact details, links, email addresses). "
                             . "STRICT HTML RULES:\n"
                             . "- Preserve ALL HTML tags exactly as they appear: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
                             . "- Do NOT remove, add, or restructure any HTML tags.\n"
-                            . "- Only rephrase the visible TEXT inside the tags — never alter tag names, attributes (href, src, style, alt), or tag structure.\n"
-                            . "- Output ONLY the rewritten HTML — no explanation, no preamble, no markdown fences.\n\n"
+                            . "- Only rephrase the visible TEXT inside the tags. Never alter tag names, attributes (href, src, style, alt), or tag structure.\n"
+                            . "- Output ONLY the rewritten HTML. No explanation, no preamble, no markdown fences.\n\n"
                             . "FAQ HTML Answer:\n{$htmlFaqContent}";
 
                         $paraphraseMessages = [
@@ -3300,12 +3299,12 @@ class WidgetController
                             $dynTokens = min(800, max(200, (int) (mb_strlen($htmlFaqContent) * 0.8)));
                             $streamParaPrompt = "You are {$streamAssistantName} for {$organization->name}. "
                                 . "Tone: {$responseTone}. Language: {$responseLanguage}. "
-                                . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply — do NOT invent new information, do NOT omit any key facts (including contact details, links, email addresses). "
+                                . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply. Do NOT invent new information. Do NOT omit any key facts (contact details, links, email addresses). "
                                 . "STRICT HTML RULES:\n"
                                 . "- Preserve ALL HTML tags exactly: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
                                 . "- Do NOT remove, add, or restructure any HTML tags.\n"
-                                . "- Only rephrase visible TEXT inside the tags — never alter tag names, attributes (href, src, style, alt), or structure.\n"
-                                . "- Output ONLY the rewritten HTML — no explanation, no preamble, no markdown fences.\n\n"
+                                . "- Only rephrase visible TEXT inside the tags. Never alter tag names, attributes (href, src, style, alt), or structure.\n"
+                                . "- Output ONLY the rewritten HTML. No explanation, no preamble, no markdown fences.\n\n"
                                 . "FAQ HTML Answer:\n{$htmlFaqContent}";
                             $streamParaMessages = [
                                 ['role' => 'system', 'content' => $streamParaPrompt],
