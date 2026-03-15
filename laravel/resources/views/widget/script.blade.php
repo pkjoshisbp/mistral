@@ -1207,6 +1207,11 @@
 
             let normalized = String(text).replace(/\r\n?/g, '\n');
 
+            const cleanStructuredShopifyResponse = /^(?:\*\*(?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:\*\*[^\n]*(?:\n|$)){2,}/i;
+            if (cleanStructuredShopifyResponse.test(normalized)) {
+                return normalized.trim();
+            }
+
             // Fix malformed markdown labels produced by some Shopify responses, e.g.
             // "**\nTracking Number:** 123" or stray lines containing only "**".
             normalized = normalized.replace(/^\s*\*\*\s*$/gm, '');
@@ -1216,16 +1221,13 @@
 
             // Force each common Shopify field label onto its own line.
             normalized = normalized.replace(
-                /([^\n])\s*(\*\*(?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:\*\*)/gi,
+                /([^\n*])\s*(\*\*(?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:\*\*)/gi,
                 '$1\n$2'
             );
             normalized = normalized.replace(
-                /([^\n])\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)/gi,
+                /([^\n*])\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)/gi,
                 '$1\n$2'
             );
-
-            // Keep common trailing values from being glued to the previous field.
-            normalized = normalized.replace(/([^\n])\s+(UPS|FedEx|USPS|DHL)\b/g, '$1\n$2');
 
             return normalized.replace(/\n{3,}/g, '\n\n').trim();
         }
