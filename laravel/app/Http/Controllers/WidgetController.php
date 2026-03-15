@@ -1496,14 +1496,18 @@ class WidgetController
                 }
 
                 if ($conversation) {
-                    $this->handleEscalationIfNeeded(
-                        $conversation,
-                        $message,
-                        $branchResponse,
-                        $intentResult,
-                        $request,
-                        $sessionMetadata
-                    );
+                    $faqEscalationReason = $this->getEscalationReason($message, $branchResponse, $intentResult);
+                    if ($faqEscalationReason !== 'low_intent_confidence') {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $branchResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata,
+                            $faqEscalationReason
+                        );
+                    }
                 }
 
                 return response()->json([
@@ -1652,14 +1656,18 @@ class WidgetController
                 }
 
                 if ($conversation) {
-                    $this->handleEscalationIfNeeded(
-                        $conversation,
-                        $message,
-                        $finalFaqResponse,
-                        $intentResult,
-                        $request,
-                        $sessionMetadata
-                    );
+                    $faqEscalationReason = $this->getEscalationReason($message, $finalFaqResponse, $intentResult);
+                    if ($faqEscalationReason !== 'low_intent_confidence') {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $finalFaqResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata,
+                            $faqEscalationReason
+                        );
+                    }
                 }
 
                 return response()->json([
@@ -3282,14 +3290,18 @@ class WidgetController
                     }
 
                     if ($conversation) {
-                        $this->handleEscalationIfNeeded(
-                            $conversation,
-                            $message,
-                            $directResponse,
-                            $intentResult,
-                            $request,
-                            $sessionMetadata
-                        );
+                        $faqEscalationReason = $this->getEscalationReason($message, $directResponse, $intentResult);
+                        if ($faqEscalationReason !== 'low_intent_confidence') {
+                            $this->handleEscalationIfNeeded(
+                                $conversation,
+                                $message,
+                                $directResponse,
+                                $intentResult,
+                                $request,
+                                $sessionMetadata,
+                                $faqEscalationReason
+                            );
+                        }
                     }
 
                     return;
@@ -3404,14 +3416,18 @@ class WidgetController
                     }
 
                     if ($conversation) {
-                        $this->handleEscalationIfNeeded(
-                            $conversation,
-                            $message,
-                            $directResponse,
-                            $intentResult,
-                            $request,
-                            $sessionMetadata
-                        );
+                        $faqEscalationReason = $this->getEscalationReason($message, $directResponse, $intentResult);
+                        if ($faqEscalationReason !== 'low_intent_confidence') {
+                            $this->handleEscalationIfNeeded(
+                                $conversation,
+                                $message,
+                                $directResponse,
+                                $intentResult,
+                                $request,
+                                $sessionMetadata,
+                                $faqEscalationReason
+                            );
+                        }
                     }
 
                     return;

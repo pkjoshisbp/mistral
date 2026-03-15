@@ -1207,6 +1207,13 @@
 
             let normalized = String(text).replace(/\r\n?/g, '\n');
 
+            // Fix malformed markdown labels produced by some Shopify responses, e.g.
+            // "**\nTracking Number:** 123" or stray lines containing only "**".
+            normalized = normalized.replace(/^\s*\*\*\s*$/gm, '');
+            normalized = normalized.replace(/\*\*\s*\n+\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:\*\*)/gi, '**$1');
+            normalized = normalized.replace(/(^|\n)\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)\s*\*\*/gi, '$1**$2**');
+            normalized = normalized.replace(/\n{2,}\*\*\s*(?=\*\*[A-Z])/g, '\n');
+
             // Force each common Shopify field label onto its own line.
             normalized = normalized.replace(
                 /([^\n])\s*(\*\*(?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:\*\*)/gi,
