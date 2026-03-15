@@ -8765,31 +8765,113 @@ class WidgetController
         }
 
         $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $fieldNames = [
+            'Status',
+            'Tracking Number',
+            'Tracking Link',
+            'Carrier',
+            'Shipped On',
+            'Fulfilled On',
+            'Delivered On',
+            'Estimated Delivery',
+            'Order Number',
+        ];
+        $fieldPattern = implode('|', array_map(static fn ($field) => preg_quote($field, '/'), $fieldNames));
+
         $text = preg_replace('/^\s*\*\*\s*$/m', '', $text) ?? $text;
+        $text = preg_replace('/\*+/', '**', $text) ?? $text;
         $text = preg_replace(
-            '/\*\*\s*\n+\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:\*\*)/i',
-            '**$1',
-            $text
-        ) ?? $text;
-        $text = preg_replace(
-            '/\*\*\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)\s*\*\*/i',
-            '$1',
-            $text
-        ) ?? $text;
-        $text = preg_replace(
-            '/\*\*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)\*\*/i',
-            '$1',
-            $text
-        ) ?? $text;
-        $text = preg_replace(
-            '/([^\n])\s*((?:Status|Tracking Number|Tracking Link|Carrier|Shipped On|Fulfilled On|Delivered On|Estimated Delivery|Order Number)\s*:)/i',
+            '/([^\n])\s*\*{0,2}\s*((?:' . $fieldPattern . ')\s*:)\s*\*{0,2}/i',
             "$1\n$2",
             $text
         ) ?? $text;
-        $text = preg_replace('/([^\n])\s+(UPS|FedEx|USPS|DHL)\b/i', "$1\n$2", $text) ?? $text;
-        $text = preg_replace('/\n{3,}/', "\n\n", $text) ?? $text;
 
-        return trim($text);
+        $lines = preg_split('/\n+/', $text) ?: [];
+        $normalizedLines = [];
+
+        for ($index = 0; $index < count($lines); $index++) {
+            $line = trim((string) $lines[$index]);
+            if ($line === '' || $line === '**') {
+                continue;
+            }
+
+            $line = trim(preg_replace('/^[-*\s]+/', '', $line) ?? $line);
+            $line = str_replace('UPS®', 'UPS', $line);
+
+            if (preg_match('/^\*{0,2}\s*((?:' . $fieldPattern . '))\s*:\s*\*{0,2}\s*(.*)$/i', $line, $matches)) {
+                $label = $this->canonicalizeShopifyFieldLabel((string) ($matches[1] ?? ''));
+                $value = trim((string) ($matches[2] ?? ''));
+
+                if ($value === '' && isset($lines[$index + 1])) {
+                    $nextLine = trim((string) $lines[$index + 1]);
+                    $nextLine = trim(preg_replace('/^[-*\s]+/', '', $nextLine) ?? $nextLine);
+                    if ($nextLine !== '' && !preg_match('/^\*{0,2}\s*(?:' . $fieldPattern . ')\s*:/i', $nextLine)) {
+                        $value = $nextLine;
+                        $index++;
+                    }
+                }
+
+                $value = trim(str_replace('UPS®', 'UPS', $value));
+                $value = $this->formatShopifyFieldValue($label, $value);
+                $normalizedLines[] = '**' . $label . ':**' . ($value !== '' ? ' ' . $value : '');
+                continue;
+            }
+
+            $normalizedLines[] = $line;
+        }
+
+        return trim(implode("\n", $normalizedLines));
+    }
+
+    private function canonicalizeShopifyFieldLabel(string $label): string
+    {
+        return match (strtolower(trim($label))) {
+            'tracking number' => 'Tracking Number',
+            'tracking link' => 'Tracking Link',
+            'carrier' => 'Carrier',
+            'status' => 'Status',
+            'shipped on' => 'Shipped On',
+            'fulfilled on' => 'Fulfilled On',
+            'delivered on' => 'Delivered On',
+            'estimated delivery' => 'Estimated Delivery',
+            'order number' => 'Order Number',
+            default => trim($label),
+        };
+    }
+
+    private function formatShopifyFieldValue(string $label, string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+
+        if ($label === 'Tracking Link') {
+            return rtrim($value, '.');
+        }
+
+        if (in_array($label, ['Shipped On', 'Fulfilled On', 'Delivered On', 'Estimated Delivery'], true)) {
+            if (preg_match('/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2}|Z)?)/', $value, $matches)) {
+                try {
+                    return \Carbon\Carbon::parse($matches[1])->format('M j, Y g:i A P');
+                } catch (\Throwable $e) {
+                    return $matches[1];
+                }
+            }
+
+            if (preg_match('/^\d{8,}T(\d{2}:\d{2}:\d{2})([+-]\d{2}:\d{2}|Z)?$/', $value, $matches)) {
+                $time = $matches[1] ?? '';
+                $offset = $matches[2] ?? '';
+                try {
+                    $formattedTime = \Carbon\Carbon::createFromFormat('H:i:s', $time)->format('g:i A');
+                    return trim($formattedTime . ($offset !== '' ? ' ' . $offset : ''));
+                } catch (\Throwable $e) {
+                    return trim($time . ($offset !== '' ? ' ' . $offset : ''));
+                }
+            }
+        }
+
+        return $value;
     }
 
     private function sanitizeContradictoryAvailabilityClaims(string $text): string
