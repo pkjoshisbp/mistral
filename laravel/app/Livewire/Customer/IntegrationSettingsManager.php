@@ -48,6 +48,13 @@ class IntegrationSettingsManager extends Component
         'lookup' => '',
         'static_info' => ''
     ];
+    public $route_signal_keywords = [
+        'availability_checks' => '',
+        'pricing_requests' => '',
+        'fulfillment_questions' => '',
+        'policy_questions' => '',
+        'schedule_questions' => '',
+    ];
 
     // Chat email notifications
     public $notify_chat_email_enabled = false;
@@ -143,6 +150,14 @@ class IntegrationSettingsManager extends Component
             'lookup' => $this->keywordsToString($storedKeywords['lookup'] ?? []),
             'static_info' => $this->keywordsToString($storedKeywords['static_info'] ?? []),
         ];
+        $storedRouteKeywords = $this->normalizeRouteSignalKeywords($settings['route_signal_keywords'] ?? []);
+        $this->route_signal_keywords = [
+            'availability_checks' => $this->keywordsToString($storedRouteKeywords['availability_checks'] ?? []),
+            'pricing_requests' => $this->keywordsToString($storedRouteKeywords['pricing_requests'] ?? []),
+            'fulfillment_questions' => $this->keywordsToString($storedRouteKeywords['fulfillment_questions'] ?? []),
+            'policy_questions' => $this->keywordsToString($storedRouteKeywords['policy_questions'] ?? []),
+            'schedule_questions' => $this->keywordsToString($storedRouteKeywords['schedule_questions'] ?? []),
+        ];
         $this->notify_chat_email_enabled = (bool) ($settings['notify_chat_email_enabled'] ?? false);
         $this->notify_chat_emails = $this->keywordsToString($settings['notify_chat_emails'] ?? []);
         $this->notify_chat_email_mode = $settings['notify_chat_email_mode'] ?? 'immediate';
@@ -207,6 +222,13 @@ class IntegrationSettingsManager extends Component
                 'realtime_data' => $this->stringToKeywords($this->intent_keywords['realtime_data'] ?? ''),
                 'lookup' => $this->stringToKeywords($this->intent_keywords['lookup'] ?? ''),
                 'static_info' => $this->stringToKeywords($this->intent_keywords['static_info'] ?? ''),
+            ];
+            $settings['route_signal_keywords'] = [
+                'availability_checks' => $this->stringToKeywords($this->route_signal_keywords['availability_checks'] ?? ''),
+                'pricing_requests' => $this->stringToKeywords($this->route_signal_keywords['pricing_requests'] ?? ''),
+                'fulfillment_questions' => $this->stringToKeywords($this->route_signal_keywords['fulfillment_questions'] ?? ''),
+                'policy_questions' => $this->stringToKeywords($this->route_signal_keywords['policy_questions'] ?? ''),
+                'schedule_questions' => $this->stringToKeywords($this->route_signal_keywords['schedule_questions'] ?? ''),
             ];
             $settings['notify_chat_email_enabled'] = (bool) $this->notify_chat_email_enabled;
             $settings['notify_chat_emails'] = $this->stringToKeywords($this->notify_chat_emails ?? '');
@@ -280,7 +302,18 @@ class IntegrationSettingsManager extends Component
             $this->intent_keywords[$intent] = $this->keywordsToString($merged);
         }
 
-        session()->flash('message', 'Intent keyword template applied. Review and save.');
+        $routeTemplates = $this->getRouteSignalKeywordTemplates();
+        $routeTemplate = $routeTemplates[$this->org_type] ?? [];
+        foreach ($this->route_signal_keywords as $signal => $existing) {
+            $templateWords = $routeTemplate[$signal] ?? [];
+            $merged = array_unique(array_filter(array_merge(
+                $this->stringToKeywords($existing),
+                $templateWords
+            )));
+            $this->route_signal_keywords[$signal] = $this->keywordsToString($merged);
+        }
+
+        session()->flash('message', 'Intent and route keyword templates applied. Review and save.');
     }
 
     private function keywordsToString(array $keywords): string
@@ -294,6 +327,39 @@ class IntegrationSettingsManager extends Component
         $clean = array_map(fn($k) => trim(strtolower($k)), $parts);
         $clean = array_filter($clean, fn($k) => $k !== '');
         return array_values(array_unique($clean));
+    }
+
+    private function normalizeRouteSignalKeywords($keywords): array
+    {
+        $keywords = is_array($keywords) ? $keywords : [];
+        $legacyMap = [
+            'product_stock' => 'availability_checks',
+            'product_price' => 'pricing_requests',
+            'shipping_question' => 'fulfillment_questions',
+            'return_policy' => 'policy_questions',
+            'store_hours' => 'schedule_questions',
+        ];
+        $defaults = [
+            'availability_checks' => [],
+            'pricing_requests' => [],
+            'fulfillment_questions' => [],
+            'policy_questions' => [],
+            'schedule_questions' => [],
+        ];
+
+        foreach ($keywords as $key => $values) {
+            $target = $legacyMap[$key] ?? $key;
+            if (!array_key_exists($target, $defaults)) {
+                continue;
+            }
+
+            $defaults[$target] = array_values(array_unique(array_merge(
+                $defaults[$target],
+                is_array($values) ? $values : []
+            )));
+        }
+
+        return $defaults;
     }
 
     private function getIntentKeywordTemplates(): array
@@ -434,5 +500,116 @@ class IntegrationSettingsManager extends Component
         }
 
         return $templates;
+    }
+
+    private function getRouteSignalKeywordTemplates(): array
+    {
+        return [
+            'ecommerce' => [
+                'availability_checks' => ['in stock', 'out of stock', 'available', 'inventory'],
+                'pricing_requests' => ['price', 'cost', 'discount', 'offer'],
+                'fulfillment_questions' => ['ship', 'shipping', 'deliver', 'delivery time'],
+                'policy_questions' => ['return', 'refund', 'exchange', 'replacement'],
+                'schedule_questions' => ['store hours', 'open now', 'closing time'],
+            ],
+            'hospital' => [
+                'availability_checks' => ['available today', 'slot available', 'bed available'],
+                'pricing_requests' => ['fees', 'price', 'cost', 'charges'],
+                'fulfillment_questions' => ['home sample', 'sample pickup', 'deliver report'],
+                'policy_questions' => ['refund', 'cancellation', 'reschedule'],
+                'schedule_questions' => ['timing', 'open', 'closing time', 'visiting hours'],
+            ],
+            'clinic' => [
+                'availability_checks' => ['available today', 'slot available'],
+                'pricing_requests' => ['fees', 'cost', 'charges'],
+                'fulfillment_questions' => ['home visit', 'sample pickup', 'deliver report'],
+                'policy_questions' => ['refund', 'cancellation', 'reschedule'],
+                'schedule_questions' => ['timing', 'open', 'closing time'],
+            ],
+            'automobile_dealer' => [
+                'availability_checks' => ['available', 'in stock', 'ready for delivery'],
+                'pricing_requests' => ['price', 'on-road price', 'emi', 'offer'],
+                'fulfillment_questions' => ['delivery', 'deliver', 'ship', 'dispatch'],
+                'policy_questions' => ['return', 'exchange', 'cancellation'],
+                'schedule_questions' => ['showroom hours', 'service hours', 'open now'],
+            ],
+            'ngo' => [
+                'availability_checks' => ['available', 'open slots'],
+                'pricing_requests' => ['donation', 'contribution', 'amount'],
+                'fulfillment_questions' => ['deliver', 'reach', 'send'],
+                'policy_questions' => ['refund', 'cancellation'],
+                'schedule_questions' => ['office hours', 'open', 'closing time'],
+            ],
+            'school' => [
+                'availability_checks' => ['available seats', 'open seats', 'availability'],
+                'pricing_requests' => ['fees', 'cost', 'charges'],
+                'fulfillment_questions' => ['transport', 'bus route', 'pickup'],
+                'policy_questions' => ['refund', 'cancellation', 'withdrawal'],
+                'schedule_questions' => ['school hours', 'office hours', 'timing'],
+            ],
+            'college' => [
+                'availability_checks' => ['available seats', 'open seats', 'availability'],
+                'pricing_requests' => ['fees', 'cost', 'charges'],
+                'fulfillment_questions' => ['transport', 'bus route', 'pickup'],
+                'policy_questions' => ['refund', 'cancellation', 'withdrawal'],
+                'schedule_questions' => ['college hours', 'office hours', 'timing'],
+            ],
+            'restaurant' => [
+                'availability_checks' => ['available', 'sold out', 'in stock'],
+                'pricing_requests' => ['price', 'cost', 'combo price'],
+                'fulfillment_questions' => ['deliver', 'delivery', 'ship', 'send'],
+                'policy_questions' => ['refund', 'replacement', 'complaint'],
+                'schedule_questions' => ['opening hours', 'open now', 'closing time'],
+            ],
+            'real_estate' => [
+                'availability_checks' => ['available', 'vacant', 'open listing'],
+                'pricing_requests' => ['price', 'rent', 'cost'],
+                'fulfillment_questions' => ['handover', 'possession', 'move in'],
+                'policy_questions' => ['refund', 'cancellation'],
+                'schedule_questions' => ['office hours', 'site visit hours', 'open now'],
+            ],
+            'travel' => [
+                'availability_checks' => ['available', 'seat available', 'slot available'],
+                'pricing_requests' => ['price', 'fare', 'cost'],
+                'fulfillment_questions' => ['pickup', 'drop', 'departure', 'arrival'],
+                'policy_questions' => ['refund', 'cancellation', 'reschedule'],
+                'schedule_questions' => ['office hours', 'support hours', 'open now'],
+            ],
+            'fitness' => [
+                'availability_checks' => ['slot available', 'available', 'open batch'],
+                'pricing_requests' => ['price', 'membership cost', 'fees'],
+                'fulfillment_questions' => ['deliver', 'ship', 'send plan'],
+                'policy_questions' => ['refund', 'cancellation', 'freeze membership'],
+                'schedule_questions' => ['gym hours', 'open now', 'closing time'],
+            ],
+            'logistics' => [
+                'availability_checks' => ['available vehicle', 'capacity available', 'slot available'],
+                'pricing_requests' => ['price', 'quote', 'rate'],
+                'fulfillment_questions' => ['ship', 'dispatch', 'deliver', 'transit'],
+                'policy_questions' => ['claim', 'refund', 'cancellation'],
+                'schedule_questions' => ['office hours', 'support hours', 'open now'],
+            ],
+            'fintech' => [
+                'availability_checks' => ['available', 'active', 'service status'],
+                'pricing_requests' => ['charges', 'fees', 'cost'],
+                'fulfillment_questions' => ['send card', 'deliver card', 'dispatch'],
+                'policy_questions' => ['refund', 'chargeback', 'reversal'],
+                'schedule_questions' => ['support hours', 'office hours', 'open now'],
+            ],
+            'real_estate_rental' => [
+                'availability_checks' => ['available', 'vacant', 'ready to move'],
+                'pricing_requests' => ['rent', 'deposit', 'cost'],
+                'fulfillment_questions' => ['move in', 'handover', 'possession'],
+                'policy_questions' => ['refund', 'cancellation'],
+                'schedule_questions' => ['office hours', 'visit hours', 'open now'],
+            ],
+            'other' => [
+                'availability_checks' => ['available', 'in stock', 'status'],
+                'pricing_requests' => ['price', 'cost', 'fees'],
+                'fulfillment_questions' => ['ship', 'shipping', 'deliver', 'delivery'],
+                'policy_questions' => ['refund', 'return', 'cancellation'],
+                'schedule_questions' => ['hours', 'open now', 'timing'],
+            ],
+        ];
     }
 }

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use OpenAI;
 
 class AiAgentService
@@ -1954,7 +1955,15 @@ Rules:
     public function llmChat($messages, $model = null, $userId = null, $organizationId = null, array $options = [])  // Default determined dynamically
     {
         try {
-            $sessionId = isset($options['session_id']) ? (string) $options['session_id'] : null;
+            $sessionId = $this->resolveTrackedSessionId(
+                isset($options['session_id']) ? (string) $options['session_id'] : null,
+                $organizationId,
+                'llm_chat'
+            );
+            if ($sessionId !== null) {
+                $options['session_id'] = $sessionId;
+            }
+
             // Use configured model if none provided
             if (!$model) {
                 $model = $this->getLlamaModel();
@@ -2059,6 +2068,8 @@ Rules:
     public function openAiChat($messages, $model = null, $userId = null, $organizationId = null, ?string $sessionId = null)
     {
         try {
+            $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, 'openai_chat');
+
             // Use configured model if none provided
             if (!$model) {
                 $model = $this->getOpenAiModel();
@@ -2194,6 +2205,7 @@ Rules:
     public function logWidgetTokenUsage(int $organizationId, array $messages, string $responseText, string $endpointType = 'llm_chat_stream', ?string $sessionId = null): void
     {
         try {
+            $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, $endpointType);
             $inputTokens  = max(1, (int) $this->estimateTokenCount($messages));
             $outputTokens = max(1, (int) (strlen($responseText) / 4));
             $totalTokens  = $inputTokens + $outputTokens;
@@ -2752,12 +2764,52 @@ Rules:
         }
     }
 
+    private function resolveTrackedSessionId(?string $sessionId, $organizationId, string $endpointType): ?string
+    {
+        $normalized = $this->normalizeTrackedSessionId($sessionId);
+        if ($normalized !== null) {
+            return $normalized;
+        }
+
+        if (!$organizationId || !$this->endpointRequiresSessionTracking($endpointType)) {
+            return null;
+        }
+
+        $generated = 'chat_' . Str::uuid()->toString();
+
+        Log::warning('Generated fallback session id for org-scoped chat usage', [
+            'organization_id' => $organizationId,
+            'endpoint_type' => $endpointType,
+            'generated_session_id' => $generated,
+        ]);
+
+        return $generated;
+    }
+
+    private function normalizeTrackedSessionId(?string $sessionId): ?string
+    {
+        $normalized = trim((string) $sessionId);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    private function endpointRequiresSessionTracking(string $endpointType): bool
+    {
+        $normalized = strtolower(trim($endpointType));
+        if ($normalized === '') {
+            return false;
+        }
+
+        return str_contains($normalized, 'chat');
+    }
+
     /**
      * Log token usage for billing and monitoring purposes
      */
     private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary, int $inputTokens = 0, int $outputTokens = 0, ?string $sessionId = null)
     {
         try {
+            $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, (string) $endpointType);
             $subscription = null;
             
             // Handle widget usage (no user ID) - assign to organization's first user
@@ -2787,7 +2839,7 @@ Rules:
             }
             
             // Still log even if no user found (for monitoring)
-            \App\Models\TokenUsageLog::create([
+            $tokenUsageLog = \App\Models\TokenUsageLog::create([
                 'user_id' => $userId,
                 'organization_id' => $organizationId,
                 'session_id' => $sessionId,
@@ -2815,10 +2867,13 @@ Rules:
                 try {
                     $userCredit = \App\Models\UserCredit::getOrCreateForUser($userId);
                     $deducted = $userCredit->deductCredits($tokensUsed, 'AI usage: ' . $endpointType, [
+                        'reference_id' => 'token-usage:' . $tokenUsageLog->id,
                         'metadata' => [
                             'organization_id' => $organizationId,
+                            'session_id' => $sessionId,
                             'endpoint_type' => $endpointType,
                             'tokens_used' => $tokensUsed,
+                            'token_usage_log_id' => $tokenUsageLog->id,
                         ]
                     ]);
                     if (!$deducted) {

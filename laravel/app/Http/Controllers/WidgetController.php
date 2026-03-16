@@ -417,7 +417,7 @@ class WidgetController
             }
 
             $message = $request->input('message');
-            $sessionId = $request->input('session_id', uniqid());
+            $sessionId = $this->resolveWidgetSessionId((string) $request->input('session_id', ''), true);
             $userInfo = $request->input('user_info', []);
             $visitorInfo = $request->input('visitor_info', []); // For backward compatibility
             $isShopify = $request->input('is_shopify', false); // Widget flag for Shopify stores
@@ -590,6 +590,14 @@ class WidgetController
             $this->debugData['intent']            = $intentResult['intent']      ?? null;
             $this->debugData['intent_confidence'] = $intentResult['confidence']  ?? null;
             $this->debugData['intent_method']     = $intentResult['method']      ?? null;
+            $routeAnalysis = is_array($intentResult['route_analysis'] ?? null)
+                ? $intentResult['route_analysis']
+                : [];
+            $this->debugData['extra'] = array_filter([
+                'route_primary' => $routeAnalysis['primary_route'] ?? null,
+                'route_signals' => $routeAnalysis['signals'] ?? [],
+                'route_slots' => $routeAnalysis['slots'] ?? [],
+            ], static fn ($value) => !($value === null || $value === []));
 
 
             if ($existingConversation && in_array($existingConversation->agent_status, ['agent_assigned', 'agent_active'], true)) {
@@ -728,6 +736,21 @@ class WidgetController
                 $hasPendingFollowUpState ? $pendingFollowUpState : null
             );
 
+            if ($isReferentialFollowUp && in_array($routeAnalysis['primary_route'] ?? null, ['fulfillment_questions', 'availability_checks', 'pricing_requests'], true)) {
+                $routeProductCandidate = trim((string) ($routeAnalysis['slots']['product_candidate'] ?? ''));
+                if ($routeProductCandidate === '' || $this->isWeakRouteProductCandidate($routeProductCandidate)) {
+                    $followUpTopicAnchor = $this->buildFollowUpTopicAnchor($lastUserMessage);
+                    if ($followUpTopicAnchor !== '') {
+                        $routeAnalysis['slots']['product_candidate'] = $followUpTopicAnchor;
+                        $routeAnalysis['signals'] = array_values(array_unique(array_merge($routeAnalysis['signals'] ?? [], ['product_lookup'])));
+                        $routeAnalysis['requires_product_resolution'] = true;
+                        $routeAnalysis['policy_only'] = false;
+                        $this->debugData['extra']['route_slots'] = $routeAnalysis['slots'];
+                        $this->debugData['extra']['route_signals'] = $routeAnalysis['signals'];
+                    }
+                }
+            }
+
             $searchQuery = $message;
             if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $shouldUsePendingStateAnchor) && !$canReusePreviousContext) {
                 $searchQuery = $this->buildRelatedFollowUpSearchQuery(
@@ -769,6 +792,7 @@ class WidgetController
             $shopifyContext = '';
             $shopifyData = null;
             $hasShopifyData = false;
+            $shopifySkippedForPolicyRoute = false;
 
             try {
                 $integration = $shopifyIntegration; // already loaded above
@@ -803,6 +827,19 @@ class WidgetController
                         ]);
                     } elseif ($integration->shop) {
                         try {
+                            $shopifyProductCandidate = trim((string) ($routeAnalysis['slots']['product_candidate'] ?? ''));
+                            $shopifyPolicyOnlyRoute = (bool) ($routeAnalysis['policy_only'] ?? false);
+
+                            if ($shopifyPolicyOnlyRoute) {
+                                $shopifySkippedForPolicyRoute = true;
+                                Log::info('[SHOPIFY] Skipping catalog lookup for policy-only route', [
+                                    'org_id' => $organization->id,
+                                    'session_id' => $sessionId,
+                                    'message' => $message,
+                                    'route_analysis' => $routeAnalysis,
+                                ]);
+                            }
+
                             // $searchQuery already contains rich context (prev message + current)
                             // so always use it; fall back to raw $message only if empty.
                             $shopifyApiQuery = !empty($searchQuery) ? $searchQuery : $message;
@@ -812,24 +849,28 @@ class WidgetController
                                     $shopifyApiQuery = trim($followUpTopicAnchor . ' ' . $message);
                                 }
                             }
+                            if ($shopifyProductCandidate !== '' && ($routeAnalysis['requires_product_resolution'] ?? false)) {
+                                $shopifyApiQuery = $shopifyProductCandidate;
+                            }
                             $customerEmail   = $allUserInfo['email'] ?? $allUserInfo['customer_email'] ?? null;
                             if (!filter_var((string) $customerEmail, FILTER_VALIDATE_EMAIL)) {
                                 $customerEmail = null;
                             }
 
-                            // Direct PHP call — no Apache/HTTP self-loop
-                            $shopifyController = app(\App\Http\Controllers\Api\ShopifyDataController::class);
-                            $data = $shopifyController->queryDirect($integration->shop, $shopifyApiQuery, $customerEmail);
+                            if (!$shopifyPolicyOnlyRoute) {
+                                // Direct PHP call — no Apache/HTTP self-loop
+                                $shopifyController = app(\App\Http\Controllers\Api\ShopifyDataController::class);
+                                $data = $shopifyController->queryDirect($integration->shop, $shopifyApiQuery, $customerEmail);
 
-                            if ($data['success'] ?? false) {
-                                $shopifyData = $data;
-                                $hasShopifyData = !empty($data['data']);
-                                $shopifySpecificMatch = $data['specific_match'] ?? true;
+                                if ($data['success'] ?? false) {
+                                    $shopifyData = $data;
+                                    $hasShopifyData = !empty($data['data']);
+                                    $shopifySpecificMatch = $data['specific_match'] ?? true;
 
-                                // Build concise context for LLM
-                                if ($hasShopifyData && ($data['query_type'] ?? '') === 'products') {
-                                    $products = $data['data'];
-                                    $productCount = count($products);
+                                    // Build concise context for LLM
+                                    if ($hasShopifyData && ($data['query_type'] ?? '') === 'products') {
+                                        $products = $data['data'];
+                                        $productCount = count($products);
 
                                     // Sort products by price (ascending) for accurate price queries
                                     usort($products, function($a, $b) {
@@ -929,11 +970,12 @@ class WidgetController
                                     ]);
                                 }
 
-                                Log::info('Shopify data fetched for widget', [
-                                    'query_type' => $data['query_type'] ?? 'unknown',
-                                    'data_count' => count($data['data'] ?? []),
-                                    'has_data'   => $hasShopifyData
-                                ]);
+                                    Log::info('Shopify data fetched for widget', [
+                                        'query_type' => $data['query_type'] ?? 'unknown',
+                                        'data_count' => count($data['data'] ?? []),
+                                        'has_data'   => $hasShopifyData
+                                    ]);
+                                }
                             }
                         } catch (\Exception $e) {
                             Log::error('Shopify API request failed in widget', [
@@ -1744,6 +1786,31 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            if (($routeAnalysis['policy_only'] ?? false) && !$hasShopifyData) {
+                $safeResponse = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $safeResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->debugData['clarification_sought'] = true;
+                $this->debugData['response_path'] = 'clarification';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->writeDebugLog($conversation);
+
+                return response()->json([
+                    'response' => $safeResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             if ($this->shouldClarifyAffirmative($message, $organization, $sessionId)) {
                 $shortResponse = $this->buildAffirmativeClarifyResponse();
 
@@ -2242,21 +2309,32 @@ class WidgetController
                 'raw_ai_response_preview' => substr((string) $rawResponseText, 0, 300) . '...',
             ]);
             if (!empty($hasShopifyData)) {
-                $structuredShopifyAvailabilityResponse = $this->buildStructuredShopifyAvailabilityResponse((string) $searchQuery, $shopifyData);
-                if ($structuredShopifyAvailabilityResponse !== null) {
-                    $responseText = $structuredShopifyAvailabilityResponse;
+                $structuredShopifyPolicyResponse = $this->buildStructuredShopifyPolicyResponse(
+                    (string) $message,
+                    $shopifyData,
+                    $organization,
+                    $routeAnalysis ?? [],
+                    trim((string) $context) !== ''
+                );
+                if ($structuredShopifyPolicyResponse !== null) {
+                    $responseText = $structuredShopifyPolicyResponse;
                 } else {
-                    $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $searchQuery, $shopifyData);
-                    if ($structuredShopifyMismatchResponse !== null) {
-                        $responseText = $structuredShopifyMismatchResponse;
+                    $structuredShopifyAvailabilityResponse = $this->buildStructuredShopifyAvailabilityResponse((string) $searchQuery, $shopifyData);
+                    if ($structuredShopifyAvailabilityResponse !== null) {
+                        $responseText = $structuredShopifyAvailabilityResponse;
                     } else {
-                        $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
-                        if ($structuredShopifyOrderResponse !== null) {
-                            $responseText = $structuredShopifyOrderResponse;
+                        $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $searchQuery, $shopifyData);
+                        if ($structuredShopifyMismatchResponse !== null) {
+                            $responseText = $structuredShopifyMismatchResponse;
                         } else {
-                            $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $searchQuery, $shopifyData);
-                            if ($structuredShopifyProductResponse !== null) {
-                                $responseText = $structuredShopifyProductResponse;
+                            $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
+                            if ($structuredShopifyOrderResponse !== null) {
+                                $responseText = $structuredShopifyOrderResponse;
+                            } else {
+                                $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $searchQuery, $shopifyData);
+                                if ($structuredShopifyProductResponse !== null) {
+                                    $responseText = $structuredShopifyProductResponse;
+                                }
                             }
                         }
                     }
@@ -2264,6 +2342,16 @@ class WidgetController
                 $responseText = $this->normalizeShopifyResponseText($responseText);
             }
             $responseText = $this->normalizeAiResponse($responseText);
+            $suppressGenericFollowUp = !empty(array_intersect(
+                is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [],
+                ['fulfillment_questions', 'policy_questions', 'schedule_questions']
+            )) && trim((string) $context) === '';
+
+            if (($routeAnalysis['policy_only'] ?? false) && empty($hasShopifyData) && trim((string) $context) === '') {
+                $responseText = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
+                $suppressGenericFollowUp = true;
+            }
+
             // Enforce official contacts only (no hallucinated emails/phones)
             $responseTextBefore = $responseText;
             if (empty($hasShopifyData)) {
@@ -2335,7 +2423,7 @@ class WidgetController
                 $hasPendingFollowUpState
             );
 
-            if (!$hallucinationBlocked && !$responseHasQuestion && !$isConversationEnding) {
+            if (!$hallucinationBlocked && !$suppressGenericFollowUp && !$responseHasQuestion && !$isConversationEnding) {
                 $intentFollowUp = $this->buildFollowUpPrompt($intentResult, $organization);
                 if ($intentFollowUp !== '') {
                     $responseText = trim($responseText) . "\n\n" . $intentFollowUp;
@@ -2488,7 +2576,7 @@ class WidgetController
         }
 
         $message = $request->input('message');
-        $sessionId = $request->input('session_id', uniqid());
+        $sessionId = $this->resolveWidgetSessionId((string) $request->input('session_id', ''), true);
         $userInfo = $request->input('user_info', []);
         $visitorInfo = $request->input('visitor_info', []);
         $allUserInfo = array_merge($userInfo, $visitorInfo);
@@ -6498,6 +6586,28 @@ class WidgetController
         return implode(' ', array_slice($meaningfulTerms, 0, 4));
     }
 
+    private function isWeakRouteProductCandidate(string $candidate): bool
+    {
+        $candidate = trim(mb_strtolower($candidate));
+        if ($candidate === '') {
+            return true;
+        }
+
+        if ((bool) preg_match('/^(can|could|would|should)\b/', $candidate)) {
+            return true;
+        }
+
+        if ((bool) preg_match('/\b(it|this|that|these|those)\b/', $candidate) && str_word_count($candidate) <= 4) {
+            return true;
+        }
+
+        if ((bool) preg_match('/\b(ship|shipped|shipping|deliver|delivered|delivery|send|sent)\b/', $candidate) && str_word_count($candidate) <= 5) {
+            return true;
+        }
+
+        return false;
+    }
+
     private function isOneOrTwoWordReply(string $message): bool
     {
         $clean = trim(mb_strtolower(strip_tags($message)));
@@ -7727,6 +7837,20 @@ class WidgetController
         return "I didn't understand that. Could you please share a bit more detail?";
     }
 
+    private function resolveWidgetSessionId(?string $sessionId, bool $generateWhenMissing = false): string
+    {
+        $normalized = trim((string) $sessionId);
+        if ($normalized !== '') {
+            return $normalized;
+        }
+
+        if (!$generateWhenMissing) {
+            return '';
+        }
+
+        return 'widget_' . str_replace('-', '', (string) Str::uuid());
+    }
+
     /**
      * Persist the accumulated debug payload for one chat request to llm_debug_logs.
      * Safe to call from any response path; silently swallows exceptions so a DB
@@ -8766,31 +8890,30 @@ class WidgetController
         $primary = $terms[0] ?? null;
 
         if ($primary) {
-            return "I want to give you the correct details, but I couldn't confidently match the exact item or service for '{$primary}'. Please share the exact name (or SKU/code), and I'll verify availability, pricing, and options for that exact match.";
+            return "I want to give you the correct details, but I couldn't confidently match '{$primary}' to a specific entry in our records. Please share the exact name or any official identifier, and I'll check the relevant details for you.";
         }
 
-        return "I want to give you the correct details, but I couldn't confidently match the exact item or service from your message. Please share the exact name (or SKU/code), and I'll verify availability, pricing, and options for that exact match.";
+        return "I want to give you the correct details, but I couldn't confidently match that to a specific entry in our records. Please share the exact name or any official identifier, and I'll check the relevant details for you.";
     }
 
-    private function isPolicySupportQuestion(string $message): bool
+    private function isPolicySupportQuestion(string $message, ?Organization $organization = null): bool
     {
-        return (bool) preg_match('/\b(ship|shipping|deliver|delivery|international|outside\s+usa|outside\s+the\s+usa|outside\s+us|outside\s+the\s+us|return|refund|exchange|warranty|guarantee|policy|policies)\b/i', $message);
+        $routeAnalysis = app(IntentDetectionService::class)->analyzeRoutePlan($message, $organization?->id ?? 0);
+        $signals = is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [];
+
+        return !empty(array_intersect($signals, ['fulfillment_questions', 'policy_questions', 'schedule_questions']))
+            || trim((string) ($routeAnalysis['policy_topic'] ?? '')) !== 'that';
     }
 
-    private function buildPolicySupportUnavailableResponse(Organization $organization, string $message): string
+    private function buildPolicySupportUnavailableResponse(Organization $organization, string $message, array $routeAnalysis = []): string
     {
-        $topic = 'that';
+        if (empty($routeAnalysis)) {
+            $routeAnalysis = app(IntentDetectionService::class)->analyzeRoutePlan($message, $organization->id);
+        }
 
-        if ((bool) preg_match('/\b(ship|shipping|deliver|delivery)\b/i', $message)) {
-            $topic = (bool) preg_match('/\b(outside\s+usa|outside\s+the\s+usa|outside\s+us|outside\s+the\s+us|international)\b/i', $message)
-                ? 'whether we ship outside the USA'
-                : 'shipping';
-        } elseif ((bool) preg_match('/\b(return|refund|exchange)\b/i', $message)) {
-            $topic = 'our return, refund, or exchange policy';
-        } elseif ((bool) preg_match('/\b(warranty|guarantee)\b/i', $message)) {
-            $topic = 'our warranty or guarantee policy';
-        } elseif ((bool) preg_match('/\bpolicy|policies\b/i', $message)) {
-            $topic = 'that policy';
+        $topic = trim((string) ($routeAnalysis['policy_topic'] ?? 'that'));
+        if ($topic === '') {
+            $topic = 'that';
         }
 
         $contact = $this->buildContactResponse(
@@ -9481,6 +9604,65 @@ class WidgetController
         return empty($lines) ? null : implode("\n", $lines);
     }
 
+    private function buildStructuredShopifyPolicyResponse(
+        string $message,
+        $shopifyData,
+        Organization $organization,
+        array $routeAnalysis = [],
+        bool $hasVerifiedPolicyContext = false
+    ): ?string {
+        if ($hasVerifiedPolicyContext) {
+            return null;
+        }
+
+        if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
+            return null;
+        }
+
+        $signals = is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [];
+        if (!in_array('fulfillment_questions', $signals, true) && !in_array('policy_questions', $signals, true)) {
+            return null;
+        }
+
+        $productCandidate = trim((string) ($routeAnalysis['slots']['product_candidate'] ?? ''));
+        if ($productCandidate === '') {
+            return null;
+        }
+
+        if (($shopifyData['specific_match'] ?? true) !== true) {
+            return 'We could not find a product named "' . $productCandidate . '". Please check the product name or SKU and try again.';
+        }
+
+        $products = array_values(array_filter($shopifyData['data'] ?? [], static function ($product) {
+            return is_array($product) && isset($product['title']);
+        }));
+
+        if (empty($products)) {
+            return null;
+        }
+
+        $product = $products[0];
+        $title = trim((string) ($product['title'] ?? $productCandidate));
+        $currency = strtoupper(trim((string) ($product['currency'] ?? 'USD')));
+        $price = isset($product['price']) ? number_format((float) $product['price'], 2) : null;
+        $available = !empty($product['available']);
+
+        $lines = [
+            '**Product:** ' . $title,
+            '**Stock:** ' . ($available ? 'Available' : 'Out of stock'),
+        ];
+
+        if ($price !== null) {
+            $lines[] = '**Price:** ' . $currency . ' ' . $price;
+        }
+
+        $policyFallback = $this->buildPolicySupportUnavailableResponse($organization, $message);
+        $lines[] = '';
+        $lines[] = $policyFallback;
+
+        return implode("\n", $lines);
+    }
+
     private function buildStructuredShopifyProductResponse(string $message, $shopifyData): ?string
     {
         if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
@@ -10132,7 +10314,7 @@ class WidgetController
 
         $userInfo     = $request->input('user_info', []);
         $locationInfo = $request->input('location_info', []);
-        $sessionId    = $request->input('session_id', '');
+        $sessionId    = $this->resolveWidgetSessionId((string) $request->input('session_id', ''));
 
         if (empty($userInfo['name']) || empty($userInfo['email']) || empty($sessionId)) {
             return response()->json(['error' => 'Missing required fields'], 422)

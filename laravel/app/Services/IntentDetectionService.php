@@ -12,6 +12,52 @@ class IntentDetectionService
 {
     private AiAgentService $aiAgent;
 
+    private const LEGACY_ROUTE_SIGNAL_KEY_MAP = [
+        'product_stock' => 'availability_checks',
+        'product_price' => 'pricing_requests',
+        'shipping_question' => 'fulfillment_questions',
+        'return_policy' => 'policy_questions',
+        'store_hours' => 'schedule_questions',
+    ];
+
+    private const ROUTE_SIGNAL_KEYWORDS = [
+        'availability_checks' => [
+            'available', 'availability', 'in stock', 'out of stock', 'stock', 'inventory',
+            'have in stock', 'do you have', 'is it available'
+        ],
+        'pricing_requests' => [
+            'price', 'pricing', 'cost', 'how much', 'quote', 'rate', 'charges', 'fee', 'fees'
+        ],
+        'fulfillment_questions' => [
+            'ship', 'shipping', 'deliver', 'delivery', 'dispatch', 'courier', 'eta', 'arrive'
+        ],
+        'policy_questions' => [
+            'return', 'refund', 'exchange', 'replacement', 'cancel', 'cancellation', 'warranty'
+        ],
+        'schedule_questions' => [
+            'hours', 'timing', 'timings', 'open', 'close', 'closing', 'working hours', 'business hours'
+        ],
+    ];
+
+    private const ROUTE_FILLER_PATTERNS = [
+        '/\b(can\s+you|could\s+you|would\s+you|do\s+you|did\s+you|are\s+you|is\s+it|i\s+want\s+to|please|kindly)\b/i',
+        '/\b(ship|shipping|deliver|delivery|dispatch|courier|eta|arrive|available|availability|in\s+stock|out\s+of\s+stock|stock|inventory|price|pricing|cost|quote|rate|charges|fee|fees)\b/i',
+        '/\b(return|refund|exchange|replacement|cancel|cancellation|warranty|policy|policies)\b/i',
+        '/\b(what|which|where|when|who|how|much|many|about|for|the|a|an|this|that|these|those|item|product|service)\b/i',
+    ];
+
+    private const PRODUCT_CANDIDATE_REJECT_TERMS = [
+        'outside', 'internationally', 'international', 'abroad', 'worldwide', 'usa', 'us', 'uk', 'india',
+        'shipping', 'delivery', 'return', 'refund', 'policy', 'policies', 'hours', 'timing', 'timings',
+        'open', 'close', 'closed', 'store', 'shop', 'customer service', 'support'
+    ];
+
+    private const PRODUCT_CANDIDATE_REJECT_TOKENS = [
+        'can', 'could', 'would', 'should', 'it', 'this', 'that', 'these', 'those',
+        'be', 'been', 'is', 'are', 'was', 'were', 'ship', 'shipped', 'shipping',
+        'deliver', 'delivered', 'delivery', 'send', 'sent'
+    ];
+
     // Rule-based keywords for quick intent detection.
     // IMPORTANT: 'available'/'availability' are NOT booking signals — they indicate stock/status checks
     // (realtime_data). Only classify as 'booking' when the user explicitly wants to MAKE a reserveration
@@ -103,7 +149,8 @@ class IntentDetectionService
      */
     public function detectIntent(string $query, int $organizationId): array
     {
-        $query = strtolower(trim($query));
+        $rawQuery = trim($query);
+        $query = strtolower($rawQuery);
 
         $settings = $this->getIntentSettings($organizationId);
         $strategy = $settings['intent_strategy'];
@@ -149,6 +196,8 @@ class IntentDetectionService
             }
         }
         
+        $finalIntent['route_analysis'] = $this->analyzeRoutePlan($rawQuery, $organizationId);
+
         Log::info('Intent detection completed', [
             'query' => $query,
             'rule_based' => $ruleBasedIntent,
@@ -157,6 +206,69 @@ class IntentDetectionService
         ]);
 
         return $finalIntent;
+    }
+
+    public function analyzeRoutePlan(string $query, int $organizationId): array
+    {
+        $query = trim($query);
+        if ($query === '') {
+            return [
+                'primary_route' => 'unknown',
+                'signals' => [],
+                'slots' => [],
+                'requires_product_resolution' => false,
+                'policy_only' => false,
+            ];
+        }
+
+        $normalized = mb_strtolower($query);
+        $signalMatches = [];
+        $orgSignals = $this->getOrgRouteSignalKeywords($organizationId);
+
+        foreach (self::ROUTE_SIGNAL_KEYWORDS as $signal => $keywords) {
+            $mergedKeywords = array_merge($keywords, $orgSignals[$signal] ?? []);
+            $matches = [];
+
+            foreach ($mergedKeywords as $keyword) {
+                $keyword = trim(mb_strtolower((string) $keyword));
+                if ($keyword !== '' && Str::contains($normalized, $keyword)) {
+                    $matches[] = $keyword;
+                }
+            }
+
+            if (!empty($matches)) {
+                $signalMatches[$signal] = array_values(array_unique($matches));
+            }
+        }
+
+        $productCandidate = $this->extractProductCandidate($query, array_keys($signalMatches));
+        $destination = $this->extractDestinationSlot($query);
+        $deliveryDeadline = $this->extractDeliveryDeadlineSlot($query);
+
+        if ($productCandidate !== '' && !isset($signalMatches['availability_checks']) && !isset($signalMatches['pricing_requests'])) {
+            $signalMatches['product_lookup'] = [$productCandidate];
+        }
+
+        $signals = array_keys($signalMatches);
+        $requiresProductResolution = $productCandidate !== ''
+            && !empty(array_intersect($signals, ['fulfillment_questions', 'availability_checks', 'pricing_requests', 'product_lookup']));
+
+        $policyOnly = empty($productCandidate)
+            && !empty(array_intersect($signals, ['fulfillment_questions', 'policy_questions', 'schedule_questions']));
+
+        return [
+            'primary_route' => $this->determinePrimaryRoute($signals),
+            'signals' => $signals,
+            'signal_matches' => $signalMatches,
+            'slots' => array_filter([
+                'product_candidate' => $productCandidate,
+                'destination' => $destination,
+                'delivery_deadline' => $deliveryDeadline,
+            ], static fn ($value) => is_string($value) ? trim($value) !== '' : !empty($value)),
+            'requires_product_resolution' => $requiresProductResolution,
+            'policy_only' => $policyOnly,
+            'policy_topic' => $this->buildPolicyTopic($query, $signals, $destination, $deliveryDeadline),
+        ];
     }
 
     /**
@@ -230,6 +342,202 @@ class IntentDetectionService
         }
 
         return $keywords;
+    }
+
+    private function getOrgRouteSignalKeywords(int $organizationId): array
+    {
+        if (!$organizationId) {
+            return [];
+        }
+
+        $org = Organization::find($organizationId);
+        if (!$org) {
+            return [];
+        }
+
+        $keywords = $org->settings['route_signal_keywords'] ?? [];
+        if (!is_array($keywords)) {
+            return [];
+        }
+
+        return $this->normalizeRouteSignalKeywords($keywords);
+    }
+
+    private function determinePrimaryRoute(array $signals): string
+    {
+        foreach (['availability_checks', 'pricing_requests', 'fulfillment_questions', 'policy_questions', 'schedule_questions', 'product_lookup'] as $priority) {
+            if (in_array($priority, $signals, true)) {
+                return $priority;
+            }
+        }
+
+        return 'unknown';
+    }
+
+    private function extractProductCandidate(string $query, array $signals = []): string
+    {
+        $query = trim($query);
+        if ($query === '') {
+            return '';
+        }
+
+        if (preg_match('/["“](.+?)["”]/u', $query, $matches)) {
+            return $this->sanitizeProductCandidate($matches[1]);
+        }
+
+        if (preg_match('/\b(?:can|could|would|should)\s+(.+?)\s+be\s+(?:shipped|delivered|sent)\b/i', $query, $matches)) {
+            $candidate = $this->sanitizeProductCandidate($matches[1]);
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        if (in_array('fulfillment_questions', $signals, true)
+            && preg_match('/\b(?:ship|deliver|send)\s+(.+?)(?:\s+to\b|\s+by\b|[?.!,]|$)/i', $query, $matches)) {
+            $candidate = $this->sanitizeProductCandidate($matches[1]);
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        $candidate = $query;
+        $candidate = preg_replace('/\bto\s+[\p{L}][\p{L}\s.-]{1,40}(?=\s+by\b|\s+before\b|\s+on\b|\s+tomorrow\b|\s+today\b|\s+next\b|\s+this\b|[?.!,]|$)/iu', ' ', $candidate) ?? $candidate;
+        $candidate = preg_replace('/\bby\s+[\p{L}\d][\p{L}\d\s,\/-]{0,30}(?=[?.!,]|$)/iu', ' ', $candidate) ?? $candidate;
+
+        foreach (self::ROUTE_FILLER_PATTERNS as $pattern) {
+            $candidate = preg_replace($pattern, ' ', $candidate) ?? $candidate;
+        }
+
+        return $this->sanitizeProductCandidate($candidate);
+    }
+
+    private function sanitizeProductCandidate(string $candidate): string
+    {
+        $candidate = trim(strip_tags($candidate));
+        $candidate = preg_replace('/[[:punct:]]+/u', ' ', $candidate) ?? $candidate;
+        $candidate = trim((string) preg_replace('/\s+/', ' ', $candidate));
+
+        if ($candidate === '') {
+            return '';
+        }
+
+        $lower = mb_strtolower($candidate);
+        foreach (self::PRODUCT_CANDIDATE_REJECT_TERMS as $term) {
+            if ($lower === $term || Str::startsWith($lower, $term . ' ') || Str::endsWith($lower, ' ' . $term)) {
+                return '';
+            }
+        }
+
+        $tokens = array_values(array_filter(explode(' ', $lower), static fn ($token) => $token !== ''));
+        $meaningfulTokens = array_values(array_filter($tokens, function ($token) {
+            return !in_array($token, ['to', 'by', 'for', 'with', 'outside', 'from'], true);
+        }));
+
+        $nonRejectTokens = array_values(array_filter($meaningfulTokens, function ($token) {
+            return !in_array($token, self::PRODUCT_CANDIDATE_REJECT_TOKENS, true);
+        }));
+
+        if (empty($meaningfulTokens)) {
+            return '';
+        }
+
+        if (empty($nonRejectTokens)) {
+            return '';
+        }
+
+        if (count($meaningfulTokens) === 1 && in_array($meaningfulTokens[0], self::PRODUCT_CANDIDATE_REJECT_TERMS, true)) {
+            return '';
+        }
+
+        if (preg_match('/\b(?:ship|shipped|shipping|deliver|delivered|delivery|send|sent)\b/i', $candidate)
+            && count($nonRejectTokens) <= 1) {
+            return '';
+        }
+
+        return trim($candidate);
+    }
+
+    private function extractDestinationSlot(string $query): string
+    {
+        if (preg_match('/\bto\s+([\p{L}][\p{L}\s.-]{1,40}?)(?=\s+by\b|\s+before\b|\s+on\b|\s+tomorrow\b|\s+today\b|\s+next\b|\s+this\b|[?.!,]|$)/iu', $query, $matches)) {
+            return trim($matches[1]);
+        }
+
+        return '';
+    }
+
+    private function extractDeliveryDeadlineSlot(string $query): string
+    {
+        if (preg_match('/\bby\s+([\p{L}\d][\p{L}\d\s,\/-]{0,30}?)(?=[?.!,]|$)/iu', $query, $matches)) {
+            return trim($matches[1]);
+        }
+
+        if (preg_match('/\b(today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+week|next\s+month)\b/i', $query, $matches)) {
+            return trim($matches[1]);
+        }
+
+        return '';
+    }
+
+    private function buildPolicyTopic(string $query, array $signals, string $destination, string $deliveryDeadline): string
+    {
+        $normalized = mb_strtolower($query);
+
+        if (in_array('fulfillment_questions', $signals, true)) {
+            if ((bool) preg_match('/\b(outside\s+usa|outside\s+the\s+usa|outside\s+us|outside\s+the\s+us|international)\b/i', $normalized)) {
+                return 'whether we ship outside the USA';
+            }
+
+            if ($destination !== '' && $deliveryDeadline !== '') {
+                return 'whether we can ship to ' . $destination . ' by ' . $deliveryDeadline;
+            }
+
+            if ($destination !== '') {
+                return 'whether we can ship to ' . $destination;
+            }
+
+            if ($deliveryDeadline !== '') {
+                return 'whether we can deliver by ' . $deliveryDeadline;
+            }
+
+            return 'shipping';
+        }
+
+        if (in_array('policy_questions', $signals, true)) {
+            return 'our return, refund, or exchange policy';
+        }
+
+        if (str_contains($normalized, 'warranty') || str_contains($normalized, 'guarantee')) {
+            return 'our warranty or guarantee policy';
+        }
+
+        if (in_array('schedule_questions', $signals, true)) {
+            return 'our store hours';
+        }
+
+        return 'that';
+    }
+
+    private function normalizeRouteSignalKeywords(array $keywords): array
+    {
+        $normalized = [];
+
+        foreach ($keywords as $key => $values) {
+            $targetKey = self::LEGACY_ROUTE_SIGNAL_KEY_MAP[$key] ?? $key;
+            if (!isset(self::ROUTE_SIGNAL_KEYWORDS[$targetKey])) {
+                continue;
+            }
+
+            $current = $normalized[$targetKey] ?? [];
+            $incoming = is_array($values) ? $values : [];
+            $normalized[$targetKey] = array_values(array_unique(array_merge($current, $incoming)));
+        }
+
+        foreach (array_keys(self::ROUTE_SIGNAL_KEYWORDS) as $key) {
+            $normalized[$key] = array_values(array_filter($normalized[$key] ?? []));
+        }
+
+        return $normalized;
     }
 
     /**

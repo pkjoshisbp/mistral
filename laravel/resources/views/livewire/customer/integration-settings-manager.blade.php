@@ -373,7 +373,41 @@
                                 <small class="form-text text-muted">FAQs, policies, general info, contact, how-to.</small>
                                 <textarea wire:model.defer="intent_keywords.static_info" class="form-control" rows="2" placeholder="policy, refund, warranty, rules"></textarea>
                             </div>
-                            <small class="form-text text-muted">Comma-separated keywords. These are added to global rules for your organization.</small>
+                            <small class="form-text text-muted">Comma-separated keywords. These control the main intent buckets for this organization only.</small>
+
+                            <hr>
+
+                            <div class="alert alert-light border">
+                                <strong>Route signals are separate from intent keywords.</strong>
+                                They are secondary routing hints used after intent detection to recognize patterns like availability, price, logistics, cancellations, or schedule questions.
+                            </div>
+
+                            <div class="form-group">
+                                <label>Route Signals: Availability or Capacity</label>
+                                <small class="form-text text-muted">Phrases that usually mean availability, capacity, open slots, or stock checks.</small>
+                                <textarea wire:model.defer="route_signal_keywords.availability_checks" class="form-control" rows="2" placeholder="in stock, available, inventory, out of stock"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Route Signals: Price or Fees</label>
+                                <small class="form-text text-muted">Phrases that usually mean price, fees, charges, quote, or cost questions.</small>
+                                <textarea wire:model.defer="route_signal_keywords.pricing_requests" class="form-control" rows="2" placeholder="price, cost, charges, quote"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Route Signals: Delivery, Logistics, or Fulfillment</label>
+                                <small class="form-text text-muted">Phrases that usually mean delivery, dispatch, transport, pickup, destination, or fulfillment questions.</small>
+                                <textarea wire:model.defer="route_signal_keywords.fulfillment_questions" class="form-control" rows="2" placeholder="ship, shipping, deliver, dispatch"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Route Signals: Returns, Refunds, or Cancellations</label>
+                                <small class="form-text text-muted">Phrases that usually mean return, refund, exchange, cancellation, or withdrawal policy.</small>
+                                <textarea wire:model.defer="route_signal_keywords.policy_questions" class="form-control" rows="2" placeholder="refund, return, exchange, cancellation"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Route Signals: Hours, Timing, or Schedule</label>
+                                <small class="form-text text-muted">Phrases that usually mean opening hours, timing, operating schedule, or office hours.</small>
+                                <textarea wire:model.defer="route_signal_keywords.schedule_questions" class="form-control" rows="2" placeholder="open now, timing, hours, closing time"></textarea>
+                            </div>
+                            <small class="form-text text-muted">These route phrases are organization-scoped. Add alternate wording here when users ask the same type of question in a new way.</small>
                         </div>
                     </div>
                 </div>
