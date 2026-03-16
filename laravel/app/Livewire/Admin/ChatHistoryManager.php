@@ -8,6 +8,7 @@ use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\LlmDebugLog;
 use App\Models\Organization;
+use App\Services\ChatConversationCleanupService;
 use Illuminate\Support\Facades\Auth;
 
 class ChatHistoryManager extends Component
@@ -156,6 +157,40 @@ class ChatHistoryManager extends Component
 
         $this->replyMessage[$conversationId] = '';
         session()->flash('success', 'Agent reply sent.');
+    }
+
+    public function deleteConversation(int $conversationId)
+    {
+        $conversation = ChatConversation::with('organization')->find($conversationId);
+        if (!$conversation) {
+            session()->flash('error', 'Chat conversation not found.');
+            return;
+        }
+
+        try {
+            $cleanupService = app(ChatConversationCleanupService::class);
+            $result = $cleanupService->deleteConversation($conversation, Auth::id());
+
+            unset($this->showDetails[$conversationId]);
+            if ((int) ($this->debugConversationId ?? 0) === $conversationId) {
+                $this->closeDebugModal();
+            }
+            if ((int) ($this->modalConversation->id ?? 0) === $conversationId) {
+                $this->closeConversationModal();
+            }
+
+            $refundedTokens = (int) ($result['refunded_tokens'] ?? 0);
+            $refundedLogCount = (int) ($result['refunded_log_count'] ?? 0);
+
+            $message = 'Conversation deleted successfully.';
+            if ($refundedLogCount > 0) {
+                $message .= ' Refunded ' . $refundedTokens . ' tokens from ' . $refundedLogCount . ' usage log(s).';
+            }
+
+            session()->flash('success', $message);
+        } catch (\Throwable $e) {
+            session()->flash('error', 'Failed to delete conversation: ' . $e->getMessage());
+        }
     }
 
     public function render()

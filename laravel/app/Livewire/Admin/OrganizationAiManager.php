@@ -52,6 +52,7 @@ class OrganizationAiManager extends Component
     public $guardrailCategories = [];
     public $approvedSensitiveCategories = [];
     public $pricingActionRequiresKeywords = false;
+    public $queryTranslationMap = '';
     public $intentKeywords = [
         'booking' => '',
         'pricing' => '',
@@ -79,6 +80,7 @@ class OrganizationAiManager extends Component
         'verifiedOnlyMode' => 'boolean',
         'guardrailCategories' => 'nullable|array',
         'approvedSensitiveCategories' => 'nullable|array',
+        'queryTranslationMap' => 'nullable|string|max:12000',
         'notifyChatEmailMode' => 'required|in:immediate,digest',
         'notifyChatEmailIntervalMinutes' => 'required|integer|min:1|max:120'
     ];
@@ -153,6 +155,12 @@ class OrganizationAiManager extends Component
         $this->guardrailCategories = $settings['guardrail_categories'] ?? [];
         $this->approvedSensitiveCategories = $settings['approved_sensitive_categories'] ?? [];
         $this->pricingActionRequiresKeywords = (bool) ($settings['pricing_action_requires_keywords'] ?? false);
+        $translationMap = $settings['query_translation_map'] ?? '';
+        $this->queryTranslationMap = is_array($translationMap)
+            ? $this->keywordsToString(array_map(function ($value, $key) {
+                return is_string($key) ? ($key . ' = ' . $value) : (string) $value;
+            }, $translationMap, array_keys($translationMap)))
+            : (string) $translationMap;
         $storedKeywords = $settings['intent_keywords'] ?? [];
         $this->intentKeywords = [
             'booking' => $this->keywordsToString($storedKeywords['booking'] ?? []),
@@ -429,6 +437,7 @@ class OrganizationAiManager extends Component
             $currentSettings['guardrail_categories'] = array_values(array_unique($this->guardrailCategories ?? []));
             $currentSettings['approved_sensitive_categories'] = array_values(array_unique($this->approvedSensitiveCategories ?? []));
             $currentSettings['pricing_action_requires_keywords'] = (bool) $this->pricingActionRequiresKeywords;
+            $currentSettings['query_translation_map'] = trim((string) $this->queryTranslationMap) ?: null;
 
             $currentSettings['intent_keywords'] = [
                 'booking' => $this->stringToKeywords($this->intentKeywords['booking'] ?? ''),
@@ -496,6 +505,7 @@ class OrganizationAiManager extends Component
             unset($currentSettings['intent_llm_repeat_penalty']);
             unset($currentSettings['org_type']);
             unset($currentSettings['intent_keywords']);
+            unset($currentSettings['query_translation_map']);
             unset($currentSettings['notify_chat_email_enabled']);
             unset($currentSettings['notify_chat_emails']);
             

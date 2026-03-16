@@ -33,6 +33,7 @@ class WidgetController
     private $aiAgentService;
     private $faqFollowUpService;
     private $followUpStateService;
+    private array $activeFollowUpTranslationMap = [];
 
     /** Accumulated debug fields for a single chat request — written once per request. */
     private array $debugData = [];
@@ -401,6 +402,8 @@ class WidgetController
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            $this->primeFollowUpTranslationMap($organization);
+
             if (!$this->isWidgetRequestAllowedForOrganization($organization, $request)) {
                 return response()->json(['error' => 'Widget request origin is not allowed for this organization'], 403)
                     ->header('X-Robots-Tag', 'noindex, nofollow');
@@ -714,45 +717,27 @@ class WidgetController
                 $lastUserMessage,
                 is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
                 is_array($previousContextPayloads) ? $previousContextPayloads : [],
-                $hasPendingFollowUpState
+                $hasPendingFollowUpState,
+                $hasPendingFollowUpState ? $pendingFollowUpState : null
             );
 
             $canReusePreviousContext = !empty($previousContextPayloads)
                 && $isRelatedFollowUp;
+            $shouldUsePendingStateAnchor = $this->shouldAnchorWithPendingFollowUpState(
+                (string) $message,
+                $hasPendingFollowUpState ? $pendingFollowUpState : null
+            );
 
             $searchQuery = $message;
-            if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp) && !$canReusePreviousContext) {
-                if ($isAffirmativeFollowUp && $hasPendingFollowUpState) {
-                    $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
-                    if ($this->isMinimalAcknowledgementMessage((string) $message)) {
-                        if ($lastUserMessage !== '') {
-                            $searchQuery = trim($lastUserMessage . ' ' . $searchQuery);
-                        }
-                    }
-                } else {
-                $queryParts = [];
-                $followUpTopicAnchor = $this->buildFollowUpTopicAnchor($lastUserMessage);
-
-                if ($followUpTopicAnchor !== '') {
-                    $queryParts[] = $followUpTopicAnchor;
-                } elseif ($lastUserMessage !== '') {
-                    $queryParts[] = $lastUserMessage;
-                }
-
-                if ($isReferentialFollowUp && $hasPendingFollowUpState) {
-                    $pinned = trim((string) $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message));
-                    if ($pinned !== '') {
-                        $queryParts[] = $pinned;
-                    }
-                }
-
-                if (is_string($lastAssistantMessage) && trim($lastAssistantMessage) !== '' && $this->responseHasQuestion($lastAssistantMessage)) {
-                    $queryParts[] = trim($lastAssistantMessage);
-                }
-
-                $queryParts[] = $message;
-                $searchQuery = trim(implode(' ', array_filter($queryParts)));
-                }
+            if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $shouldUsePendingStateAnchor) && !$canReusePreviousContext) {
+                $searchQuery = $this->buildRelatedFollowUpSearchQuery(
+                    (string) $message,
+                    $hasPendingFollowUpState ? $pendingFollowUpState : null,
+                    $lastUserMessage,
+                    is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
+                    $isAffirmativeFollowUp,
+                    $isReferentialFollowUp
+                );
             }
 
             // Load Shopify integration early — before the query rewrite — so we can skip
@@ -1150,6 +1135,10 @@ class WidgetController
                         $this->debugData['rewritten_query'] = $searchDebug['rewritten_query'];
                     }
                 }
+
+                if ($this->isPolicySupportQuestion((string) $message) && $maxResultScore <= 0.0) {
+                    $orderedResults = [];
+                }
                 
                 // Deduplicate results: skip items whose URL or content we've already added to context
                 $seenContextKeys = [];
@@ -1357,6 +1346,34 @@ class WidgetController
                 }
             }
 
+            if ($this->isPolicySupportQuestion((string) $message)
+                && empty($shopifyContext)
+                && isset($maxResultScore)
+                && $maxResultScore <= 0.0) {
+                $safeResponse = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $safeResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->debugData['clarification_sought'] = true;
+                $this->debugData['response_path'] = 'clarification';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->writeDebugLog($conversation);
+
+                return response()->json([
+                    'response' => $safeResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             // Build context with Shopify data priority
             $finalContext = '';
             if (!empty($shopifyContext)) {
@@ -1389,7 +1406,34 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            $hasVerifiedKnowledgeContext = trim((string) $context) !== '' || !empty($shopifyContext);
             $hasVerifiedContext = !empty($finalContext) || !empty($shopifyContext);
+
+            if ($this->isPolicySupportQuestion((string) $message) && !$hasVerifiedKnowledgeContext) {
+                $safeResponse = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $safeResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->debugData['clarification_sought'] = true;
+                $this->debugData['response_path'] = 'clarification';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->writeDebugLog($conversation);
+
+                return response()->json([
+                    'response' => $safeResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             if ($this->shouldUseAffirmativeNoContextFallback($isAffirmativeContinuation, $context, $shopifyContext, null)) {
                 $safeResponse = $this->buildAffirmativeNoContextResponse($organization);
 
@@ -1482,7 +1526,8 @@ class WidgetController
                     $organization->id,
                     $tokenMessages,
                     $branchResponse,
-                    'faq_direct'
+                    'faq_direct',
+                    $sessionId
                 );
 
                 $conversation = $this->saveConversationToDatabase(
@@ -1585,7 +1630,7 @@ class WidgetController
 
                         // Always use the org's configured model routed to vast.ai GPU.
                         // Same model used for main chat so it is already warm from recent queries.
-                        $paraphraseOptions = ['num_predict' => $dynamicNumPredict, 'temperature' => 0.3, 'use_vastai' => true];
+                        $paraphraseOptions = ['num_predict' => $dynamicNumPredict, 'temperature' => 0.3, 'use_vastai' => true, 'session_id' => $sessionId];
                         $paraphraseModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
                         $paraphraseResponse = $this->aiAgentService->llmChat(
                             $paraphraseMessages,
@@ -1625,7 +1670,8 @@ class WidgetController
                         $organization->id,
                         $tokenMessages,
                         $finalFaqResponse,
-                        'faq_direct'
+                        'faq_direct',
+                        $sessionId
                     );
                 }
 
@@ -1957,22 +2003,31 @@ class WidgetController
                     $lowRelevanceWarning = '';
                 }
 
+                $shouldUsePolicySupportFallback = $this->isPolicySupportQuestion((string) $message)
+                    && !$this->isContactQuery($message)
+                    && empty($shopifyContext)
+                    && trim((string) $context) === '';
+
                 // When search confidence is too low to give a reliable answer, skip the LLM
                 // and ask the visitor to clarify — this prevents hallucination and wrong answers.
-                if (isset($maxResultScore)
-                    && $maxResultScore > 0.0
-                    && $maxResultScore < 0.60
+                if (($shouldUsePolicySupportFallback
+                        || (isset($maxResultScore)
+                            && $maxResultScore > 0.0
+                            && $maxResultScore < 0.60))
                     && !$this->isContactQuery($message)
                     && empty($shopifyContext)
                     && !($hasCachedTurns && ($isContextualShortFollowUp || $isReferentialFollowUp))) {
                     // ^^ Skip clarification when LLM already has cached context for this follow-up.
                     //    The LLM can answer from conversation history — no Qdrant context needed.
-                    $clarificationResponse = $this->buildGeneralClarificationResponse($message);
+                    $clarificationResponse = $this->isPolicySupportQuestion((string) $message)
+                        ? $this->buildPolicySupportUnavailableResponse($organization, (string) $message)
+                        : $this->buildGeneralClarificationResponse($message);
 
                     Log::info('Widget low-confidence clarification returned (non-stream)', [
                         'org_id' => $organization->id,
                         'session_id' => $sessionId,
                         'best_score' => $maxResultScore,
+                        'policy_no_context' => $shouldUsePolicySupportFallback,
                         'message' => $message,
                     ]);
 
@@ -2062,8 +2117,9 @@ class WidgetController
                 $systemPrompt .= " " . $supplementaryInstruction;
             }
 
-            $systemPrompt .= "\n\nOUTPUT ENVELOPE: Return JSON ONLY with keys: response (string), entity (string), topics_covered (string array), follow_up (object|null with type and topic array).";
+            $systemPrompt .= "\n\nOUTPUT ENVELOPE: Return JSON ONLY with keys: response (string), entity (string), resolved_anchor (string), anchor_facets (string array), topics_covered (string array), follow_up (object|null with type and topic array).";
             $systemPrompt .= " Keep response natural and concise for users. Set follow_up=null if not asking a follow-up question.";
+            $systemPrompt .= " Use resolved_anchor as the canonical subject of the CURRENT user turn, even when the user omitted it in a follow-up. Preserve exact product, test, class, service, order, or item names from CURRENT CONTEXT when available. Use anchor_facets for short qualifiers like stock, price, admission, fee, timing, requirement, delivery, size, color, or schedule.";
 
             // Get AI response using llmChat for better token tracking
             $messages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $finalContext);
@@ -2096,17 +2152,18 @@ class WidgetController
             $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
             if ($this->shouldUseOpenAiFallback($message, $organization, $responseLanguage)) {
                 $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
-                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id);
+                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id, $sessionId);
             } elseif ($aiProvider === 'openai') {
                 // Use OpenAI with organization-specific or global model
                 $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
-                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id);
+                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id, $sessionId);
             } else {
                 // Use local LLM with organization-specific or global model
                 $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
                 // Always route to vast.ai GPU — it is faster than local CPU inference and
                 // ensures the model is warm from previous requests.
                 $localOptions['use_vastai'] = true;
+                $localOptions['session_id'] = $sessionId;
                 $aiResponse = $this->aiAgentService->llmChat($messages, $model, null, $organization->id, $localOptions);
             }
 
@@ -2185,13 +2242,23 @@ class WidgetController
                 'raw_ai_response_preview' => substr((string) $rawResponseText, 0, 300) . '...',
             ]);
             if (!empty($hasShopifyData)) {
-                $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
-                if ($structuredShopifyOrderResponse !== null) {
-                    $responseText = $structuredShopifyOrderResponse;
+                $structuredShopifyAvailabilityResponse = $this->buildStructuredShopifyAvailabilityResponse((string) $searchQuery, $shopifyData);
+                if ($structuredShopifyAvailabilityResponse !== null) {
+                    $responseText = $structuredShopifyAvailabilityResponse;
                 } else {
-                    $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $searchQuery, $shopifyData);
-                    if ($structuredShopifyProductResponse !== null) {
-                        $responseText = $structuredShopifyProductResponse;
+                    $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $searchQuery, $shopifyData);
+                    if ($structuredShopifyMismatchResponse !== null) {
+                        $responseText = $structuredShopifyMismatchResponse;
+                    } else {
+                        $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
+                        if ($structuredShopifyOrderResponse !== null) {
+                            $responseText = $structuredShopifyOrderResponse;
+                        } else {
+                            $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $searchQuery, $shopifyData);
+                            if ($structuredShopifyProductResponse !== null) {
+                                $responseText = $structuredShopifyProductResponse;
+                            }
+                        }
                     }
                 }
                 $responseText = $this->normalizeShopifyResponseText($responseText);
@@ -2407,6 +2474,8 @@ class WidgetController
         if (!$organization || !$organization->is_active) {
             return response()->json(['error' => 'Organization not found or inactive'], 404);
         }
+
+        $this->primeFollowUpTranslationMap($organization);
 
         if (!$this->isWidgetRequestAllowedForOrganization($organization, $request)) {
             return response()->json(['error' => 'Widget request origin is not allowed for this organization'], 403);
@@ -2745,44 +2814,26 @@ class WidgetController
                     $lastUserMessage,
                     is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
                     is_array($previousContextPayloads) ? $previousContextPayloads : [],
-                    is_array($pendingFollowUpState) && !empty($pendingFollowUpState)
+                    is_array($pendingFollowUpState) && !empty($pendingFollowUpState),
+                    is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null
                 );
                 $canReusePreviousContext = !empty($previousContextPayloads)
                     && $isRelatedFollowUp;
+                $shouldUsePendingStateAnchor = $this->shouldAnchorWithPendingFollowUpState(
+                    (string) $message,
+                    is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null
+                );
 
                 $searchQuery = $message;
-                if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp) && !$canReusePreviousContext) {
-                    if ($isAffirmativeFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
-                        $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
-                        if ($this->isMinimalAcknowledgementMessage((string) $message)) {
-                            if ($lastUserMessage !== '') {
-                                $searchQuery = trim($lastUserMessage . ' ' . $searchQuery);
-                            }
-                        }
-                    } else {
-                        $queryParts = [];
-                        $followUpTopicAnchor = $this->buildFollowUpTopicAnchor($lastUserMessage);
-
-                        if ($followUpTopicAnchor !== '') {
-                            $queryParts[] = $followUpTopicAnchor;
-                        } elseif ($lastUserMessage !== '') {
-                            $queryParts[] = $lastUserMessage;
-                        }
-
-                        if ($isReferentialFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
-                            $pinned = trim((string) $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message));
-                            if ($pinned !== '') {
-                                $queryParts[] = $pinned;
-                            }
-                        }
-
-                        if (is_string($lastAssistantMessage) && trim($lastAssistantMessage) !== '' && $this->responseHasQuestion($lastAssistantMessage)) {
-                            $queryParts[] = trim($lastAssistantMessage);
-                        }
-
-                        $queryParts[] = $message;
-                        $searchQuery = trim(implode(' ', array_filter($queryParts)));
-                    }
+                if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $shouldUsePendingStateAnchor) && !$canReusePreviousContext) {
+                    $searchQuery = $this->buildRelatedFollowUpSearchQuery(
+                        (string) $message,
+                        is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null,
+                        $lastUserMessage,
+                        is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
+                        $isAffirmativeFollowUp,
+                        $isReferentialFollowUp
+                    );
                 } elseif ($isAffirmativeContinuation) {
                     if ($isAffirmativeFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
                         $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
@@ -2932,6 +2983,17 @@ class WidgetController
                             if (!empty($anchoredEntityResults)) {
                                 $resultsForPayloadCache = $anchoredEntityResults;
                             }
+
+                            if ($this->isPolicySupportQuestion((string) $message)) {
+                                $policyMaxResultScore = 0.0;
+                                foreach ($searchResults['results'] as $_streamResult) {
+                                    $policyMaxResultScore = max($policyMaxResultScore, (float) ($_streamResult['score'] ?? 0));
+                                }
+
+                                if ($policyMaxResultScore <= 0.0) {
+                                    $resultsForPayloadCache = [];
+                                }
+                            }
                         }
                     }
 
@@ -2987,7 +3049,9 @@ class WidgetController
                             'query' => $searchQuery,
                         ]);
 
-                        $clarificationResponse = $this->buildEntityClarificationResponse((string) $searchQuery);
+                        $clarificationResponse = $this->isPolicySupportQuestion((string) $message)
+                            ? $this->buildPolicySupportUnavailableResponse($organization, (string) $message)
+                            : $this->buildEntityClarificationResponse((string) $message);
                         echo "data: " . json_encode(['content' => $clarificationResponse, 'done' => true]) . "\n\n";
                         $this->streamFlush();
 
@@ -3294,7 +3358,8 @@ class WidgetController
                         $organization->id,
                         $tokenMessages,
                         $directResponse,
-                        'faq_direct'
+                        'faq_direct',
+                        $sessionId
                     );
 
                     echo "data: " . json_encode(['content' => $directResponse, 'done' => true]) . "\n\n";
@@ -3379,7 +3444,7 @@ class WidgetController
                                 $streamParaModel,
                                 null,
                                 $organization->id,
-                                ['num_predict' => $dynTokens, 'temperature' => 0.3]
+                                ['num_predict' => $dynTokens, 'temperature' => 0.3, 'session_id' => $sessionId]
                             );
                             if ($streamParaResp && isset($streamParaResp['message']['content'])) {
                                 $directResponse = trim($streamParaResp['message']['content']);
@@ -3419,7 +3484,8 @@ class WidgetController
                             $organization->id,
                             $tokenMessages,
                             $directResponse,
-                            'faq_direct'
+                            'faq_direct',
+                            $sessionId
                         );
                     }
 
@@ -3801,12 +3867,19 @@ class WidgetController
                     }
                 }
 
-                // When search confidence is too low, skip the LLM and ask for clarification
-                if ($streamMaxResultScore > 0.0
-                    && $streamMaxResultScore < 0.60
+                $shouldUsePolicySupportStreamFallback = $this->isPolicySupportQuestion((string) $message)
+                    && !$this->isContactQuery($message)
+                    && !$liveData
+                    && trim((string) $contextForPrompt) === '';
+
+                // When search confidence is too low, skip the LLM and ask for clarification.
+                if (($shouldUsePolicySupportStreamFallback
+                        || ($streamMaxResultScore > 0.0 && $streamMaxResultScore < 0.60))
                     && !$liveData
                     && !$this->isContactQuery($message)) {
-                    $clarificationResponse = $this->buildGeneralClarificationResponse($message);
+                    $clarificationResponse = $this->isPolicySupportQuestion((string) $message)
+                        ? $this->buildPolicySupportUnavailableResponse($organization, (string) $message)
+                        : $this->buildGeneralClarificationResponse($message);
 
                     echo "data: " . json_encode(['content' => $clarificationResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
@@ -3815,6 +3888,7 @@ class WidgetController
                         'org_id' => $organization->id,
                         'session_id' => $sessionId,
                         'best_score' => $streamMaxResultScore,
+                        'policy_no_context' => $shouldUsePolicySupportStreamFallback,
                         'message' => $message,
                     ]);
 
@@ -3941,7 +4015,7 @@ class WidgetController
 
                 if ($useOpenAiFallback) {
                     $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
-                    $aiResponse = $this->aiAgentService->openAiChat($chatMessages, $model, null, $organization->id);
+                    $aiResponse = $this->aiAgentService->openAiChat($chatMessages, $model, null, $organization->id, $sessionId);
                     $fullResponse = (string) ($aiResponse['message']['content'] ?? '');
 
                     if (trim($fullResponse) !== '') {
@@ -4379,7 +4453,8 @@ class WidgetController
                         $organization->id,
                         $chatMessages,
                         $finalResponse,
-                        'llm_chat_stream'
+                        'llm_chat_stream',
+                        $sessionId
                     );
 
                     $conversation = $this->saveConversationToDatabase(
@@ -5421,7 +5496,21 @@ class WidgetController
                 $to = strtolower(trim(preg_replace('/\s+/', ' ', $to) ?? $to));
 
                 if ($from !== '' && $to !== '') {
-                    $map[$from] = $to;
+                    $aliases = array_values(array_filter(array_map(function ($value) {
+                        $value = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
+                        return $value;
+                    }, preg_split('/,/', $to) ?: [])));
+
+                    if (count($aliases) > 1) {
+                        $map[$from] = $from;
+                        foreach ($aliases as $alias) {
+                            if ($alias !== '') {
+                                $map[$alias] = $from;
+                            }
+                        }
+                    } else {
+                        $map[$from] = $to;
+                    }
                 }
             }
 
@@ -5444,7 +5533,20 @@ class WidgetController
                 $toNorm = strtolower(trim((string) $to));
 
                 if ($fromNorm !== '' && $toNorm !== '') {
-                    $map[$fromNorm] = $toNorm;
+                    $aliases = array_values(array_filter(array_map(function ($value) {
+                        return strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
+                    }, preg_split('/,/', $toNorm) ?: [])));
+
+                    if (count($aliases) > 1) {
+                        $map[$fromNorm] = $fromNorm;
+                        foreach ($aliases as $alias) {
+                            if ($alias !== '') {
+                                $map[$alias] = $fromNorm;
+                            }
+                        }
+                    } else {
+                        $map[$fromNorm] = $toNorm;
+                    }
                 }
             }
         }
@@ -5783,6 +5885,7 @@ class WidgetController
 
     private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message, string $context = ''): array
     {
+        $this->primeFollowUpTranslationMap($organization);
         $hasContext = trim($context) !== '';
         $historyLimit = 4; // default
         $isShortFollowUp = $this->isShortFollowUp($message);
@@ -5793,12 +5896,17 @@ class WidgetController
         $lastUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
         $lastUserMessage = is_string($lastUserMessage) ? trim($lastUserMessage) : '';
         $lastAssistantAskedQuestion = $lastAssistant !== null && $this->responseHasQuestion($lastAssistant);
+        $conversation = ChatConversation::where('conversation_id', $sessionId)
+            ->where('organization_id', $organization->id)
+            ->first();
+        $pendingFollowUpState = $this->followUpStateService->getPendingState($conversation);
         $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
             $message,
             $lastUserMessage,
             is_string($lastAssistant) ? $lastAssistant : '',
             [],
-            false
+            is_array($pendingFollowUpState) && !empty($pendingFollowUpState),
+            is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null
         );
         $isLikelyShortReply = $isRelatedFollowUp
             && ($isShortFollowUp || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion));
@@ -6026,10 +6134,15 @@ class WidgetController
         ?string $lastUserMessage,
         ?string $lastAssistantMessage = null,
         array $previousContextPayloads = [],
-        bool $hasPendingFollowUpState = false
+        bool $hasPendingFollowUpState = false,
+        ?array $pendingFollowUpState = null
     ): bool {
         $current = trim(strip_tags($message));
         if ($current === '') {
+            return false;
+        }
+        
+        if ($this->isPolicySupportQuestion($current)) {
             return false;
         }
 
@@ -6039,6 +6152,10 @@ class WidgetController
 
         if ($this->isAffirmativeFollowUp($current) || $this->isNegativeFollowUp($current)) {
             return $lastAssistantAskedQuestion || $hasPendingFollowUpState;
+        }
+
+        if ($hasPendingFollowUpState && $this->messageMatchesPendingFollowUpState($current, $pendingFollowUpState)) {
+            return true;
         }
 
         if ($this->isReferentialFollowUpMessage($current)) {
@@ -6058,6 +6175,56 @@ class WidgetController
         }
 
         return false;
+    }
+
+    private function buildRelatedFollowUpSearchQuery(
+        string $message,
+        ?array $pendingFollowUpState,
+        ?string $lastUserMessage,
+        ?string $lastAssistantMessage,
+        bool $isAffirmativeFollowUp,
+        bool $isReferentialFollowUp
+    ): string {
+        $message = trim($message);
+        if ($message === '') {
+            return '';
+        }
+
+        $lastUserMessage = trim((string) ($lastUserMessage ?? ''));
+        $lastAssistantMessage = trim((string) ($lastAssistantMessage ?? ''));
+
+        if ($this->shouldAnchorWithPendingFollowUpState($message, $pendingFollowUpState)) {
+            $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, $message);
+            if ($isAffirmativeFollowUp && $this->isMinimalAcknowledgementMessage($message) && $lastUserMessage !== '') {
+                $searchQuery = trim($lastUserMessage . ' ' . $searchQuery);
+            }
+
+            return $searchQuery !== '' ? $searchQuery : $message;
+        }
+
+        $queryParts = [];
+        $followUpTopicAnchor = $this->buildFollowUpTopicAnchor($lastUserMessage);
+
+        if ($followUpTopicAnchor !== '') {
+            $queryParts[] = $followUpTopicAnchor;
+        } elseif ($lastUserMessage !== '') {
+            $queryParts[] = $lastUserMessage;
+        }
+
+        if ($isReferentialFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
+            $pinned = trim((string) $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, $message));
+            if ($pinned !== '') {
+                $queryParts[] = $pinned;
+            }
+        }
+
+        if ($lastAssistantMessage !== '' && $this->responseHasQuestion($lastAssistantMessage)) {
+            $queryParts[] = $lastAssistantMessage;
+        }
+
+        $queryParts[] = $message;
+
+        return trim(implode(' ', array_filter($queryParts)));
     }
 
     private function isEllipticalFollowUpMessage(string $message): bool
@@ -6150,6 +6317,165 @@ class WidgetController
         }));
 
         return array_values(array_unique($tokens));
+    }
+
+    private function shouldAnchorWithPendingFollowUpState(string $message, ?array $pendingFollowUpState): bool
+    {
+        if (!is_array($pendingFollowUpState) || empty($pendingFollowUpState)) {
+            return false;
+        }
+        
+        if ($this->isPolicySupportQuestion($message)) {
+            return false;
+        }
+
+        if ($this->isAffirmativeFollowUp($message) || $this->isReferentialFollowUpMessage($message) || $this->isEllipticalFollowUpMessage($message)) {
+            return true;
+        }
+
+        return $this->messageMatchesPendingFollowUpState($message, $pendingFollowUpState);
+    }
+
+    private function messageMatchesPendingFollowUpState(string $message, ?array $pendingFollowUpState): bool
+    {
+        $normalizedMessage = $this->normalizeFollowUpAnchorText($message);
+        if ($normalizedMessage === '') {
+            return false;
+        }
+
+        foreach ($this->extractPendingFollowUpAnchorTerms($pendingFollowUpState) as $anchor) {
+            if ($anchor !== '' && str_contains($normalizedMessage, $anchor)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function extractPendingFollowUpAnchorTerms(?array $pendingFollowUpState): array
+    {
+        if (!is_array($pendingFollowUpState) || empty($pendingFollowUpState)) {
+            return [];
+        }
+
+        $sources = [];
+
+        $resolvedAnchor = trim((string) ($pendingFollowUpState['resolved_anchor'] ?? ''));
+        if ($resolvedAnchor !== '') {
+            $sources[] = $resolvedAnchor;
+        }
+
+        $entity = trim((string) ($pendingFollowUpState['entity'] ?? ''));
+        if ($entity !== '') {
+            $sources[] = $entity;
+        }
+
+        $anchorFacets = $pendingFollowUpState['anchor_facets'] ?? [];
+        if (is_string($anchorFacets)) {
+            $anchorFacets = [$anchorFacets];
+        }
+        if (is_array($anchorFacets)) {
+            foreach ($anchorFacets as $facet) {
+                $facet = trim(str_replace('_', ' ', (string) $facet));
+                if ($facet !== '') {
+                    $sources[] = $facet;
+                }
+            }
+        }
+
+        foreach (['topic_hints', 'topics_covered'] as $key) {
+            $items = $pendingFollowUpState[$key] ?? [];
+            if (is_string($items)) {
+                $items = [$items];
+            }
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    $item = trim(str_replace('_', ' ', (string) $item));
+                    if ($item !== '') {
+                        $sources[] = $item;
+                    }
+                }
+            }
+        }
+
+        $followUpTopics = $pendingFollowUpState['follow_up']['topic'] ?? [];
+        if (is_string($followUpTopics)) {
+            $followUpTopics = [$followUpTopics];
+        }
+        if (is_array($followUpTopics)) {
+            foreach ($followUpTopics as $topic) {
+                $topic = trim(str_replace('_', ' ', (string) $topic));
+                if ($topic !== '') {
+                    $sources[] = $topic;
+                }
+            }
+        }
+
+        $question = trim((string) ($pendingFollowUpState['question'] ?? ''));
+        if ($question !== '') {
+            $sources[] = $question;
+        }
+
+        $anchors = [];
+        foreach ($sources as $source) {
+            $normalizedSource = $this->normalizeFollowUpAnchorText($source);
+            if ($normalizedSource !== '') {
+                $anchors[] = $normalizedSource;
+            }
+
+            foreach ($this->extractMeaningfulFollowUpTerms($source) as $term) {
+                $normalizedTerm = $this->normalizeFollowUpAnchorText($term);
+                if ($normalizedTerm !== '') {
+                    $anchors[] = $normalizedTerm;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($anchors)));
+    }
+
+    private function normalizeFollowUpAnchorText(string $text): string
+    {
+        $normalized = mb_strtolower(strip_tags($text));
+        $normalized = str_replace('_', ' ', $normalized);
+        $normalized = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $normalized) ?? $normalized;
+
+        if (!empty($this->activeFollowUpTranslationMap)) {
+            $normalized = $this->applyFollowUpTranslationMap($normalized, $this->activeFollowUpTranslationMap);
+        }
+
+        return trim((string) preg_replace('/\s+/', ' ', $normalized));
+    }
+
+    private function primeFollowUpTranslationMap(Organization $organization): void
+    {
+        $this->activeFollowUpTranslationMap = $this->getOrganizationQueryTranslationMap($organization);
+    }
+
+    private function applyFollowUpTranslationMap(string $text, array $translationMap): string
+    {
+        $normalized = trim((string) preg_replace('/\s+/', ' ', mb_strtolower($text)));
+        if ($normalized === '' || empty($translationMap)) {
+            return $normalized;
+        }
+
+        uksort($translationMap, function ($left, $right) {
+            return mb_strlen((string) $right) <=> mb_strlen((string) $left);
+        });
+
+        foreach ($translationMap as $from => $to) {
+            $from = trim((string) $from);
+            $to = trim((string) $to);
+
+            if ($from === '' || $to === '') {
+                continue;
+            }
+
+            $pattern = '/\b' . preg_quote($from, '/') . '\b/u';
+            $normalized = preg_replace($pattern, $to, $normalized) ?? $normalized;
+        }
+
+        return trim((string) preg_replace('/\s+/', ' ', $normalized));
     }
 
     private function buildFollowUpTopicAnchor(?string $lastUserMessage): string
@@ -7043,7 +7369,7 @@ class WidgetController
         }
 
         $basePrice = null;
-        if (preg_match('/\bartist_price\s*=\s*"?([0-9][0-9,]*(?:\.\d{1,2})?)"?/i', $context, $match)) {
+        if (preg_match('/(?:^|\n)\s*(?:Price|Retail\s*Price|Sale\s*Price|selling_price|price_inr)\s*[=:]\s*["\']?([0-9][0-9,]*(?:\.\d{1,2})?)/im', $context, $match)) {
             $basePrice = trim((string) ($match[1] ?? ''));
         }
 
@@ -7180,7 +7506,7 @@ class WidgetController
         preg_match_all('/(?:₹|rs\.?|inr|\$|€|£)\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i', $text, $matches);
         $values = $matches[1] ?? [];
 
-        preg_match_all('/\b(?:artist_price|price|cost|amount)\b\s*(?:[:=]\s*|=\s*"?)([0-9][0-9,]*(?:\.\d{1,2})?)/i', $text, $fieldMatches);
+        preg_match_all('/\b(?:price|retail\s*price|sale\s*price|selling_price|price_inr|cost|amount)\b\s*(?:[:=]\s*|=\s*"?)([0-9][0-9,]*(?:\.\d{1,2})?)/i', $text, $fieldMatches);
         foreach (($fieldMatches[1] ?? []) as $fieldValue) {
             $values[] = (string) $fieldValue;
         }
@@ -7269,12 +7595,21 @@ class WidgetController
     private function extractCatalogBasePriceFromPayload(array $payload): ?float
     {
         $candidates = [
-            $payload['artist_price'] ?? null,
             $payload['price'] ?? null,
-            data_get($payload, 'metadata.artist_price'),
+            $payload['sale_price'] ?? null,
+            $payload['special_price'] ?? null,
+            $payload['regular_price'] ?? null,
+            $payload['price_inr'] ?? null,
             data_get($payload, 'metadata.price'),
-            data_get($payload, 'metadata.csv.artist_price'),
+            data_get($payload, 'metadata.sale_price'),
+            data_get($payload, 'metadata.special_price'),
+            data_get($payload, 'metadata.regular_price'),
+            data_get($payload, 'metadata.price_inr'),
             data_get($payload, 'metadata.csv.price'),
+            data_get($payload, 'metadata.csv.sale_price'),
+            data_get($payload, 'metadata.csv.special_price'),
+            data_get($payload, 'metadata.csv.regular_price'),
+            data_get($payload, 'metadata.csv.price_inr'),
         ];
 
         foreach ($candidates as $candidate) {
@@ -7295,7 +7630,7 @@ class WidgetController
 
         $content = (string) ($payload['content'] ?? '');
         if ($content !== '') {
-            if (preg_match('/\bartist_price\s*=\s*"?([0-9][0-9,]*(?:\.\d{1,2})?)"?/i', $content, $match)) {
+            if (preg_match('/(?:^|\n)\s*(?:Price|Retail\s*Price|Sale\s*Price|selling_price|price_inr)\s*[=:]\s*["\']?(\d[\d,\.]*)(?:["\']|\b)/im', $content, $match)) {
                 $normalized = $this->normalizeMonetaryValue((string) ($match[1] ?? ''));
                 if ($normalized !== '') {
                     $value = (float) $normalized;
@@ -8437,6 +8772,36 @@ class WidgetController
         return "I want to give you the correct details, but I couldn't confidently match the exact item or service from your message. Please share the exact name (or SKU/code), and I'll verify availability, pricing, and options for that exact match.";
     }
 
+    private function isPolicySupportQuestion(string $message): bool
+    {
+        return (bool) preg_match('/\b(ship|shipping|deliver|delivery|international|outside\s+usa|outside\s+the\s+usa|outside\s+us|outside\s+the\s+us|return|refund|exchange|warranty|guarantee|policy|policies)\b/i', $message);
+    }
+
+    private function buildPolicySupportUnavailableResponse(Organization $organization, string $message): string
+    {
+        $topic = 'that';
+
+        if ((bool) preg_match('/\b(ship|shipping|deliver|delivery)\b/i', $message)) {
+            $topic = (bool) preg_match('/\b(outside\s+usa|outside\s+the\s+usa|outside\s+us|outside\s+the\s+us|international)\b/i', $message)
+                ? 'whether we ship outside the USA'
+                : 'shipping';
+        } elseif ((bool) preg_match('/\b(return|refund|exchange)\b/i', $message)) {
+            $topic = 'our return, refund, or exchange policy';
+        } elseif ((bool) preg_match('/\b(warranty|guarantee)\b/i', $message)) {
+            $topic = 'our warranty or guarantee policy';
+        } elseif ((bool) preg_match('/\bpolicy|policies\b/i', $message)) {
+            $topic = 'that policy';
+        }
+
+        $contact = $this->buildContactResponse(
+            $organization->contact_email ?? null,
+            $organization->contact_phone ?? null,
+            $organization->website ?: config('app.url')
+        );
+
+        return "I don't have verified information in our knowledge base about {$topic} right now. {$contact}";
+    }
+
     private function shouldDeferStreamUntilPostProcess(string $message, string $searchQuery, ?array $intentResult, string $context): bool
     {
         $combined = strtolower(trim($message . ' ' . $searchQuery));
@@ -8454,7 +8819,7 @@ class WidgetController
             return true;
         }
 
-        if ((bool) preg_match('/\b(Title:|Service:|Ex-showroom Price|On-road Price|Is in stock|artist_price|Sku:)\b/i', $context)) {
+        if ((bool) preg_match('/\b(Title:|Service:|Ex-showroom Price|On-road Price|Is in stock|Sku:|Price:|Retail Price|Sale Price|price_inr)\b/i', $context)) {
             return true;
         }
 
@@ -8570,6 +8935,10 @@ class WidgetController
         $followUpQuestion = trim($currentMessage);
         if ($followUpQuestion === '') {
             return trim($currentSearchQuery);
+        }
+        
+        if ($this->isPolicySupportQuestion($followUpQuestion)) {
+            return $followUpQuestion;
         }
 
         $originalQuestion = trim((string) $this->getLastUserMessageForSession($organization->id, $sessionId));
@@ -9181,6 +9550,84 @@ class WidgetController
         return implode("\n", $lines);
     }
 
+    private function buildStructuredShopifySpecificMatchClarificationResponse(string $message, $shopifyData): ?string
+    {
+        if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
+            return null;
+        }
+
+        if (($shopifyData['specific_match'] ?? true) !== false) {
+            return null;
+        }
+
+        if (!$this->isEntityFocusedCatalogQuery($message)) {
+            return null;
+        }
+
+        return $this->buildEntityClarificationResponse($message);
+    }
+
+    private function buildStructuredShopifyAvailabilityResponse(string $message, $shopifyData): ?string
+    {
+        if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
+            return null;
+        }
+
+        if (($shopifyData['specific_match'] ?? true) !== true) {
+            return null;
+        }
+
+        if (!$this->isShopifyAvailabilityQuery($message)) {
+            return null;
+        }
+
+        $products = array_values(array_filter($shopifyData['data'] ?? [], static function ($product) {
+            return is_array($product) && isset($product['title']);
+        }));
+
+        if (empty($products)) {
+            return null;
+        }
+
+        $product = $products[0];
+        $title = trim((string) ($product['title'] ?? 'Product'));
+        $currency = strtoupper(trim((string) ($product['currency'] ?? 'USD')));
+        $price = isset($product['price']) ? number_format((float) $product['price'], 2) : null;
+        $available = !empty($product['available']);
+        $inventory = isset($product['inventory']) ? max(0, (int) $product['inventory']) : null;
+
+        $lines = [
+            '**Product:** ' . $title,
+            '**Stock:** ' . ($available
+                ? ('Yes, this product is currently in stock' . ($inventory !== null ? ' (' . $inventory . ' available)' : '') . '.')
+                : 'No, this product is currently out of stock.'),
+        ];
+
+        if ($price !== null) {
+            $lines[] = '**Price:** ' . $currency . ' ' . $price;
+        }
+
+        $variantTitles = array_values(array_filter(array_map(function ($variant) {
+            return trim((string) ($variant['title'] ?? ''));
+        }, is_array($product['variants'] ?? null) ? $product['variants'] : []), function ($title) {
+            return $title !== '' && strcasecmp($title, 'Default Title') !== 0;
+        }));
+
+        if (!empty($variantTitles)) {
+            $lines[] = '**Available Sizes/Variants:** ' . implode(', ', array_slice($variantTitles, 0, 12));
+        }
+
+        $lines[] = '';
+        $lines[] = 'Do you want me to look up anything else for you?';
+
+        return implode("\n", $lines);
+    }
+
+    private function isShopifyAvailabilityQuery(string $message): bool
+    {
+        return (bool) preg_match('/\b(availability|available|in\s+stock|stock|out\s+of\s+stock|have\s+in\s+stock|do\s+you\s+have|is\s+this\s+available)\b/i', $message);
+    }
+
     private function extractShopifyBudgetFromMessage(string $message): array
     {
         $currency = null;
@@ -9404,7 +9851,7 @@ class WidgetController
             }
 
             $modelPricing = $this->extractModelPricingFromPayload($p);
-            $payloads[] = [
+            $payloads[] = $this->sanitizeContextPayloadForStorage([
                 'data_type' => $p['data_type'] ?? null,
                 'title' => $p['title'] ?? null,
                 'content' => $p['content'] ?? null,
@@ -9420,10 +9867,47 @@ class WidgetController
                 'supplementary_info' => $this->extractSupplementaryInfoFromPayload($p),
                 'ex_showroom_price_inr' => $modelPricing['ex_showroom_price_inr'] ?? null,
                 'approx_on_road_price_inr' => $modelPricing['approx_on_road_price_inr'] ?? null,
-            ];
+            ]);
         }
 
         return $payloads;
+    }
+
+    private function sanitizeContextPayloadForStorage(array $payload): array
+    {
+        return $this->sanitizeLegacyArtistPriceValue($payload);
+    }
+
+    private function sanitizeLegacyArtistPriceValue($value)
+    {
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                $sanitizedKey = is_string($key) ? trim(strtolower($key)) : $key;
+                if ($sanitizedKey === 'artist_price') {
+                    unset($value[$key]);
+                    continue;
+                }
+
+                $value[$key] = $this->sanitizeLegacyArtistPriceValue($item);
+            }
+
+            return $value;
+        }
+
+        if (!is_string($value) || $value === '') {
+            return $value;
+        }
+
+        $sanitized = preg_replace('/(?:^|,)\s*artist_price\s*=\s*"[^"]*"\s*(?=,|$)/i', '', $value) ?? $value;
+        $sanitized = preg_replace('/(?:^|\n)\s*artist_price\s*[=:]\s*"?[^\n"]*"?\s*(?=\n|$)/im', '', $sanitized) ?? $sanitized;
+        $sanitized = preg_replace('/\bartist_price\s*[=:]\s*"?[0-9][^,\n"]*"?/i', '', $sanitized) ?? $sanitized;
+        $sanitized = preg_replace('/\s+,/', ',', $sanitized) ?? $sanitized;
+        $sanitized = preg_replace('/,\s*,+/', ',', $sanitized) ?? $sanitized;
+        $sanitized = preg_replace('/\n{3,}/', "\n\n", $sanitized) ?? $sanitized;
+        $sanitized = preg_replace('/(?:Additional attributes:\s*)(?:,\s*)+(?=\S)/i', '$1', $sanitized) ?? $sanitized;
+        $sanitized = preg_replace('/^\s*Additional attributes:\s*$/im', '', $sanitized) ?? $sanitized;
+
+        return trim((string) $sanitized, ", \t\n\r\0\x0B");
     }
 
     private function extractSearchKeywordsFromPayload(array $payload): string
@@ -9454,6 +9938,12 @@ class WidgetController
         if (empty($payloads) || trim($sessionId) === '') {
             return;
         }
+
+        $payloads = array_map(function ($payload) {
+            return is_array($payload)
+                ? $this->sanitizeContextPayloadForStorage($payload)
+                : $payload;
+        }, $payloads);
 
         try {
             $conversation = ChatConversation::firstOrCreate(
@@ -10009,6 +10499,7 @@ class WidgetController
             if (!$this->isMinimalAcknowledgementMessage((string) $userMessage)) {
                 $this->followUpStateService->updatePendingState(
                     $conversation,
+                    (string) $userMessage,
                     (string) $aiResponse,
                     is_array($contextPayloads) ? $contextPayloads : [],
                     is_array($structuredFollowUpState) ? $structuredFollowUpState : null
@@ -10087,6 +10578,8 @@ class WidgetController
 
         $state = [
             'entity' => trim((string) ($decoded['entity'] ?? '')),
+            'resolved_anchor' => trim((string) ($decoded['resolved_anchor'] ?? '')),
+            'anchor_facets' => is_array($decoded['anchor_facets'] ?? null) ? $decoded['anchor_facets'] : [],
             'topics_covered' => is_array($decoded['topics_covered'] ?? null) ? $decoded['topics_covered'] : [],
             'follow_up' => is_array($decoded['follow_up'] ?? null) ? $decoded['follow_up'] : null,
         ];
@@ -10119,10 +10612,10 @@ class WidgetController
                 // Strip leading **Response**: or *Response*: prefix if present
                 $cleaned = preg_replace('/^\*{0,2}\s*Response\s*\*{0,2}\s*:?\s*/i', '', trim((string) $cleaned));
                 $cleaned = trim(preg_replace('/\n{3,}/', "\n\n", (string) $cleaned) ?? '');
-                return ['response' => $cleaned !== '' ? $cleaned : trim($rawResponseText), 'entity' => '', 'topics_covered' => [], 'follow_up' => null];
+                return ['response' => $cleaned !== '' ? $cleaned : trim($rawResponseText), 'entity' => '', 'resolved_anchor' => '', 'anchor_facets' => [], 'topics_covered' => [], 'follow_up' => null];
             }
 
-            $system = 'Convert assistant output into strict JSON only. Return exactly one JSON object with keys: response (string), entity (string), topics_covered (array of strings), follow_up (object|null with keys type and topic array). No markdown, no extra text.';
+            $system = 'Convert assistant output into strict JSON only. Return exactly one JSON object with keys: response (string), entity (string), resolved_anchor (string), anchor_facets (array of strings), topics_covered (array of strings), follow_up (object|null with keys type and topic array). No markdown, no extra text.';
             $user = "User message:\n{$userMessage}\n\nAssistant output:\n{$rawResponseText}";
 
             if ($aiProvider === 'openai') {
@@ -10183,17 +10676,37 @@ class WidgetController
 
         $response = '';
         $entity = '';
+        $resolvedAnchor = '';
+        $anchorFacets = [];
         $topicsCovered = [];
         $followUp = null;
 
-        if (preg_match('/response\s*:\s*(.*?)(?=\bentity\s*:|\btopics_covered\s*:|\bfollow_up\s*:|$)/i', $text, $m)) {
+        if (preg_match('/response\s*:\s*(.*?)(?=\bentity\s*:|\bresolved_anchor\s*:|\banchor_facets\s*:|\btopics_covered\s*:|\bfollow_up\s*:|$)/i', $text, $m)) {
             $response = trim((string) ($m[1] ?? ''));
             $response = trim($response, "\"' ");
         }
 
-        if (preg_match('/entity\s*:\s*(.*?)(?=\btopics_covered\s*:|\bfollow_up\s*:|$)/i', $text, $m)) {
+        if (preg_match('/entity\s*:\s*(.*?)(?=\bresolved_anchor\s*:|\banchor_facets\s*:|\btopics_covered\s*:|\bfollow_up\s*:|$)/i', $text, $m)) {
             $entity = trim((string) ($m[1] ?? ''));
             $entity = trim($entity, "\"' ");
+        }
+
+        if (preg_match('/resolved_anchor\s*:\s*(.*?)(?=\banchor_facets\s*:|\btopics_covered\s*:|\bfollow_up\s*:|$)/i', $text, $m)) {
+            $resolvedAnchor = trim((string) ($m[1] ?? ''));
+            $resolvedAnchor = trim($resolvedAnchor, "\"' ");
+        }
+
+        if (preg_match('/anchor_facets\s*:\s*(\[[^\]]*\])/i', $text, $m)) {
+            $rawFacets = (string) ($m[1] ?? '[]');
+            $decodedFacets = json_decode($rawFacets, true);
+            if (!is_array($decodedFacets)) {
+                $fallback = trim($rawFacets, '[] ');
+                $decodedFacets = array_filter(array_map('trim', explode(',', $fallback)));
+                $decodedFacets = array_map(function ($item) {
+                    return trim((string) $item, "\"' ");
+                }, $decodedFacets);
+            }
+            $anchorFacets = is_array($decodedFacets) ? array_values($decodedFacets) : [];
         }
 
         if (preg_match('/topics_covered\s*:\s*(\[[^\]]*\])/i', $text, $m)) {
@@ -10227,6 +10740,8 @@ class WidgetController
             'response' => $response,
             'structured_state' => [
                 'entity' => $entity,
+                'resolved_anchor' => $resolvedAnchor,
+                'anchor_facets' => is_array($anchorFacets) ? $anchorFacets : [],
                 'topics_covered' => is_array($topicsCovered) ? $topicsCovered : [],
                 'follow_up' => is_array($followUp) ? $followUp : null,
             ],

@@ -12,6 +12,7 @@ class TokenUsageLog extends Model
     protected $fillable = [
         'user_id',
         'organization_id',
+        'session_id',
         'subscription_id',
         'endpoint_type',
         'tokens_used',

@@ -61,7 +61,6 @@ class CatalogGeneratePriceTemplate extends Command
             'db_id',            // Internal DB id — use when re-importing (fastest lookup)
             'sku',              // SKU from original catalog
             'name',             // Product name
-            'artist_price',     // Internal cost (for reference only — DO NOT use as retail price)
             'price',            // FILL THIS: Retail price in INR (e.g. 26000)
             'special_price',    // FILL THIS: Sale price (leave empty if no sale)
         ]);
@@ -78,13 +77,6 @@ class CatalogGeneratePriceTemplate extends Command
                 $currentPrice = $csv['price'] ?? '';
                 $specialPrice = $csv['special_price'] ?? '';
 
-                // Extract artist_price from additional_attributes string (reference only)
-                $artistPrice = '';
-                $aa = $csv['additional_attributes'] ?? '';
-                if (preg_match('/artist_price[=:]\s*"?(\d[\d,\.]*)"?/i', $aa, $m)) {
-                    $artistPrice = $m[1];
-                }
-
                 // Skip if already has price and --only-missing is set
                 if ($onlyMissing && $currentPrice !== '' && $currentPrice !== '0' && $currentPrice !== '0.0000') {
                     $skipped++;
@@ -96,7 +88,6 @@ class CatalogGeneratePriceTemplate extends Command
                     $row->id,
                     $sku,
                     $row->name,
-                    $artistPrice,
                     $currentPrice,  // empty for most rows
                     $specialPrice,
                 ]);

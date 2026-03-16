@@ -247,6 +247,21 @@ class ShopifyDataController extends Controller
         $normalizedQuery = preg_replace('/[,;:]+/', ' ', $query);
         $normalizedQuery = preg_replace('/\s+/', ' ', $normalizedQuery);
         $normalizedQuery = trim($normalizedQuery);
+
+        $specificReference = $this->extractSpecificProductReference($normalizedQuery);
+        if (!empty($specificReference)) {
+            Log::info('[SHOPIFY] Specific product reference search', [
+                'original' => $original,
+                'reference' => $specificReference,
+            ]);
+
+            $referenceResults = $this->shopifyService->searchProducts($specificReference, 10);
+            $referenceMaxScore = $this->shopifyService->getLastSearchMaxScore();
+
+            if (!empty($referenceResults) && $this->isConfidentSpecificProductMatch($specificReference, $referenceResults, $referenceMaxScore)) {
+                return ['results' => $referenceResults, 'specific_match' => true];
+            }
+        }
         
         // Use LLM to extract product keyword(s) from natural language
         $keywords = $this->extractProductKeyword($normalizedQuery);
@@ -256,8 +271,7 @@ class ShopifyDataController extends Controller
             $results = $this->shopifyService->searchProducts($keywords, 10);
             $maxScore = $this->shopifyService->getLastSearchMaxScore();
 
-            // Score >= 5 means at least one title-level match (not just generic keyword in description)
-            if (!empty($results) && $maxScore >= 5) {
+            if (!empty($results) && $this->isConfidentSpecificProductMatch((string) $keywords, $results, $maxScore)) {
                 return ['results' => $results, 'specific_match' => true];
             }
 
@@ -271,7 +285,7 @@ class ShopifyDataController extends Controller
 
                 $fallbackResults = $this->shopifyService->searchProducts($fallbackKeywords, 10);
                 $fallbackMaxScore = $this->shopifyService->getLastSearchMaxScore();
-                if (!empty($fallbackResults) && $fallbackMaxScore >= 5) {
+                if (!empty($fallbackResults) && $this->isConfidentSpecificProductMatch((string) $fallbackKeywords, $fallbackResults, $fallbackMaxScore)) {
                     return ['results' => $fallbackResults, 'specific_match' => true];
                 }
             }
@@ -289,7 +303,7 @@ class ShopifyDataController extends Controller
                 ]);
                 $embeddedResults = $this->shopifyService->searchProducts($embeddedEnglish, 10);
                 $embeddedMaxScore = $this->shopifyService->getLastSearchMaxScore();
-                if (!empty($embeddedResults) && $embeddedMaxScore >= 5) {
+                if (!empty($embeddedResults) && $this->isConfidentSpecificProductMatch((string) $embeddedEnglish, $embeddedResults, $embeddedMaxScore)) {
                     return ['results' => $embeddedResults, 'specific_match' => true];
                 }
             }
@@ -302,6 +316,49 @@ class ShopifyDataController extends Controller
 
         // Return general catalog but flag it as no specific match so AI can ask for clarification
         return ['results' => $this->shopifyService->getAllProducts(10), 'specific_match' => false];
+    }
+
+    protected function extractSpecificProductReference(string $query): ?string
+    {
+        $candidate = trim($query);
+        if ($candidate === '') {
+            return null;
+        }
+
+        $candidate = preg_replace('/^(?:do\s+you\s+have|can\s+you\s+check|can\s+you\s+tell\s+me|have\s+in\s+stock|is|are|what\s+is\s+the\s+price\s+of|what\s+is\s+price\s+of|price\s+for|tell\s+me\s+about|show\s+me|looking\s+for)\b[\s\-:]+/i', '', $candidate) ?? $candidate;
+        $candidate = preg_replace('/\b(?:available|availability|in\s+stock|stock|price|pricing|cost|details|detail|please|currently|now)\b/i', ' ', $candidate) ?? $candidate;
+        $candidate = preg_replace('/[?]+$/', '', $candidate) ?? $candidate;
+        $candidate = trim((string) preg_replace('/\s+/', ' ', $candidate), " -:\t\n\r\0\x0B");
+
+        $tokens = $this->extractSearchableTokens($candidate);
+        if (count($tokens) < 4) {
+            return null;
+        }
+
+        return implode(' ', array_slice($tokens, 0, 12));
+    }
+
+    protected function isConfidentSpecificProductMatch(string $query, array $results, int $maxScore): bool
+    {
+        if (empty($results)) {
+            return false;
+        }
+
+        $queryTokens = $this->extractSearchableTokens($query);
+        if (empty($queryTokens)) {
+            return false;
+        }
+
+        $topResult = $results[0] ?? [];
+        $titleTokens = $this->extractSearchableTokens((string) ($topResult['title'] ?? ''));
+        $matchedTokenCount = count(array_intersect($queryTokens, $titleTokens));
+        $requiredMatches = min(4, max(2, (int) ceil(count($queryTokens) * 0.45)));
+
+        if ($matchedTokenCount >= $requiredMatches) {
+            return true;
+        }
+
+        return $maxScore >= 12;
     }
 
     /**
@@ -389,11 +446,21 @@ class ShopifyDataController extends Controller
             return $this->fallbackKeywordExtraction($originalQuery);
         }
 
+        if (preg_match('/\b(rule|rules|extract|extraction|type|query|customer|english|product\s+type|follow)\b/i', $result)) {
+            return $this->fallbackKeywordExtraction($originalQuery);
+        }
+
         $result = preg_replace('/\b(tell|about|show|give|share|details?|information|info|me|please|on|for|the|a|an|some|any|product|products|item|items|model|do|does|you|your|have|has|what|which|is|are|in|stock|available|looking|find|search)\b/i', ' ', $result);
         $result = preg_replace('/\s+/', ' ', (string) $result);
         $result = trim((string) $result);
 
         if ($result === '' || in_array($result, ['featured', 'products', 'items', 'catalog'], true)) {
+            return $this->fallbackKeywordExtraction($originalQuery);
+        }
+
+        $originalTokens = $this->extractSearchableTokens($originalQuery);
+        $resultTokens = $this->extractSearchableTokens($result);
+        if (empty(array_intersect($originalTokens, $resultTokens))) {
             return $this->fallbackKeywordExtraction($originalQuery);
         }
 
@@ -445,16 +512,40 @@ class ShopifyDataController extends Controller
     {
         // Remove common question words, articles, and price/quality adjectives
         $keywords = preg_replace('/\b(what|which|do|does|you|your|have|has|sell|selling|any|all|products?|items?|looking|for|show|me|my|the|a|an|available|current|can|i|see|get|list|in|stock|and|is|what|price|lowest|highest|cost|cheapest|most expensive|best|worst|featured|tell|about|details?|information|info|please|find|search|model)\b/i', '', $query);
-        $keywords = preg_replace('/[^\w\s-]/', '', $keywords);
-        $keywords = trim($keywords);
-        
-        // Only return first 1-2 words
-        $words = explode(' ', $keywords);
-        $words = array_filter($words); // Remove empty elements
-        $words = array_slice($words, 0, 2);
+        $keywords = preg_replace('/[^\p{L}\p{N}\s-]/u', ' ', $keywords);
+        $keywords = trim((string) preg_replace('/\s+/', ' ', $keywords));
+
+        $words = $this->extractSearchableTokens($keywords);
+        $words = array_slice($words, 0, 8);
         $keywords = implode(' ', $words);
-        
+
         return strlen($keywords) >= 3 ? $keywords : null;
+    }
+
+    protected function extractSearchableTokens(string $text): array
+    {
+        $normalized = strtolower(trim($text));
+        $normalized = preg_replace('/[^\p{L}\p{N}\s-]/u', ' ', $normalized);
+        $normalized = trim((string) preg_replace('/\s+/', ' ', $normalized));
+        if ($normalized === '') {
+            return [];
+        }
+
+        $stopWords = [
+            'tell', 'about', 'show', 'me', 'please', 'the', 'a', 'an', 'do', 'does',
+            'you', 'your', 'have', 'has', 'in', 'stock', 'available', 'product', 'products',
+            'item', 'items', 'for', 'with', 'and', 'or', 'to', 'of', 'info', 'information',
+            'details', 'detail', 'model', 'looking', 'find', 'search', 'price', 'pricing',
+            'cost', 'current', 'currently', 'check', 'can', 'is', 'are', 'what', 'how',
+            'much', 'from', 'that', 'this', 'these', 'those', 'now', 'sku', 'code'
+        ];
+
+        return array_values(array_filter(explode(' ', $normalized), function ($token) use ($stopWords) {
+            return $token !== ''
+                && strlen($token) >= 2
+                && !in_array($token, $stopWords, true)
+                && $token !== '-';
+        }));
     }
 
     /**

@@ -214,25 +214,18 @@ class ShopifyApiService
             }
 
             $product = $response['product'];
+            $variantSummary = $this->summarizeProductVariants($product['variants'] ?? []);
             return [
                 'id' => $product['id'],
                 'title' => $product['title'],
                 'description' => strip_tags($product['body_html'] ?? ''),
-                'price' => $product['variants'][0]['price'] ?? 'N/A',
-                'currency' => $product['variants'][0]['currency_code'] ?? 'USD',
-                'available' => ($product['variants'][0]['inventory_quantity'] ?? 0) > 0,
-                'inventory' => $product['variants'][0]['inventory_quantity'] ?? 0,
+                'price' => $variantSummary['primary_price'] ?? ($product['variants'][0]['price'] ?? 'N/A'),
+                'currency' => $variantSummary['currency'] ?? ($product['variants'][0]['currency_code'] ?? 'USD'),
+                'available' => $variantSummary['available'],
+                'inventory' => $variantSummary['inventory'],
                 'url' => "https://{$this->shopDomain}/products/{$product['handle']}",
                 'image' => $product['image']['src'] ?? null,
-                'variants' => array_map(function ($variant) {
-                    return [
-                        'id' => $variant['id'],
-                        'title' => $variant['title'],
-                        'price' => $variant['price'],
-                        'available' => ($variant['inventory_quantity'] ?? 0) > 0,
-                        'inventory' => $variant['inventory_quantity'] ?? 0,
-                    ];
-                }, $product['variants'] ?? []),
+                'variants' => $variantSummary['variants'],
             ];
         });
     }
@@ -255,29 +248,59 @@ class ShopifyApiService
             }
 
             return array_map(function ($product) {
-                $variant = $product['variants'][0] ?? [];
+                $variantSummary = $this->summarizeProductVariants($product['variants'] ?? []);
                 return [
                     'id' => $product['id'],
                     'title' => $product['title'],
                     'description' => strip_tags($product['body_html'] ?? ''),
-                    'price' => $variant['price'] ?? 'N/A',
-                    'currency' => $product['currency'] ?? 'USD',
-                    'inventory' => $variant['inventory_quantity'] ?? 0,
-                    'available' => ($variant['inventory_quantity'] ?? 0) > 0,
+                    'price' => $variantSummary['primary_price'] ?? (($product['variants'][0]['price'] ?? 'N/A')),
+                    'currency' => $variantSummary['currency'] ?? ($product['currency'] ?? 'USD'),
+                    'inventory' => $variantSummary['inventory'],
+                    'available' => $variantSummary['available'],
                     'url' => "https://{$this->shopDomain}/products/{$product['handle']}",
                     // Map all variant titles so size/option info is available for LLM context
-                    'variants' => array_map(function ($v) {
-                        return [
-                            'id'        => $v['id'],
-                            'title'     => $v['title'],
-                            'price'     => $v['price'],
-                            'available' => ($v['inventory_quantity'] ?? 0) > 0,
-                            'inventory' => $v['inventory_quantity'] ?? 0,
-                        ];
-                    }, $product['variants'] ?? []),
+                    'variants' => $variantSummary['variants'],
                 ];
             }, $response['products']);
         });
+    }
+
+    private function summarizeProductVariants(array $variants): array
+    {
+        $mapped = array_map(function ($variant) {
+            $inventory = (int) ($variant['inventory_quantity'] ?? 0);
+            $available = $inventory > 0;
+
+            return [
+                'id' => $variant['id'] ?? null,
+                'title' => $variant['title'] ?? 'Default Title',
+                'price' => $variant['price'] ?? 'N/A',
+                'available' => $available,
+                'inventory' => $inventory,
+                'currency' => $variant['currency_code'] ?? null,
+            ];
+        }, $variants);
+
+        $totalInventory = array_sum(array_map(function ($variant) {
+            return (int) ($variant['inventory'] ?? 0);
+        }, $mapped));
+
+        $availableVariants = array_values(array_filter($mapped, function ($variant) {
+            return !empty($variant['available']);
+        }));
+
+        $primaryVariant = $availableVariants[0] ?? ($mapped[0] ?? []);
+
+        return [
+            'available' => !empty($availableVariants),
+            'inventory' => $totalInventory,
+            'primary_price' => $primaryVariant['price'] ?? 'N/A',
+            'currency' => $primaryVariant['currency'] ?? null,
+            'variants' => array_map(function ($variant) {
+                unset($variant['currency']);
+                return $variant;
+            }, $mapped),
+        ];
     }
 
     /**

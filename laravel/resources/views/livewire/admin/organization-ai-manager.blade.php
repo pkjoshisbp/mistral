@@ -240,6 +240,23 @@
                                                 </div>
                                             </div>
 
+                                            <div class="card mb-3">
+                                                <div class="card-header">
+                                                    <strong>
+                                                        <i class="fas fa-random me-1"></i>
+                                                        Query Translation & Follow-up Aliases
+                                                    </strong>
+                                                </div>
+                                                <div class="card-body">
+                                                    <label class="form-label fw-bold" for="queryTranslationMap">Organization-specific alias map</label>
+                                                    <textarea wire:model.defer="queryTranslationMap" class="form-control @error('queryTranslationMap') is-invalid @enderror" id="queryTranslationMap" rows="5" placeholder="class 11 = class xi, xi, 11th&#10;admission fee = admission fees, fee for admission&#10;hostel fee = hostel charges, boarding fee"></textarea>
+                                                    @error('queryTranslationMap')
+                                                        <div class="invalid-feedback">{{ $message }}</div>
+                                                    @enderror
+                                                    <small class="text-muted d-block mt-2">One mapping per line. Format: canonical term = alias 1, alias 2, alias 3. These mappings are used for both query normalization and follow-up context anchoring for this organization.</small>
+                                                </div>
+                                            </div>
+
                                             <!-- Chat Email Notifications -->
                                             <div class="card mb-3">
                                                 <div class="card-header">

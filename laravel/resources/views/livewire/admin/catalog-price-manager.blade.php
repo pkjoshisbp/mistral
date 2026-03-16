@@ -320,7 +320,7 @@
                                 <div class="card-header"><strong><i class="fas fa-file-csv me-2"></i>Generate Price Template</strong></div>
                                 <div class="card-body">
                                     <p class="text-muted small">
-                                        Creates a CSV with columns: <code>db_id, sku, name, artist_price (reference), price, special_price</code>.
+                                        Creates a CSV with columns: <code>db_id, sku, name, price, special_price</code>.
                                         The <code>price</code> and <code>special_price</code> columns will be empty — fill them in and re-upload.
                                     </p>
                                     <button class="btn btn-primary" wire:click="generateTemplate"
@@ -385,7 +385,7 @@ php artisan catalog:import-prices /path/to/prices_filled.csv 19
 # 4. Import prices (DB only, sync Qdrant later)
 php artisan catalog:import-prices /path/to/prices_filled.csv 19 --skip-qdrant
 
-# 5. Clean product content (remove artist_price, junk, full category paths, HTML)
+# 5. Clean product content (remove legacy internal fields, junk, full category paths, HTML)
 php artisan catalog:clean-content 19 --dry-run   # preview first
 php artisan catalog:clean-content 19 --skip-qdrant  # DB only
 php artisan catalog:clean-content 19              # clean + sync Qdrant

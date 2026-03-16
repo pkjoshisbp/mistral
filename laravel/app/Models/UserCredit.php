@@ -144,6 +144,58 @@ class UserCredit extends Model
     }
 
     /**
+     * Restore credits previously consumed by usage without treating them as a new purchase.
+     */
+    public function restoreCredits($amount, $reason = 'Refund', array $extra = [])
+    {
+        return DB::transaction(function () use ($amount, $reason, $extra) {
+            $amount = (float) $amount;
+            if ($amount <= 0) {
+                return false;
+            }
+
+            $this->increment('balance', $amount);
+            $newTotalUsed = max(0, (float) $this->total_used - $amount);
+            $this->update([
+                'total_used' => $newTotalUsed,
+                'last_updated_at' => now(),
+            ]);
+
+            $payload = [
+                'user_id' => $this->user_id,
+                'type' => 'credit',
+                'amount' => $amount,
+                'balance_after' => $this->fresh()->balance,
+                'description' => $reason,
+            ];
+
+            $allowedExtras = [
+                'reference_id',
+                'subscription_id',
+                'credit_package_id',
+                'credits',
+                'payment_method',
+                'razorpay_payment_id',
+                'notes',
+                'metadata',
+            ];
+            foreach ($allowedExtras as $key) {
+                if (array_key_exists($key, $extra)) {
+                    $payload[$key] = $extra[$key];
+                }
+            }
+
+            if (!isset($payload['credits'])) {
+                $payload['credits'] = $amount;
+            }
+
+            CreditTransaction::create($payload);
+
+            return true;
+        });
+    }
+
+    /**
      * Check if user has sufficient credits
      */
     public function hasSufficientCredits($amount)

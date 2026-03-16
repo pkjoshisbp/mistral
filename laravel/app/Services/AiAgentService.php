@@ -1954,6 +1954,7 @@ Rules:
     public function llmChat($messages, $model = null, $userId = null, $organizationId = null, array $options = [])  // Default determined dynamically
     {
         try {
+            $sessionId = isset($options['session_id']) ? (string) $options['session_id'] : null;
             // Use configured model if none provided
             if (!$model) {
                 $model = $this->getLlamaModel();
@@ -2037,7 +2038,8 @@ Rules:
                         $tokensUsed,
                         substr($payloadPreview, 0, 255),
                         $inputTokens,
-                        $outputTokens
+                        $outputTokens,
+                        $sessionId
                     );
                 }
                 
@@ -2054,7 +2056,7 @@ Rules:
     /**
      * OpenAI chat completion
      */
-    public function openAiChat($messages, $model = null, $userId = null, $organizationId = null)
+    public function openAiChat($messages, $model = null, $userId = null, $organizationId = null, ?string $sessionId = null)
     {
         try {
             // Use configured model if none provided
@@ -2134,14 +2136,17 @@ Rules:
                 ]
             ];
 
-            // Log token usage if user and organization are provided
-            if ($userId && $organizationId) {
+            // Log token usage for organization-scoped chats, including widget chats with no user id.
+            if ($organizationId) {
                 $this->logTokenUsage(
                     $userId,
                     $organizationId,
                     'openai_chat',
                     $response['usage']['total_tokens'],
-                    "OpenAI {$model} chat"
+                    "OpenAI {$model} chat",
+                    (int) ($response['usage']['prompt_tokens'] ?? 0),
+                    (int) ($response['usage']['completion_tokens'] ?? 0),
+                    $sessionId
                 );
             }
 
@@ -2186,7 +2191,7 @@ Rules:
     /**
      * Log token usage for widget streaming responses
      */
-    public function logWidgetTokenUsage(int $organizationId, array $messages, string $responseText, string $endpointType = 'llm_chat_stream'): void
+    public function logWidgetTokenUsage(int $organizationId, array $messages, string $responseText, string $endpointType = 'llm_chat_stream', ?string $sessionId = null): void
     {
         try {
             $inputTokens  = max(1, (int) $this->estimateTokenCount($messages));
@@ -2194,7 +2199,7 @@ Rules:
             $totalTokens  = $inputTokens + $outputTokens;
             $summary = 'in:' . $inputTokens . ' out:' . $outputTokens . ' | ' . substr(json_encode($messages), 0, 200);
 
-            $this->logTokenUsage(null, $organizationId, $endpointType, $totalTokens, $summary, $inputTokens, $outputTokens);
+            $this->logTokenUsage(null, $organizationId, $endpointType, $totalTokens, $summary, $inputTokens, $outputTokens, $sessionId);
         } catch (\Exception $e) {
             Log::error('Failed to log widget token usage', [
                 'organization_id' => $organizationId,
@@ -2238,7 +2243,8 @@ Rules:
         if ($this->isOpenAiProvider()) {
             // Always use GPT-5-mini as it's the only allowed model
             $openAiModel = 'gpt-5-mini';
-            return $this->openAiChat($messages, $openAiModel, $userId, $organizationId);
+            $sessionId = isset($options['session_id']) ? (string) $options['session_id'] : null;
+            return $this->openAiChat($messages, $openAiModel, $userId, $organizationId, $sessionId);
         } else {
             $llamaModel = $model ?: $this->getLlamaModel();
             return $this->llmChat($messages, $llamaModel, $userId, $organizationId, $options);
@@ -2749,7 +2755,7 @@ Rules:
     /**
      * Log token usage for billing and monitoring purposes
      */
-    private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary, int $inputTokens = 0, int $outputTokens = 0)
+    private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary, int $inputTokens = 0, int $outputTokens = 0, ?string $sessionId = null)
     {
         try {
             $subscription = null;
@@ -2784,6 +2790,7 @@ Rules:
             \App\Models\TokenUsageLog::create([
                 'user_id' => $userId,
                 'organization_id' => $organizationId,
+                'session_id' => $sessionId,
                 'subscription_id' => $subscription ? $subscription->id : null,
                 'endpoint_type' => $endpointType,
                 'tokens_used' => $tokensUsed,
@@ -2853,6 +2860,7 @@ Rules:
             }
 
             $metadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
+            [$item, $metadata] = $this->stripLegacyArtistPriceData($item, $metadata);
 
             $keywords = trim((string) (
                 $item['keywords']
@@ -2978,6 +2986,35 @@ Rules:
 
             return $item;
         }, $items);
+    }
+
+    private function stripLegacyArtistPriceData(array $item, array $metadata): array
+    {
+        unset($item['artist_price']);
+        unset($metadata['artist_price']);
+
+        $csvMeta = is_array($metadata['csv'] ?? null) ? $metadata['csv'] : [];
+        unset($csvMeta['artist_price']);
+
+        $additionalAttributes = (string) ($csvMeta['additional_attributes'] ?? '');
+        if ($additionalAttributes !== '') {
+            $additionalAttributes = preg_replace('/(?:^|,)\s*artist_price\s*=\s*"?[^"]*"?\s*(?=,|$)/i', '', $additionalAttributes) ?? $additionalAttributes;
+            $additionalAttributes = trim((string) preg_replace('/\s*,\s*/', ',', $additionalAttributes), ", \t\n\r\0\x0B");
+
+            if ($additionalAttributes === '') {
+                unset($csvMeta['additional_attributes']);
+            } else {
+                $csvMeta['additional_attributes'] = $additionalAttributes;
+            }
+        }
+
+        $metadata['csv'] = $csvMeta;
+
+        if (isset($item['content']) && is_string($item['content']) && $item['content'] !== '') {
+            $item['content'] = trim((string) preg_replace('/(?:^|\n)\s*artist_price\s*[=:]\s*"?[^\n"]*"?\s*(?=\n|$)/im', '', $item['content']));
+        }
+
+        return [$item, $metadata];
     }
 
     private function buildOrgNeutralSemanticMetadata(array $item, array $metadata, string $entity, string $keywords): array

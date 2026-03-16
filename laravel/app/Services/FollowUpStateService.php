@@ -47,10 +47,23 @@ class FollowUpStateService
         }
 
         $parts = [];
+        $messageComparable = $this->normalizeComparableText($message);
 
+        $resolvedAnchor = trim((string) ($pendingState['resolved_anchor'] ?? ''));
         $entity = trim((string) ($pendingState['entity'] ?? ''));
-        if ($entity !== '') {
-            $parts[] = $entity;
+        $primaryAnchor = $resolvedAnchor !== '' ? $resolvedAnchor : $entity;
+        if ($primaryAnchor !== '' && !$this->comparableTextContains($messageComparable, $primaryAnchor)) {
+            $parts[] = $primaryAnchor;
+        }
+
+        $anchorFacets = $pendingState['anchor_facets'] ?? [];
+        if (is_array($anchorFacets)) {
+            foreach ($anchorFacets as $facet) {
+                $facet = trim((string) $facet);
+                if ($facet !== '' && $this->isRetrievalSafeHint($facet) && !$this->comparableTextContains($messageComparable, $facet)) {
+                    $parts[] = $facet;
+                }
+            }
         }
 
         $topicHints = $pendingState['topic_hints'] ?? [];
@@ -58,7 +71,7 @@ class FollowUpStateService
             $addedHints = 0;
             foreach ($topicHints as $hint) {
                 $hint = trim((string) $hint);
-                if ($hint !== '' && $this->isRetrievalSafeHint($hint)) {
+                if ($hint !== '' && $this->isRetrievalSafeHint($hint) && !$this->comparableTextContains($messageComparable, $hint)) {
                     $parts[] = $hint;
                     $addedHints++;
                     if ($addedHints >= 2) {
@@ -77,8 +90,8 @@ class FollowUpStateService
 
         if (mb_strlen($query) > 220) {
             $fallbackParts = [];
-            if ($entity !== '' && $this->isRetrievalSafeHint($entity)) {
-                $fallbackParts[] = $entity;
+            if ($primaryAnchor !== '' && $this->isRetrievalSafeHint($primaryAnchor)) {
+                $fallbackParts[] = $primaryAnchor;
             }
             if ($message !== '') {
                 $fallbackParts[] = $message;
@@ -111,16 +124,16 @@ class FollowUpStateService
         return true;
     }
 
-    public function updatePendingState(ChatConversation $conversation, string $assistantResponse, array $contextPayloads = [], ?array $providedState = null): void
+    public function updatePendingState(ChatConversation $conversation, string $userMessage, string $assistantResponse, array $contextPayloads = [], ?array $providedState = null): void
     {
         $metadata = is_array($conversation->metadata) ? $conversation->metadata : [];
         $state = null;
         if (is_array($providedState) && !empty($providedState)) {
-            $state = $this->normalizeProvidedState($providedState, $assistantResponse, $contextPayloads);
+            $state = $this->normalizeProvidedState($providedState, $userMessage, $assistantResponse, $contextPayloads);
         }
 
         if ($state === null) {
-            $state = $this->extractPendingState($assistantResponse, $contextPayloads, (int) $conversation->organization_id);
+            $state = $this->extractPendingState($userMessage, $assistantResponse, $contextPayloads, (int) $conversation->organization_id);
         }
 
         if ($state === null) {
@@ -135,12 +148,9 @@ class FollowUpStateService
         ]);
     }
 
-    private function normalizeProvidedState(array $providedState, string $assistantResponse, array $contextPayloads): ?array
+    private function normalizeProvidedState(array $providedState, string $userMessage, string $assistantResponse, array $contextPayloads): ?array
     {
         $question = $this->extractQuestionLine($assistantResponse);
-        if ($question === '') {
-            return null;
-        }
 
         $fallbackEntity = '';
         $fallbackTopicHints = [];
@@ -170,6 +180,12 @@ class FollowUpStateService
             $entity = $fallbackEntity;
         }
 
+        $resolvedAnchor = trim((string) ($providedState['resolved_anchor'] ?? ''));
+        if ($resolvedAnchor === '' || str_contains($resolvedAnchor, '?') || $this->isWeakConversationAnchor($resolvedAnchor)) {
+            $resolvedAnchor = $entity !== '' ? $entity : $fallbackEntity;
+        }
+
+        $anchorFacets = $this->normalizeStringList($providedState['anchor_facets'] ?? []);
         $topicsCovered = $this->normalizeStringList($providedState['topics_covered'] ?? []);
         $followUpRaw = is_array($providedState['follow_up'] ?? null) ? $providedState['follow_up'] : [];
         $followUpType = $this->normalizeFollowUpType((string) ($followUpRaw['type'] ?? ''), $question);
@@ -177,20 +193,29 @@ class FollowUpStateService
 
         $topicHints = array_values(array_unique(array_filter(array_merge(
             $fallbackTopicHints,
+            $anchorFacets,
             $topicsCovered,
             $followUpTopics
         ))));
 
         $state = [
-            'question' => $question,
             'entity' => $entity,
+            'resolved_anchor' => $resolvedAnchor,
             'topic_hints' => array_slice($topicHints, 0, 4),
             'created_at' => now()->toIso8601String(),
             'expires_at' => now()->addMinutes(20)->toIso8601String(),
         ];
 
+        if ($question !== '') {
+            $state['question'] = $question;
+        }
+
         if (!empty($topicsCovered)) {
             $state['topics_covered'] = array_slice($topicsCovered, 0, 6);
+        }
+
+        if (!empty($anchorFacets)) {
+            $state['anchor_facets'] = array_slice($anchorFacets, 0, 6);
         }
 
         if ($followUpType !== '' || !empty($followUpTopics)) {
@@ -200,15 +225,16 @@ class FollowUpStateService
             ];
         }
 
+        if (!$this->hasUsableConversationAnchor($state)) {
+            return null;
+        }
+
         return $state;
     }
 
-    private function extractPendingState(string $assistantResponse, array $contextPayloads = [], ?int $organizationId = null): ?array
+    private function extractPendingState(string $userMessage, string $assistantResponse, array $contextPayloads = [], ?int $organizationId = null): ?array
     {
         $question = $this->extractQuestionLine($assistantResponse);
-        if ($question === '') {
-            return null;
-        }
 
         $entity = '';
         $topicHints = [];
@@ -238,6 +264,7 @@ class FollowUpStateService
         }, $topicHints))));
 
         $structured = $this->extractStructuredStateViaLlm(
+            $userMessage,
             $assistantResponse,
             $question,
             $entity,
@@ -254,6 +281,12 @@ class FollowUpStateService
             $entity = $structuredEntity;
         }
 
+        $resolvedAnchor = trim((string) ($structured['resolved_anchor'] ?? ''));
+        if ($resolvedAnchor === '' || str_contains($resolvedAnchor, '?') || $this->isWeakConversationAnchor($resolvedAnchor)) {
+            $resolvedAnchor = $entity;
+        }
+
+        $anchorFacets = $this->normalizeStringList($structured['anchor_facets'] ?? []);
         $structuredTopicsCovered = $this->normalizeStringList($structured['topics_covered'] ?? []);
 
         $structuredFollowUp = null;
@@ -274,25 +307,125 @@ class FollowUpStateService
         }
 
         $state = [
-            'question' => $question,
             'entity' => $entity,
+            'resolved_anchor' => $resolvedAnchor,
             'topic_hints' => array_slice($topicHints, 0, 4),
             'created_at' => now()->toIso8601String(),
             'expires_at' => now()->addMinutes(20)->toIso8601String(),
         ];
 
+        if ($question !== '') {
+            $state['question'] = $question;
+        }
+
         if (!empty($structuredTopicsCovered)) {
             $state['topics_covered'] = array_slice($structuredTopicsCovered, 0, 6);
+        }
+
+        if (!empty($anchorFacets)) {
+            $state['anchor_facets'] = array_slice($anchorFacets, 0, 6);
+            $state['topic_hints'] = array_slice(array_values(array_unique(array_merge($state['topic_hints'], $anchorFacets))), 0, 6);
         }
 
         if ($structuredFollowUp !== null) {
             $state['follow_up'] = $structuredFollowUp;
         }
 
+        if (!$this->hasUsableConversationAnchor($state)) {
+            return null;
+        }
+
         return $state;
     }
 
+    private function hasUsableConversationAnchor(array $state): bool
+    {
+        $resolvedAnchor = trim((string) ($state['resolved_anchor'] ?? ''));
+        if ($resolvedAnchor !== '') {
+            return true;
+        }
+
+        $entity = trim((string) ($state['entity'] ?? ''));
+        if ($entity !== '') {
+            return true;
+        }
+
+        $topicHints = $this->normalizeStringList($state['topic_hints'] ?? []);
+        if (!empty($topicHints)) {
+            return true;
+        }
+
+        $topicsCovered = $this->normalizeStringList($state['topics_covered'] ?? []);
+        if (!empty($topicsCovered)) {
+            return true;
+        }
+
+        $question = trim((string) ($state['question'] ?? ''));
+        if ($question !== '') {
+            return true;
+        }
+
+        $followUp = $state['follow_up'] ?? null;
+        if (!is_array($followUp)) {
+            return false;
+        }
+
+        $followUpType = trim((string) ($followUp['type'] ?? ''));
+        $followUpTopics = $this->normalizeStringList($followUp['topic'] ?? []);
+
+        return $followUpType !== '' || !empty($followUpTopics);
+    }
+
+    private function normalizeComparableText(string $text): string
+    {
+        $normalized = mb_strtolower(trim($text));
+        $normalized = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $normalized) ?? $normalized;
+
+        return trim((string) preg_replace('/\s+/', ' ', $normalized));
+    }
+
+    private function comparableTextContains(string $haystack, string $needle): bool
+    {
+        $needleComparable = $this->normalizeComparableText($needle);
+        if ($haystack === '' || $needleComparable === '') {
+            return false;
+        }
+
+        return str_contains($haystack, $needleComparable);
+    }
+
+    private function isWeakConversationAnchor(string $value): bool
+    {
+        $normalized = $this->normalizeComparableText($value);
+        if ($normalized === '') {
+            return true;
+        }
+
+        return in_array($normalized, [
+            'price',
+            'pricing',
+            'cost',
+            'fee',
+            'fees',
+            'quote',
+            'item',
+            'product',
+            'service',
+            'test',
+            'availability',
+            'stock',
+            'timing',
+            'schedule',
+            'requirement',
+            'requirements',
+            'delivery',
+            'size',
+            'color',
+        ], true);
+    }
+
     private function extractStructuredStateViaLlm(
+        string $userMessage,
         string $assistantResponse,
         string $question,
         string $fallbackEntity,
@@ -316,11 +449,12 @@ class FollowUpStateService
             }
         }
 
-        $systemPrompt = "Extract follow-up intent from an assistant response. Return ONLY valid JSON with this schema: "
-            . '{"entity":"string","topics_covered":["string"],"follow_up":{"type":"string","topic":["string"]}}' . "\n"
+        $systemPrompt = "Extract follow-up anchor and intent from a completed user-assistant turn. Return ONLY valid JSON with this schema: "
+            . '{"entity":"string","resolved_anchor":"string","anchor_facets":["string"],"topics_covered":["string"],"follow_up":{"type":"string","topic":["string"]}}' . "\n"
             . "Rules: use short lowercase topics, use empty arrays when unknown, and set follow_up to null when there is no follow-up question.";
 
-        $userPrompt = "assistant_response:\n{$assistantResponse}\n\n"
+        $userPrompt = "user_message:\n{$userMessage}\n\n"
+            . "assistant_response:\n{$assistantResponse}\n\n"
             . "question_line:\n{$question}\n\n"
             . "fallback_entity:\n{$fallbackEntity}\n\n"
             . "fallback_topic_hints:\n" . implode(', ', $fallbackTopicHints) . "\n\n"

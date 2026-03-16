@@ -56,6 +56,9 @@
                                     <button class="btn btn-sm btn-outline-warning" wire:click="openDebugModal({{ $conversation->id }})" title="AI Debug Info">
                                         <i class="fas fa-bug"></i> Debug
                                     </button>
+                                    <button class="btn btn-sm btn-outline-danger" wire:click="deleteConversation({{ $conversation->id }})" wire:confirm="Delete this conversation and refund its linked token usage?" title="Delete conversation and refund tokens">
+                                        <i class="fas fa-trash"></i> Delete
+                                    </button>
                                 </div>
                             </div>
                             {{-- Card body: visitor info + message count --}}
@@ -430,6 +433,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 <div class="d-flex justify-content-between align-items-center">
                     <small class="text-muted">Agent replies are visible to customers and used as AI context.</small>
                     <div>
+                        <button type="button" class="btn btn-outline-danger btn-sm mr-2" wire:click="deleteConversation({{ $modalConversation->id }})" wire:confirm="Delete this conversation and refund its linked token usage?">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
                         <button type="button" class="btn btn-secondary btn-sm mr-2" wire:click="closeConversationModal">Close</button>
                         <button class="btn btn-primary btn-sm" wire:click="sendAgentReply({{ $modalConversation->id }})">
                             <i class="fas fa-reply"></i> Send as Agent
