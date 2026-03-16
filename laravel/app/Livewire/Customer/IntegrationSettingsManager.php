@@ -22,6 +22,7 @@ class IntegrationSettingsManager extends Component
     public $business_hours = '';
     public $holiday_dates = '';
     public $seasonal_promotions = '';
+    public $promo_codes = '';
     public $response_tone = 'friendly';
     public $response_language = 'auto';
     public $query_translation_map = '';
@@ -79,6 +80,7 @@ class IntegrationSettingsManager extends Component
         'business_hours' => 'nullable|string|max:2000',
         'holiday_dates' => 'nullable|string|max:2000',
         'seasonal_promotions' => 'nullable|string|max:4000',
+        'promo_codes' => 'nullable|string|max:4000',
         'response_tone' => 'required|string|max:30',
         'response_language' => 'required|string|max:30',
         'query_translation_map' => 'nullable|string|max:12000',
@@ -173,6 +175,7 @@ class IntegrationSettingsManager extends Component
         $this->business_hours = $settings['business_hours'] ?? '';
         $this->holiday_dates = $this->keywordsToString($settings['holiday_dates'] ?? []);
         $this->seasonal_promotions = $settings['seasonal_promotions'] ?? '';
+        $this->promo_codes = $settings['promo_codes'] ?? '';
         $this->response_tone = $settings['response_tone'] ?? 'friendly';
         $this->response_language = $settings['response_language'] ?? 'auto';
         $translationMap = $settings['query_translation_map'] ?? '';
@@ -245,6 +248,7 @@ class IntegrationSettingsManager extends Component
             $settings['business_hours'] = trim((string) $this->business_hours) ?: null;
             $settings['holiday_dates'] = $this->stringToKeywords($this->holiday_dates ?? '');
             $settings['seasonal_promotions'] = trim((string) $this->seasonal_promotions) ?: null;
+            $settings['promo_codes'] = trim((string) $this->promo_codes) ?: null;
             $settings['response_tone'] = $this->response_tone;
             $settings['response_language'] = $this->response_language;
             $settings['query_translation_map'] = trim((string) $this->query_translation_map) ?: null;

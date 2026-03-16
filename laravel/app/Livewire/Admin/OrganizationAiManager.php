@@ -46,6 +46,7 @@ class OrganizationAiManager extends Component
     public $businessHoursTimezone = 'IST';
     public $holidayDates = '';
     public $seasonalPromotions = '';
+    public $promoCodes = '';
     public $responseTone = 'friendly';
     public $responseLanguage = 'auto';
     public $verifiedOnlyMode = false;
@@ -156,6 +157,7 @@ class OrganizationAiManager extends Component
         $this->syncBusinessHoursSelector();
         $this->holidayDates = $this->keywordsToString($settings['holiday_dates'] ?? []);
         $this->seasonalPromotions = $settings['seasonal_promotions'] ?? '';
+        $this->promoCodes = $settings['promo_codes'] ?? '';
         $this->responseTone = $settings['response_tone'] ?? 'friendly';
         $this->responseLanguage = $settings['response_language'] ?? 'auto';
         $this->verifiedOnlyMode = (bool) ($settings['verified_only_mode'] ?? false);
@@ -446,6 +448,7 @@ class OrganizationAiManager extends Component
             }
             $currentSettings['holiday_dates'] = $this->stringToKeywords($this->holidayDates ?? '');
             $currentSettings['seasonal_promotions'] = trim((string) $this->seasonalPromotions) ?: null;
+            $currentSettings['promo_codes'] = trim((string) $this->promoCodes) ?: null;
             $currentSettings['response_tone'] = $this->responseTone;
             $currentSettings['response_language'] = $this->responseLanguage;
             $currentSettings['verified_only_mode'] = (bool) $this->verifiedOnlyMode;

@@ -80,15 +80,17 @@ class ShopifyDataController extends Controller
                     break;
 
                 case 'order':
+                    $wantsPurchaseHistory = $this->isPurchaseHistoryQuery($query);
                     $data = $this->handleOrderQuery($query);
                     // If no order found by ID/name in query, try customer email if provided (logged-in Shopify customer)
-                    if (!$data && $customerEmail) {
+                    if ($customerEmail && ($wantsPurchaseHistory || !$data)) {
                         Log::info('[SHOPIFY API] No order in query text — trying customer email lookup', [
                             'customer_email' => $customerEmail,
+                            'purchase_history' => $wantsPurchaseHistory,
                         ]);
-                        $customerOrders = $this->shopifyService->getCustomerOrders($customerEmail, 3);
+                        $customerOrders = $this->shopifyService->getCustomerOrders($customerEmail, $wantsPurchaseHistory ? 5 : 3);
                         if (!empty($customerOrders)) {
-                            $data = $customerOrders[0]; // Most recent order
+                            $data = $wantsPurchaseHistory ? $customerOrders : $customerOrders[0];
                         }
                     }
                     $formattedText = $data ? $this->shopifyService->formatForAI($data, 'order') : 'No order found with that order number or email.';
@@ -165,12 +167,16 @@ class ShopifyDataController extends Controller
                     break;
 
                 case 'order':
+                    $wantsPurchaseHistory = $this->isPurchaseHistoryQuery($query);
                     $data = $this->handleOrderQuery($query);
-                    if (!$data && $customerEmail) {
-                        Log::info('[SHOPIFY DIRECT] No order in query — trying customer email', ['customer_email' => $customerEmail]);
-                        $customerOrders = $this->shopifyService->getCustomerOrders($customerEmail, 3);
+                    if ($customerEmail && ($wantsPurchaseHistory || !$data)) {
+                        Log::info('[SHOPIFY DIRECT] No order in query — trying customer email', [
+                            'customer_email' => $customerEmail,
+                            'purchase_history' => $wantsPurchaseHistory,
+                        ]);
+                        $customerOrders = $this->shopifyService->getCustomerOrders($customerEmail, $wantsPurchaseHistory ? 5 : 3);
                         if (!empty($customerOrders)) {
-                            $data = $customerOrders[0];
+                            $data = $wantsPurchaseHistory ? $customerOrders : $customerOrders[0];
                         }
                     }
                     $formattedText = $data
@@ -210,6 +216,10 @@ class ShopifyDataController extends Controller
         $original = $query;
         $query = strtolower($query);
 
+        if ($this->isPurchaseHistoryQuery($original)) {
+            return 'order';
+        }
+
         // Order tracking patterns
         if (preg_match('/\b(order|tracking|track|shipment|delivery|where is my|order number|#\d+)\b/', $query)) {
             return 'order';
@@ -235,6 +245,14 @@ class ShopifyDataController extends Controller
         return 'products';
     }
 
+    protected function isPurchaseHistoryQuery(string $query): bool
+    {
+        return (bool) preg_match(
+            '/\b(previous\s+purchases?|purchase\s+history|order\s+history|past\s+orders?|last\s+orders?|bought\s+before|purchased\s+before|buy\s+again|reorder|repeat\s+customer|what\s+did\s+i\s+buy|what\s+have\s+i\s+ordered)\b/i',
+            $query
+        );
+    }
+
     /**
      * Handle product-related queries
      */
@@ -247,6 +265,20 @@ class ShopifyDataController extends Controller
         $normalizedQuery = preg_replace('/[,;:]+/', ' ', $query);
         $normalizedQuery = preg_replace('/\s+/', ' ', $normalizedQuery);
         $normalizedQuery = trim($normalizedQuery);
+
+        foreach ($this->extractSkuCandidates($original) as $skuCandidate) {
+            Log::info('[SHOPIFY] SKU product search', [
+                'original' => $original,
+                'sku' => $skuCandidate,
+            ]);
+
+            $skuResults = $this->shopifyService->searchProducts($skuCandidate, 10);
+            $skuMaxScore = $this->shopifyService->getLastSearchMaxScore();
+
+            if (!empty($skuResults) && $skuMaxScore >= 20) {
+                return ['results' => $skuResults, 'specific_match' => true];
+            }
+        }
 
         $specificReference = $this->extractSpecificProductReference($normalizedQuery);
         if (!empty($specificReference)) {
@@ -316,6 +348,24 @@ class ShopifyDataController extends Controller
 
         // Return general catalog but flag it as no specific match so AI can ask for clarification
         return ['results' => $this->shopifyService->getAllProducts(10), 'specific_match' => false];
+    }
+
+    protected function extractSkuCandidates(string $query): array
+    {
+        preg_match_all('/\b[A-Z0-9][A-Z0-9._-]{2,}\b/i', $query, $matches);
+        $rawMatches = array_values(array_unique(array_map('trim', $matches[0] ?? [])));
+
+        return array_values(array_filter($rawMatches, function ($candidate) {
+            if ($candidate === '') {
+                return false;
+            }
+
+            if (preg_match('/^\d+$/', $candidate)) {
+                return false;
+            }
+
+            return (bool) preg_match('/[A-Z]/i', $candidate) && (bool) preg_match('/\d/', $candidate);
+        }));
     }
 
     protected function extractSpecificProductReference(string $query): ?string

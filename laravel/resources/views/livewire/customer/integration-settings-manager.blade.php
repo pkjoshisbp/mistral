@@ -106,6 +106,15 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label for="promo_codes">Promo Codes</label>
+                                    <textarea wire:model="promo_codes" class="form-control @error('promo_codes') is-invalid @enderror" id="promo_codes" rows="3" placeholder="2026-03-01 to 2026-03-31 | SAVE10 | 10% off selected lab items&#10;WELCOME5 | 5% off first order"></textarea>
+                                    @error('promo_codes')
+                                        <span class="invalid-feedback">{{ $message }}</span>
+                                    @enderror
+                                    <small class="form-text text-muted">One per line. Use either <strong>YYYY-MM-DD to YYYY-MM-DD | CODE | Details</strong> or <strong>CODE | Details</strong>.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label for="response_tone">Response Tone</label>
                                     <select wire:model="response_tone" class="form-control @error('response_tone') is-invalid @enderror" id="response_tone">
                                         <option value="friendly">Friendly</option>

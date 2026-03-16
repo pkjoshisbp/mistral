@@ -450,6 +450,11 @@
                                                         <small class="text-muted">One per line. Format: YYYY-MM-DD to YYYY-MM-DD | Title | Details.</small>
                                                     </div>
                                                     <div class="mb-2">
+                                                        <label class="form-label fw-bold">Promo Codes</label>
+                                                        <textarea wire:model.defer="promoCodes" class="form-control" rows="3" placeholder="2026-03-01 to 2026-03-31 | SAVE10 | 10% off selected lab items&#10;WELCOME5 | 5% off first order"></textarea>
+                                                        <small class="text-muted">One per line. Use either YYYY-MM-DD to YYYY-MM-DD | CODE | Details or CODE | Details.</small>
+                                                    </div>
+                                                    <div class="mb-2">
                                                         <label class="form-label fw-bold">Response Tone</label>
                                                         <select wire:model.defer="responseTone" class="form-select">
                                                             <option value="friendly">Friendly</option>

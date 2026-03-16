@@ -843,13 +843,16 @@ class WidgetController
                             // $searchQuery already contains rich context (prev message + current)
                             // so always use it; fall back to raw $message only if empty.
                             $shopifyApiQuery = !empty($searchQuery) ? $searchQuery : $message;
+                            if ($this->messageContainsSkuLikeReference((string) $message)) {
+                                $shopifyApiQuery = (string) $message;
+                            }
                             if ($isRelatedFollowUp && $isEllipticalFollowUp) {
                                 $followUpTopicAnchor = $this->buildFollowUpTopicAnchor($lastUserMessage);
                                 if ($followUpTopicAnchor !== '') {
                                     $shopifyApiQuery = trim($followUpTopicAnchor . ' ' . $message);
                                 }
                             }
-                            if ($shopifyProductCandidate !== '' && ($routeAnalysis['requires_product_resolution'] ?? false)) {
+                            if (!$this->messageContainsSkuLikeReference((string) $message) && $shopifyProductCandidate !== '' && ($routeAnalysis['requires_product_resolution'] ?? false)) {
                                 $shopifyApiQuery = $shopifyProductCandidate;
                             }
                             $customerEmail   = $allUserInfo['email'] ?? $allUserInfo['customer_email'] ?? null;
@@ -2319,27 +2322,40 @@ class WidgetController
                 if ($structuredShopifyPolicyResponse !== null) {
                     $responseText = $structuredShopifyPolicyResponse;
                 } else {
-                    $structuredShopifyAvailabilityResponse = $this->buildStructuredShopifyAvailabilityResponse((string) $searchQuery, $shopifyData);
-                    if ($structuredShopifyAvailabilityResponse !== null) {
-                        $responseText = $structuredShopifyAvailabilityResponse;
+                    $structuredShopifyCartResponse = $this->buildStructuredShopifyCartResponse((string) $message, $shopifyData);
+                    if ($structuredShopifyCartResponse !== null) {
+                        $responseText = $structuredShopifyCartResponse;
                     } else {
-                        $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $searchQuery, $shopifyData);
-                        if ($structuredShopifyMismatchResponse !== null) {
-                            $responseText = $structuredShopifyMismatchResponse;
+                        $structuredShopifyAvailabilityResponse = $this->buildStructuredShopifyAvailabilityResponse((string) $searchQuery, $shopifyData);
+                        if ($structuredShopifyAvailabilityResponse !== null) {
+                            $responseText = $structuredShopifyAvailabilityResponse;
                         } else {
-                            $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
-                            if ($structuredShopifyOrderResponse !== null) {
-                                $responseText = $structuredShopifyOrderResponse;
+                            $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $searchQuery, $shopifyData);
+                            if ($structuredShopifyMismatchResponse !== null) {
+                                $responseText = $structuredShopifyMismatchResponse;
                             } else {
-                                $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $searchQuery, $shopifyData);
-                                if ($structuredShopifyProductResponse !== null) {
-                                    $responseText = $structuredShopifyProductResponse;
+                                $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
+                                if ($structuredShopifyOrderResponse !== null) {
+                                    $responseText = $structuredShopifyOrderResponse;
+                                } else {
+                                    $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $searchQuery, $shopifyData);
+                                    if ($structuredShopifyProductResponse !== null) {
+                                        $responseText = $structuredShopifyProductResponse;
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 $responseText = $this->normalizeShopifyResponseText($responseText);
+            }
+            $structuredPromotionResponse = $this->buildStructuredPromotionResponse(
+                (string) $message,
+                $organization,
+                !empty($hasShopifyData) ? $shopifyData : null
+            );
+            if ($structuredPromotionResponse !== null) {
+                $responseText = $structuredPromotionResponse;
             }
             $responseText = $this->normalizeAiResponse($responseText);
             $suppressGenericFollowUp = !empty(array_intersect(
@@ -7307,6 +7323,88 @@ class WidgetController
         return $promotions;
     }
 
+    private function parsePromoCodeLines(string $raw, string $timezone): array
+    {
+        $lines = preg_split('/\r?\n/', $raw);
+        $promoCodes = [];
+
+        foreach ($lines as $line) {
+            $line = trim((string) $line);
+            if ($line === '') {
+                continue;
+            }
+
+            $start = null;
+            $end = null;
+            $code = '';
+            $details = '';
+
+            if (preg_match('/^(\d{4}-\d{2}-\d{2})\s*(?:to|-)\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([A-Z0-9_-]{3,})\s*\|\s*(.+)$/i', $line, $matches)) {
+                $start = \Carbon\Carbon::createFromFormat('Y-m-d', trim($matches[1]), $timezone)->startOfDay();
+                $end = \Carbon\Carbon::createFromFormat('Y-m-d', trim($matches[2]), $timezone)->endOfDay();
+                $code = strtoupper(trim($matches[3]));
+                $details = trim($matches[4]);
+            } elseif (preg_match('/^([A-Z0-9_-]{3,})\s*\|\s*(.+)$/i', $line, $matches)) {
+                $code = strtoupper(trim($matches[1]));
+                $details = trim($matches[2]);
+            } else {
+                continue;
+            }
+
+            if ($code === '') {
+                continue;
+            }
+
+            $promoCodes[] = [
+                'code' => $code,
+                'details' => $details !== '' ? $details : 'Promotion details available on request.',
+                'start' => $start,
+                'end' => $end,
+            ];
+        }
+
+        return $promoCodes;
+    }
+
+    private function getConfiguredPromoCodes(Organization $organization): array
+    {
+        $settings = $organization->settings ?? [];
+        $raw = trim((string) ($settings['promo_codes'] ?? ''));
+        if ($raw === '') {
+            return [];
+        }
+
+        return $this->parsePromoCodeLines($raw, $organization->timezone ?: config('app.timezone', 'UTC'));
+    }
+
+    private function splitPromoCodesByAvailability(array $promoCodes, string $timezone): array
+    {
+        $now = now()->timezone($timezone);
+        $active = [];
+        $upcoming = [];
+
+        foreach ($promoCodes as $promoCode) {
+            $start = $promoCode['start'] ?? null;
+            $end = $promoCode['end'] ?? null;
+
+            if (!$start && !$end) {
+                $active[] = $promoCode;
+                continue;
+            }
+
+            if ($start && $end && $now->between($start, $end)) {
+                $active[] = $promoCode;
+                continue;
+            }
+
+            if ($start && $start->greaterThan($now)) {
+                $upcoming[] = $promoCode;
+            }
+        }
+
+        return [$active, $upcoming];
+    }
+
     private function detectGuardrailCategory(string $message, $guardrailCategories): ?string
     {
         $enabled = is_array($guardrailCategories) ? $guardrailCategories : [];
@@ -9222,9 +9320,223 @@ class WidgetController
         return (bool) preg_match('/\b(promo|promotion|discount|offer|coupon|deal|sale|special)\b/i', $message);
     }
 
+    private function isPromoApplicationIntent(string $message): bool
+    {
+        return (bool) preg_match('/\b(apply|use|add|enter|redeem|activate)\b.*\b(promo|promotion|discount|coupon|code|offer)\b|\b(promo|promotion|discount|coupon)\s+code\b.*\b(apply|use|add|enter|redeem)\b|\bapply\b.*\bcart\b/i', $message);
+    }
+
+    private function messageContainsSkuLikeReference(string $message): bool
+    {
+        return (bool) preg_match('/\bsku\b[^\n]*\b[A-Z0-9][A-Z0-9._-]{2,}\b|\b[A-Z]+[A-Z0-9._-]*\d+[A-Z0-9._-]*\b/i', $message);
+    }
+
     private function buildPromoUnavailableResponse(): string
     {
         return "We don't have any promotions or discount details listed right now. Could you share what you're looking for?";
+    }
+
+    private function buildStructuredPromotionResponse(string $message, Organization $organization, $shopifyData = null): ?string
+    {
+        $timezone = $organization->timezone ?: config('app.timezone', 'UTC');
+        $promoCodes = $this->getConfiguredPromoCodes($organization);
+        [$activePromoCodes, $upcomingPromoCodes] = $this->splitPromoCodesByAvailability($promoCodes, $timezone);
+        $matchedPromo = $this->findMentionedPromoCode($message, !empty($activePromoCodes) ? $activePromoCodes : $promoCodes);
+        $isPromoQuestion = $this->isPromoQuery($message);
+        $isPromoApplication = $this->isPromoApplicationIntent($message) || $matchedPromo !== null;
+
+        if (!$isPromoQuestion && !$isPromoApplication) {
+            return null;
+        }
+
+        if ($isPromoApplication) {
+            if ($matchedPromo === null) {
+                if (!empty($activePromoCodes)) {
+                    $codes = implode(', ', array_map(static function ($promo) {
+                        return '**' . $promo['code'] . '**';
+                    }, array_slice($activePromoCodes, 0, 5)));
+
+                    return 'I can apply one of the currently active promo codes: ' . $codes . '. Tell me which one you want to use.';
+                }
+
+                return $this->buildPromoUnavailableResponse();
+            }
+
+            if (!$this->isPromoCodeCurrentlyActive($matchedPromo, $timezone)) {
+                $window = '';
+                if (!empty($matchedPromo['start']) && !empty($matchedPromo['end'])) {
+                    $window = ' (' . $matchedPromo['start']->toDateString() . ' to ' . $matchedPromo['end']->toDateString() . ')';
+                }
+
+                return '**Promo Code:** ' . $matchedPromo['code'] . $window . "\nThis promo code is not active right now.";
+            }
+
+            $storefrontBaseUrl = $this->resolveShopifyStorefrontBaseUrl($organization, $shopifyData);
+            $shopifyService = app(\App\Services\ShopifyApiService::class);
+
+            if (is_array($shopifyData) && (($shopifyData['query_type'] ?? null) === 'products') && (($shopifyData['specific_match'] ?? true) === true) && $this->isShopifyAddToCartIntent($message)) {
+                $products = array_values(array_filter($shopifyData['data'] ?? [], static function ($product) {
+                    return is_array($product) && isset($product['title']);
+                }));
+
+                if (!empty($products)) {
+                    $product = $products[0];
+                    $variant = $shopifyService->resolvePreferredVariantForCart($product, $message);
+                    $variantTitle = trim((string) ($variant['title'] ?? ''));
+                    $variantOptions = array_values(array_filter(array_map(static function ($item) {
+                        $title = trim((string) ($item['title'] ?? ''));
+                        return $title !== '' && strcasecmp($title, 'Default Title') !== 0 ? $title : '';
+                    }, is_array($product['variants'] ?? null) ? $product['variants'] : [])));
+
+                    if (count($variantOptions) > 1 && ($variantTitle === '' || strcasecmp($variantTitle, 'Default Title') === 0)) {
+                        return implode("\n", [
+                            '**Promo Code:** ' . $matchedPromo['code'],
+                            '**Product:** ' . trim((string) ($product['title'] ?? 'Product')),
+                            '**Available Variants:** ' . implode(', ', array_slice($variantOptions, 0, 12)),
+                            'Tell me which variant or size you want, and I will prepare an add-to-cart link with the promo applied.',
+                        ]);
+                    }
+
+                    $cartUrl = $shopifyService->buildStorefrontAddToCartUrl($product, $message, $matchedPromo['code']);
+                    if ($cartUrl !== null) {
+                        $currency = strtoupper(trim((string) ($product['currency'] ?? 'USD')));
+                        $price = isset($product['price']) ? number_format((float) $product['price'], 2) : null;
+                        $lines = [
+                            '**Promo Code:** ' . $matchedPromo['code'],
+                            '**Promotion:** ' . $matchedPromo['details'],
+                            '**Product:** ' . trim((string) ($product['title'] ?? 'Product')),
+                        ];
+
+                        if ($variantTitle !== '' && strcasecmp($variantTitle, 'Default Title') !== 0) {
+                            $lines[] = '**Variant:** ' . $variantTitle;
+                        }
+
+                        if ($price !== null) {
+                            $lines[] = '**Price:** ' . $currency . ' ' . $price;
+                        }
+
+                        $lines[] = '**Add to Cart with Promo:** ' . $cartUrl;
+                        $lines[] = 'Open that link to add the item and carry the promo code into the cart.';
+
+                        return implode("\n", $lines);
+                    }
+                }
+            }
+
+            if ($storefrontBaseUrl === null) {
+                return '**Promo Code:** ' . $matchedPromo['code'] . "\n**Promotion:** {$matchedPromo['details']}\nI could not build the storefront discount link right now.";
+            }
+
+            $discountUrl = $shopifyService->buildStorefrontApplyDiscountUrl($storefrontBaseUrl, $matchedPromo['code'], '/cart');
+            if ($discountUrl === null) {
+                return '**Promo Code:** ' . $matchedPromo['code'] . "\n**Promotion:** {$matchedPromo['details']}\nI could not build the storefront discount link right now.";
+            }
+
+            return implode("\n", [
+                '**Promo Code:** ' . $matchedPromo['code'],
+                '**Promotion:** ' . $matchedPromo['details'],
+                '**Apply to Current Cart:** ' . $discountUrl,
+                'Open that link to apply the promo code to the current storefront cart.',
+            ]);
+        }
+
+        if (!empty($activePromoCodes)) {
+            $lines = ['Current promo codes:'];
+            foreach (array_slice($activePromoCodes, 0, 5) as $promoCode) {
+                $lines[] = '- **' . $promoCode['code'] . '**: ' . $promoCode['details'];
+            }
+
+            return implode("\n", $lines);
+        }
+
+        if (!empty($upcomingPromoCodes)) {
+            $lines = ['Upcoming promo codes:'];
+            foreach (array_slice($upcomingPromoCodes, 0, 5) as $promoCode) {
+                $window = '';
+                if (!empty($promoCode['start']) && !empty($promoCode['end'])) {
+                    $window = ' (' . $promoCode['start']->toDateString() . ' to ' . $promoCode['end']->toDateString() . ')';
+                }
+                $lines[] = '- **' . $promoCode['code'] . '**' . $window . ': ' . $promoCode['details'];
+            }
+
+            return implode("\n", $lines);
+        }
+
+        $promotionContext = $this->buildPromotionContext($organization);
+        if ($promotionContext !== '') {
+            return $promotionContext;
+        }
+
+        return $this->buildPromoUnavailableResponse();
+    }
+
+    private function findMentionedPromoCode(string $message, array $promoCodes): ?array
+    {
+        foreach ($promoCodes as $promoCode) {
+            $code = trim((string) ($promoCode['code'] ?? ''));
+            if ($code === '') {
+                continue;
+            }
+
+            if (preg_match('/\b' . preg_quote($code, '/') . '\b/i', $message)) {
+                return $promoCode;
+            }
+        }
+
+        return null;
+    }
+
+    private function isPromoCodeCurrentlyActive(array $promoCode, string $timezone): bool
+    {
+        $now = now()->timezone($timezone);
+        $start = $promoCode['start'] ?? null;
+        $end = $promoCode['end'] ?? null;
+
+        if (!$start && !$end) {
+            return true;
+        }
+
+        if ($start && $end) {
+            return $now->between($start, $end);
+        }
+
+        if ($start) {
+            return $now->greaterThanOrEqualTo($start);
+        }
+
+        if ($end) {
+            return $now->lessThanOrEqualTo($end);
+        }
+
+        return false;
+    }
+
+    private function resolveShopifyStorefrontBaseUrl(Organization $organization, $shopifyData = null): ?string
+    {
+        if (is_array($shopifyData)) {
+            $products = array_values(array_filter($shopifyData['data'] ?? [], static function ($product) {
+                return is_array($product) && !empty($product['url']);
+            }));
+
+            if (!empty($products)) {
+                $url = trim((string) ($products[0]['url'] ?? ''));
+                $parts = parse_url($url);
+                if (!empty($parts['scheme']) && !empty($parts['host'])) {
+                    return $parts['scheme'] . '://' . $parts['host'];
+                }
+            }
+        }
+
+        $integration = $organization->integrations()
+            ->where('provider', 'shopify')
+            ->where('active', true)
+            ->orderByDesc('id')
+            ->first();
+
+        if ($integration && !empty($integration->shop)) {
+            return 'https://' . $integration->shop;
+        }
+
+        return null;
     }
 
     private function isCallbackRequest(string $message): bool
@@ -9732,6 +10044,70 @@ class WidgetController
         return implode("\n", $lines);
     }
 
+    private function buildStructuredShopifyCartResponse(string $message, $shopifyData): ?string
+    {
+        if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
+            return null;
+        }
+
+        if (($shopifyData['specific_match'] ?? true) !== true) {
+            return null;
+        }
+
+        if (!$this->isShopifyAddToCartIntent($message)) {
+            return null;
+        }
+
+        $products = array_values(array_filter($shopifyData['data'] ?? [], static function ($product) {
+            return is_array($product) && isset($product['title']);
+        }));
+        if (empty($products)) {
+            return null;
+        }
+
+        $product = $products[0];
+        $shopifyService = app(\App\Services\ShopifyApiService::class);
+        $variant = $shopifyService->resolvePreferredVariantForCart($product, $message);
+        $variantTitle = trim((string) ($variant['title'] ?? ''));
+        $variantOptions = array_values(array_filter(array_map(static function ($item) {
+            $title = trim((string) ($item['title'] ?? ''));
+            return $title !== '' && strcasecmp($title, 'Default Title') !== 0 ? $title : '';
+        }, is_array($product['variants'] ?? null) ? $product['variants'] : [])));
+
+        if (count($variantOptions) > 1 && ($variantTitle === '' || strcasecmp($variantTitle, 'Default Title') === 0)) {
+            return implode("\n", [
+                '**Product:** ' . trim((string) ($product['title'] ?? 'Product')),
+                '**Available Variants:** ' . implode(', ', array_slice($variantOptions, 0, 12)),
+                'Tell me which variant or size you want, and I will prepare the correct add-to-cart link.',
+            ]);
+        }
+
+        $cartUrl = $shopifyService->buildStorefrontAddToCartUrl($product, $message);
+        if ($cartUrl === null) {
+            return null;
+        }
+
+        $currency = strtoupper(trim((string) ($product['currency'] ?? 'USD')));
+        $price = isset($product['price']) ? number_format((float) $product['price'], 2) : null;
+
+        $lines = [
+            '**Product:** ' . trim((string) ($product['title'] ?? 'Product')),
+        ];
+
+        if ($variantTitle !== '' && strcasecmp($variantTitle, 'Default Title') !== 0) {
+            $lines[] = '**Variant:** ' . $variantTitle;
+        }
+
+        if ($price !== null) {
+            $lines[] = '**Price:** ' . $currency . ' ' . $price;
+        }
+
+        $lines[] = '**Add to Cart:** ' . $cartUrl;
+        $lines[] = 'Open that link to add this item to the store cart.';
+
+        return implode("\n", $lines);
+    }
+
     private function buildStructuredShopifySpecificMatchClarificationResponse(string $message, $shopifyData): ?string
     {
         if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
@@ -9808,6 +10184,11 @@ class WidgetController
     private function isShopifyAvailabilityQuery(string $message): bool
     {
         return (bool) preg_match('/\b(availability|available|in\s+stock|stock|out\s+of\s+stock|have\s+in\s+stock|do\s+you\s+have|is\s+this\s+available)\b/i', $message);
+    }
+
+    private function isShopifyAddToCartIntent(string $message): bool
+    {
+        return (bool) preg_match('/\b(add(?:\s+.+?)?\s+to\s+cart|put\s+.+?\s+in\s+(?:my\s+)?cart|put\s+(?:it|this|that)\s+in\s+(?:my\s+)?cart|buy\s+this|order\s+this|purchase\s+this|get\s+this)\b/i', $message);
     }
 
     private function extractShopifyBudgetFromMessage(string $message): array

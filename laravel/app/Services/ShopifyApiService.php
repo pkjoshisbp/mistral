@@ -143,10 +143,31 @@ class ShopifyApiService
             $titleLower = strtolower((string) ($product['title'] ?? ''));
             $descLower = strtolower((string) ($product['description'] ?? ''));
             $haystack = $titleLower . ' ' . $descLower;
+            $productSkus = array_values(array_filter(array_map(static function ($sku) {
+                return strtolower(trim((string) $sku));
+            }, is_array($product['skus'] ?? null) ? $product['skus'] : [])));
 
             $score = 0;
             if ($searchTerm !== '' && (str_contains($titleLower, $searchTerm) || str_contains($descLower, $searchTerm))) {
                 $score += 8;
+            }
+
+            foreach ($productSkus as $sku) {
+                if ($sku === '') {
+                    continue;
+                }
+
+                if ($searchTerm !== '' && ($searchTerm === $sku || str_contains($searchTerm, $sku) || str_contains($sku, $searchTerm))) {
+                    $score += 20;
+                }
+
+                foreach ($tokens as $token) {
+                    if ($token === $sku) {
+                        $score += 20;
+                    } elseif (strlen($token) >= 3 && (str_contains($sku, $token) || str_contains($token, $sku))) {
+                        $score += 8;
+                    }
+                }
             }
 
             foreach ($tokens as $token) {
@@ -260,6 +281,7 @@ class ShopifyApiService
                     'url' => "https://{$this->shopDomain}/products/{$product['handle']}",
                     // Map all variant titles so size/option info is available for LLM context
                     'variants' => $variantSummary['variants'],
+                    'skus' => $variantSummary['skus'],
                 ];
             }, $response['products']);
         });
@@ -270,6 +292,7 @@ class ShopifyApiService
         $mapped = array_map(function ($variant) {
             $inventory = (int) ($variant['inventory_quantity'] ?? 0);
             $available = $inventory > 0;
+            $sku = trim((string) ($variant['sku'] ?? ''));
 
             return [
                 'id' => $variant['id'] ?? null,
@@ -278,6 +301,7 @@ class ShopifyApiService
                 'available' => $available,
                 'inventory' => $inventory,
                 'currency' => $variant['currency_code'] ?? null,
+                'sku' => $sku !== '' ? $sku : null,
             ];
         }, $variants);
 
@@ -296,6 +320,9 @@ class ShopifyApiService
             'inventory' => $totalInventory,
             'primary_price' => $primaryVariant['price'] ?? 'N/A',
             'currency' => $primaryVariant['currency'] ?? null,
+            'skus' => array_values(array_unique(array_filter(array_map(static function ($variant) {
+                return trim((string) ($variant['sku'] ?? ''));
+            }, $mapped)))),
             'variants' => array_map(function ($variant) {
                 unset($variant['currency']);
                 return $variant;
@@ -519,6 +546,10 @@ class ShopifyApiService
                 if (empty($data)) {
                     return "Order not found.";
                 }
+
+                if (array_is_list($data)) {
+                    return $this->formatOrderHistoryForAI($data);
+                }
                 
                 // Handle error cases
                 if (isset($data['error']) && $data['error'] === 'requires_approval') {
@@ -701,5 +732,194 @@ class ShopifyApiService
 
         // Default fallback
         return '#007bff';
+    }
+
+    public function buildStorefrontAddToCartUrl(array $product, ?string $variantHint = null, ?string $discountCode = null): ?string
+    {
+        $baseUrl = trim((string) ($product['url'] ?? ''));
+        if ($baseUrl === '') {
+            return null;
+        }
+
+        $variant = $this->resolvePreferredVariantForCart($product, $variantHint);
+        $variantId = $variant['id'] ?? null;
+        if (!$variantId) {
+            return null;
+        }
+
+        $parts = parse_url($baseUrl);
+        if (empty($parts['scheme']) || empty($parts['host'])) {
+            return null;
+        }
+
+        $url = $parts['scheme'] . '://' . $parts['host'] . '/cart/' . $variantId . ':1';
+
+        return $this->appendDiscountToStorefrontUrl($url, $discountCode);
+    }
+
+    public function resolvePreferredVariantForCart(array $product, ?string $variantHint = null): ?array
+    {
+        $variants = array_values(array_filter($product['variants'] ?? [], static function ($variant) {
+            return is_array($variant) && !empty($variant['id']);
+        }));
+
+        if (empty($variants)) {
+            return null;
+        }
+
+        $hint = trim(mb_strtolower((string) $variantHint));
+        if ($hint !== '') {
+            foreach ($variants as $variant) {
+                $sku = mb_strtolower(trim((string) ($variant['sku'] ?? '')));
+                if ($sku !== '' && (str_contains($hint, $sku) || preg_match('/\b' . preg_quote($sku, '/') . '\b/i', $hint))) {
+                    return $variant;
+                }
+
+                $title = mb_strtolower(trim((string) ($variant['title'] ?? '')));
+                if ($title !== '' && $title !== 'default title' && str_contains($hint, $title)) {
+                    return $variant;
+                }
+
+                $titleTokens = array_values(array_filter(preg_split('/[^a-z0-9]+/i', $title) ?: [], static function ($token) {
+                    return $token !== '' && $token !== 'default' && $token !== 'title';
+                }));
+
+                if (!empty($titleTokens)) {
+                    $allTokensPresent = true;
+                    foreach ($titleTokens as $token) {
+                        if (!str_contains($hint, mb_strtolower($token))) {
+                            $allTokensPresent = false;
+                            break;
+                        }
+                    }
+
+                    if ($allTokensPresent) {
+                        return $variant;
+                    }
+                }
+
+                $normalizedTitle = trim((string) preg_replace('/[^a-z0-9]+/i', ' ', $title));
+                if ($normalizedTitle !== '' && str_contains($hint, $normalizedTitle)) {
+                    return $variant;
+                }
+            }
+        }
+
+        foreach ($variants as $variant) {
+            if (!empty($variant['available'])) {
+                return $variant;
+            }
+        }
+
+        return $variants[0];
+    }
+
+    public function buildStorefrontApplyDiscountUrl(string $storeUrlOrDomain, string $discountCode, string $redirectPath = '/cart'): ?string
+    {
+        $discountCode = trim($discountCode);
+        if ($discountCode === '') {
+            return null;
+        }
+
+        $baseUrl = $this->normalizeStorefrontBaseUrl($storeUrlOrDomain);
+        if ($baseUrl === null) {
+            return null;
+        }
+
+        $redirect = '/' . ltrim($redirectPath, '/');
+
+        return rtrim($baseUrl, '/') . '/discount/' . rawurlencode($discountCode) . '?redirect=' . rawurlencode($redirect);
+    }
+
+    private function appendDiscountToStorefrontUrl(string $url, ?string $discountCode = null): string
+    {
+        $discountCode = trim((string) $discountCode);
+        if ($discountCode === '') {
+            return $url;
+        }
+
+        $separator = str_contains($url, '?') ? '&' : '?';
+
+        return $url . $separator . 'discount=' . rawurlencode($discountCode);
+    }
+
+    private function normalizeStorefrontBaseUrl(string $storeUrlOrDomain): ?string
+    {
+        $value = trim($storeUrlOrDomain);
+        if ($value === '') {
+            return null;
+        }
+
+        if (!preg_match('#^https?://#i', $value)) {
+            $value = 'https://' . $value;
+        }
+
+        $parts = parse_url($value);
+        if (empty($parts['scheme']) || empty($parts['host'])) {
+            return null;
+        }
+
+        return $parts['scheme'] . '://' . $parts['host'];
+    }
+
+    private function formatOrderHistoryForAI(array $orders): string
+    {
+        $orders = array_values(array_filter($orders, static function ($order) {
+            return is_array($order) && !empty($order['name']);
+        }));
+
+        if (empty($orders)) {
+            return 'No previous purchases were found for this customer.';
+        }
+
+        $lines = ['Recent purchases:'];
+        foreach (array_slice($orders, 0, 5) as $order) {
+            $status = $this->deriveOrderHistoryStatus($order);
+            $items = array_values(array_filter(array_map(static function ($item) {
+                $title = trim((string) ($item['title'] ?? ''));
+                $quantity = max(1, (int) ($item['quantity'] ?? 1));
+                return $title !== '' ? $title . ' x' . $quantity : '';
+            }, $order['line_items'] ?? [])));
+
+            $line = '- ' . ($order['name'] ?? 'Order') . ' | ' . ($order['currency'] ?? 'USD') . ' ' . ($order['total_price'] ?? '0');
+            if ($status !== '') {
+                $line .= ' | ' . $status;
+            }
+            if (!empty($order['created_at'])) {
+                $line .= ' | ' . $order['created_at'];
+            }
+
+            $lines[] = $line;
+            if (!empty($items)) {
+                $lines[] = '  Items: ' . implode(', ', array_slice($items, 0, 5));
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function deriveOrderHistoryStatus(array $order): string
+    {
+        $trackingStatus = strtolower(trim((string) ($order['tracking']['status'] ?? '')));
+        if ($trackingStatus !== '') {
+            return match ($trackingStatus) {
+                'success' => 'Delivered',
+                'in_transit' => 'In Transit',
+                'out_for_delivery' => 'Out For Delivery',
+                'attempted_delivery' => 'Delivery Attempted',
+                'ready_for_pickup' => 'Ready For Pickup',
+                'confirmed' => 'Shipping Confirmed',
+                'failure' => 'Delivery Failed',
+                default => ucwords(str_replace('_', ' ', $trackingStatus)),
+            };
+        }
+
+        $fulfillmentStatus = strtolower(trim((string) ($order['fulfillment_status'] ?? '')));
+        return match ($fulfillmentStatus) {
+            'fulfilled' => 'Shipped',
+            'partial' => 'Partially Shipped',
+            'restocked' => 'Restocked / Returned',
+            default => 'Not Yet Shipped',
+        };
     }
 }
