@@ -42,6 +42,11 @@
             this.contactFields = this.normalizeContactFields(this.config.contactFields);
             this.starterPrompts = this.normalizeStarterPrompts(this.config.starterPrompts || []);
             this.starterPromptsShown = false;
+            this.feedbackDelayMs = 8000;
+            this.feedbackTimer = null;
+            this.feedbackSubmitted = false;
+            this.suppressNextFeedbackPrompt = false;
+            this.lastBotMessageForFeedback = '';
             this.init();
             this.detectLocation();
             // ISSUE 5B FIX: Load previous messages after init
@@ -81,6 +86,7 @@
             const message = customMessage || this.config.welcomeMessage;
             
             setTimeout(() => {
+                this.suppressNextFeedbackPrompt = true;
                 this.addMessage(message, 'bot');
                 this.showStarterPrompts();
             }, 500);
@@ -405,7 +411,9 @@
             }, 1500);
 
             // Detect and apply Shopify theme colors if available
-            if (this.config.isShopify) {
+            // Only runs when shopifyAutoColor is enabled (default: true).
+            // Disable it from the Widget Manager to lock your admin-set colors.
+            if (this.config.isShopify && this.config.shopifyAutoColor !== false) {
                 setTimeout(() => {
                     const colors = this.detectShopifyThemeColors();
                     if (colors) {
@@ -943,6 +951,126 @@
             return parts.length ? `You can reach us at ${parts.join(' | ')}.` : '';
         }
 
+        cancelFeedbackPromptTimer() {
+            if (this.feedbackTimer) {
+                clearTimeout(this.feedbackTimer);
+                this.feedbackTimer = null;
+            }
+        }
+
+        removeFeedbackPrompt() {
+            const existing = document.getElementById(`ai-chat-feedback-${this.config.orgId}`);
+            if (existing) {
+                existing.remove();
+            }
+        }
+
+        scheduleFeedbackPrompt(content, sender = 'bot') {
+            if (sender !== 'bot' && sender !== 'agent') {
+                return;
+            }
+
+            if (this.suppressNextFeedbackPrompt) {
+                this.suppressNextFeedbackPrompt = false;
+                return;
+            }
+
+            if (!this.messages.some((msg) => msg.sender === 'user')) {
+                return;
+            }
+
+            if (this.feedbackSubmitted) {
+                return;
+            }
+
+            this.cancelFeedbackPromptTimer();
+            this.removeFeedbackPrompt();
+            this.lastBotMessageForFeedback = String(content || '');
+
+            this.feedbackTimer = window.setTimeout(() => {
+                this.showFeedbackPrompt();
+            }, this.feedbackDelayMs);
+        }
+
+        showFeedbackPrompt() {
+            const messagesContainer = document.getElementById(this.ids.messages);
+            if (!messagesContainer || this.feedbackSubmitted) {
+                return;
+            }
+
+            this.removeFeedbackPrompt();
+
+            const prompt = document.createElement('div');
+            prompt.className = 'ai-chat-feedback-prompt';
+            prompt.id = `ai-chat-feedback-${this.config.orgId}`;
+            prompt.innerHTML = `
+                <div class="ai-chat-feedback-title">Was this helpful?</div>
+                <div class="ai-chat-feedback-actions">
+                    <button type="button" class="ai-chat-feedback-btn" data-feedback-action="yes">Yes</button>
+                    <button type="button" class="ai-chat-feedback-btn ai-chat-feedback-btn-secondary" data-feedback-action="more-help">Need more help?</button>
+                </div>
+                <div class="ai-chat-feedback-form" style="display:none;">
+                    <label class="ai-chat-feedback-label" for="ai-chat-feedback-text-${this.config.orgId}">Tell us what went wrong:</label>
+                    <textarea id="ai-chat-feedback-text-${this.config.orgId}" class="ai-chat-feedback-text" rows="3" placeholder="Share what was missing or unclear"></textarea>
+                    <div class="ai-chat-feedback-actions">
+                        <button type="button" class="ai-chat-feedback-btn" data-feedback-action="submit-more-help">Send</button>
+                    </div>
+                </div>
+            `;
+
+            messagesContainer.appendChild(prompt);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            prompt.querySelector('[data-feedback-action="yes"]')?.addEventListener('click', () => {
+                this.submitFeedback(true, '', prompt);
+            });
+
+            prompt.querySelector('[data-feedback-action="more-help"]')?.addEventListener('click', () => {
+                const form = prompt.querySelector('.ai-chat-feedback-form');
+                if (form) {
+                    form.style.display = 'block';
+                    const textarea = form.querySelector('.ai-chat-feedback-text');
+                    if (textarea) {
+                        textarea.focus();
+                    }
+                }
+            });
+
+            prompt.querySelector('[data-feedback-action="submit-more-help"]')?.addEventListener('click', () => {
+                const text = prompt.querySelector('.ai-chat-feedback-text')?.value || '';
+                this.submitFeedback(false, text, prompt);
+            });
+        }
+
+        async submitFeedback(helpful, feedback, promptElement) {
+            const payload = {
+                session_id: this.sessionId,
+                helpful: !!helpful,
+                feedback: String(feedback || '').trim(),
+                page_url: window.location.href,
+                message: this.lastBotMessageForFeedback || null,
+            };
+
+            try {
+                await fetch(`${this.config.apiUrl}/widget/${this.config.orgId}/feedback`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+            } catch (error) {
+                console.warn('[AI Widget] Feedback submission failed:', error);
+            }
+
+            this.feedbackSubmitted = true;
+            this.cancelFeedbackPromptTimer();
+
+            if (promptElement) {
+                promptElement.innerHTML = '<div class="ai-chat-feedback-thanks">Thanks for the feedback.</div>';
+            }
+        }
+
         toggleExpand() {
             const chatWindow = document.getElementById(this.ids.window);
             const expandBtn = document.getElementById(this.ids.expand);
@@ -1302,16 +1430,27 @@
         }
 
         addMessage(content, sender = 'user', senderName = null, messageId = null) {
+            if (sender === 'user') {
+                this.cancelFeedbackPromptTimer();
+                this.removeFeedbackPrompt();
+            }
+
             this.renderMessage(content, sender, null, senderName);
 
             this.messages.push({ content, sender, senderName, messageId, timestamp: new Date() });
             // ISSUE 5B FIX: Persist messages after each addition
             this.saveMessages();
+
+            if (sender === 'bot' || sender === 'agent') {
+                this.scheduleFeedbackPrompt(content, sender);
+            }
         }
 
         addStreamingMessage(fullContent) {
             const messagesContainer = document.getElementById(this.ids.messages);
             if (!messagesContainer) return;
+            this.cancelFeedbackPromptTimer();
+            this.removeFeedbackPrompt();
             messagesContainer.style.setProperty('width', '100%', 'important');
             messagesContainer.style.setProperty('align-items', 'flex-start', 'important');
 
@@ -1341,6 +1480,8 @@
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 if (i < text.length) {
                     setTimeout(tick, interval);
+                } else {
+                    this.scheduleFeedbackPrompt(fullContent, 'bot');
                 }
             };
             tick();

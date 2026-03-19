@@ -167,6 +167,7 @@
                                     </div>
                                     @php
                                         $queryTranslationMap = $custOrg->settings['query_translation_map'] ?? '';
+                                        $queryAliasMap = $custOrg->settings['query_alias_map'] ?? '';
                                         if (is_array($queryTranslationMap)) {
                                             $queryTranslationMap = implode("\n", array_map(function ($to, $from) {
                                                 if (is_int($from)) {
@@ -175,11 +176,98 @@
                                                 return trim((string) $from) . ' => ' . trim((string) $to);
                                             }, $queryTranslationMap, array_keys($queryTranslationMap)));
                                         }
+
+                                        $normalizedTranslationLines = [];
+                                        $normalizedAliasLines = [];
+                                        $legacyRows = preg_split('/\r\n|\r|\n/', (string) $queryTranslationMap) ?: [];
+                                        foreach ($legacyRows as $row) {
+                                            $line = trim((string) $row);
+                                            if ($line === '' || str_starts_with($line, '#')) {
+                                                continue;
+                                            }
+
+                                            $parts = preg_split('/=>|=|\|/', $line, 2) ?: [];
+                                            if (count($parts) < 2) {
+                                                continue;
+                                            }
+
+                                            $left = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) ($parts[0] ?? ''))));
+                                            $right = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) ($parts[1] ?? ''))));
+                                            if ($left === '' || $right === '') {
+                                                continue;
+                                            }
+
+                                            $aliases = array_values(array_unique(array_filter(array_map(function ($value) {
+                                                return strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
+                                            }, preg_split('/,/', $right) ?: []))));
+
+                                            if (count($aliases) > 1) {
+                                                $normalizedAliasLines[] = $left . ' = ' . implode(', ', $aliases);
+                                            } else {
+                                                $normalizedTranslationLines[] = $left . ' = ' . ($aliases[0] ?? $right);
+                                            }
+                                        }
+
+                                        if (is_array($queryAliasMap)) {
+                                            $queryAliasMap = implode("\n", array_map(function ($to, $from) {
+                                                if (is_int($from)) {
+                                                    return (string) $to;
+                                                }
+                                                return trim((string) $from) . ' => ' . trim((string) $to);
+                                            }, $queryAliasMap, array_keys($queryAliasMap)));
+                                        }
+
+                                        $aliasRows = preg_split('/\r\n|\r|\n/', (string) $queryAliasMap) ?: [];
+                                        foreach ($aliasRows as $row) {
+                                            $line = trim((string) $row);
+                                            if ($line === '' || str_starts_with($line, '#')) {
+                                                continue;
+                                            }
+
+                                            $parts = preg_split('/=>|=|\|/', $line, 2) ?: [];
+                                            if (count($parts) < 2) {
+                                                continue;
+                                            }
+
+                                            $left = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) ($parts[0] ?? ''))));
+                                            $right = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) ($parts[1] ?? ''))));
+                                            if ($left === '' || $right === '') {
+                                                continue;
+                                            }
+
+                                            $aliases = array_values(array_unique(array_filter(array_map(function ($value) {
+                                                return strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
+                                            }, preg_split('/,/', $right) ?: []))));
+                                            if (!empty($aliases)) {
+                                                $normalizedAliasLines[] = $left . ' = ' . implode(', ', $aliases);
+                                            }
+                                        }
+
+                                        $queryTranslationMap = implode("\n", array_values(array_unique(array_filter($normalizedTranslationLines))));
+                                        $queryAliasMap = implode("\n", array_values(array_unique(array_filter($normalizedAliasLines))));
                                     @endphp
                                     <div class="mb-3">
+                                        <label class="form-label">Response Language</label>
+                                        <select id="responseLanguage" name="responseLanguage" class="form-select">
+                                            @php $responseLanguage = $custOrg->settings['response_language'] ?? 'auto'; @endphp
+                                            <option value="auto" {{ $responseLanguage === 'auto' ? 'selected' : '' }}>Auto-detect</option>
+                                            <option value="en" {{ $responseLanguage === 'en' ? 'selected' : '' }}>English</option>
+                                            <option value="hi" {{ $responseLanguage === 'hi' ? 'selected' : '' }}>Hindi</option>
+                                            <option value="es" {{ $responseLanguage === 'es' ? 'selected' : '' }}>Spanish</option>
+                                            <option value="fr" {{ $responseLanguage === 'fr' ? 'selected' : '' }}>French</option>
+                                            <option value="de" {{ $responseLanguage === 'de' ? 'selected' : '' }}>German</option>
+                                        </select>
+                                        <small class="text-muted">Auto-detect replies in the visitor's language when possible.</small>
+                                    </div>
+                                    <div class="mb-3">
                                         <label class="form-label">Query Translation Map (optional)</label>
-                                        <textarea id="queryTranslationMap" name="queryTranslationMap" class="form-control" rows="6" placeholder="mehr infos = more information&#10;prix = price&#10;servicio = service">{{ $queryTranslationMap }}</textarea>
-                                        <small class="text-muted">Use one mapping per line in format <strong>source = target</strong> (or <strong>source =&gt; target</strong>). Add commonly used terms from any language (for example Indic, German, French, Spanish, Tamil, Telugu) to improve multilingual FAQ matching.</small>
+                                        <textarea id="queryTranslationMap" name="queryTranslationMap" class="form-control" rows="5" placeholder="mehr infos = more information&#10;prix = price&#10;servicio = service">{{ $queryTranslationMap }}</textarea>
+                                        <small class="text-muted">Use one mapping per line in format <strong>source = target</strong> (or <strong>source =&gt; target</strong>). Use this for one-to-one multilingual normalization.</small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Query Alias / Synonym Map (optional)</label>
+                                        <textarea id="queryAliasMap" name="queryAliasMap" class="form-control" rows="5" placeholder="class 11 = class xi, xi, 11th&#10;admission fee = admission fees, fee for admission&#10;hostel fee = hostel charges, boarding fee">{{ $queryAliasMap }}</textarea>
+                                        <small class="text-muted">Use one mapping per line in format <strong>canonical = alias 1, alias 2, alias 3</strong>. Single aliases also work here, for example <strong>college = clg</strong>.</small>
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Custom Widget CSS (optional)</label>

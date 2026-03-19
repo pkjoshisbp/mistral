@@ -6,18 +6,21 @@ use Illuminate\Console\Command;
 use App\Models\Organization;
 use App\Models\OrganizationFaq;
 use App\Services\AiAgentService;
+use App\Services\QdrantCanonicalizationService;
 use Illuminate\Support\Facades\Log;
 
 class ResyncFaqsToQdrant extends Command
 {
-    protected $signature = 'faq:resync {organization? : Organization slug or ID} {--dry-run : Only log actions, do not write}';
+    protected $signature = 'faq:resync {organization? : Organization slug or ID} {--dry-run : Only log actions, do not write} {--skip-canonicalize : Skip canonical point-id cleanup after sync}';
     protected $description = 'Re-index FAQs to Qdrant with safe fallbacks; skips empty content. Optionally scope to one organization.';
 
     public function handle()
     {
         $orgArg = $this->argument('organization');
         $dryRun = (bool) $this->option('dry-run');
+        $skipCanonicalize = (bool) $this->option('skip-canonicalize');
         $ai = new AiAgentService();
+        $canonicalizer = app(QdrantCanonicalizationService::class);
 
         $orgs = Organization::query();
         if ($orgArg) {
@@ -72,6 +75,12 @@ class ResyncFaqsToQdrant extends Command
                         'result' => $result
                     ]);
                 }
+            }
+
+            if (! $dryRun && ! $skipCanonicalize) {
+                $cleanup = $canonicalizer->run($org->slug, true);
+                $cleanupSummary = $cleanup['summary'] ?? [];
+                $this->info("Canonicalized {$org->slug}: migrated {$cleanupSummary['migrated_groups']} groups, deleted {$cleanupSummary['deleted_points']} stale point ids, skipped {$cleanupSummary['skipped_groups']} groups.");
             }
         }
 

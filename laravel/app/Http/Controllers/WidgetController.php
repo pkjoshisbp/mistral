@@ -214,6 +214,9 @@ class WidgetController
             'standardAttribution' => $useShopifyStandardAttribution,
             // Shopify integration flag
             'isShopify' => $hasShopifyIntegration,
+            // Auto-match Shopify theme colors (default true for backward compat).
+            // Set shopify_auto_color=false in org settings to lock admin-chosen colors.
+            'shopifyAutoColor' => array_key_exists('shopify_auto_color', $settings) ? (bool)$settings['shopify_auto_color'] : true,
             'customJs' => $this->sanitizeWidgetCustomCode($settings['widget_custom_js'] ?? null),
         ];
 
@@ -453,6 +456,8 @@ class WidgetController
             $previousContextPayloads = $existingConversation->metadata['last_context_payloads'] ?? [];
             $pendingFollowUpState = $this->followUpStateService->getPendingState($existingConversation);
             $hasPendingFollowUpState = is_array($pendingFollowUpState) && !empty($pendingFollowUpState);
+            $hasExplicitPendingFollowUpPrompt = $this->pendingStateHasExplicitFollowUpPrompt($pendingFollowUpState);
+            $previousDebugSummary = $this->getPreviousDebugSummary($existingConversation);
 
             $lastAssistantForIntent = $this->getLastAssistantMessage($organization, $sessionId);
             $lastAssistantAskedQuestionForIntent = is_string($lastAssistantForIntent)
@@ -461,13 +466,28 @@ class WidgetController
             $skipIntentOnAffirmative = (bool) ($rulePolicy['skip_intent_on_affirmative_follow_up'] ?? true);
             $isAffirmativeContinuationForIntent = $this->isAffirmativeFollowUp((string) $message)
                 && $existingConversation
-                && ($lastAssistantAskedQuestionForIntent || $hasPendingFollowUpState)
+                && ($lastAssistantAskedQuestionForIntent || $hasExplicitPendingFollowUpPrompt)
                 && $skipIntentOnAffirmative;
+
+            $this->mergeDebugExtra(array_filter([
+                'previous_query' => $previousDebugSummary['user_message'] ?? null,
+                'previous_response_path' => $previousDebugSummary['response_path'] ?? null,
+                'previous_faq_id' => data_get($previousDebugSummary, 'extra.faq_item_id'),
+                'previous_faq_title' => data_get($previousDebugSummary, 'extra.faq_title'),
+                'pending_follow_up' => $hasPendingFollowUpState ? [
+                    'question' => trim((string) ($pendingFollowUpState['question'] ?? '')),
+                    'resolved_anchor' => trim((string) ($pendingFollowUpState['resolved_anchor'] ?? '')),
+                    'topics' => array_values(array_filter(array_unique(array_merge(
+                        $this->normalizeDebugList($pendingFollowUpState['topic_hints'] ?? []),
+                        $this->normalizeDebugList(data_get($pendingFollowUpState, 'follow_up.topic', []))
+                    )))),
+                ] : null,
+            ], static fn ($value) => !($value === null || $value === [] || $value === '')));
 
             if (
                 $this->isMinimalAcknowledgementMessage((string) $message)
                 && !$lastAssistantAskedQuestionForIntent
-                && !$hasPendingFollowUpState
+                && !$hasExplicitPendingFollowUpPrompt
             ) {
                 $ackResponse = $this->buildContextualFarewellResponse(
                     $organization,
@@ -505,6 +525,14 @@ class WidgetController
                     );
                 }
 
+                $this->debugData['response_path'] = 'acknowledgement';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->mergeDebugExtra([
+                    'context_reused' => false,
+                    'reason' => 'conversation_closing_acknowledgement',
+                ]);
+                $this->writeDebugLog($conversation);
+
                 return response()->json([
                     'response' => $ackResponse,
                     'session_id' => $sessionId,
@@ -514,7 +542,7 @@ class WidgetController
 
             if (
                 $this->isMinimalAcknowledgementMessage((string) $message)
-                && ($lastAssistantAskedQuestionForIntent || $hasPendingFollowUpState)
+                && ($lastAssistantAskedQuestionForIntent || $hasExplicitPendingFollowUpPrompt)
             ) {
                 // If the acknowledgement contains a thank-you signal it means the visitor
                 // is closing — not accepting the AI's offer to continue. Treat as farewell.
@@ -559,6 +587,14 @@ class WidgetController
                     );
                 }
 
+                $this->debugData['response_path'] = $isThanksClosing ? 'acknowledgement' : 'affirmative_continuation';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->mergeDebugExtra([
+                    'context_reused' => false,
+                    'reason' => $isThanksClosing ? 'conversation_closing_acknowledgement' : 'explicit_follow_up_prompt_answered',
+                ]);
+                $this->writeDebugLog($conversation);
+
                 return response()->json([
                     'response' => $continuationResponse,
                     'session_id' => $sessionId,
@@ -566,7 +602,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if (!$isAffirmativeContinuationForIntent) {
+            if (!$isAffirmativeContinuationForIntent && $this->shouldRunWidgetIntentDetection($organization)) {
                 try {
                     $intentResult = app(IntentDetectionService::class)->detectIntent($message, $organization->id);
                 } catch (\Throwable $t) {
@@ -575,12 +611,14 @@ class WidgetController
                         'error' => $t->getMessage()
                     ]);
                 }
-            } else {
+            } elseif ($isAffirmativeContinuationForIntent) {
                 $intentResult = [
                     'intent' => 'follow_up',
                     'confidence' => 0.95,
                     'method' => 'rule_follow_up',
                 ];
+            } else {
+                $intentResult = $this->buildSkippedIntentResult();
             }
 
             // Capture intent into debug payload
@@ -718,7 +756,7 @@ class WidgetController
                 && $this->responseHasQuestion($lastAssistantMessage);
             $isContextualShortFollowUp = $isShortFollowUp
                 || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion);
-            $isAffirmativeContinuation = $isAffirmativeFollowUp && ($lastAssistantAskedQuestion || $hasPendingFollowUpState);
+            $isAffirmativeContinuation = $isAffirmativeFollowUp && ($lastAssistantAskedQuestion || $hasExplicitPendingFollowUpPrompt);
             $skipExactMatchOnAffirmative = (bool) ($rulePolicy['skip_exact_match_on_affirmative_follow_up'] ?? true);
             $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
                 (string) $message,
@@ -733,8 +771,21 @@ class WidgetController
                 && $isRelatedFollowUp;
             $shouldUsePendingStateAnchor = $this->shouldAnchorWithPendingFollowUpState(
                 (string) $message,
-                $hasPendingFollowUpState ? $pendingFollowUpState : null
+                $hasExplicitPendingFollowUpPrompt ? $pendingFollowUpState : null
             );
+
+            $this->mergeDebugExtra([
+                'context_reused' => $canReusePreviousContext,
+                'reason' => $this->determineContextReuseReason(
+                    $isRelatedFollowUp,
+                    is_array($previousContextPayloads) ? $previousContextPayloads : [],
+                    $canReusePreviousContext,
+                    $shouldUsePendingStateAnchor,
+                    $hasPendingFollowUpState,
+                    $hasExplicitPendingFollowUpPrompt,
+                    $isAffirmativeFollowUp
+                ),
+            ]);
 
             if ($isReferentialFollowUp && in_array($routeAnalysis['primary_route'] ?? null, ['fulfillment_questions', 'availability_checks', 'pricing_requests'], true)) {
                 $routeProductCandidate = trim((string) ($routeAnalysis['slots']['product_candidate'] ?? ''));
@@ -1158,6 +1209,10 @@ class WidgetController
                     $orderedResults = $anchoredEntityResults;
                 }
 
+                $this->mergeDebugExtra([
+                    'top_matches' => $this->buildDebugTopMatches($orderedResults),
+                ]);
+
                 // Compute max relevance score to detect low-quality / off-topic context
                 $maxResultScore = 0.0;
                 foreach ($searchResults['results'] as $_r) {
@@ -1540,9 +1595,38 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            // NOTE: isContactQuery hard-bypass removed — contact queries now go through
-            // the normal Qdrant + LLM pipeline so how-to / config queries are not mis-routed.
-            // The LLM system prompt already contains the org's contact details.
+            if ($this->isContactQuery((string) $message)) {
+                $contactResponse = $this->buildDeterministicContactQueryResponse($organization, (string) $message);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $contactResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location', 'city'),
+                    $sessionMetadata
+                );
+
+                $this->debugData['response_path'] = 'deterministic_contact';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->writeDebugLog($conversation);
+
+                return response()->json([
+                    'response' => $contactResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
 
             $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
             if ($branchFaqMatch && !$hasShopifyData) {
@@ -1584,6 +1668,21 @@ class WidgetController
                     compact('country', 'region', 'location', 'city'),
                     $intentResult
                 );
+
+                $this->debugData['faq_matched'] = true;
+                $this->debugData['faq_match_type'] = 'branch';
+                $this->debugData['response_path'] = 'faq_branch';
+                $this->debugData['ai_provider'] = $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                $this->debugData['model_used'] = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->mergeDebugExtra([
+                    'faq_source' => 'funnel_branch',
+                    'faq_item_id' => $branchFaqMatch['payload']['item_id'] ?? null,
+                    'faq_title' => $branchFaqMatch['payload']['title'] ?? null,
+                    'branch_type' => $branchFaqMatch['branch_type'] ?? null,
+                    'branch_score' => $branchFaqMatch['score'] ?? null,
+                ]);
+                $this->writeDebugLog($conversation);
 
                 $this->logIntentAnalytics(
                     $organization->id,
@@ -1642,6 +1741,8 @@ class WidgetController
                 $directResponse = $exactFaqMatch['response'];
                 $assistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
                 $paraphrasedResponse = null;
+                $paraphraseElapsedMs = null;
+                $paraphraseModel = null;
                 // Skip paraphrase ONLY for keyword-fallback matches with no HTML content.
                 // FAQ content stored as HTML must be paraphrased so XML/HTML markup is cleaned.
                 $rawFaqContent = trim((string) $directResponse);
@@ -1677,6 +1778,7 @@ class WidgetController
                         // Same model used for main chat so it is already warm from recent queries.
                         $paraphraseOptions = ['num_predict' => $dynamicNumPredict, 'temperature' => 0.3, 'use_vastai' => true, 'session_id' => $sessionId];
                         $paraphraseModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                        $paraphraseStartedAt = microtime(true);
                         $paraphraseResponse = $this->aiAgentService->llmChat(
                             $paraphraseMessages,
                             $paraphraseModel,
@@ -1684,6 +1786,7 @@ class WidgetController
                             $organization->id,
                             $paraphraseOptions
                         );
+                        $paraphraseElapsedMs = (int) round((microtime(true) - $paraphraseStartedAt) * 1000);
 
                         if ($paraphraseResponse && isset($paraphraseResponse['message']['content'])) {
                             $paraphrasedResponse = trim($paraphraseResponse['message']['content']);
@@ -1696,8 +1799,20 @@ class WidgetController
                         ]);
                     }
                 }
+                $contactDrift = $paraphrasedResponse
+                    ? $this->summarizeContactDrift((string) $directResponse, (string) $paraphrasedResponse)
+                    : ['added_emails' => [], 'added_domains' => []];
 
                 $finalFaqResponse = $this->decodeHtmlEntitiesRecursively($paraphrasedResponse ?: $directResponse);
+                $faqResponseBeforeContactSanitization = $finalFaqResponse;
+                $finalFaqResponse = $this->enforceOfficialContacts(
+                    $finalFaqResponse,
+                    $organization->contact_email ?? null,
+                    $organization->contact_phone ?? null,
+                    $organization->website ?: config('app.url')
+                );
+                $faqContactsSanitized = $finalFaqResponse !== $faqResponseBeforeContactSanitization;
+
                 $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
                     $organization,
                     $finalFaqResponse,
@@ -1724,6 +1839,7 @@ class WidgetController
                     'org_id' => $organization->id,
                     'session_id' => $sessionId,
                     'paraphrased' => (bool) $paraphrasedResponse,
+                    'contacts_sanitized' => $faqContactsSanitized,
                     'response_preview' => substr((string) $finalFaqResponse, 0, 300) . '...',
                 ]);
                 $conversation = $this->saveConversationToDatabase(
@@ -1738,12 +1854,38 @@ class WidgetController
 
                 $this->debugData['faq_matched']       = true;
                 $this->debugData['faq_match_type']    = 'direct';
+                $this->debugData['faq_keyword_score'] = (($exactFaqMatch['match_source'] ?? null) === 'keyword_fallback')
+                    ? ($exactFaqMatch['score'] ?? null)
+                    : null;
                 $this->debugData['response_path']     = 'faq_direct';
                 $this->debugData['ai_provider']       = $this->aiAgentService->getAiProviderForOrganization($organization->id);
                 $this->debugData['model_used']        = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
-                $this->debugData['llm_elapsed_ms']    = 0; // No LLM call for FAQ direct
-                $this->debugData['max_tokens']        = 0; // No LLM call for FAQ direct
+                $this->debugData['llm_elapsed_ms']    = $paraphraseElapsedMs ?? 0;
+                $this->debugData['max_tokens']        = $paraphrasedResponse ? ($dynamicNumPredict ?? null) : 0;
                 $this->debugData['total_elapsed_ms']  = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->mergeDebugExtra([
+                    'faq_source' => $exactFaqMatch['match_source'] ?? null,
+                    'faq_item_id' => $exactFaqMatch['payload']['item_id'] ?? null,
+                    'faq_title' => $exactFaqMatch['payload']['title'] ?? null,
+                    'faq_semantic_threshold' => $exactFaqMatch['semantic_threshold'] ?? null,
+                    'faq_semantic_best_score' => $exactFaqMatch['semantic_best_score'] ?? null,
+                    'faq_semantic_threshold_passed' => $exactFaqMatch['semantic_threshold_passed'] ?? null,
+                    'faq_paraphrase_attempted' => !$skipParaphrase,
+                    'faq_paraphrase_model' => $paraphraseModel,
+                    'faq_paraphrase_elapsed_ms' => $paraphraseElapsedMs,
+                    'faq_paraphrase_skipped' => $skipParaphrase,
+                    'faq_contacts_sanitized' => $faqContactsSanitized,
+                    'faq_contact_drift' => array_filter([
+                        'added_emails' => $contactDrift['added_emails'] ?? [],
+                        'added_domains' => $contactDrift['added_domains'] ?? [],
+                    ], static fn ($value) => !empty($value)),
+                    'faq_overlap_terms' => $exactFaqMatch['match_debug']['overlap_terms'] ?? [],
+                    'faq_specific_overlap_terms' => $exactFaqMatch['match_debug']['specific_overlap_terms'] ?? [],
+                    'faq_specific_query_terms' => $exactFaqMatch['match_debug']['specific_query_terms'] ?? [],
+                    'faq_specific_coverage' => $exactFaqMatch['match_debug']['specific_coverage'] ?? null,
+                    'faq_matched_keywords' => $exactFaqMatch['match_debug']['matched_keywords'] ?? [],
+                    'faq_has_career_intent' => $exactFaqMatch['match_debug']['has_career_intent'] ?? null,
+                ]);
                 $this->writeDebugLog($conversation);
 
                 $this->logIntentAnalytics(
@@ -1858,6 +2000,15 @@ class WidgetController
                         $sessionMetadata
                     );
                 }
+
+                $this->debugData['clarification_sought'] = true;
+                $this->debugData['response_path'] = 'affirmative_clarification';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->mergeDebugExtra([
+                    'context_reused' => false,
+                    'reason' => 'affirmative_without_explicit_follow_up_prompt',
+                ]);
+                $this->writeDebugLog($conversation);
 
                 return response()->json([
                     'response' => $shortResponse,
@@ -5288,6 +5439,23 @@ class WidgetController
         return 'You can reach us at ' . implode(' | ', $parts) . '.';
     }
 
+    private function buildDeterministicContactQueryResponse(Organization $organization, string $message): string
+    {
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+        $website = (string) ($organization->website ?: config('app.url'));
+        $email = $organization->contact_email ?? ($settings['contact_email'] ?? null);
+        $phone = $organization->contact_phone ?? ($settings['contact_phone'] ?? null);
+        $hours = trim((string) ($settings['business_hours'] ?? ''));
+
+        $response = $this->buildContactResponse($email, $phone, $website);
+
+        if ($hours !== '' && preg_match('/\b(hour|hours|timing|timings|open|opening|closing|available)\b/i', $message)) {
+            $response .= ' Business hours: ' . $hours . '.';
+        }
+
+        return $response;
+    }
+
     private function getExactFaqMatchResponse(?array $searchResults, Organization $organization, string $message = ''): ?array
     {
         if (!$searchResults || empty($searchResults['results']) || !is_array($searchResults['results'])) {
@@ -5296,8 +5464,7 @@ class WidgetController
 
         $threshold = 0.62;
         $best = null;
-        $queryTerms = $this->extractKeywordTerms($this->normalizeKeywordMatchText((string) $message));
-        $queryTermCount = count($queryTerms);
+        $bestFaqSemanticScore = null;
 
         foreach ($searchResults['results'] as $result) {
             $payload = $result['payload'] ?? [];
@@ -5314,6 +5481,9 @@ class WidgetController
             }
 
             $score = (float) ($result['semantic_score'] ?? $result['score'] ?? 0);
+            $bestFaqSemanticScore = $bestFaqSemanticScore === null
+                ? $score
+                : max($bestFaqSemanticScore, $score);
             if ($score < $threshold) {
                 continue;
             }
@@ -5334,7 +5504,14 @@ class WidgetController
         }
 
         if (!$best) {
-            return $this->getKeywordFaqMatchResponse($organization, $message);
+            $fallbackMatch = $this->getKeywordFaqMatchResponse($organization, $message);
+            if ($fallbackMatch) {
+                $fallbackMatch['semantic_threshold'] = $threshold;
+                $fallbackMatch['semantic_best_score'] = $bestFaqSemanticScore;
+                $fallbackMatch['semantic_threshold_passed'] = false;
+            }
+
+            return $fallbackMatch;
         }
 
         $payload = $best['payload'] ?? [];
@@ -5360,6 +5537,9 @@ class WidgetController
             'score' => $best['score'],
             'payload' => $payload,
             'match_source' => 'semantic',
+            'semantic_threshold' => $threshold,
+            'semantic_best_score' => $best['score'],
+            'semantic_threshold_passed' => true,
         ];
     }
 
@@ -5375,6 +5555,17 @@ class WidgetController
         if (empty($queryTerms)) {
             return null;
         }
+
+        $genericQueryTerms = [
+            'a', 'an', 'the', 'and', 'or', 'for', 'to', 'of', 'in', 'on', 'at', 'by', 'with',
+            'how', 'what', 'when', 'where', 'why', 'who', 'which', 'is', 'are', 'was', 'were',
+            'be', 'become', 'can', 'could', 'should', 'would', 'do', 'does', 'did', 'i', 'we',
+            'you', 'they', 'he', 'she', 'it', 'my', 'our', 'your', 'their', 'person', 'someone',
+            'member', 'please', 'tell', 'show', 'give', 'need', 'want', 'know', 'about', 'details',
+            'detail', 'info', 'information', 'me', 'us', 'from'
+        ];
+        $organizationTerms = $this->buildOrganizationKeywordIgnoreTerms($organization);
+        $specificQueryTerms = array_values(array_unique(array_diff($queryTerms, $genericQueryTerms, $organizationTerms)));
 
         $careerTerms = [
             'career', 'careers', 'job', 'jobs', 'vacancy', 'vacancies', 'opening', 'openings',
@@ -5397,6 +5588,8 @@ class WidgetController
 
             $score = 0.0;
             $strongKeywordHit = false;
+            $matchedPhraseKeyword = false;
+            $matchedKeywords = [];
 
             // Generic single short words that appear in many queries should
             // not count as a "strong" keyword hit on their own (e.g. "apply",
@@ -5426,12 +5619,20 @@ class WidgetController
                     }
                     $score += 2.25;
                     $strongKeywordHit = true;
+                    $matchedKeywords[] = $keywordNorm;
+                    if (count($kwWords) > 1) {
+                        $matchedPhraseKeyword = true;
+                    }
                     continue;
                 }
 
                 $keywordTerms = $this->extractKeywordTerms($keywordNorm);
                 if (!empty($keywordTerms) && empty(array_diff($keywordTerms, $queryTerms))) {
                     $score += 1.5;
+                    $matchedKeywords[] = $keywordNorm;
+                    if (count($keywordTerms) > 1) {
+                        $matchedPhraseKeyword = true;
+                    }
                 }
             }
 
@@ -5439,6 +5640,12 @@ class WidgetController
             if ($overlapCount > 0) {
                 $score += min(1.8, $overlapCount * 0.42);
             }
+
+            $specificOverlapTerms = array_values(array_unique(array_intersect($specificQueryTerms, $faqTerms)));
+            $specificQueryCount = count($specificQueryTerms);
+            $specificCoverage = $specificQueryCount > 0
+                ? (count($specificOverlapTerms) / $specificQueryCount)
+                : null;
 
             if ($questionNorm !== '' && str_contains($query, $questionNorm)) {
                 $score += 0.9;
@@ -5453,6 +5660,14 @@ class WidgetController
             }
 
             if (!$strongKeywordHit && $score < 1.8) {
+                continue;
+            }
+
+            if ($specificQueryCount >= 4 && !$matchedPhraseKeyword && count($specificOverlapTerms) < 2) {
+                continue;
+            }
+
+            if ($specificQueryCount >= 3 && !$matchedPhraseKeyword && $specificCoverage !== null && $specificCoverage < 0.34) {
                 continue;
             }
 
@@ -5479,6 +5694,14 @@ class WidgetController
                         'follow_up' => $faq->follow_up,
                         'category' => $faq->category,
                         'keywords' => $faq->keywords,
+                    ],
+                    'match_debug' => [
+                        'overlap_terms' => array_values(array_unique(array_intersect($queryTerms, $faqTerms))),
+                        'specific_overlap_terms' => $specificOverlapTerms,
+                        'specific_query_terms' => $specificQueryTerms,
+                        'specific_coverage' => $specificCoverage,
+                        'matched_keywords' => array_values(array_unique($matchedKeywords)),
+                        'has_career_intent' => $hasCareerIntent,
                     ],
                 ];
             }
@@ -5533,6 +5756,106 @@ class WidgetController
         return trim(preg_replace('/\s+/', ' ', $normalized) ?? $normalized);
     }
 
+    private function shouldRunWidgetIntentDetection(Organization $organization): bool
+    {
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+
+        if (array_key_exists('widget_intent_detection_enabled', $settings)) {
+            return (bool) $settings['widget_intent_detection_enabled'];
+        }
+
+        if ($this->aiAgentService->useIntentAndRewrite()) {
+            return true;
+        }
+
+        return $this->organizationSupportsBookingFollowUp($organization);
+    }
+
+    private function buildSkippedIntentResult(): array
+    {
+        return [
+            'intent' => 'general_qna',
+            'confidence' => null,
+            'method' => 'skipped_widget_kb_only',
+        ];
+    }
+
+    private function mergeDebugExtra(array $values): void
+    {
+        $existing = is_array($this->debugData['extra'] ?? null) ? $this->debugData['extra'] : [];
+
+        foreach ($values as $key => $value) {
+            if ($value === null || $value === []) {
+                continue;
+            }
+
+            $existing[$key] = $value;
+        }
+
+        $this->debugData['extra'] = $existing;
+    }
+
+    private function buildOrganizationKeywordIgnoreTerms(Organization $organization): array
+    {
+        $parts = [
+            (string) ($organization->name ?? ''),
+            (string) ($organization->slug ?? ''),
+        ];
+
+        $terms = [];
+        foreach ($parts as $part) {
+            $normalized = $this->normalizeKeywordMatchText($part);
+            if ($normalized === '') {
+                continue;
+            }
+
+            $terms = array_merge($terms, $this->extractKeywordTerms($normalized));
+        }
+
+        return array_values(array_unique($terms));
+    }
+
+    private function summarizeContactDrift(string $sourceText, string $rewrittenText): array
+    {
+        $sourceEmails = $this->extractEmailsFromText($sourceText);
+        $rewrittenEmails = $this->extractEmailsFromText($rewrittenText);
+        $sourceDomains = $this->extractDomainsFromText($sourceText);
+        $rewrittenDomains = $this->extractDomainsFromText($rewrittenText);
+
+        return [
+            'added_emails' => array_values(array_diff($rewrittenEmails, $sourceEmails)),
+            'added_domains' => array_values(array_diff($rewrittenDomains, $sourceDomains)),
+        ];
+    }
+
+    private function extractEmailsFromText(string $text): array
+    {
+        preg_match_all('/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i', $text, $matches);
+
+        return array_values(array_unique(array_map('strtolower', $matches[0] ?? [])));
+    }
+
+    private function extractDomainsFromText(string $text): array
+    {
+        $domains = [];
+
+        foreach ($this->extractEmailsFromText($text) as $email) {
+            $atPos = strrpos($email, '@');
+            if ($atPos !== false) {
+                $domains[] = substr($email, $atPos + 1);
+            }
+        }
+
+        foreach ($this->extractUrlsFromText($text) as $url) {
+            $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+            if ($host !== '') {
+                $domains[] = preg_replace('/^www\./', '', $host) ?? $host;
+            }
+        }
+
+        return array_values(array_unique(array_filter($domains)));
+    }
+
     private function extractKeywordTerms(string $value): array
     {
         if ($value === '') {
@@ -5573,89 +5896,92 @@ class WidgetController
     private function getOrganizationQueryTranslationMap(Organization $organization): array
     {
         $settings = $organization->settings ?? [];
-        $configured = $settings['query_translation_map'] ?? [];
-
         $map = [];
 
-        if (is_string($configured)) {
-            $rows = preg_split('/\r\n|\r|\n/', $configured) ?: [];
-            foreach ($rows as $row) {
-                $line = trim((string) $row);
-                if ($line === '' || str_starts_with($line, '#')) {
-                    continue;
-                }
-
-                $parts = preg_split('/=>|=|\|/', $line, 2) ?: [];
-                if (count($parts) < 2) {
-                    continue;
-                }
-
-                $from = trim((string) ($parts[0] ?? ''));
-                $to = trim((string) ($parts[1] ?? ''));
-                if ($from === '' || $to === '') {
-                    continue;
-                }
-
-                $from = strtolower(trim(preg_replace('/\s+/', ' ', $from) ?? $from));
-                $to = strtolower(trim(preg_replace('/\s+/', ' ', $to) ?? $to));
-
-                if ($from !== '' && $to !== '') {
-                    $aliases = array_values(array_filter(array_map(function ($value) {
-                        $value = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
-                        return $value;
-                    }, preg_split('/,/', $to) ?: [])));
-
-                    if (count($aliases) > 1) {
-                        $map[$from] = $from;
-                        foreach ($aliases as $alias) {
-                            if ($alias !== '') {
-                                $map[$alias] = $from;
-                            }
-                        }
-                    } else {
-                        $map[$from] = $to;
-                    }
-                }
-            }
-
-            return $map;
-        }
-
-        if (is_array($configured)) {
-            foreach ($configured as $from => $to) {
-                if (is_int($from) && is_string($to)) {
-                    $parts = preg_split('/=>|=|\|/', $to, 2) ?: [];
-                    if (count($parts) >= 2) {
-                        $from = (string) ($parts[0] ?? '');
-                        $to = (string) ($parts[1] ?? '');
-                    } else {
-                        continue;
-                    }
-                }
-
-                $fromNorm = strtolower(trim((string) $from));
-                $toNorm = strtolower(trim((string) $to));
-
-                if ($fromNorm !== '' && $toNorm !== '') {
-                    $aliases = array_values(array_filter(array_map(function ($value) {
-                        return strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
-                    }, preg_split('/,/', $toNorm) ?: [])));
-
-                    if (count($aliases) > 1) {
-                        $map[$fromNorm] = $fromNorm;
-                        foreach ($aliases as $alias) {
-                            if ($alias !== '') {
-                                $map[$alias] = $fromNorm;
-                            }
-                        }
-                    } else {
-                        $map[$fromNorm] = $toNorm;
-                    }
-                }
-            }
-        }
+        $this->mergeOrganizationQueryNormalizationMap(
+            $map,
+            $settings['query_translation_map'] ?? [],
+            false,
+            true
+        );
+        $this->mergeOrganizationQueryNormalizationMap(
+            $map,
+            $settings['query_alias_map'] ?? [],
+            true,
+            false
+        );
 
         return $map;
+    }
+
+    private function mergeOrganizationQueryNormalizationMap(
+        array &$map,
+        $configured,
+        bool $forceAliasMode,
+        bool $allowLegacyAliasGroups
+    ): void {
+        foreach ($this->organizationQueryNormalizationRows($configured) as $row) {
+            $line = trim((string) $row);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            $parts = preg_split('/=>|=|\|/', $line, 2) ?: [];
+            if (count($parts) < 2) {
+                continue;
+            }
+
+            $from = $this->normalizeOrganizationQueryNormalizationValue((string) ($parts[0] ?? ''));
+            $to = $this->normalizeOrganizationQueryNormalizationValue((string) ($parts[1] ?? ''));
+            if ($from === '' || $to === '') {
+                continue;
+            }
+
+            $aliases = array_values(array_unique(array_filter(array_map(function ($value) {
+                return $this->normalizeOrganizationQueryNormalizationValue((string) $value);
+            }, preg_split('/,/', $to) ?: []))));
+
+            $shouldTreatAsAliasGroup = $forceAliasMode || ($allowLegacyAliasGroups && count($aliases) > 1);
+            if ($shouldTreatAsAliasGroup) {
+                $map[$from] = $from;
+                foreach ($aliases as $alias) {
+                    if ($alias !== '') {
+                        $map[$alias] = $from;
+                    }
+                }
+                continue;
+            }
+
+            $map[$from] = $aliases[0] ?? $to;
+        }
+    }
+
+    private function organizationQueryNormalizationRows($configured): array
+    {
+        if (is_string($configured)) {
+            return preg_split('/\r\n|\r|\n/', $configured) ?: [];
+        }
+
+        if (!is_array($configured)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($configured as $from => $to) {
+            if (is_int($from) && is_string($to)) {
+                $rows[] = $to;
+                continue;
+            }
+
+            $rows[] = (string) $from . ' = ' . (string) $to;
+        }
+
+        return $rows;
+    }
+
+    private function normalizeOrganizationQueryNormalizationValue(string $value): string
+    {
+        return strtolower(trim((string) preg_replace('/\s+/', ' ', $value)));
     }
 
     private function getFunnelBranchFaqMatchResponse(Organization $organization, ?array $pendingFollowUpState, string $message): ?array
@@ -5679,6 +6005,17 @@ class WidgetController
         } elseif ($this->isNegativeFollowUp($cleanMessage)) {
             $branchType = 'negative';
         }
+
+        if ($branchType !== null && !$this->pendingStateHasExplicitFollowUpPrompt($pendingFollowUpState)) {
+            return null;
+        }
+
+        $pendingStateTerms = $this->normalizeDebugList(array_merge(
+            [$pendingFollowUpState['resolved_anchor'] ?? null, $pendingFollowUpState['entity'] ?? null],
+            $this->normalizeDebugList($pendingFollowUpState['topic_hints'] ?? []),
+            $this->normalizeDebugList($pendingFollowUpState['topics_covered'] ?? []),
+            $this->normalizeDebugList(data_get($pendingFollowUpState, 'follow_up.topic', []))
+        ));
 
         $affirmativeTriggers = ['yes', 'yeah', 'yup', 'yep', 'sure', 'okay', 'ok', 'definitely', 'go ahead', 'continue'];
         $negativeTriggers = ['no', 'nope', 'nah', 'not now', 'dont', "don't", 'do not', 'not really', 'no thanks', 'no thank you'];
@@ -5713,9 +6050,14 @@ class WidgetController
             $questionNorm = trim(mb_strtolower((string) $faq->question));
             $keywordsNorm = trim(mb_strtolower((string) ($faq->keywords ?? '')));
             $categoryNorm = trim(mb_strtolower((string) ($faq->category ?? '')));
+            $candidateText = trim($questionNorm . ' ' . $keywordsNorm . ' ' . $categoryNorm);
 
             $isFunnelCategory = str_starts_with($categoryNorm, 'funnel');
             $score = 0.0;
+
+            if ($branchType !== null && !$this->debugTermsOverlap($candidateText, $pendingStateTerms)) {
+                continue;
+            }
 
             if ($branchType !== null) {
                 if (in_array($questionNorm, $triggers, true)) {
@@ -5802,7 +6144,29 @@ class WidgetController
         }
 
         unset($best['updated_at']);
+        $best['branch_type'] = $branchType;
         return $best;
+    }
+
+    private function debugTermsOverlap(string $haystack, array $needles): bool
+    {
+        $haystackTerms = $this->extractKeywordTerms($this->normalizeKeywordMatchText($haystack));
+        if (empty($haystackTerms)) {
+            return false;
+        }
+
+        foreach ($needles as $needle) {
+            $needleTerms = $this->extractKeywordTerms($this->normalizeKeywordMatchText((string) $needle));
+            if (empty($needleTerms)) {
+                continue;
+            }
+
+            if (!empty(array_intersect($haystackTerms, $needleTerms))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // -------------------------------------------------------------------------
@@ -8158,7 +8522,103 @@ class WidgetController
 
     private function buildAffirmativeClarifyResponse(): string
     {
-        return "You're welcome.";
+        return "I can help with that. Tell me what you want more details about so I answer the right thing.";
+    }
+
+    private function pendingStateHasExplicitFollowUpPrompt(?array $pendingFollowUpState): bool
+    {
+        if (!is_array($pendingFollowUpState) || empty($pendingFollowUpState)) {
+            return false;
+        }
+
+        $question = trim((string) ($pendingFollowUpState['question'] ?? ''));
+        if ($question !== '') {
+            return true;
+        }
+
+        $followUpType = trim((string) data_get($pendingFollowUpState, 'follow_up.type', ''));
+        $followUpTopics = $this->normalizeDebugList(data_get($pendingFollowUpState, 'follow_up.topic', []));
+
+        return in_array($followUpType, ['clarifying_question', 'confirm_choice'], true)
+            && !empty($followUpTopics);
+    }
+
+    private function normalizeDebugList($values): array
+    {
+        if (is_string($values)) {
+            $values = [$values];
+        }
+
+        if (!is_array($values)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(static function ($value) {
+            return trim((string) $value);
+        }, $values), static fn ($value) => $value !== ''));
+    }
+
+    private function getPreviousDebugSummary($conversation): ?array
+    {
+        if (!$conversation || empty($conversation->id)) {
+            return null;
+        }
+
+        $previous = \App\Models\LlmDebugLog::where('conversation_id', $conversation->id)
+            ->orderByDesc('id')
+            ->first();
+
+        return $previous?->toArray();
+    }
+
+    private function determineContextReuseReason(
+        bool $isRelatedFollowUp,
+        array $previousContextPayloads,
+        bool $canReusePreviousContext,
+        bool $shouldUsePendingStateAnchor,
+        bool $hasPendingFollowUpState,
+        bool $hasExplicitPendingFollowUpPrompt,
+        bool $isAffirmativeFollowUp
+    ): string {
+        if ($canReusePreviousContext) {
+            return 'reused_previous_context_payloads';
+        }
+
+        if ($shouldUsePendingStateAnchor) {
+            return 'rewrote_query_with_pending_follow_up_anchor';
+        }
+
+        if ($isAffirmativeFollowUp && $hasPendingFollowUpState && !$hasExplicitPendingFollowUpPrompt) {
+            return 'affirmative_without_explicit_follow_up_prompt';
+        }
+
+        if (!$isRelatedFollowUp) {
+            return 'no_follow_up_detected';
+        }
+
+        if (empty($previousContextPayloads)) {
+            return 'no_previous_context_payloads';
+        }
+
+        return 'follow_up_detected_but_context_not_reused';
+    }
+
+    private function buildDebugTopMatches(array $results, int $limit = 5): array
+    {
+        $matches = [];
+
+        foreach (array_slice($results, 0, $limit) as $result) {
+            $payload = is_array($result['payload'] ?? null) ? $result['payload'] : [];
+            $matches[] = array_filter([
+                'faq_id' => $payload['item_id'] ?? null,
+                'score' => isset($result['score']) ? round((float) $result['score'], 4) : null,
+                'title' => trim((string) ($payload['title'] ?? '')),
+                'category' => trim((string) ($payload['category'] ?? '')),
+                'data_type' => trim((string) ($payload['data_type'] ?? '')),
+            ], static fn ($value) => !($value === null || $value === ''));
+        }
+
+        return $matches;
     }
 
     private function buildDefaultFollowUpPrompt(string $message): string
@@ -9133,7 +9593,7 @@ class WidgetController
                 ->first();
 
             $pendingFollowUpState = $this->followUpStateService->getPendingState($conversation);
-            if (is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
+            if ($this->pendingStateHasExplicitFollowUpPrompt($pendingFollowUpState)) {
                 return false;
             }
         }
@@ -10713,6 +11173,68 @@ class WidgetController
             null,   // no message yet
             $sessionMetadata
         );
+
+        return response()->json(['success' => true])
+            ->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    public function submitFeedback(Request $request, $orgId)
+    {
+        $organization = is_numeric($orgId)
+            ? Organization::find($orgId)
+            : Organization::where('slug', $orgId)->first();
+
+        if (!$organization || !$organization->is_active) {
+            return response()->json(['success' => false, 'error' => 'Organization not found'], 404)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        if (!$this->isWidgetRequestAllowedForOrganization($organization, $request)) {
+            return response()->json(['success' => false, 'error' => 'Widget request origin is not allowed for this organization'], 403)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $validated = $request->validate([
+            'session_id' => 'required|string|max:255',
+            'helpful' => 'required|boolean',
+            'feedback' => 'nullable|string|max:2000',
+            'page_url' => 'nullable|string|max:1000',
+            'message' => 'nullable|string|max:20000',
+        ]);
+
+        $conversation = ChatConversation::where('organization_id', $organization->id)
+            ->where('conversation_id', $validated['session_id'])
+            ->first();
+
+        if (!$conversation) {
+            return response()->json(['success' => false, 'error' => 'Conversation not found'], 404)
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        $metadata = is_array($conversation->metadata ?? null) ? $conversation->metadata : [];
+        $entries = is_array($metadata['widget_feedback'] ?? null) ? $metadata['widget_feedback'] : [];
+        $entries[] = [
+            'helpful' => (bool) $validated['helpful'],
+            'feedback' => trim((string) ($validated['feedback'] ?? '')) ?: null,
+            'page_url' => trim((string) ($validated['page_url'] ?? '')) ?: null,
+            'message' => trim((string) ($validated['message'] ?? '')) ?: null,
+            'submitted_at' => now()->toISOString(),
+            'ip' => $request->ip(),
+            'user_agent' => (string) $request->userAgent(),
+        ];
+        $metadata['widget_feedback'] = $entries;
+        $metadata['last_widget_feedback_at'] = now()->toISOString();
+
+        $conversation->metadata = $metadata;
+        $conversation->save();
+
+        Log::info('Widget feedback captured', [
+            'org_id' => $organization->id,
+            'conversation_id' => $conversation->id,
+            'session_id' => $conversation->conversation_id,
+            'helpful' => (bool) $validated['helpful'],
+            'has_feedback' => !empty($validated['feedback']),
+        ]);
 
         return response()->json(['success' => true])
             ->header('X-Robots-Tag', 'noindex, nofollow');

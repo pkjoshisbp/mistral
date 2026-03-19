@@ -284,12 +284,19 @@
                                                     </strong>
                                                 </div>
                                                 <div class="card-body">
-                                                    <label class="form-label fw-bold" for="queryTranslationMap">Organization-specific alias map</label>
-                                                    <textarea wire:model.defer="queryTranslationMap" class="form-control @error('queryTranslationMap') is-invalid @enderror" id="queryTranslationMap" rows="5" placeholder="class 11 = class xi, xi, 11th&#10;admission fee = admission fees, fee for admission&#10;hostel fee = hostel charges, boarding fee"></textarea>
+                                                    <label class="form-label fw-bold" for="queryTranslationMap">Organization-specific translation map</label>
+                                                    <textarea wire:model.defer="queryTranslationMap" class="form-control @error('queryTranslationMap') is-invalid @enderror" id="queryTranslationMap" rows="4" placeholder="mehr infos = more information&#10;prix = price&#10;servicio = service"></textarea>
                                                     @error('queryTranslationMap')
                                                         <div class="invalid-feedback">{{ $message }}</div>
                                                     @enderror
-                                                    <small class="text-muted d-block mt-2">One mapping per line. Format: canonical term = alias 1, alias 2, alias 3. These mappings are used for both query normalization and follow-up context anchoring for this organization.</small>
+                                                    <small class="text-muted d-block mt-2">One mapping per line. Format: source = target. Use this for one-to-one language or phrasing normalization.</small>
+
+                                                    <label class="form-label fw-bold mt-3" for="queryAliasMap">Organization-specific alias / synonym map</label>
+                                                    <textarea wire:model.defer="queryAliasMap" class="form-control @error('queryAliasMap') is-invalid @enderror" id="queryAliasMap" rows="4" placeholder="class 11 = class xi, xi, 11th&#10;admission fee = admission fees, fee for admission&#10;hostel fee = hostel charges, boarding fee"></textarea>
+                                                    @error('queryAliasMap')
+                                                        <div class="invalid-feedback">{{ $message }}</div>
+                                                    @enderror
+                                                    <small class="text-muted d-block mt-2">One mapping per line. Format: canonical term = alias 1, alias 2, alias 3. Single aliases also work here, for example: college = clg.</small>
                                                 </div>
                                             </div>
 
@@ -472,7 +479,7 @@
                                                             <option value="fr">French</option>
                                                             <option value="de">German</option>
                                                         </select>
-                                                        <small class="text-muted">Auto-detect matches the user's language.</small>
+                                                        <small class="text-muted">Auto-detect matches the user's language. This is the same org-level setting available in the customer widget panel.</small>
                                                     </div>
                                                     <div class="mb-2">
                                                         <div class="form-check form-switch">

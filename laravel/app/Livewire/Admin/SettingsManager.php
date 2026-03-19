@@ -33,6 +33,8 @@ class SettingsManager extends Component
     public $app_name = '';
     public $app_url = '';
     public $app_timezone = 'UTC';
+    public $homepage_client_logo_gap = 24;
+    public $homepage_client_logo_height = 100;
     
     // AI Settings
     public $ai_model_provider = 'llama';
@@ -173,6 +175,8 @@ class SettingsManager extends Component
         $this->app_name = AdminSetting::get('app_name', config('app.name'));
         $this->app_url = AdminSetting::get('app_url', config('app.url'));
         $this->app_timezone = AdminSetting::get('app_timezone', 'UTC');
+        $this->homepage_client_logo_gap = (int) AdminSetting::get('homepage_client_logo_gap', 24);
+        $this->homepage_client_logo_height = (int) AdminSetting::get('homepage_client_logo_height', 100);
         
         // AI Settings
         $this->ai_model_provider = AdminSetting::get('ai_model_provider', config('app.ai_model_provider', 'llama'));
@@ -287,11 +291,15 @@ class SettingsManager extends Component
             'app_name' => 'required|string|max:255',
             'app_url' => 'required|url',
             'app_timezone' => 'required|string',
+            'homepage_client_logo_gap' => 'required|integer|min:8|max:80',
+            'homepage_client_logo_height' => 'required|integer|min:40|max:140',
         ]);
 
         AdminSetting::set('app_name', $this->app_name, 'text', 'app', 'Application Name');
         AdminSetting::set('app_url', $this->app_url, 'url', 'app', 'Application URL');
         AdminSetting::set('app_timezone', $this->app_timezone, 'select', 'app', 'Timezone');
+        AdminSetting::set('homepage_client_logo_gap', (string) $this->homepage_client_logo_gap, 'number', 'app', 'Homepage Client Logo Gap');
+        AdminSetting::set('homepage_client_logo_height', (string) $this->homepage_client_logo_height, 'number', 'app', 'Homepage Client Logo Height');
 
         // Update environment file
         $this->updateEnvFile([

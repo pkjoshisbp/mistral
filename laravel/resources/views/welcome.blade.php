@@ -1,6 +1,10 @@
 @extends('layouts.public')
 
 @section('content')
+@php
+    $clientLogoGap = max(8, min(80, (int) \App\Models\AdminSetting::get('homepage_client_logo_gap', 24)));
+    $clientLogoHeight = max(40, min(140, (int) \App\Models\AdminSetting::get('homepage_client_logo_height', 100)));
+@endphp
 <style>
     .hero-section {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -34,7 +38,122 @@
     .blog-meta {
         font-size: 0.875rem;
     }
+    .clients-section {
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        overflow: hidden;
+        --client-logo-gap: {{ $clientLogoGap }}px;
+        --client-logo-height: {{ $clientLogoHeight }}px;
+    }
+    .clients-kicker {
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: #0d6efd;
+    }
+    .clients-carousel-shell {
+        position: relative;
+        overflow: hidden;
+        padding: 0.5rem 0;
+    }
+    .clients-carousel-shell::before,
+    .clients-carousel-shell::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100px;
+        z-index: 2;
+        pointer-events: none;
+    }
+    .clients-carousel-shell::before {
+        left: 0;
+        background: linear-gradient(90deg, #f8fbff 0%, rgba(248, 251, 255, 0) 100%);
+    }
+    .clients-carousel-shell::after {
+        right: 0;
+        background: linear-gradient(270deg, #f8fbff 0%, rgba(248, 251, 255, 0) 100%);
+    }
+    .clients-carousel-track {
+        display: flex;
+        align-items: stretch;
+        width: max-content;
+        animation: clients-scroll 42s linear infinite;
+    }
+    .clients-carousel-shell:hover .clients-carousel-track {
+        animation-play-state: paused;
+    }
+    .client-logo-card {
+        width: 220px;
+        min-width: 220px;
+        margin-right: var(--client-logo-gap);
+       /* border: 1px solid rgba(13, 110, 253, 0.08);*/
+        border-radius: 1rem;
+        background: rgba(255, 255, 255, 0.96);
+       /* box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06); */
+        padding: 1.25rem 1rem;
+        text-align: center;
+    }
+    .client-logo-frame {
+        height: calc(var(--client-logo-height) + 10px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 0.75rem;
+    }
+    .client-logo-frame img {
+        max-height: var(--client-logo-height);
+        width: auto;
+        max-width: 100%;
+        object-fit: contain;
+        display: block;
+    }
+    .client-logo-frame img.logo-darken {
+        filter: brightness(0.42) contrast(1.22) saturate(0.85);
+    }
+    .client-logo-name {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 0.2rem;
+    }
+    .client-logo-url {
+        font-size: 0.78rem;
+        color: #6b7280;
+    }
+    @keyframes clients-scroll {
+        from {
+            transform: translateX(0);
+        }
+        to {
+            transform: translateX(-50%);
+        }
+    }
+    @media (max-width: 767.98px) {
+        .client-logo-card {
+            width: 180px;
+            min-width: 180px;
+        }
+        .clients-carousel-track {
+            animation-duration: 34s;
+        }
+    }
 </style>
+
+@php
+    $clientLogos = [
+        ['name' => 'Indian Art Zone', 'url' => 'https://indianartzone.com', 'logo' => asset('images/clients/indian-art-zone.png')],
+        ['name' => 'Vedic International', 'url' => 'https://vedic.ac.in', 'logo' => asset('images/clients/vedic-international.png')],
+        ['name' => 'Dr Instruments', 'url' => 'https://drinstruments.com', 'logo' => asset('images/clients/dr-instruments.png')],
+        ['name' => 'Powerup Links', 'url' => 'https://poweruplinks.com', 'logo' => asset('images/clients/powerup-links.png')],
+        ['name' => 'FloorPlan Expert', 'url' => 'https://www.floorplanexpert.co.uk', 'logo' => asset('images/clients/floorplan-expert.png')],
+        ['name' => 'Odyssey Motors', 'url' => 'https://odysseymotors.com', 'logo' => asset('images/clients/odyssey-motors.png')],
+        ['name' => 'Gupta Diagnostic', 'url' => 'https://guptadiagnostic.com', 'logo' => asset('images/clients/gupta-diagnostic.png'), 'class' => 'logo-darken'],
+        ['name' => 'Gurunanak Public School', 'url' => 'https://gurunanakpublicschool.org.in', 'logo' => asset('images/clients/gurunanak-public-school.gif')],
+        ['name' => 'SIDI', 'url' => 'https://sidi.org.in', 'logo' => asset('images/clients/sidi.png')],
+        ['name' => 'ADARSA', 'url' => 'https://adarsa.org', 'logo' => asset('images/clients/adarsa.png')],
+    ];
+@endphp
 
     <!-- Hero Section -->
     <section class="hero-section">
@@ -483,6 +602,29 @@
                         <p class="text-muted">{{ __('common.pricing_coming_soon') }}</p>
                     </div>
                 @endforelse
+            </div>
+        </div>
+    </section>
+
+    <section class="py-5 clients-section" id="our-clients">
+        <div class="container">
+            <div class="text-center mb-4">
+                <div class="clients-kicker mb-2">Our Clients</div>
+                <h2 class="mb-2">Trusted by teams across healthcare, education, ecommerce, and services</h2>
+                
+            </div>
+        </div>
+        <div class="clients-carousel-shell">
+            <div class="clients-carousel-track">
+                @foreach(array_merge($clientLogos, $clientLogos) as $client)
+                    <div class="client-logo-card">
+                        <div class="client-logo-frame">
+                            <img src="{{ $client['logo'] }}" alt="{{ $client['name'] }} logo" loading="lazy" class="{{ $client['class'] ?? '' }}">
+                        </div>
+                        <div class="client-logo-name">{{ $client['name'] }}</div>
+                        <div class="client-logo-url">{{ parse_url($client['url'], PHP_URL_HOST) }}</div>
+                    </div>
+                @endforeach
             </div>
         </div>
     </section>

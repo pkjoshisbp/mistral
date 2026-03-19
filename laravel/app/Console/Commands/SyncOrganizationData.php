@@ -8,6 +8,7 @@ use App\Models\OrganizationFaq;
 use App\Models\OrganizationInfo;
 use App\Models\OrganizationData;
 use App\Services\AiAgentService;
+use App\Services\QdrantCanonicalizationService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
@@ -18,7 +19,7 @@ class SyncOrganizationData extends Command
      *
      * @var string
      */
-    protected $signature = 'sync:organization-data {organization_id?} {--type=all}';
+    protected $signature = 'sync:organization-data {organization_id?} {--type=all} {--skip-canonicalize : Skip canonical point-id cleanup after sync}';
 
     /**
      * The console command description.
@@ -34,6 +35,7 @@ class SyncOrganizationData extends Command
     {
         $organizationId = $this->argument('organization_id');
         $type = $this->option('type');
+        $skipCanonicalize = (bool) $this->option('skip-canonicalize');
         
         $query = Organization::query();
         if ($organizationId) {
@@ -42,6 +44,7 @@ class SyncOrganizationData extends Command
         
         $organizations = $query->get();
         $aiService = new AiAgentService();
+        $canonicalizer = app(QdrantCanonicalizationService::class);
         
         foreach ($organizations as $organization) {
             $this->info("Syncing data for: {$organization->name} (slug: {$organization->slug})");
@@ -64,6 +67,12 @@ class SyncOrganizationData extends Command
             // Sync Products
             if ($type === 'all' || $type === 'product') {
                 $this->syncProducts($organization, $aiService);
+            }
+
+            if (! $skipCanonicalize) {
+                $cleanup = $canonicalizer->run($organization->slug, true);
+                $cleanupSummary = $cleanup['summary'] ?? [];
+                $this->info("Canonicalized {$organization->slug}: migrated {$cleanupSummary['migrated_groups']} groups, deleted {$cleanupSummary['deleted_points']} stale point ids, skipped {$cleanupSummary['skipped_groups']} groups.");
             }
         }
         

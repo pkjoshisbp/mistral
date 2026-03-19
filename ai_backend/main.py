@@ -4051,8 +4051,9 @@ async def store_data(request: Request):
                 payload["semantic_terms"] = semantic_terms or payload.get("semantic_terms") or []
                 payload["semantic_text"] = semantic_text or str(payload.get("semantic_text") or '').strip()
 
-                item_identifier = item.get('id', f"{data_type}_{len(prepared)}")
-                point_id = hash(f"{organization_slug}_{data_type}_{item_identifier}") & 0x7FFFFFFF
+                item_identifier = str(item.get('id', f"{data_type}_{len(prepared)}"))
+                stable_seed = f"{organization_slug}:{data_type}:{item_identifier}".encode("utf-8")
+                point_id = int.from_bytes(hashlib.sha256(stable_seed).digest()[:8], byteorder="big", signed=False) & 0x7FFFFFFFFFFFFFFF
 
                 prepared.append({
                     "text": full_text,

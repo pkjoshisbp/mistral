@@ -36,10 +36,12 @@ class WidgetSettingsController extends Controller
             'offsetY' => 'nullable|integer|min:0|max:200',
             'welcomeMessage' => 'required|string|max:255',
             'assistantDisplayName' => 'nullable|string|max:64',
+            'responseLanguage' => 'nullable|string|in:auto,en,hi,es,fr,de',
             'requireContactForGuests' => 'nullable|boolean',
             'widgetAllowedDomains' => 'nullable|string|max:3000',
             'widgetContactFields' => 'nullable|string|max:5000',
             'queryTranslationMap' => 'nullable|string|max:12000',
+            'queryAliasMap' => 'nullable|string|max:12000',
             'widgetCustomCss' => 'nullable|string|max:20000',
             'widgetCustomJs' => 'nullable|string|max:20000',
         ]);
@@ -78,6 +80,11 @@ class WidgetSettingsController extends Controller
             $settings['assistant_display_name'] = trim((string)$data['assistantDisplayName']) !== ''
                 ? trim((string)$data['assistantDisplayName'])
                 : null;
+        }
+        if (array_key_exists('responseLanguage', $data)) {
+            $settings['response_language'] = trim((string) $data['responseLanguage']) !== ''
+                ? trim((string) $data['responseLanguage'])
+                : 'auto';
         }
         $settings['require_contact_for_guests'] = (bool) ($data['requireContactForGuests'] ?? false);
 
@@ -152,6 +159,15 @@ class WidgetSettingsController extends Controller
                 unset($settings['query_translation_map']);
             } else {
                 $settings['query_translation_map'] = $raw;
+            }
+        }
+
+        if (array_key_exists('queryAliasMap', $data)) {
+            $raw = trim((string) $data['queryAliasMap']);
+            if ($raw === '') {
+                unset($settings['query_alias_map']);
+            } else {
+                $settings['query_alias_map'] = $raw;
             }
         }
 

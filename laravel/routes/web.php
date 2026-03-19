@@ -476,18 +476,22 @@ Route::prefix('{locale}')
 
         // Localized blog routes
         Route::get('/blog', function () {
-            $blogs = Blog::published()->orderBy('published_at', 'desc')->paginate(6);
-            return view('public.blog.index', compact('blogs'));
+            return redirect('/blog', 301);
         });
 
-        Route::get('/blog/{slug}', function (string $slug) {
-            $blog = Blog::published()->where('slug', $slug)->firstOrFail();
-            $relatedPosts = Blog::published()
-                ->where('id', '!=', $blog->id)
-                ->inRandomOrder()
-                ->limit(3)
-                ->get();
-            return view('public.blog.show', compact('blog', 'relatedPosts'));
+        Route::get('/blog/{slug}', function (string $locale, string $slug) {
+            return redirect('/blog/' . $slug, 301);
+        });
+
+        // Localized demo and affiliate redirects
+        Route::get('/demo', function () {
+            return redirect('/demo', 301);
+        });
+        Route::get('/demo/{industry}', function (string $locale, string $industry) {
+            return redirect('/demo/' . $industry, 301);
+        });
+        Route::get('/affiliate/register', function () {
+            return redirect('/affiliate/register', 301);
         });
 
         // Localized auth routes
@@ -519,6 +523,21 @@ Route::prefix('{locale}')
     });
 
 
+
+// Language switcher redirects — /lang/{locale} URLs indexed by Google (no route existed)
+Route::get('/lang/{locale}', function () {
+    return redirect('/', 301);
+})->whereIn('locale', ['de', 'fr', 'es', 'it', 'pt', 'hi', 'th', 'en']);
+
+// Search fallback — WordPress-style /search?q=... URLs
+Route::get('/search', function () {
+    return redirect('/', 301);
+});
+
+// Widget root fallback — /widget/ (no org slug) crawled by Google
+Route::get('/widget', function () {
+    return redirect('/', 301);
+})->name('widget.root.redirect');
 
 // Industry Demo Routes - Debug Route
 Route::get('/demo-test', function() {
@@ -890,7 +909,9 @@ Route::prefix('widget')->middleware([\App\Http\Middleware\CorsMiddleware::class,
     Route::get('{orgId}/history', [\App\Http\Controllers\WidgetController::class, 'getConversationHistory'])->name('widget.history');
     Route::get('{orgId}/config', [\App\Http\Controllers\WidgetController::class, 'getConfig'])->name('widget.config');
     Route::post('{orgId}/lead', [\App\Http\Controllers\WidgetController::class, 'captureLead'])->name('widget.lead.capture');
+    Route::post('{orgId}/feedback', [\App\Http\Controllers\WidgetController::class, 'submitFeedback'])->name('widget.feedback.submit');
     Route::options('{orgId}/lead', function() { return response('', 204); });
+    Route::options('{orgId}/feedback', function() { return response('', 204); });
     Route::get('{orgId}/test', function($orgId) {
         $organization = \App\Models\Organization::findOrFail($orgId);
         return view('widget.test', compact('organization'));

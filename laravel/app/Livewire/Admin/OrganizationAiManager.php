@@ -54,6 +54,7 @@ class OrganizationAiManager extends Component
     public $approvedSensitiveCategories = [];
     public $pricingActionRequiresKeywords = false;
     public $queryTranslationMap = '';
+    public $queryAliasMap = '';
     public $intentKeywords = [
         'booking' => '',
         'pricing' => '',
@@ -89,6 +90,7 @@ class OrganizationAiManager extends Component
         'guardrailCategories' => 'nullable|array',
         'approvedSensitiveCategories' => 'nullable|array',
         'queryTranslationMap' => 'nullable|string|max:12000',
+        'queryAliasMap' => 'nullable|string|max:12000',
         'notifyChatEmailMode' => 'required|in:immediate,digest',
         'notifyChatEmailIntervalMinutes' => 'required|integer|min:1|max:120'
     ];
@@ -164,12 +166,12 @@ class OrganizationAiManager extends Component
         $this->guardrailCategories = $settings['guardrail_categories'] ?? [];
         $this->approvedSensitiveCategories = $settings['approved_sensitive_categories'] ?? [];
         $this->pricingActionRequiresKeywords = (bool) ($settings['pricing_action_requires_keywords'] ?? false);
-        $translationMap = $settings['query_translation_map'] ?? '';
-        $this->queryTranslationMap = is_array($translationMap)
-            ? $this->keywordsToString(array_map(function ($value, $key) {
-                return is_string($key) ? ($key . ' = ' . $value) : (string) $value;
-            }, $translationMap, array_keys($translationMap)))
-            : (string) $translationMap;
+        $splitNormalizationMaps = $this->splitQueryNormalizationSettings(
+            $settings['query_translation_map'] ?? '',
+            $settings['query_alias_map'] ?? ''
+        );
+        $this->queryTranslationMap = $splitNormalizationMaps['translations'];
+        $this->queryAliasMap = $splitNormalizationMaps['aliases'];
         $storedKeywords = $settings['intent_keywords'] ?? [];
         $this->intentKeywords = [
             'booking' => $this->keywordsToString($storedKeywords['booking'] ?? []),
@@ -456,6 +458,7 @@ class OrganizationAiManager extends Component
             $currentSettings['approved_sensitive_categories'] = array_values(array_unique($this->approvedSensitiveCategories ?? []));
             $currentSettings['pricing_action_requires_keywords'] = (bool) $this->pricingActionRequiresKeywords;
             $currentSettings['query_translation_map'] = trim((string) $this->queryTranslationMap) ?: null;
+            $currentSettings['query_alias_map'] = trim((string) $this->queryAliasMap) ?: null;
 
             $currentSettings['intent_keywords'] = [
                 'booking' => $this->stringToKeywords($this->intentKeywords['booking'] ?? ''),
@@ -532,6 +535,7 @@ class OrganizationAiManager extends Component
             unset($currentSettings['intent_keywords']);
             unset($currentSettings['route_signal_keywords']);
             unset($currentSettings['query_translation_map']);
+            unset($currentSettings['query_alias_map']);
             unset($currentSettings['notify_chat_email_enabled']);
             unset($currentSettings['notify_chat_emails']);
             
@@ -640,6 +644,100 @@ class OrganizationAiManager extends Component
         }
 
         return $defaults;
+    }
+
+    private function splitQueryNormalizationSettings($translationConfigured, $aliasConfigured): array
+    {
+        $translationLines = [];
+        $aliasLines = [];
+
+        foreach ($this->normalizeQueryNormalizationEntries($translationConfigured, false) as $entry) {
+            if (($entry['type'] ?? '') === 'alias') {
+                $aliasLines[] = $entry['line'];
+            } else {
+                $translationLines[] = $entry['line'];
+            }
+        }
+
+        foreach ($this->normalizeQueryNormalizationEntries($aliasConfigured, true) as $entry) {
+            $aliasLines[] = $entry['line'];
+        }
+
+        return [
+            'translations' => implode("\n", array_values(array_unique(array_filter($translationLines)))),
+            'aliases' => implode("\n", array_values(array_unique(array_filter($aliasLines)))),
+        ];
+    }
+
+    private function normalizeQueryNormalizationEntries($configured, bool $forceAliasMode): array
+    {
+        $entries = [];
+
+        foreach ($this->queryNormalizationRows($configured) as $line) {
+            $parts = preg_split('/=>|=|\|/', $line, 2) ?: [];
+            if (count($parts) < 2) {
+                continue;
+            }
+
+            $left = $this->normalizeQueryNormalizationValue((string) ($parts[0] ?? ''));
+            $right = $this->normalizeQueryNormalizationValue((string) ($parts[1] ?? ''));
+            if ($left === '' || $right === '') {
+                continue;
+            }
+
+            $aliases = array_values(array_filter(array_map(
+                fn ($value) => $this->normalizeQueryNormalizationValue((string) $value),
+                preg_split('/,/', $right) ?: []
+            )));
+
+            if ($forceAliasMode || count($aliases) > 1) {
+                $entries[] = [
+                    'type' => 'alias',
+                    'line' => $left . ' = ' . implode(', ', array_values(array_unique($aliases))),
+                ];
+                continue;
+            }
+
+            $entries[] = [
+                'type' => 'translation',
+                'line' => $left . ' = ' . ($aliases[0] ?? $right),
+            ];
+        }
+
+        return $entries;
+    }
+
+    private function queryNormalizationRows($configured): array
+    {
+        if (is_string($configured)) {
+            return preg_split('/\r\n|\r|\n/', $configured) ?: [];
+        }
+
+        if (!is_array($configured)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($configured as $from => $to) {
+            if (is_int($from)) {
+                $rows[] = (string) $to;
+                continue;
+            }
+
+            $rows[] = (string) $from . ' = ' . (string) $to;
+        }
+
+        return $rows;
+    }
+
+    private function normalizeQueryNormalizationValue(string $value): string
+    {
+        $value = trim((string) $value);
+        if ($value === '' || str_starts_with($value, '#')) {
+            return '';
+        }
+
+        return strtolower(trim((string) preg_replace('/\s+/', ' ', $value)));
     }
 
     private function getIntentKeywordTemplates(): array

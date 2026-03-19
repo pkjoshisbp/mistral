@@ -186,6 +186,24 @@
                                         @error('app_timezone')<div class="invalid-feedback">{{ $message }}</div>@enderror
                                     </div>
                                 </div>
+                                <div class="col-md-3">
+                                    <div class="form-group mb-3">
+                                        <label for="homepage_client_logo_gap" class="form-label">Home Client Gap</label>
+                                        <input type="number" class="form-control @error('homepage_client_logo_gap') is-invalid @enderror"
+                                               wire:model="homepage_client_logo_gap" min="8" max="80" step="2" placeholder="24">
+                                        @error('homepage_client_logo_gap')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Horizontal gap between logo cards in pixels.</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group mb-3">
+                                        <label for="homepage_client_logo_height" class="form-label">Home Logo Max Height</label>
+                                        <input type="number" class="form-control @error('homepage_client_logo_height') is-invalid @enderror"
+                                               wire:model="homepage_client_logo_height" min="40" max="140" step="2" placeholder="100">
+                                        @error('homepage_client_logo_height')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Maximum logo height in pixels for the carousel.</small>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="d-flex justify-content-end">

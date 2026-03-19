@@ -48,7 +48,7 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label>Primary Color</label>
+                                <label>Primary Color <small class="text-muted">(header, user bubbles)</small></label>
                                 <input type="color" wire:model="settings.primary_color" class="form-control">
                             </div>
                         </div>
@@ -64,6 +64,100 @@
                             </div>
                         </div>
                     </div>
+
+                    {{-- Launcher Button Appearance --}}
+                    <div class="card card-outline card-primary mt-2 mb-3">
+                        <div class="card-header p-2">
+                            <h6 class="card-title mb-0"><i class="fas fa-circle"></i> Launcher Button Appearance</h6>
+                        </div>
+                        <div class="card-body p-2">
+                            {{-- Shopify auto-color toggle --}}
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="shopify_auto_color" wire:model.live="settings.shopify_auto_color">
+                                <label class="form-check-label" for="shopify_auto_color">
+                                    <strong>Auto-match Shopify theme color</strong>
+                                    <small class="d-block text-muted">When enabled, the widget detects and copies the store's primary button color. <strong>Uncheck to lock the colors you set below.</strong></small>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>Button Background Type</label>
+                                <select wire:model.live="settings.widget_button_bg_type" class="form-control">
+                                    <option value="gradient">Gradient</option>
+                                    <option value="solid">Solid Color</option>
+                                </select>
+                            </div>
+
+                            @if(($settings['widget_button_bg_type'] ?? 'gradient') === 'solid')
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label>Button Color</label>
+                                        <input type="color" wire:model="settings.widget_button_solid_color" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label>Icon Color</label>
+                                        <input type="color" wire:model="settings.widget_icon_color" class="form-control">
+                                    </div>
+                                </div>
+                            </div>
+                            @else
+                            <div class="row">
+                                <div class="col-md-5">
+                                    <div class="form-group">
+                                        <label>Gradient Start</label>
+                                        <input type="color" wire:model="settings.widget_button_gradient_start" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="col-md-5">
+                                    <div class="form-group">
+                                        <label>Gradient End</label>
+                                        <input type="color" wire:model="settings.widget_button_gradient_end" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label>Angle°</label>
+                                        <input type="number" wire:model="settings.widget_button_gradient_angle" class="form-control" min="0" max="360" step="5">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label>Icon Color</label>
+                                        <input type="color" wire:model="settings.widget_icon_color" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label>Preview</label>
+                                        <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient({{ $settings['widget_button_gradient_angle'] ?? 135 }}deg, {{ $settings['widget_button_gradient_start'] ?? '#667eea' }}, {{ $settings['widget_button_gradient_end'] ?? '#764ba2' }});display:flex;align-items:center;justify-content:center;color:{{ $settings['widget_icon_color'] ?? '#fff' }};">
+                                            <i class="fas fa-comments"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            @endif
+                        </div>
+                    </div>
+
+                    {{-- Bot bubble colours --}}
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Bot Bubble Background</label>
+                                <input type="color" wire:model="settings.widget_bot_bubble_bg_color" class="form-control">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Bot Bubble Text Color</label>
+                                <input type="color" wire:model="settings.widget_bot_bubble_text_color" class="form-control">
+                            </div>
+                        </div>
+                    </div>
                     <div class="form-group mt-2">
                         <label>Chat History TTL (hours)</label>
                         <input type="number" wire:model="settings.chat_history_ttl_hours" class="form-control" min="1" max="168">
@@ -73,8 +167,9 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label>Secondary Color</label>
+                                <label>Chat Window Background <small class="text-muted">(messages area)</small></label>
                                 <input type="color" wire:model="settings.secondary_color" class="form-control">
+                                <small class="text-muted">Default: #f8f9fa (light grey)</small>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -151,8 +246,14 @@
                     <div class="widget-preview" style="background: #f8f9fa; padding: 20px; border-radius: 10px; position: relative; height: 300px;">
                         <!-- Simulated chat widget -->
                         <div style="position: absolute; {{ $settings['widget_position'] === 'bottom-right' ? 'bottom: 20px; right: 20px;' : '' }}{{ $settings['widget_position'] === 'bottom-left' ? 'bottom: 20px; left: 20px;' : '' }}{{ $settings['widget_position'] === 'top-right' ? 'top: 20px; right: 20px;' : '' }}{{ $settings['widget_position'] === 'top-left' ? 'top: 20px; left: 20px;' : '' }}">
-                            <!-- Chat button -->
-                            <div style="width: 60px; height: 60px; background: {{ $settings['primary_color'] }}; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                        <!-- Chat button -->
+                            @php
+                                $btnBgType = $settings['widget_button_bg_type'] ?? 'gradient';
+                                $btnBg = $btnBgType === 'solid'
+                                    ? ($settings['widget_button_solid_color'] ?? $settings['primary_color'] ?? '#007bff')
+                                    : 'linear-gradient(' . ($settings['widget_button_gradient_angle'] ?? 135) . 'deg, ' . ($settings['widget_button_gradient_start'] ?? '#667eea') . ', ' . ($settings['widget_button_gradient_end'] ?? '#764ba2') . ')';
+                            @endphp
+                            <div style="width: 60px; height: 60px; background: {{ $btnBg }}; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: {{ $settings['widget_icon_color'] ?? '#ffffff' }}; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
                                 <i class="fas fa-comments"></i>
                             </div>
                         </div>

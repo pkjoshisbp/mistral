@@ -18,9 +18,17 @@ class WidgetManager extends Component
         'settings.widget_position' => 'required|string',
         'settings.widget_theme' => 'required|string',
         'settings.chat_history_ttl_hours' => 'required|integer|min:1|max:168',
+        'settings.widget_button_bg_type' => 'required|string|in:solid,gradient',
+        'settings.widget_button_solid_color' => 'nullable|string|max:32',
+        'settings.widget_button_gradient_start' => 'nullable|string|max:32',
+        'settings.widget_button_gradient_end' => 'nullable|string|max:32',
+        'settings.widget_button_gradient_angle' => 'nullable|integer|min:0|max:360',
+        'settings.widget_icon_color' => 'nullable|string|max:32',
+        'settings.widget_bot_bubble_bg_color' => 'nullable|string|max:32',
+        'settings.widget_bot_bubble_text_color' => 'nullable|string|max:32',
         'settings.widget_custom_css' => 'nullable|string|max:20000',
-        'settings.widget_custom_js' => 'nullable|string|max:20000'
-    ];
+        'settings.widget_custom_js' => 'nullable|string|max:20000',
+        'settings.shopify_auto_color' => 'nullable|boolean',
 
     public function mount()
     {
@@ -38,6 +46,14 @@ class WidgetManager extends Component
             'border_radius' => '10px',
             'widget_position' => 'bottom-right',
             'widget_theme' => 'default',
+            'widget_button_bg_type' => 'gradient',
+            'widget_button_solid_color' => '#007bff',
+            'widget_button_gradient_start' => '#667eea',
+            'widget_button_gradient_end' => '#764ba2',
+            'widget_button_gradient_angle' => 135,
+            'widget_icon_color' => '#ffffff',
+            'widget_bot_bubble_bg_color' => '#f4f8f6',
+            'widget_bot_bubble_text_color' => '#000000',
             'branding_enabled' => true,
             'branding_badge' => false,
             'branding_follow' => true,
@@ -46,6 +62,7 @@ class WidgetManager extends Component
             'chat_history_ttl_hours' => 24,
             'widget_custom_css' => '',
             'widget_custom_js' => '',
+            'shopify_auto_color' => true,
         ];
     }
 

@@ -39,6 +39,11 @@
                 <div class="card-header"><h3 class="card-title"><i class="fas fa-comments mr-2"></i> Conversations ({{ $conversations->total() }})</h3></div>
                 <div class="card-body p-2">
                     @forelse($conversations as $conversation)
+                        @php
+                            $latestWidgetFeedback = collect(data_get($conversation->metadata, 'widget_feedback', []))
+                                ->filter(fn ($entry) => is_array($entry))
+                                ->last();
+                        @endphp
                         <div class="card border mb-2 shadow-sm conversation-card">
                             {{-- Card header: date + org + action buttons --}}
                             <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-1 py-2 px-3">
@@ -74,6 +79,16 @@
                                                 <i class="fas fa-map-marker-alt"></i>
                                                 {{ $conversation->visitor_location }}{{ $conversation->visitor_location && $conversation->visitor_country ? ', ' : '' }}{{ $conversation->visitor_country }}
                                             </small>
+                                        @endif
+                                        @if($latestWidgetFeedback)
+                                            <div class="mt-2">
+                                                <span class="badge {{ !empty($latestWidgetFeedback['helpful']) ? 'badge-success' : 'badge-warning text-dark' }}">
+                                                    {{ !empty($latestWidgetFeedback['helpful']) ? 'Helpful' : 'Need more help' }}
+                                                </span>
+                                                @if(!empty($latestWidgetFeedback['feedback']))
+                                                    <small class="d-block text-muted mt-1">{{ \Illuminate\Support\Str::limit($latestWidgetFeedback['feedback'], 120) }}</small>
+                                                @endif
+                                            </div>
                                         @endif
                                     </div>
                                     <span class="badge badge-info ml-2 align-self-start">{{ $conversation->messages->count() }} msg{{ $conversation->messages->count() !== 1 ? 's' : '' }}</span>
@@ -246,12 +261,50 @@ document.addEventListener('DOMContentLoaded', function () {
                     </div>
                 @else
                     @foreach($debugLogs as $idx => $log)
+                    @php
+                        $extra = is_array($log['extra'] ?? null) ? $log['extra'] : [];
+                        $faqContactDrift = is_array(data_get($extra, 'faq_contact_drift')) ? data_get($extra, 'faq_contact_drift') : [];
+                        $topMatches = is_array(data_get($extra, 'top_matches')) ? data_get($extra, 'top_matches') : [];
+                        $pendingFollowUp = is_array(data_get($extra, 'pending_follow_up')) ? data_get($extra, 'pending_follow_up') : [];
+                        $debugExport = [
+                            'user_message' => $log['user_message'] ?? null,
+                            'intent' => $log['intent'] ?? null,
+                            'intent_confidence' => $log['intent_confidence'] ?? null,
+                            'intent_method' => $log['intent_method'] ?? null,
+                            'response_path' => $log['response_path'] ?? null,
+                            'best_qdrant_score' => $log['best_qdrant_score'] ?? null,
+                            'original_query' => $log['original_query'] ?? null,
+                            'final_search_query' => $log['final_search_query'] ?? null,
+                            'query_was_rewritten' => $log['query_was_rewritten'] ?? null,
+                            'rewritten_query' => $log['rewritten_query'] ?? null,
+                            'faq_source' => data_get($extra, 'faq_source'),
+                            'faq_item_id' => data_get($extra, 'faq_item_id'),
+                            'faq_title' => data_get($extra, 'faq_title'),
+                            'top_matches' => $topMatches,
+                            'previous_query' => data_get($extra, 'previous_query'),
+                            'previous_response_path' => data_get($extra, 'previous_response_path'),
+                            'previous_faq_id' => data_get($extra, 'previous_faq_id'),
+                            'previous_faq_title' => data_get($extra, 'previous_faq_title'),
+                            'context_reused' => data_get($extra, 'context_reused'),
+                            'reason' => data_get($extra, 'reason'),
+                            'pending_follow_up' => $pendingFollowUp,
+                            'branch_type' => data_get($extra, 'branch_type'),
+                            'branch_score' => data_get($extra, 'branch_score'),
+                            'timing' => [
+                                'search_elapsed_ms' => $log['search_elapsed_ms'] ?? null,
+                                'llm_elapsed_ms' => $log['llm_elapsed_ms'] ?? null,
+                                'total_elapsed_ms' => $log['total_elapsed_ms'] ?? null,
+                            ],
+                        ];
+                    @endphp
                     <div class="border-bottom p-3 {{ $idx % 2 === 0 ? 'bg-white' : 'bg-light' }}">
                         <div class="d-flex align-items-center justify-content-between mb-2">
                             <div>
                                 <span class="badge badge-{{ match($log['response_path'] ?? '') {
                                     'faq_direct'  => 'success',
+                                    'faq_branch' => 'info',
                                     'faq_keyword' => 'info',
+                                    'affirmative_clarification' => 'warning',
                                     'clarification' => 'warning',
                                     default => 'secondary'
                                 } }} mr-1">{{ strtoupper($log['response_path'] ?? 'llm') }}</span>
@@ -308,6 +361,30 @@ document.addEventListener('DOMContentLoaded', function () {
                                         @else —
                                         @endif
                                     </div>
+                                    <div><strong>FAQ source:</strong> <code>{{ data_get($extra, 'faq_source', '—') }}</code></div>
+                                    @if(data_get($extra, 'faq_title'))
+                                        <div><strong>FAQ title:</strong> <span class="text-muted">{{ Str::limit(data_get($extra, 'faq_title'), 80) }}</span></div>
+                                    @endif
+                                    @if(data_get($extra, 'faq_item_id'))
+                                        <div><strong>FAQ item:</strong> <code>{{ data_get($extra, 'faq_item_id') }}</code></div>
+                                    @endif
+                                    @if(data_get($extra, 'faq_semantic_threshold') !== null)
+                                        <div><strong>FAQ semantic:</strong>
+                                            <span class="text-muted">
+                                                best {{ data_get($extra, 'faq_semantic_best_score') !== null ? number_format((float) data_get($extra, 'faq_semantic_best_score'), 4) : '—' }}
+                                                / threshold {{ number_format((float) data_get($extra, 'faq_semantic_threshold'), 2) }}
+                                            </span>
+                                        </div>
+                                    @endif
+                                    @if($log['faq_keyword_score'] ?? null)
+                                        <div><strong>FAQ keyword score:</strong> <span class="badge badge-warning">{{ number_format((float) $log['faq_keyword_score'], 2) }}</span></div>
+                                    @endif
+                                    @if(data_get($extra, 'faq_specific_coverage') !== null)
+                                        <div><strong>Keyword coverage:</strong> {{ number_format((float) data_get($extra, 'faq_specific_coverage') * 100, 1) }}%</div>
+                                    @endif
+                                    @if(!empty(data_get($extra, 'faq_specific_overlap_terms', [])))
+                                        <div><strong>Specific overlap:</strong> <span class="text-muted">{{ implode(', ', data_get($extra, 'faq_specific_overlap_terms', [])) }}</span></div>
+                                    @endif
                                     <div><strong>Rewritten?</strong> {{ ($log['query_was_rewritten'] ?? false) ? '✅ Yes' : '❌ No' }}</div>
                                     @if(($log['rewritten_query'] ?? null) && $log['rewritten_query'] !== $log['original_query'])
                                         <div><strong>Rewrite:</strong> <em class="text-muted">{{ Str::limit($log['rewritten_query'] ?? '', 80) }}</em></div>
@@ -326,6 +403,20 @@ document.addEventListener('DOMContentLoaded', function () {
                                     <div><strong>Model:</strong> <code>{{ $log['model_used'] ?? '—' }}</code></div>
                                     <div><strong>Provider:</strong> <code>{{ $log['ai_provider'] ?? '—' }}</code></div>
                                     <div><strong>Max tokens:</strong> {{ $log['max_tokens'] ?? '—' }}</div>
+                                    <div><strong>FAQ paraphrase:</strong> {{ data_get($extra, 'faq_paraphrase_attempted') ? 'Yes' : 'No' }}</div>
+                                    @if(data_get($extra, 'faq_paraphrase_model'))
+                                        <div><strong>Paraphrase model:</strong> <code>{{ data_get($extra, 'faq_paraphrase_model') }}</code></div>
+                                    @endif
+                                    @if(data_get($extra, 'faq_paraphrase_elapsed_ms'))
+                                        <div><strong>Paraphrase time:</strong> {{ data_get($extra, 'faq_paraphrase_elapsed_ms') }}ms</div>
+                                    @endif
+                                    <div><strong>Contacts sanitized:</strong> {{ data_get($extra, 'faq_contacts_sanitized') ? '✅' : '❌' }}</div>
+                                    @if(!empty($faqContactDrift['added_emails'] ?? []))
+                                        <div><strong>Added emails:</strong> <span class="text-danger">{{ implode(', ', $faqContactDrift['added_emails']) }}</span></div>
+                                    @endif
+                                    @if(!empty($faqContactDrift['added_domains'] ?? []))
+                                        <div><strong>Added domains:</strong> <span class="text-danger">{{ implode(', ', $faqContactDrift['added_domains']) }}</span></div>
+                                    @endif
                                     @if($log['input_tokens'] ?? null)
                                         <div><strong>Tokens in/out:</strong> {{ $log['input_tokens'] }} / {{ $log['output_tokens'] ?? '?' }}</div>
                                     @endif
@@ -365,6 +456,74 @@ document.addEventListener('DOMContentLoaded', function () {
                             </div>
                             @endif
                         </div>
+
+                        @if(!empty($topMatches))
+                            <div class="mt-3">
+                                <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-list-ol mr-1"></i>Top Matches Considered</div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered mb-0 bg-white">
+                                        <thead class="thead-light">
+                                            <tr>
+                                                <th>FAQ</th>
+                                                <th>Score</th>
+                                                <th>Title</th>
+                                                <th>Category</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach($topMatches as $match)
+                                                <tr>
+                                                    <td><code>{{ data_get($match, 'faq_id', '—') }}</code></td>
+                                                    <td>{{ data_get($match, 'score', '—') }}</td>
+                                                    <td>{{ data_get($match, 'title', '—') }}</td>
+                                                    <td>{{ data_get($match, 'category', data_get($match, 'data_type', '—')) }}</td>
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        @endif
+
+                        @if(data_get($extra, 'previous_query') || array_filter($pendingFollowUp) || array_key_exists('context_reused', $extra) || data_get($extra, 'reason'))
+                            <div class="mt-3">
+                                <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-history mr-1"></i>Previous Context</div>
+                                <div class="card card-body p-2 bg-white border small">
+                                    @if(data_get($extra, 'previous_query'))
+                                        <div><strong>Previous query:</strong> <span class="text-muted">{{ data_get($extra, 'previous_query') }}</span></div>
+                                    @endif
+                                    @if(data_get($extra, 'previous_faq_id') || data_get($extra, 'previous_faq_title'))
+                                        <div>
+                                            <strong>Previous FAQ:</strong>
+                                            <span class="text-muted">{{ data_get($extra, 'previous_faq_id', '—') }}{{ data_get($extra, 'previous_faq_title') ? ' - ' . data_get($extra, 'previous_faq_title') : '' }}</span>
+                                        </div>
+                                    @endif
+                                    @if(array_key_exists('context_reused', $extra))
+                                        <div><strong>Context reused:</strong> {{ data_get($extra, 'context_reused') ? 'true' : 'false' }}</div>
+                                    @endif
+                                    @if(data_get($extra, 'reason'))
+                                        <div><strong>Reason:</strong> <code>{{ data_get($extra, 'reason') }}</code></div>
+                                    @endif
+                                    @if(data_get($pendingFollowUp, 'question'))
+                                        <div><strong>Pending question:</strong> <span class="text-muted">{{ data_get($pendingFollowUp, 'question') }}</span></div>
+                                    @endif
+                                    @if(data_get($pendingFollowUp, 'resolved_anchor'))
+                                        <div><strong>Pending anchor:</strong> <span class="text-muted">{{ data_get($pendingFollowUp, 'resolved_anchor') }}</span></div>
+                                    @endif
+                                    @if(!empty(data_get($pendingFollowUp, 'topics', [])))
+                                        <div><strong>Pending topics:</strong> <span class="text-muted">{{ implode(', ', data_get($pendingFollowUp, 'topics', [])) }}</span></div>
+                                    @endif
+                                    @if(data_get($extra, 'branch_type') || data_get($extra, 'branch_score') !== null)
+                                        <div><strong>Branch decision:</strong> <span class="text-muted">{{ data_get($extra, 'branch_type', '—') }} @if(data_get($extra, 'branch_score') !== null)(score {{ number_format((float) data_get($extra, 'branch_score'), 2) }})@endif</span></div>
+                                    @endif
+                                </div>
+                            </div>
+                        @endif
+
+                        <div class="mt-3">
+                            <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-code mr-1"></i>Pasteable Debug JSON</div>
+                            <pre class="small bg-dark text-light rounded p-3 mb-0" style="white-space:pre-wrap;word-break:break-word;">{{ json_encode($debugExport, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                        </div>
                     </div>
                     @endforeach
                 @endif
@@ -402,6 +561,47 @@ document.addEventListener('DOMContentLoaded', function () {
                             <span><i class="fas fa-map-marker-alt mr-1 text-muted"></i>{{ $modalConversation->visitor_location }}{{ $modalConversation->visitor_location && $modalConversation->visitor_country ? ', ' : '' }}{{ $modalConversation->visitor_country }}</span>
                         @endif
                         <span class="ml-auto text-muted"><i class="far fa-clock mr-1"></i><time class="local-ts" data-utc="{{ $modalConversation->created_at->utc()->toISOString() }}">{{ $modalConversation->created_at->format('d M Y H:i:s') }}</time></span>
+                    </div>
+                @endif
+                @php
+                    $widgetFeedbackEntries = collect(data_get($modalConversation->metadata, 'widget_feedback', []))
+                        ->filter(fn ($entry) => is_array($entry))
+                        ->sortByDesc(fn ($entry) => $entry['submitted_at'] ?? null)
+                        ->values();
+                @endphp
+                @if($widgetFeedbackEntries->isNotEmpty())
+                    <div class="card border-0 shadow-sm mb-3">
+                        <div class="card-header bg-white border-bottom">
+                            <strong><i class="fas fa-thumbs-up mr-1 text-info"></i> Widget Feedback</strong>
+                            <small class="text-muted ml-1">{{ $widgetFeedbackEntries->count() }} item{{ $widgetFeedbackEntries->count() !== 1 ? 's' : '' }}</small>
+                        </div>
+                        <div class="card-body py-2">
+                            @foreach($widgetFeedbackEntries as $feedbackEntry)
+                                <div class="widget-feedback-entry py-2 {{ !$loop->last ? 'border-bottom' : '' }}">
+                                    <div class="d-flex flex-wrap align-items-center mb-1">
+                                        <span class="badge {{ !empty($feedbackEntry['helpful']) ? 'badge-success' : 'badge-warning text-dark' }} mr-2">
+                                            {{ !empty($feedbackEntry['helpful']) ? 'Helpful' : 'Need more help' }}
+                                        </span>
+                                        @if(!empty($feedbackEntry['submitted_at']))
+                                            <small class="text-muted">
+                                                <time class="local-ts" data-utc="{{ \Carbon\Carbon::parse($feedbackEntry['submitted_at'])->utc()->toISOString() }}">{{ \Carbon\Carbon::parse($feedbackEntry['submitted_at'])->format('d M Y H:i:s') }}</time>
+                                            </small>
+                                        @endif
+                                    </div>
+                                    @if(!empty($feedbackEntry['feedback']))
+                                        <div class="small text-dark mb-1">{{ $feedbackEntry['feedback'] }}</div>
+                                    @endif
+                                    @if(!empty($feedbackEntry['message']))
+                                        <div class="small text-muted"><strong>About reply:</strong> {{ $feedbackEntry['message'] }}</div>
+                                    @endif
+                                    @if(!empty($feedbackEntry['page_url']))
+                                        <div class="small mt-1">
+                                            <a href="{{ $feedbackEntry['page_url'] }}" target="_blank" rel="noopener noreferrer">{{ $feedbackEntry['page_url'] }}</a>
+                                        </div>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
                     </div>
                 @endif
                 <div class="chat-messages">
