@@ -22,6 +22,15 @@ import wave
 import audioop
 from pathlib import Path
 try:
+    from ftlangdetect import detect as ft_detect  # type: ignore
+except Exception:
+    ft_detect = None  # type: ignore
+try:
+    from langdetect import detect as ld_detect, DetectorFactory  # type: ignore
+    DetectorFactory.seed = 0
+except Exception:
+    ld_detect = None  # type: ignore
+try:
     from rewrite import rewrite_prompt  # type: ignore
 except Exception as e:
     rewrite_import_error = e
@@ -35,6 +44,7 @@ DEFAULT_EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")  # Fast dedic
 FALLBACK_EMBED_MODEL = os.getenv("FALLBACK_EMBED_MODEL", "llama3.2:1b")  # Fallback if nomic fails
 DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.1:8b")  # vast.ai primary model via tunnel
 FALLBACK_CHAT_MODEL = os.getenv("FALLBACK_CHAT_MODEL", "llama3.2:3b")  # Fast local fallback
+QUERY_NORMALIZATION_MODEL = os.getenv("QUERY_NORMALIZATION_MODEL", DEFAULT_CHAT_MODEL)
 EMBED_TIMEOUT_SEC = float(os.getenv("EMBED_TIMEOUT", "25"))  # 25s handles nomic-embed-text cold-start (model load ~20s)
 MAX_EMBED_CHARS = int(os.getenv("MAX_EMBED_CHARS", "1800"))
 EMBED_CONCURRENCY = int(os.getenv("EMBED_CONCURRENCY", "8"))  # Max concurrent embed endpoint calls
@@ -74,17 +84,60 @@ MODELS_DIR = os.getenv("MODELS_DIR", "/var/www/clients/client1/web64/web/models"
 # Running mistral-nemo + Whisper simultaneously ≈ 10.2 GB → fits with ~6 GB free.
 # Do NOT run all three large models simultaneously — Ollama handles LRU eviction.
 VASTAI_MODELS = [
+    "deepseek-r1:8b",
     "llama3.1:8b",
     "mistral-nemo",
     "mistral-nemo:latest",
 ]
 
-# Dedicated model/URL for crawl attribute extraction.
-# Runs on vast.ai GPU so it does NOT compete with local chat inference.
-# llama3.2:3b is fast enough for structured JSON extraction and cheap to run.
-# Override via env vars if you want a different model.
-CRAWL_LLM_MODEL = os.getenv("CRAWL_LLM_MODEL", "llama3.2:3b")
-CRAWL_LLM_URL   = os.getenv("CRAWL_LLM_URL",   OLLAMA_URL_VASTAI)  # default: vast.ai tunnel
+DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
+ORIYA_RE = re.compile(r"[\u0B00-\u0B7F]")
+HINGLISH_HINTS = {
+    "hai", "haan", "nahi", "kya", "mera", "meri", "mere", "mujhe", "karna",
+    "karni", "karna hai", "kitna", "kab", "kaise", "kyu", "kyon", "chahiye",
+    "hoga", "hogi", "honge", "kripya", "please bata", "sampark", "madad",
+}
+ORIYA_LATIN_HINTS = {
+    "kana", "kemiti", "achhi", "achi", "mu", "mate", "mo", "mora", "aapankar", "apankara", "darkar", "kariba",
+    "kahinki", "odia", "oriya", "bhala", "seba", "samparka",
+}
+
+AVAILABILITY_QUESTION_HINTS = {
+    "kon achhi", "kana achhi", "kya hai", "kaun sa hai", "available", "offer", "offer karte",
+}
+
+
+def _strip_reasoning_blocks(text: str) -> str:
+    cleaned = re.sub(r"<think>.*?</think>\s*", "", text or "", flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"</?think>", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def _sanitize_chat_result(result: dict) -> dict:
+    message = result.get("message")
+    if isinstance(message, dict):
+        content = str(message.get("content", "") or "")
+        cleaned = _strip_reasoning_blocks(content)
+        if cleaned != content:
+            message["content"] = cleaned
+            result.setdefault("meta", {})["reasoning_stripped"] = True
+    return result
+
+
+def _should_disable_thinking(model: str) -> bool:
+    normalized = (model or "").strip().lower()
+    return normalized.startswith("deepseek-r1")
+
+# Dedicated model/URL for crawl suggestion + structured extraction.
+# These crawl tasks must stay on vast.ai for better accuracy and consistency.
+# Allowed models are intentionally restricted to the larger remote models.
+CRAWL_ALLOWED_MODELS = [
+    "llama3.1:8b",
+    "mistral-nemo",
+    "mistral-nemo:latest",
+]
+CRAWL_LLM_MODEL = os.getenv("CRAWL_LLM_MODEL", "mistral-nemo")
+CRAWL_LLM_URL   = os.getenv("CRAWL_LLM_URL",   OLLAMA_URL_VASTAI)  # vast.ai tunnel only
 
 # Personal Assistant voice service configuration (typically tunneled from vast.ai)
 PERSONAL_ASSISTANT_WHISPER_URL = os.getenv("PERSONAL_ASSISTANT_WHISPER_URL", "http://127.0.0.1:18081/transcribe")
@@ -177,6 +230,165 @@ AVATAR_SIZE_FRACTIONS: dict[str, float] = {"small": 0.22, "medium": 0.29, "large
 def get_ollama_url(model: str) -> str:
     """Get the appropriate Ollama URL based on the model"""
     return OLLAMA_URL_VASTAI if model in VASTAI_MODELS else OLLAMA_URL_LOCAL
+
+
+def resolve_crawl_model(requested_model: str | None = None) -> str:
+    model = (requested_model or CRAWL_LLM_MODEL).strip()
+    if model not in CRAWL_ALLOWED_MODELS:
+        logging.warning(f"crawl model '{model}' is not allowed; forcing {CRAWL_LLM_MODEL}")
+        return CRAWL_LLM_MODEL
+    return model
+
+
+def _detect_query_language(query: str) -> dict:
+    text = (query or "").strip()
+    if text == "":
+        return {
+            "language": "en",
+            "confidence": 1.0,
+            "source": "empty",
+            "script": "latin",
+        }
+
+    if ORIYA_RE.search(text):
+        return {"language": "or", "confidence": 0.99, "source": "heuristic_script", "script": "oriya"}
+
+    if DEVANAGARI_RE.search(text):
+        return {"language": "hi", "confidence": 0.98, "source": "heuristic_script", "script": "devanagari"}
+
+    lowered = text.lower()
+    hinglish_hits = sum(1 for hint in HINGLISH_HINTS if hint in lowered)
+    oriya_hits = sum(1 for hint in ORIYA_LATIN_HINTS if hint in lowered)
+    ascii_only = all(ord(ch) < 128 for ch in lowered)
+
+    if oriya_hits >= 2:
+        return {"language": "or", "confidence": 0.72, "source": "heuristic_latin", "script": "latin"}
+
+    if hinglish_hits >= 2:
+        return {"language": "hi", "confidence": 0.7, "source": "heuristic_latin", "script": "latin"}
+
+    if ft_detect is not None:
+        try:
+            detected = ft_detect(lowered)
+            lang = str(detected.get("lang") or detected.get("language") or "").strip().lower()
+            score = float(detected.get("score") or detected.get("confidence") or 0.0)
+            if lang:
+                return {
+                    "language": lang,
+                    "confidence": score,
+                    "source": "ftlangdetect",
+                    "script": "latin",
+                }
+        except Exception as exc:
+            logging.warning("ftlangdetect failed for query detection: %s", exc)
+
+    if ld_detect is not None:
+        try:
+            lang = str(ld_detect(lowered) or "").strip().lower()
+            if lang:
+                return {
+                    "language": lang,
+                    "confidence": 0.65,
+                    "source": "langdetect",
+                    "script": "latin",
+                }
+        except Exception as exc:
+            logging.warning("langdetect failed for query detection: %s", exc)
+
+    if ascii_only:
+        return {"language": "en", "confidence": 0.55, "source": "heuristic_ascii", "script": "latin"}
+
+    return {"language": "unknown", "confidence": 0.2, "source": "heuristic_fallback", "script": "mixed"}
+
+
+def _should_normalize_query(query: str, detection: dict) -> bool:
+    text = (query or "").strip()
+    if text == "":
+        return False
+
+    language = str(detection.get("language") or "").lower()
+    confidence = float(detection.get("confidence") or 0.0)
+    script = str(detection.get("script") or "latin").lower()
+
+    if script in {"devanagari", "oriya", "mixed"}:
+        return True
+
+    if language in {"hi", "or"} and confidence >= 0.35:
+        return True
+
+    lowered = text.lower()
+    hint_hits = sum(1 for hint in HINGLISH_HINTS if hint in lowered) + sum(1 for hint in ORIYA_LATIN_HINTS if hint in lowered)
+    return hint_hits >= 2
+
+
+def _canonicalize_multilingual_support_query(query: str, detection: dict) -> str:
+    original = (query or "").strip()
+    if original == "":
+        return original
+
+    lowered = re.sub(r"\s+", " ", re.sub(r"[^\w\s:-]", " ", original.lower())).strip()
+    language = str(detection.get("language") or "").lower()
+
+    has_availability_intent = any(hint in lowered for hint in AVAILABILITY_QUESTION_HINTS)
+    has_subscription_intent = "subscription" in lowered or "plan" in lowered or "pricing" in lowered
+    has_trial_intent = "trial" in lowered or "demo" in lowered
+    has_price_intent = any(term in lowered for term in ["price", "cost", "fee", "charge", "rate", "pricing"])
+
+    if language in {"or", "hi"}:
+        if has_subscription_intent and has_availability_intent:
+            return "what subscription plans do you offer"
+        if has_trial_intent and has_availability_intent:
+            return "do you offer a free trial"
+        if has_subscription_intent and has_price_intent:
+            return "what is the pricing for your subscription plans"
+
+    return original
+
+
+async def _normalize_query_to_english(query: str, model: str, use_vastai: bool = True) -> str:
+    ollama_url = OLLAMA_URL_VASTAI if use_vastai else get_ollama_url(model)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You normalize multilingual customer-support queries for semantic retrieval.\n"
+                "Rules:\n"
+                "- Convert the user query into concise canonical English for search.\n"
+                "- Questions asking what is available or what exists must become offering/availability queries, not recommendation queries.\n"
+                "- Example: 'aapankar subscription plan kon achhi?' -> 'what subscription plans do you offer'.\n"
+                "- Example: 'free trial achhi ki?' -> 'do you offer a free trial'.\n"
+                "- Example: 'pricing kete?' -> 'what is the pricing'.\n"
+                "- Preserve product names, service names, person names, test names, IDs, order numbers, dates, phone numbers, and quantities exactly.\n"
+                "- Do not answer the question.\n"
+                "- Do not explain your reasoning.\n"
+                "- If the query is already clear English, return it unchanged.\n"
+                "- Return ONLY the normalized English query text."
+            ),
+        },
+        {"role": "user", "content": query},
+    ]
+
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": 0.0,
+                "num_predict": 96,
+            },
+        }
+        if _should_disable_thinking(model):
+            payload["think"] = False
+        resp = await client.post(f"{ollama_url}/api/chat", json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Query normalization HTTP {resp.status_code}: {resp.text}")
+        result = _sanitize_chat_result(resp.json())
+        if isinstance(result, dict) and result.get("error"):
+            raise RuntimeError(f"Query normalization error: {result.get('error')}")
+        content = ((result.get("message") or {}).get("content") or "").strip()
+        content = re.sub(r"\s+", " ", content)
+        return content or query.strip()
 
 # Pre-configured GGUF models
 GGUF_MODELS = {
@@ -3007,10 +3219,10 @@ async def crawl_extract_attributes(request: Request):
     attributes = data.get("attributes", [])
     page_type = data.get("page_type", "product")
     page_url = data.get("page_url", "")
+    prompt_override = (data.get("prompt_override") or "").strip()
     # Model comes from caller, but we always prefer the dedicated crawl URL (vast.ai GPU).
     # The caller can still override by passing "crawl_llm_url" explicitly.
-    model = data.get("model", CRAWL_LLM_MODEL)
-    # Resolve URL: caller override > env CRAWL_LLM_URL > vast.ai tunnel > local fallback
+    model = resolve_crawl_model(data.get("model"))
     crawl_url = data.get("crawl_llm_url", CRAWL_LLM_URL)
 
     if not text:
@@ -3045,7 +3257,9 @@ Page text:
 
 JSON output (keys must exactly match the attribute names given above):"""
 
-    # Try vast.ai first, fall back to local Ollama if tunnel is unreachable.
+    if prompt_override:
+        prompt += f"\n\nAdditional extraction instructions:\n{prompt_override}"
+
     async def _do_extract(ollama_url: str, timeout: float = 45.0):
         async with httpx.AsyncClient(timeout=timeout) as client:
             return await client.post(f"{ollama_url}/api/generate", json={
@@ -3062,17 +3276,8 @@ JSON output (keys must exactly match the attribute names given above):"""
             })
 
     try:
-        # Attempt extraction on the dedicated crawl URL (vast.ai GPU by default)
-        try:
-            resp = await _do_extract(crawl_url)
-            logging.info(f"crawl/extract-attributes used crawl_url={crawl_url} model={model} url={page_url}")
-        except Exception as tunnel_err:
-            # Tunnel down or timeout — fall back to local model to not block the crawl
-            logging.warning(
-                f"crawl/extract-attributes vast.ai unavailable ({tunnel_err}), "
-                f"falling back to local model={FALLBACK_CHAT_MODEL}"
-            )
-            resp = await _do_extract(OLLAMA_URL_LOCAL)
+        resp = await _do_extract(crawl_url)
+        logging.info(f"crawl/extract-attributes used crawl_url={crawl_url} model={model} url={page_url}")
 
         result = resp.json()
         raw = result.get("response", "").strip()
@@ -3111,6 +3316,108 @@ JSON output (keys must exactly match the attribute names given above):"""
 
     except Exception as e:
         logging.error(f"crawl/extract-attributes error for {page_url}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/crawl/suggest-template")
+async def crawl_suggest_template(request: Request):
+    data = await request.json()
+    title = (data.get("title") or "").strip()
+    meta_description = (data.get("meta_description") or "").strip()
+    headings = data.get("headings") or []
+    text = (data.get("text") or "").strip()
+    page_url = (data.get("page_url") or "").strip()
+    current_page_type = (data.get("current_page_type") or "").strip()
+    current_attributes = data.get("current_attributes") or []
+    prompt_override = (data.get("prompt_override") or "").strip()
+    model = resolve_crawl_model(data.get("model"))
+    crawl_url = data.get("crawl_llm_url", CRAWL_LLM_URL)
+
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    if len(text) > 3500:
+        text = text[:3500] + "..."
+
+    headings_block = "\n".join(f"- {heading}" for heading in headings[:25])
+    current_attributes_block = ", ".join(str(item) for item in current_attributes[:20])
+
+    prompt = f"""You are helping an admin build a reusable website crawl template from one sample page.
+
+Return ONLY valid JSON with this exact shape:
+{{
+  "page_type": "product|service|doctor|property|menu-item|medical-test|faq|article|event|course|general",
+  "qdrant_data_type": "product|service|faq|info|webpage",
+  "attribute_schema": ["field 1", "field 2"],
+  "url_filter_pattern": "string or null",
+  "summary": "short explanation"
+}}
+
+Rules:
+- No markdown, no commentary, JSON only.
+- Keep attribute_schema to 4-12 fields.
+- Prefer fields that are likely to repeat on similar pages of the same site.
+- Use concise lower-case field names.
+- If current attributes are already good, refine them instead of replacing them wildly.
+- url_filter_pattern should usually be a reusable path fragment like /products/ or /tests/ and not the full page URL.
+
+Current hint for page type: {current_page_type or 'none'}
+Current attributes: {current_attributes_block or 'none'}
+URL: {page_url or 'unknown'}
+Title: {title or 'unknown'}
+Meta description: {meta_description or 'none'}
+Headings:
+{headings_block or '- none'}
+
+Sample page text:
+---
+{text}
+---
+"""
+
+    if prompt_override:
+        prompt += f"\nAdditional admin instructions:\n{prompt_override}\n"
+
+    async def _do_suggest(ollama_url: str, timeout: float = 45.0):
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            return await client.post(f"{ollama_url}/api/generate", json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "num_predict": 384,
+                    "temperature": 0.05,
+                    "top_k": 10,
+                    "top_p": 0.5,
+                    "stop": ["```", "\n\n\n"]
+                }
+            })
+
+    try:
+        resp = await _do_suggest(crawl_url)
+        logging.info(f"crawl/suggest-template used crawl_url={crawl_url} model={model} url={page_url}")
+
+        result = resp.json()
+        raw = (result.get("response") or "").strip()
+        json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not json_match:
+            raise ValueError("No JSON object found in suggestion response")
+
+        parsed = json.loads(json_match.group())
+        attribute_schema = parsed.get("attribute_schema") or []
+        if not isinstance(attribute_schema, list):
+            attribute_schema = []
+
+        return {
+            "page_type": parsed.get("page_type") or current_page_type or "general",
+            "qdrant_data_type": parsed.get("qdrant_data_type") or "webpage",
+            "attribute_schema": [str(item).strip() for item in attribute_schema if str(item).strip()][:12],
+            "url_filter_pattern": parsed.get("url_filter_pattern"),
+            "summary": (parsed.get("summary") or "").strip(),
+            "model": model,
+        }
+    except Exception as e:
+        logging.error(f"crawl/suggest-template error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -3238,13 +3545,51 @@ async def _chat_completion(messages: list, model: str) -> dict:
                 "num_predict": 300
             }
         }
+        if _should_disable_thinking(model):
+            payload["think"] = False
         resp = await client.post(f"{ollama_url}/api/chat", json=payload)
         if resp.status_code != 200:
             raise RuntimeError(f"LLM HTTP {resp.status_code}: {resp.text}")
-        result = resp.json()
+        result = _sanitize_chat_result(resp.json())
         if isinstance(result, dict) and result.get("error"):
             raise RuntimeError(f"LLM error: {result.get('error')}")
         return result
+
+
+@app.post("/language/normalize-query")
+async def normalize_query(request: Request):
+    data = await request.json()
+    query = (data.get("query") or "").strip()
+    model = (data.get("model") or QUERY_NORMALIZATION_MODEL).strip() or QUERY_NORMALIZATION_MODEL
+    use_vastai = bool(data.get("use_vastai", True))
+
+    if query == "":
+        raise HTTPException(status_code=400, detail="Query is required")
+
+    detection = _detect_query_language(query)
+    should_normalize = bool(data.get("force_translate", False)) or _should_normalize_query(query, detection)
+    normalized_query = _canonicalize_multilingual_support_query(query, detection)
+    translation_error = None
+
+    if should_normalize and normalized_query.strip() == query.strip():
+        try:
+            normalized_query = await _normalize_query_to_english(query, model, use_vastai=use_vastai)
+        except Exception as exc:
+            translation_error = str(exc)
+            logging.warning("Query normalization failed, using original query: %s", exc)
+            normalized_query = query
+
+    return {
+        "original_query": query,
+        "normalized_query": normalized_query,
+        "language": detection.get("language", "en"),
+        "confidence": detection.get("confidence", 0.0),
+        "detection_source": detection.get("source", "unknown"),
+        "script": detection.get("script", "latin"),
+        "used_translation": should_normalize and normalized_query.strip() != query.strip(),
+        "translation_model": model,
+        "translation_error": translation_error,
+    }
 
 
 @app.post("/voice/transcribe")
@@ -3638,6 +3983,7 @@ async def llm_chat(request: Request):
         logging.info(f"Will fallback to model {FALLBACK_CHAT_MODEL} on {ollama_url} if {model} fails")
     
     last_error = None
+    attempt_debug = []
     for url_to_try, model_to_use in configs_to_try:
         try:
             # 45s for Vast.ai (large models need 6-12s load + inference on cold start)
@@ -3654,11 +4000,13 @@ async def llm_chat(request: Request):
                     payload["options"] = ollama_options
                 if keep_alive:
                     payload["keep_alive"] = keep_alive
+                if _should_disable_thinking(model_to_use):
+                    payload["think"] = False
 
                 resp = await client.post(f"{url_to_try}/api/chat", json=payload)
                 if resp.status_code != 200:
                     raise RuntimeError(f"Ollama HTTP {resp.status_code}: {resp.text}")
-                result = resp.json()
+                result = _sanitize_chat_result(resp.json())
                 if isinstance(result, dict) and result.get("error"):
                     raise RuntimeError(f"Ollama error: {result.get('error')}")
                 attempt_ms = int((time.time() - attempt_start) * 1000)
@@ -3687,6 +4035,22 @@ async def llm_chat(request: Request):
                         "prompt_tokens": input_tokens,
                         "completion_tokens": output_tokens,
                         "total_tokens": total_tokens
+                    },
+                    "debug": {
+                        "requested_model": model,
+                        "actual_model": model_to_use,
+                        "requested_backend": backend_type,
+                        "actual_backend": "ollama",
+                        "requested_url": ollama_url,
+                        "actual_url": url_to_try,
+                        "fallback_used": (url_to_try != ollama_url) or (model_to_use != model),
+                        "attempts": attempt_debug + [{
+                            "url": url_to_try,
+                            "model": model_to_use,
+                            "backend": "ollama",
+                            "successful": True,
+                            "attempt_ms": attempt_ms,
+                        }],
                     }
                 }
 
@@ -3696,6 +4060,15 @@ async def llm_chat(request: Request):
             last_error = e
             is_vastai = url_to_try == OLLAMA_URL_VASTAI
             attempt_ms = int((time.time() - attempt_start) * 1000)
+            attempt_debug.append({
+                "url": url_to_try,
+                "model": model_to_use,
+                "backend": "ollama",
+                "successful": False,
+                "attempt_ms": attempt_ms,
+                "error": str(e),
+                "is_vastai": is_vastai,
+            })
             logging.warning(
                 f"{'🚨 Vast.ai' if is_vastai else 'Local Ollama'} URL {url_to_try} failed request_id={request_id} attempt_ms={attempt_ms}: {str(e)}"
             )
@@ -3710,6 +4083,7 @@ async def llm_chat(request: Request):
         try:
             # Fallback to local llama-server
             result = await llamacpp_server_chat(messages)
+            result = _sanitize_chat_result(result)
             elapsed_ms = int((time.time() - start_time) * 1000)
             logging.info(f"✅ llama-server fallback successful request_id={request_id} elapsed_ms={elapsed_ms}")
             
@@ -3726,6 +4100,22 @@ async def llm_chat(request: Request):
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens
                 }
+            result["debug"] = {
+                "requested_model": model,
+                "actual_model": model,
+                "requested_backend": backend_type,
+                "actual_backend": "llamacpp",
+                "requested_url": ollama_url,
+                "actual_url": "llamacpp://local",
+                "fallback_used": True,
+                "attempts": attempt_debug + [{
+                    "url": "llamacpp://local",
+                    "model": model,
+                    "backend": "llamacpp",
+                    "successful": True,
+                    "attempt_ms": elapsed_ms,
+                }],
+            }
             return result
             
         except Exception as llamacpp_error:
@@ -3783,6 +4173,7 @@ async def stream_chat(request: Request):
         last_error = None
         for url_to_try, model_to_use in configs_to_try:
             try:
+                suppress_reasoning_stream = _should_disable_thinking(model_to_use)
                 # Vast can take longer to first token on cold starts; avoid premature fallback.
                 timeout = 45.0 if url_to_try == OLLAMA_URL_VASTAI else 120.0
                 attempt_start = time.time()
@@ -3797,6 +4188,8 @@ async def stream_chat(request: Request):
                         stream_payload["options"] = ollama_options
                     if keep_alive:
                         stream_payload["keep_alive"] = keep_alive
+                    if _should_disable_thinking(model_to_use):
+                        stream_payload["think"] = False
 
                     async with client.stream(
                         'POST',
@@ -3831,9 +4224,10 @@ async def stream_chat(request: Request):
                                         logging.info(
                                             f"stream first_token request_id={request_id} model={model_to_use} url={url_to_try} first_token_ms={first_token_ms}"
                                         )
-                                
-                                    # Send SSE format
-                                    yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
+
+                                    if not suppress_reasoning_stream:
+                                        # Send SSE format
+                                        yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
                             
                                 # Check if done
                                 if chunk.get('done', False):
@@ -3841,10 +4235,19 @@ async def stream_chat(request: Request):
                                         raise RuntimeError(
                                             f"Ollama stream completed with empty content for model={model_to_use} url={url_to_try}"
                                         )
+                                    visible_content = _strip_reasoning_blocks(full_content) if suppress_reasoning_stream else full_content
+                                    if suppress_reasoning_stream and not visible_content.strip():
+                                        raise RuntimeError(
+                                            f"Ollama stream completed with only reasoning content for model={model_to_use} url={url_to_try}"
+                                        )
+
+                                    if suppress_reasoning_stream:
+                                        yield f"data: {json.dumps({'content': visible_content, 'done': False})}\n\n"
+
                                     # Calculate token usage
                                     input_text = " ".join([msg.get("content", "") for msg in messages])
                                     input_tokens = len(input_text) // 4
-                                    output_tokens = len(full_content) // 4
+                                    output_tokens = len(visible_content) // 4
                                     total_tokens = input_tokens + output_tokens
                                 
                                     # Send final message with usage

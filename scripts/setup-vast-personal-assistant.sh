@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-VAST_HOST="${VAST_HOST:-123.21.129.10}"
+VAST_HOST="${VAST_HOST:-123.21.80.170}"
 VAST_PORT="${VAST_PORT:-51734}"
 VAST_USER="${VAST_USER:-root}"
 

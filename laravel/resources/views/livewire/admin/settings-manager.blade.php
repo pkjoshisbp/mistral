@@ -268,6 +268,72 @@
                                 </div>
                             </div>
 
+                            <div class="row mt-3">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="global_query_translation_map">Global Query Translation Map</label>
+                                        <textarea wire:model="global_query_translation_map"
+                                                  id="global_query_translation_map"
+                                                  class="form-control @error('global_query_translation_map') is-invalid @enderror"
+                                                  rows="5"
+                                                  placeholder="mehr infos = more information&#10;prix = price&#10;wanted to ship = shipping"></textarea>
+                                        @error('global_query_translation_map')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">One mapping per line. Format: source = target. Applied globally before organization-specific maps.</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="global_query_alias_map">Global Query Alias / Synonym Map</label>
+                                        <textarea wire:model="global_query_alias_map"
+                                                  id="global_query_alias_map"
+                                                  class="form-control @error('global_query_alias_map') is-invalid @enderror"
+                                                  rows="5"
+                                                  placeholder="shipping = wanted to ship, ship this, send this&#10;fees = fee, charges, cost"></textarea>
+                                        @error('global_query_alias_map')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">One mapping per line. Format: canonical = alias 1, alias 2, alias 3. Useful when a new phrase appears across multiple organizations.</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row mt-3" x-show="$wire.ai_model_provider === 'llama' && $wire.ai_backend_type === 'ollama'">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="vastai_ssh_host">Vast.ai SSH Host / IP</label>
+                                        <input type="text"
+                                               id="vastai_ssh_host"
+                                               wire:model="vastai_ssh_host"
+                                               class="form-control @error('vastai_ssh_host') is-invalid @enderror"
+                                               placeholder="123.21.80.170">
+                                        @error('vastai_ssh_host')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Update this when Vast.ai assigns a new public host or IP. The next connectivity check will use it to rebuild the tunnel.</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label for="vastai_ssh_port">SSH Port</label>
+                                        <input type="number"
+                                               id="vastai_ssh_port"
+                                               wire:model="vastai_ssh_port"
+                                               class="form-control @error('vastai_ssh_port') is-invalid @enderror"
+                                               min="1"
+                                               max="65535"
+                                               placeholder="51734">
+                                        @error('vastai_ssh_port')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label for="vastai_ssh_user">SSH User</label>
+                                        <input type="text"
+                                               id="vastai_ssh_user"
+                                               wire:model="vastai_ssh_user"
+                                               class="form-control @error('vastai_ssh_user') is-invalid @enderror"
+                                               placeholder="root">
+                                        @error('vastai_ssh_user')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Ollama Settings -->
                             <div class="row" x-show="$wire.ai_model_provider === 'llama' && $wire.ai_backend_type === 'ollama'">
                                 <div class="col-md-12">
@@ -374,7 +440,7 @@
                                 @else
                                     @if($ai_backend_type === 'ollama')
                                         <span class="badge badge-success">Ollama</span>
-                                        Using {{ $llama_default_model }} model
+                                        Using {{ $llama_default_model }} model via {{ $vastai_ssh_user }}@{{ $vastai_ssh_host }}:{{ $vastai_ssh_port }}
                                     @else
                                         <span class="badge badge-warning">llama.cpp</span>
                                         Using custom GGUF model @if($llamacpp_model_path) ({{ basename($llamacpp_model_path) }}) @endif

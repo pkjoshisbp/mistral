@@ -61,6 +61,8 @@ class TokenUsage extends Component
             'total_tokens' => $totalTokens,
             'total_requests' => $totalRequests,
             'avg_tokens_per_request' => $totalRequests > 0 ? round($totalTokens / $totalRequests, 1) : 0,
+            'estimated_tokens' => (clone $query)->where('usage_is_estimated', true)->sum('tokens_used'),
+            'reasoning_tokens' => (clone $query)->sum('reasoning_tokens'),
         ];
     }
 

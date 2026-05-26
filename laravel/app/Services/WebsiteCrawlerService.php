@@ -85,12 +85,13 @@ class WebsiteCrawlerService
     {
         try {
             $response = $this->httpClient->get($url);
+            $body = $response->getBody()->getContents();
             
             return [
                 'success' => true,
                 'status_code' => $response->getStatusCode(),
-                'title' => $this->extractTitle($response->getBody()->getContents()),
-                'content_length' => strlen($response->getBody()->getContents())
+                'title' => $this->extractTitle($body),
+                'content_length' => strlen($body)
             ];
         } catch (GuzzleException $e) {
             return [
@@ -158,6 +159,49 @@ class WebsiteCrawlerService
             Log::error('Failed to parse sitemap: ' . $e->getMessage());
             return [];
         }
+    }
+
+    public function analyzeSamplePage(string $url, array $options = []): array
+    {
+        $pageData = $this->fetchSamplePageData($url, $options['noise_selectors'] ?? []);
+        $suggestedTemplate = $this->suggestTemplateForPage($pageData, $options + ['page_url' => $url]);
+
+        return [
+            'url' => $url,
+            'base_url' => $this->buildBaseUrl($url),
+            'title' => $pageData['title'],
+            'meta_description' => $pageData['meta_description'],
+            'headings' => $pageData['headings'],
+            'content_excerpt' => $pageData['content_excerpt'],
+            'suggested_template' => $suggestedTemplate,
+        ];
+    }
+
+    public function previewSampleExtraction(string $url, array $options = []): array
+    {
+        $attributes = array_values(array_filter($options['attributes'] ?? []));
+
+        if (empty($attributes)) {
+            throw new \InvalidArgumentException('No attributes provided for preview extraction.');
+        }
+
+        $pageData = $this->fetchSamplePageData($url, $options['noise_selectors'] ?? []);
+        $result = $this->extractAttributesViaLlm(
+            $pageData['content'],
+            $attributes,
+            $options['page_type'] ?? 'general',
+            $url,
+            $options['prompt_override'] ?? null
+        );
+
+        return [
+            'url' => $url,
+            'title' => $pageData['title'],
+            'headings' => $pageData['headings'],
+            'content_excerpt' => $pageData['content_excerpt'],
+            'extracted' => $result['extracted'] ?? [],
+            'flat_content' => $result['flat_content'] ?? '',
+        ];
     }
 
     public function crawl(WebsiteCrawler $crawler, $progressCallback = null)
@@ -577,6 +621,153 @@ class WebsiteCrawlerService
             Log::debug('stripNoiseSelectors DOMDocument failed, returning original HTML: ' . $e->getMessage());
             return $html;
         }
+    }
+
+    private function fetchSamplePageData(string $url, array $noiseSelectors = []): array
+    {
+        try {
+            $response = $this->httpClient->get($url);
+            $contentType = $response->getHeader('Content-Type')[0] ?? '';
+
+            if (!str_contains(strtolower($contentType), 'text/html')) {
+                throw new \RuntimeException('The sample URL does not return HTML content.');
+            }
+
+            $html = $response->getBody()->getContents();
+            if (empty($html)) {
+                throw new \RuntimeException('The sample page returned empty content.');
+            }
+
+            $cleanHtml = $this->stripNoiseSelectors($html, $noiseSelectors);
+            $extracted = $this->extractContent($cleanHtml, $url);
+            $content = trim((string) ($extracted['content'] ?? ''));
+
+            if ($content === '') {
+                throw new \RuntimeException('Could not extract readable text from the sample page.');
+            }
+
+            return [
+                'title' => $extracted['title'] ?: parse_url($url, PHP_URL_PATH),
+                'meta_description' => $extracted['meta_description'] ?? '',
+                'headings' => array_values($extracted['headings'] ?? []),
+                'content' => $content,
+                'content_excerpt' => mb_substr($content, 0, 1800),
+            ];
+        } catch (GuzzleException $e) {
+            throw new \RuntimeException('Failed to fetch sample page: ' . $e->getMessage(), 0, $e);
+        }
+    }
+
+    private function suggestTemplateForPage(array $pageData, array $options = []): array
+    {
+        $fastApiUrl = config('services.ai_agent.url', 'http://localhost:8111');
+
+        try {
+            $response = $this->httpClient->post($fastApiUrl . '/crawl/suggest-template', [
+                'json' => [
+                    'title' => $pageData['title'] ?? '',
+                    'meta_description' => $pageData['meta_description'] ?? '',
+                    'headings' => $pageData['headings'] ?? [],
+                    'text' => $pageData['content'] ?? '',
+                    'page_url' => $options['page_url'] ?? null,
+                    'current_page_type' => $options['page_type'] ?? null,
+                    'current_attributes' => $options['attributes'] ?? [],
+                    'prompt_override' => $options['prompt_override'] ?? null,
+                ],
+                'timeout' => 60,
+            ]);
+
+            $result = json_decode($response->getBody()->getContents(), true);
+            if (!is_array($result)) {
+                throw new \RuntimeException('Template suggestion returned an invalid response.');
+            }
+
+            return [
+                'page_type' => $result['page_type'] ?? ($options['page_type'] ?: 'general'),
+                'qdrant_data_type' => $result['qdrant_data_type'] ?? $this->mapPageTypeToDataType($result['page_type'] ?? ($options['page_type'] ?: 'general')),
+                'attribute_schema' => array_values(array_filter($result['attribute_schema'] ?? [])),
+                'url_filter_pattern' => $result['url_filter_pattern'] ?: $this->guessUrlFilterPattern($options['website_url'] ?? null, $options['page_url'] ?? null),
+                'summary' => $result['summary'] ?? 'Template suggestion generated from the sample page.',
+            ];
+        } catch (\Exception $e) {
+            Log::warning('Template suggestion fallback used: ' . $e->getMessage());
+            return $this->fallbackTemplateSuggestion($options['page_url'] ?? null, $pageData, $options);
+        }
+    }
+
+    private function fallbackTemplateSuggestion(?string $pageUrl, array $pageData, array $options = []): array
+    {
+        $pageType = $options['page_type'] ?: $this->guessPageType($pageUrl, $pageData['title'] ?? '', $pageData['headings'] ?? []);
+        $attributeSchema = $options['attributes'] ?: $this->defaultAttributesForPageType($pageType);
+
+        return [
+            'page_type' => $pageType,
+            'qdrant_data_type' => $this->mapPageTypeToDataType($pageType),
+            'attribute_schema' => $attributeSchema,
+            'url_filter_pattern' => $this->guessUrlFilterPattern($options['website_url'] ?? null, $pageUrl),
+            'summary' => 'Fallback template generated from the URL structure and extracted headings.',
+        ];
+    }
+
+    private function buildBaseUrl(string $url): string
+    {
+        $scheme = parse_url($url, PHP_URL_SCHEME) ?: 'https';
+        $host = parse_url($url, PHP_URL_HOST) ?: '';
+
+        return $host ? $scheme . '://' . $host : $url;
+    }
+
+    private function guessPageType(?string $url, string $title, array $headings): string
+    {
+        $haystack = strtolower(trim(($url ?? '') . ' ' . $title . ' ' . implode(' ', $headings)));
+
+        return match (true) {
+            str_contains($haystack, 'faq') || str_contains($haystack, 'question') => 'faq',
+            str_contains($haystack, 'test') || str_contains($haystack, 'diagnostic') || str_contains($haystack, 'scan') => 'medical-test',
+            str_contains($haystack, 'doctor') || str_contains($haystack, 'consultant') || str_contains($haystack, 'specialist') => 'doctor',
+            str_contains($haystack, 'service') => 'service',
+            str_contains($haystack, 'blog') || str_contains($haystack, 'article') || str_contains($haystack, 'news') => 'article',
+            default => 'product',
+        };
+    }
+
+    private function defaultAttributesForPageType(string $pageType): array
+    {
+        return match ($pageType) {
+            'service' => ['name', 'summary', 'pricing', 'duration', 'eligibility', 'requirements'],
+            'doctor' => ['name', 'specialty', 'qualification', 'experience', 'availability', 'consultation_fee'],
+            'medical-test' => ['test_name', 'price', 'preparation', 'report_time', 'sample_type', 'timing'],
+            'faq' => ['question', 'answer', 'category'],
+            'article' => ['title', 'summary', 'author', 'published_date', 'key_topics'],
+            default => ['name', 'price', 'category', 'availability', 'description'],
+        };
+    }
+
+    private function mapPageTypeToDataType(string $pageType): string
+    {
+        return match ($pageType) {
+            'service', 'doctor', 'medical-test' => 'service',
+            'faq' => 'faq',
+            'article' => 'info',
+            default => 'product',
+        };
+    }
+
+    private function guessUrlFilterPattern(?string $websiteUrl, ?string $sampleUrl): ?string
+    {
+        if (!$sampleUrl) {
+            return null;
+        }
+
+        $samplePath = trim((string) parse_url($sampleUrl, PHP_URL_PATH), '/');
+        if ($samplePath === '') {
+            return null;
+        }
+
+        $segments = explode('/', $samplePath);
+        $firstSegment = $segments[0] ?? '';
+
+        return $firstSegment !== '' ? '/' . $firstSegment . '/' : null;
     }
 
     /**

@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\URL;
 use App\Mail\ChatEscalationNotification;
 use App\Mail\ChatInteractionDigestNotification;
 use Illuminate\Support\Str;
+use App\Models\AdminSetting;
 use App\Models\OrganizationData;
 
 class WidgetController
@@ -449,6 +450,24 @@ class WidgetController
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            $inferenceInput = $this->prepareMultilingualInferenceInput(
+                $organization,
+                (string) $message,
+                (string) $responseLanguage
+            );
+            $messageForInference = $inferenceInput['inference_query'];
+            $languagePromptInstruction = $inferenceInput['prompt_instruction'];
+            $allowNoContextInstructionalResponse = $this->shouldAllowNoContextInstructionalResponse(
+                (string) $message,
+                $organization,
+                $messageForInference
+            );
+            $this->mergeDebugExtra([
+                'query_language' => $inferenceInput['language'],
+                'query_translation_used' => $inferenceInput['used_translation'],
+                'normalized_query' => $inferenceInput['used_translation'] ? $messageForInference : null,
+            ]);
+
             // Load existing conversation early for handoff and follow-up continuity
             $existingConversation = ChatConversation::where('conversation_id', $sessionId)
                 ->where('organization_id', $organization->id)
@@ -464,7 +483,7 @@ class WidgetController
                 && trim($lastAssistantForIntent) !== ''
                 && $this->responseHasQuestion($lastAssistantForIntent);
             $skipIntentOnAffirmative = (bool) ($rulePolicy['skip_intent_on_affirmative_follow_up'] ?? true);
-            $isAffirmativeContinuationForIntent = $this->isAffirmativeFollowUp((string) $message)
+            $isAffirmativeContinuationForIntent = $this->isAffirmativeFollowUp((string) $messageForInference)
                 && $existingConversation
                 && ($lastAssistantAskedQuestionForIntent || $hasExplicitPendingFollowUpPrompt)
                 && $skipIntentOnAffirmative;
@@ -604,7 +623,7 @@ class WidgetController
 
             if (!$isAffirmativeContinuationForIntent && $this->shouldRunWidgetIntentDetection($organization)) {
                 try {
-                    $intentResult = app(IntentDetectionService::class)->detectIntent($message, $organization->id);
+                    $intentResult = app(IntentDetectionService::class)->detectIntent($messageForInference, $organization->id);
                 } catch (\Throwable $t) {
                     Log::warning('Intent detection failed', [
                         'org_id' => $organization->id,
@@ -631,6 +650,9 @@ class WidgetController
             $routeAnalysis = is_array($intentResult['route_analysis'] ?? null)
                 ? $intentResult['route_analysis']
                 : [];
+            if ($routeAnalysis === []) {
+                $routeAnalysis = app(IntentDetectionService::class)->analyzeRoutePlan((string) $messageForInference, $organization->id);
+            }
             $this->debugData['extra'] = array_filter([
                 'route_primary' => $routeAnalysis['primary_route'] ?? null,
                 'route_signals' => $routeAnalysis['signals'] ?? [],
@@ -744,10 +766,10 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            $isAffirmativeFollowUp = $this->isAffirmativeFollowUp($message);
-            $isShortFollowUp = $this->isShortFollowUp($message);
-            $isReferentialFollowUp = $this->isReferentialFollowUpMessage($message);
-            $isEllipticalFollowUp = $this->isEllipticalFollowUpMessage($message);
+            $isAffirmativeFollowUp = $this->isAffirmativeFollowUp($messageForInference);
+            $isShortFollowUp = $this->isShortFollowUp($messageForInference);
+            $isReferentialFollowUp = $this->isReferentialFollowUpMessage($messageForInference);
+            $isEllipticalFollowUp = $this->isEllipticalFollowUpMessage($messageForInference);
             $lastAssistantMessage = $this->getLastAssistantMessage($organization, $sessionId);
             $lastUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
             $lastUserMessage = is_string($lastUserMessage) ? trim($lastUserMessage) : '';
@@ -755,11 +777,11 @@ class WidgetController
                 && trim($lastAssistantMessage) !== ''
                 && $this->responseHasQuestion($lastAssistantMessage);
             $isContextualShortFollowUp = $isShortFollowUp
-                || ($this->isOneOrTwoWordReply($message) && $lastAssistantAskedQuestion);
+                || ($this->isOneOrTwoWordReply($messageForInference) && $lastAssistantAskedQuestion);
             $isAffirmativeContinuation = $isAffirmativeFollowUp && ($lastAssistantAskedQuestion || $hasExplicitPendingFollowUpPrompt);
             $skipExactMatchOnAffirmative = (bool) ($rulePolicy['skip_exact_match_on_affirmative_follow_up'] ?? true);
             $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
-                (string) $message,
+                (string) $messageForInference,
                 $lastUserMessage,
                 is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
                 is_array($previousContextPayloads) ? $previousContextPayloads : [],
@@ -770,7 +792,7 @@ class WidgetController
             $canReusePreviousContext = !empty($previousContextPayloads)
                 && $isRelatedFollowUp;
             $shouldUsePendingStateAnchor = $this->shouldAnchorWithPendingFollowUpState(
-                (string) $message,
+                (string) $messageForInference,
                 $hasExplicitPendingFollowUpPrompt ? $pendingFollowUpState : null
             );
 
@@ -802,10 +824,10 @@ class WidgetController
                 }
             }
 
-            $searchQuery = $message;
+            $searchQuery = $messageForInference;
             if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $shouldUsePendingStateAnchor) && !$canReusePreviousContext) {
                 $searchQuery = $this->buildRelatedFollowUpSearchQuery(
-                    (string) $message,
+                    (string) $messageForInference,
                     $hasPendingFollowUpState ? $pendingFollowUpState : null,
                     $lastUserMessage,
                     is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
@@ -829,7 +851,7 @@ class WidgetController
                     $organization,
                     (string) $sessionId,
                     (string) $searchQuery,
-                    (string) $message,
+                    (string) $messageForInference,
                     (string) ($lastAssistantMessage ?? '')
                 );
             }
@@ -1051,11 +1073,11 @@ class WidgetController
             if (empty($shopifyContext)) {
                 try {
                     $actionService = app(\App\Services\ActionService::class);
-                    $actionQuery   = $message;
-                    if ($this->isPricingFollowUp($message)) {
+                    $actionQuery   = $messageForInference;
+                    if ($this->isPricingFollowUp($messageForInference)) {
                         $prevMsg = $this->getLastUserMessageForSession($organization->id, $sessionId);
                         if ($prevMsg) {
-                            $actionQuery = trim($prevMsg . ' ' . $message);
+                            $actionQuery = trim($prevMsg . ' ' . $messageForInference);
                         }
                     }
                     $actionResult = $actionService->processQuery($actionQuery, $organization->id);
@@ -1091,25 +1113,40 @@ class WidgetController
             $searchResults = null;
             $anchoredEntityResults = [];
             if (!$canReusePreviousContext && !$liveData) {
-                $anchoredEntityResults = $this->resolveEntityAnchoredResults(
-                    $organization,
-                    (string) $searchQuery
-                );
+                $routeSignals = is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [];
+                $isPureShopifyProductRoute = $hasShopifyData
+                    && (bool) ($routeAnalysis['requires_product_resolution'] ?? false)
+                    && empty(array_intersect($routeSignals, ['policy_questions', 'fulfillment_questions', 'schedule_questions']));
 
-                if (!empty($anchoredEntityResults)) {
-                    $searchResults = ['results' => $anchoredEntityResults];
-                    Log::info('Using entity-anchored results and skipping semantic search', [
+                if ($isPureShopifyProductRoute) {
+                    $searchResults = ['results' => []];
+                    Log::info('Skipping semantic search for pure Shopify product route', [
                         'org_id' => $organization->id,
                         'org_slug' => $organization->slug,
                         'query' => $searchQuery,
+                        'route_analysis' => $routeAnalysis,
                     ]);
                 } else {
-                    $searchResults = $this->aiAgentService->enhancedSearch(
-                        $collectionName,
-                        $searchQuery,
-                        6, // Use broader retrieval window to reduce false negatives on specific product queries
-                        ['disable_rewrite' => true]
+                    $anchoredEntityResults = $this->resolveEntityAnchoredResults(
+                        $organization,
+                        (string) $searchQuery
                     );
+
+                    if (!empty($anchoredEntityResults)) {
+                        $searchResults = ['results' => $anchoredEntityResults];
+                        Log::info('Using entity-anchored results and skipping semantic search', [
+                            'org_id' => $organization->id,
+                            'org_slug' => $organization->slug,
+                            'query' => $searchQuery,
+                        ]);
+                    } else {
+                        $searchResults = $this->aiAgentService->enhancedSearch(
+                            $collectionName,
+                            $searchQuery,
+                            6, // Use broader retrieval window to reduce false negatives on specific product queries
+                            ['disable_rewrite' => true]
+                        );
+                    }
                 }
             }
             
@@ -1508,6 +1545,11 @@ class WidgetController
 
             $hasVerifiedKnowledgeContext = trim((string) $context) !== '' || !empty($shopifyContext);
             $hasVerifiedContext = !empty($finalContext) || !empty($shopifyContext);
+            $exactFaqMatch = $this->getExactFaqMatchResponse(
+                $searchResults,
+                $organization,
+                trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message
+            );
 
             if ($this->isPolicySupportQuestion((string) $message) && !$hasVerifiedKnowledgeContext) {
                 $safeResponse = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
@@ -1586,7 +1628,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if ($verifiedOnly && !$hasVerifiedContext) {
+            if ($verifiedOnly && !$hasVerifiedContext && !$allowNoContextInstructionalResponse && !$exactFaqMatch) {
                 $safeResponse = $this->buildVerifiedOnlyResponse($organization);
                 return response()->json([
                     'response' => $safeResponse,
@@ -1596,7 +1638,7 @@ class WidgetController
             }
 
             if ($this->isContactQuery((string) $message)) {
-                $contactResponse = $this->buildDeterministicContactQueryResponse($organization, (string) $message);
+                $contactResponse = $this->buildDeterministicContactQueryResponse($organization, (string) $message, $searchResults ?? null);
 
                 $conversation = $this->saveConversationToDatabase(
                     $organization,
@@ -1727,7 +1769,6 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization, (string) $message);
             if ($exactFaqMatch && !$hasShopifyData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                 Log::info('Widget exact FAQ match response', [
                     'org_id' => $organization->id,
@@ -1762,6 +1803,7 @@ class WidgetController
                         $paraphrasePrompt = "You are {$assistantName} for {$organization->name}. "
                             . "Tone: {$responseTone}. Language: {$responseLanguage}. "
                             . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply. Do NOT invent new information. Do NOT omit any key facts (contact details, links, email addresses). "
+                            . ($languagePromptInstruction !== '' ? $languagePromptInstruction . ' ' : '')
                             . "STRICT HTML RULES:\n"
                             . "- Preserve ALL HTML tags exactly as they appear: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
                             . "- Do NOT remove, add, or restructure any HTML tags.\n"
@@ -2131,6 +2173,7 @@ class WidgetController
             $promotionContext = $this->buildPromotionContext($organization);
             $faqFollowUpInstruction = $this->faqFollowUpService->getFollowUpInstruction($organization);
             $supplementaryInstruction = $this->buildSupplementaryInstruction($organization);
+            $scopeInstruction = $this->buildScopeInstruction($organization);
             $vacancyInstruction = $this->buildVacancyInstruction($organization);
             $datasetInstruction = $this->buildDatasetInstructions($organization, $searchResults ?? []);
             $appointmentGuardrailsEnabled = (bool) ($organization->settings['appointment_guardrails_enabled'] ?? false);
@@ -2147,6 +2190,9 @@ class WidgetController
                 $systemPrompt .= "Never expose internal metadata fields (for example: keywords, semantic scores, candidate scores, internal limits) unless the user explicitly asks for those exact fields and they are customer-facing.\n";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n";
                 $systemPrompt .= $supplementaryInstruction . "\n";
+                if ($scopeInstruction !== '') {
+                    $systemPrompt .= $scopeInstruction . "\n";
+                }
                 $systemPrompt .= $vacancyInstruction . "\n";
                 if ($datasetInstruction) {
                     $systemPrompt .= $datasetInstruction . "\n";
@@ -2234,15 +2280,15 @@ class WidgetController
                 if (($shouldUsePolicySupportFallback
                         || (isset($maxResultScore)
                             && $maxResultScore > 0.0
-                            && $maxResultScore < 0.60))
+                            && $maxResultScore <= $this->getLowConfidenceNoAnswerThreshold()))
                     && !$this->isContactQuery($message)
                     && empty($shopifyContext)
-                    && !($hasCachedTurns && ($isContextualShortFollowUp || $isReferentialFollowUp))) {
-                    // ^^ Skip clarification when LLM already has cached context for this follow-up.
-                    //    The LLM can answer from conversation history — no Qdrant context needed.
-                    $clarificationResponse = $this->isPolicySupportQuestion((string) $message)
-                        ? $this->buildPolicySupportUnavailableResponse($organization, (string) $message)
-                        : $this->buildGeneralClarificationResponse($message);
+                    && !$allowNoContextInstructionalResponse) {
+                    $clarificationResponse = $this->buildLowConfidenceContactFallbackResponse(
+                        $organization,
+                        (string) $message,
+                        is_array($routeAnalysis ?? null) ? $routeAnalysis : []
+                    );
 
                     Log::info('Widget low-confidence clarification returned (non-stream)', [
                         'org_id' => $organization->id,
@@ -2324,6 +2370,7 @@ class WidgetController
                 $systemPrompt .= "STRICT KNOWLEDGE BASE POLICY: Only confirm that a test, service, product, or feature is offered if it is EXPLICITLY listed BY NAME in CURRENT CONTEXT. NEVER infer that because a related or parent service is available (e.g., MRI), a specific variant or sub-procedure (e.g., MR Enterography, MR Arthrography) is also available. If the exact item the user asked about is NOT present by name in CURRENT CONTEXT, respond: 'I don't have specific information about [item name] in our knowledge base. For further details, please contact us at [contact info].' Do NOT speculate, infer, or expand beyond what is explicitly stated. ";
                 $systemPrompt .= "Never expose internal metadata fields (for example: keywords, semantic scores, candidate scores, internal limits) unless the user explicitly asks for those exact fields and they are customer-facing. ";
                 $systemPrompt .= "If CURRENT CONTEXT includes subscription/pricing details, NEVER claim that pricing information is unavailable or not provided. Respond only with the available plans and values from CURRENT CONTEXT. ";
+                $systemPrompt .= $this->buildContextRelevanceInstruction($organization) . ' ';
                 if ($appointmentGuardrailsEnabled && $isAppointmentQuery) {
                     $systemPrompt .= "APPOINTMENT: You have NO access to any booking or appointment system — you cannot see, confirm, or deny whether any specific slot (today, tomorrow, or any exact date/time) is available. NEVER say things like 'we don't have slots today', 'slots are full', or 'I can schedule you for tomorrow'. For booking requests, direct users to contact us at [phone/email]. If CURRENT CONTEXT includes a Working Schedule, you MAY still answer general day/hour availability from that schedule. ";
                     $systemPrompt .= "SCHEDULING: Use only explicit 'Working Schedule:' lines from CURRENT CONTEXT for the same person/service. If that exact schedule is not present, say the working schedule is not listed and ask the user to contact us. Do NOT infer from partial timing text and do NOT perform date-to-weekday calculations. Do NOT claim any specific slot is free or taken; always direct booking to [phone/email]. ";
@@ -2332,9 +2379,15 @@ class WidgetController
                 if ($datasetInstruction) {
                     $systemPrompt .= $datasetInstruction . " ";
                 }
+                if ($scopeInstruction !== '') {
+                    $systemPrompt .= $scopeInstruction . " ";
+                }
                 $systemPrompt .= "For other completely off-topic queries (personal requests or services we clearly do not offer at all), apologise briefly, state what we specialise in, and direct the user to our official contact. Do NOT fabricate any information. ";
                 $systemPrompt .= "If the user clearly ends the conversation (for example: 'goodbye', 'that's all', 'nothing else'), respond with a brief, friendly closing message (1 sentence max). If the user says 'no' as an answer to your clarifying question, continue helping with their original request instead of ending the chat. ";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
+                if ($languagePromptInstruction !== '') {
+                    $systemPrompt .= ' ' . $languagePromptInstruction;
+                }
                 $systemPrompt .= " " . $supplementaryInstruction;
             }
 
@@ -2389,6 +2442,7 @@ class WidgetController
             }
 
             $rawResponseText = null;
+            $llmExecutionDebug = is_array($aiResponse['debug'] ?? null) ? $aiResponse['debug'] : [];
             $structuredFollowUpState = null;
             $oneCallEnvelopeRetryAttempted = false;
             $oneCallEnvelopeRetrySucceeded = false;
@@ -2477,21 +2531,26 @@ class WidgetController
                     if ($structuredShopifyCartResponse !== null) {
                         $responseText = $structuredShopifyCartResponse;
                     } else {
-                        $structuredShopifyAvailabilityResponse = $this->buildStructuredShopifyAvailabilityResponse((string) $searchQuery, $shopifyData);
-                        if ($structuredShopifyAvailabilityResponse !== null) {
-                            $responseText = $structuredShopifyAvailabilityResponse;
+                        $structuredShopifyLinkResponse = $this->buildStructuredShopifyLinkResponse((string) $message, $shopifyData, $organization);
+                        if ($structuredShopifyLinkResponse !== null) {
+                            $responseText = $structuredShopifyLinkResponse;
                         } else {
-                            $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $searchQuery, $shopifyData);
-                            if ($structuredShopifyMismatchResponse !== null) {
-                                $responseText = $structuredShopifyMismatchResponse;
+                            $structuredShopifyAvailabilityResponse = $this->buildStructuredShopifyAvailabilityResponse((string) $message, $shopifyData);
+                            if ($structuredShopifyAvailabilityResponse !== null) {
+                                $responseText = $structuredShopifyAvailabilityResponse;
                             } else {
-                                $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
-                                if ($structuredShopifyOrderResponse !== null) {
-                                    $responseText = $structuredShopifyOrderResponse;
+                                $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $message, $shopifyData);
+                                if ($structuredShopifyMismatchResponse !== null) {
+                                    $responseText = $structuredShopifyMismatchResponse;
                                 } else {
-                                    $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $searchQuery, $shopifyData);
-                                    if ($structuredShopifyProductResponse !== null) {
-                                        $responseText = $structuredShopifyProductResponse;
+                                    $structuredShopifyOrderResponse = $this->buildStructuredShopifyOrderResponse($shopifyData);
+                                    if ($structuredShopifyOrderResponse !== null) {
+                                        $responseText = $structuredShopifyOrderResponse;
+                                    } else {
+                                        $structuredShopifyProductResponse = $this->buildStructuredShopifyProductResponse((string) $message, $shopifyData);
+                                        if ($structuredShopifyProductResponse !== null) {
+                                            $responseText = $structuredShopifyProductResponse;
+                                        }
                                     }
                                 }
                             }
@@ -2630,8 +2689,10 @@ class WidgetController
             );
 
             // Write LLM debug log for this request
-            $this->debugData['model_used']          = $model ?? null;
-            $this->debugData['ai_provider']         = $aiProvider ?? null;
+            $actualModelUsed = (string) ($llmExecutionDebug['actual_model'] ?? $model ?? '');
+            $actualBackendUsed = (string) ($llmExecutionDebug['actual_backend'] ?? ($aiProvider ?? ''));
+            $this->debugData['model_used']          = $actualModelUsed !== '' ? $actualModelUsed : ($model ?? null);
+            $this->debugData['ai_provider']         = $actualBackendUsed !== '' ? $actualBackendUsed : ($aiProvider ?? null);
             $this->debugData['max_tokens']          = $maxTokens ?? null;
             $this->debugData['llm_elapsed_ms']      = isset($llmElapsedMs) ? (int) $llmElapsedMs : null;
             $this->debugData['total_elapsed_ms']    = (int) round((microtime(true) - $requestStartedAt) * 1000);
@@ -2640,6 +2701,20 @@ class WidgetController
             $this->debugData['low_relevance_warning'] = isset($lowRelevanceWarning) && $lowRelevanceWarning !== '';
             $this->debugData['envelope_parse_ok']   = $oneCallEnvelopeParseOk ?? false;
             $this->debugData['response_path']       = 'llm';
+            $this->mergeDebugExtra(array_filter([
+                'requested_model' => $model ?? null,
+                'actual_model' => $actualModelUsed !== '' ? $actualModelUsed : null,
+                'requested_provider' => $aiProvider ?? null,
+                'actual_backend' => $actualBackendUsed !== '' ? $actualBackendUsed : null,
+                'backend_used' => $actualBackendUsed !== '' ? $actualBackendUsed : null,
+                'fallback_used' => (bool) ($llmExecutionDebug['fallback_used'] ?? false),
+                'attempts' => is_array($llmExecutionDebug['attempts'] ?? null) ? $llmExecutionDebug['attempts'] : null,
+                'requested_url' => $llmExecutionDebug['requested_url'] ?? null,
+                'actual_url' => $llmExecutionDebug['actual_url'] ?? null,
+                'connection_failure' => collect($llmExecutionDebug['attempts'] ?? [])->first(function ($attempt) {
+                    return is_array($attempt) && !($attempt['successful'] ?? false) && (($attempt['is_vastai'] ?? false) || str_contains((string) ($attempt['url'] ?? ''), '11435'));
+                }),
+            ]));
             // Token usage from last LLM call
             $promptEval  = $aiResponse['prompt_eval_count']  ?? ($aiResponse['metadata']['prompt_eval_count']  ?? null);
             $evalCount   = $aiResponse['eval_count']         ?? ($aiResponse['metadata']['eval_count']         ?? null);
@@ -2764,6 +2839,19 @@ class WidgetController
             return response()->json(['error' => 'Message is required'], 400);
         }
 
+        $inferenceInput = $this->prepareMultilingualInferenceInput(
+            $organization,
+            (string) $message,
+            (string) $responseLanguage
+        );
+        $messageForInference = $inferenceInput['inference_query'];
+        $languagePromptInstruction = $inferenceInput['prompt_instruction'];
+        $allowNoContextInstructionalResponse = $this->shouldAllowNoContextInstructionalResponse(
+            (string) $message,
+            $organization,
+            $messageForInference
+        );
+
         $existingConversation = ChatConversation::where('conversation_id', $sessionId)
             ->where('organization_id', $organization->id)
             ->first();
@@ -2860,7 +2948,7 @@ class WidgetController
             ]);
         }
 
-        $humanRequestReason = $this->getEscalationReason($message, '', null);
+        $humanRequestReason = $this->getEscalationReason($messageForInference, '', null);
         $isWithinHours = $this->isWithinBusinessHours($organization);
         if ($humanRequestReason === 'user_requested_human' && $isWithinHours === false) {
             $handoffText = $this->buildHandoffMessage($organization);
@@ -2960,7 +3048,7 @@ class WidgetController
 
         $pendingFollowUpState = $this->followUpStateService->getPendingState($existingConversation);
 
-        return response()->stream(function () use ($organization, $message, $sessionId, $request, $allUserInfo, $country, $region, $location, $city, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy, $pendingFollowUpState) {
+        return response()->stream(function () use ($organization, $message, $messageForInference, $languagePromptInstruction, $allowNoContextInstructionalResponse, $sessionId, $request, $allUserInfo, $country, $region, $location, $city, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy, $pendingFollowUpState) {
             $this->initStreamOutput();
             
             $lastAssistantMessageForEnding = $this->getLastAssistantMessage($organization, $sessionId);
@@ -3048,13 +3136,13 @@ class WidgetController
                 $lastAssistantAskedQuestion = is_string($lastAssistantMessage)
                     && trim($lastAssistantMessage) !== ''
                     && $this->responseHasQuestion($lastAssistantMessage);
-                $isAffirmativeFollowUp = $this->isAffirmativeFollowUp((string) $message);
-                $isShortFollowUp = $this->isShortFollowUp((string) $message);
-                $isReferentialFollowUp = $this->isReferentialFollowUpMessage((string) $message);
-                $isEllipticalFollowUp = $this->isEllipticalFollowUpMessage((string) $message);
+                $isAffirmativeFollowUp = $this->isAffirmativeFollowUp((string) $messageForInference);
+                $isShortFollowUp = $this->isShortFollowUp((string) $messageForInference);
+                $isReferentialFollowUp = $this->isReferentialFollowUpMessage((string) $messageForInference);
+                $isEllipticalFollowUp = $this->isEllipticalFollowUpMessage((string) $messageForInference);
                 $isAffirmativeContinuation = $isAffirmativeFollowUp && ($lastAssistantAskedQuestion || (is_array($pendingFollowUpState) && !empty($pendingFollowUpState)));
                 $isContextualShortFollowUp = $isShortFollowUp
-                    || ($this->isOneOrTwoWordReply((string) $message) && $lastAssistantAskedQuestion);
+                    || ($this->isOneOrTwoWordReply((string) $messageForInference) && $lastAssistantAskedQuestion);
                 $skipIntentOnAffirmative = (bool) ($rulePolicy['skip_intent_on_affirmative_follow_up'] ?? true);
                 $skipExactMatchOnAffirmative = (bool) ($rulePolicy['skip_exact_match_on_affirmative_follow_up'] ?? true);
 
@@ -3065,7 +3153,7 @@ class WidgetController
                 $lastUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                 $lastUserMessage = is_string($lastUserMessage) ? trim($lastUserMessage) : '';
                 $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
-                    (string) $message,
+                    (string) $messageForInference,
                     $lastUserMessage,
                     is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
                     is_array($previousContextPayloads) ? $previousContextPayloads : [],
@@ -3075,14 +3163,14 @@ class WidgetController
                 $canReusePreviousContext = !empty($previousContextPayloads)
                     && $isRelatedFollowUp;
                 $shouldUsePendingStateAnchor = $this->shouldAnchorWithPendingFollowUpState(
-                    (string) $message,
+                    (string) $messageForInference,
                     is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null
                 );
 
-                $searchQuery = $message;
+                $searchQuery = $messageForInference;
                 if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $shouldUsePendingStateAnchor) && !$canReusePreviousContext) {
                     $searchQuery = $this->buildRelatedFollowUpSearchQuery(
-                        (string) $message,
+                        (string) $messageForInference,
                         is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null,
                         $lastUserMessage,
                         is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
@@ -3118,16 +3206,16 @@ class WidgetController
                         $organization,
                         (string) $sessionId,
                         (string) $searchQuery,
-                        (string) $message,
+                        (string) $messageForInference,
                         (string) ($lastAssistantMessage ?? '')
                     );
                 }
 
-                $actionQuery = $message;
-                if ($this->isPricingFollowUp($message)) {
+                $actionQuery = $messageForInference;
+                if ($this->isPricingFollowUp($messageForInference)) {
                     $previousMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                     if ($previousMessage) {
-                        $actionQuery = trim($previousMessage . ' ' . $message);
+                        $actionQuery = trim($previousMessage . ' ' . $messageForInference);
                     }
                 }
                 
@@ -3536,7 +3624,13 @@ class WidgetController
                     return;
                 }
 
-                if ($verifiedOnly && !$liveData && trim($context) === '') {
+                $exactFaqMatch = $this->getExactFaqMatchResponse(
+                    $searchResults,
+                    $organization,
+                    trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message
+                );
+
+                if ($verifiedOnly && !$liveData && trim($context) === '' && !$allowNoContextInstructionalResponse && !$exactFaqMatch) {
                     $safeResponse = $this->buildVerifiedOnlyResponse($organization);
                     echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
@@ -3669,7 +3763,6 @@ class WidgetController
                     return;
                 }
 
-                $exactFaqMatch = $this->getExactFaqMatchResponse($searchResults, $organization, (string) $message);
                 if ($exactFaqMatch && !$liveData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                     $directResponse = $exactFaqMatch['response'];
                     $streamAssistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
@@ -3683,6 +3776,7 @@ class WidgetController
                             $streamParaPrompt = "You are {$streamAssistantName} for {$organization->name}. "
                                 . "Tone: {$responseTone}. Language: {$responseLanguage}. "
                                 . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply. Do NOT invent new information. Do NOT omit any key facts (contact details, links, email addresses). "
+                                . ($languagePromptInstruction !== '' ? $languagePromptInstruction . ' ' : '')
                                 . "STRICT HTML RULES:\n"
                                 . "- Preserve ALL HTML tags exactly: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
                                 . "- Do NOT remove, add, or restructure any HTML tags.\n"
@@ -4060,6 +4154,7 @@ class WidgetController
                 $businessContext = $this->buildBusinessContext($organization);
                 $promotionContext = $this->buildPromotionContext($organization);
                 $supplementaryInstruction = $this->buildSupplementaryInstruction($organization);
+                $scopeInstruction = $this->buildScopeInstruction($organization);
                 $isPricingLikeStreamQuery = (($intentResult['intent'] ?? null) === 'pricing')
                     || (bool) preg_match('/\b(subscription|subscriptions|plan|plans|pricing|price|cost|package|packages|monthly|yearly|corporate|enterprise|business)\b/i', (string) $message);
                 $appointmentGuardrailsEnabled = (bool) ($organization->settings['appointment_guardrails_enabled'] ?? false);
@@ -4077,6 +4172,9 @@ class WidgetController
                 $systemPrompt .= " Be concise and precise. Use **bold** for key terms and prices. For unordered lists use - bullet points; for sequential steps use numbered lists. Put each item on its own line. If the answer is not in the provided context, say so and ask one clarifying question.";
                 $systemPrompt .= " If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
                 $systemPrompt .= " " . $supplementaryInstruction;
+                if ($scopeInstruction !== '') {
+                    $systemPrompt .= " " . $scopeInstruction;
+                }
                 $systemPrompt .= " Website: {$orgWebsite}";
                 if ($orgEmail) $systemPrompt .= " | Email: {$orgEmail}";
                 if ($orgPhone) $systemPrompt .= " | Phone: {$orgPhone}";
@@ -4129,12 +4227,15 @@ class WidgetController
 
                 // When search confidence is too low, skip the LLM and ask for clarification.
                 if (($shouldUsePolicySupportStreamFallback
-                        || ($streamMaxResultScore > 0.0 && $streamMaxResultScore < 0.60))
+                        || ($streamMaxResultScore > 0.0 && $streamMaxResultScore <= $this->getLowConfidenceNoAnswerThreshold()))
                     && !$liveData
-                    && !$this->isContactQuery($message)) {
-                    $clarificationResponse = $this->isPolicySupportQuestion((string) $message)
-                        ? $this->buildPolicySupportUnavailableResponse($organization, (string) $message)
-                        : $this->buildGeneralClarificationResponse($message);
+                    && !$this->isContactQuery($message)
+                    && !$allowNoContextInstructionalResponse) {
+                    $clarificationResponse = $this->buildLowConfidenceContactFallbackResponse(
+                        $organization,
+                        (string) $message,
+                        is_array($routeAnalysis ?? null) ? $routeAnalysis : []
+                    );
 
                     echo "data: " . json_encode(['content' => $clarificationResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
@@ -4217,6 +4318,10 @@ class WidgetController
                 $systemPrompt .= "\nCRITICAL: NEVER invent or assume URLs, phone numbers, email addresses, prices, or factual details not explicitly stated in this system prompt or CURRENT CONTEXT.";
                 $systemPrompt .= "\nSTRICT KNOWLEDGE BASE POLICY: Only confirm that a test, service, product, or feature is offered if it is EXPLICITLY listed BY NAME in CURRENT CONTEXT. NEVER infer that because a related or parent service is available (e.g., MRI), a specific variant or sub-procedure (e.g., MR Enterography) is also available. If the exact item the user asked about is NOT present by name in CURRENT CONTEXT, respond: 'I don't have specific information about [item name] in our knowledge base. For further details, please contact us at [contact info].' Do NOT speculate, infer, or expand beyond what is explicitly stated.";
                 $systemPrompt .= "\nIf CURRENT CONTEXT includes subscription/pricing details, NEVER claim that pricing information is unavailable or not provided. Respond only with the available plans and values from CURRENT CONTEXT.";
+                $systemPrompt .= "\n" . $this->buildContextRelevanceInstruction($organization);
+                if ($languagePromptInstruction !== '') {
+                    $systemPrompt .= "\n" . $languagePromptInstruction;
+                }
 
                 $lowThinkingMode = $this->shouldUseLowThinkingMode(
                     (string) $message,
@@ -4250,7 +4355,8 @@ class WidgetController
                     $maxTokens = 700;
                 }
 
-                $deferStreamUntilPostProcess = $this->shouldDeferStreamUntilPostProcess(
+                $isReasoningModel = $this->shouldDisableModelThinking($model);
+                $deferStreamUntilPostProcess = $isReasoningModel || $this->shouldDeferStreamUntilPostProcess(
                     (string) $message,
                     (string) $searchQuery,
                     $intentResult,
@@ -4272,6 +4378,7 @@ class WidgetController
                     $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
                     $aiResponse = $this->aiAgentService->openAiChat($chatMessages, $model, null, $organization->id, $sessionId);
                     $fullResponse = (string) ($aiResponse['message']['content'] ?? '');
+                    $streamUsage = is_array($aiResponse['usage'] ?? null) ? $aiResponse['usage'] : null;
 
                     if (trim($fullResponse) !== '') {
                         $streamBackendUsed = 'openai';
@@ -4300,7 +4407,8 @@ class WidgetController
                     $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
                     Log::info('Starting LLM response generation', ['model' => $model, 'use_vastai' => true]);
                     $fullResponse = '';
-                    $streamAttempt = function (bool $useVast, string $attemptModel, string $attemptLabel, bool $deferToPostProcess) use ($fastApiUrl, $chatMessages, $maxTokens, &$fullResponse, $message, $localNumPredictCap) {
+                    $streamUsage = null;
+                    $streamAttempt = function (bool $useVast, string $attemptModel, string $attemptLabel, bool $deferToPostProcess) use ($fastApiUrl, $chatMessages, $maxTokens, &$fullResponse, &$streamUsage, $message, $localNumPredictCap) {
                         $sseBuffer = '';
                         $attemptResponse = '';
                         $hadOutput = false;
@@ -4331,7 +4439,7 @@ class WidgetController
                             CURLOPT_TIMEOUT => $attemptTimeout,
                             CURLOPT_LOW_SPEED_LIMIT => $useVast ? 1 : 0,
                             CURLOPT_LOW_SPEED_TIME => $useVast ? 18 : 0,
-                            CURLOPT_WRITEFUNCTION => function ($curl, $data) use (&$sseBuffer, &$attemptResponse, &$hadOutput, &$hadDone, &$hadError, &$fullResponse, $deferToPostProcess) {
+                            CURLOPT_WRITEFUNCTION => function ($curl, $data) use (&$sseBuffer, &$attemptResponse, &$hadOutput, &$hadDone, &$hadError, &$fullResponse, &$streamUsage, $deferToPostProcess) {
                                 $sseBuffer .= $data;
 
                                 $parts = explode("\n\n", $sseBuffer);
@@ -4358,6 +4466,10 @@ class WidgetController
                                         if (!empty($payload['error'])) {
                                             $hadError = true;
                                             continue;
+                                        }
+
+                                        if (!empty($payload['done']) && isset($payload['usage']) && is_array($payload['usage'])) {
+                                            $streamUsage = $payload['usage'];
                                         }
 
                                         $hasContent = isset($payload['content']) && $payload['content'] !== '';
@@ -4418,6 +4530,9 @@ class WidgetController
                                 if (!empty($payload['error'])) {
                                     $hadError = true;
                                     continue;
+                                }
+                                if (!empty($payload['done']) && isset($payload['usage']) && is_array($payload['usage'])) {
+                                    $streamUsage = $payload['usage'];
                                 }
                                 if (isset($payload['content']) && $payload['content'] !== '') {
                                     $payload['content'] = $this->normalizeEscapedUrlSlashes((string) $payload['content']);
@@ -4562,6 +4677,7 @@ class WidgetController
 
                     if (!$streamBackendUsed) {
                         $fullResponse = '';
+                        $streamUsage = null;
                         Log::warning('Widget stream retrying on local fallback model', [
                             'reason' => $fallbackReason,
                             'fallback_model' => $localFallbackModel,
@@ -4617,6 +4733,9 @@ class WidgetController
                 ]);
 
                 $finalResponse = trim($fullResponse);
+                if ($isReasoningModel) {
+                    $finalResponse = $this->stripReasoningBlocks($finalResponse);
+                }
                 $hallucinationBlocked = false;
                 [$finalResponse, $hallucinationBlocked] = $this->enforceContextOnlyAnswer(
                     $message,
@@ -4709,7 +4828,9 @@ class WidgetController
                         $chatMessages,
                         $finalResponse,
                         'llm_chat_stream',
-                        $sessionId
+                        $sessionId,
+                        $model ?? null,
+                        $streamUsage ?? null
                     );
 
                     $conversation = $this->saveConversationToDatabase(
@@ -4723,8 +4844,15 @@ class WidgetController
                     );
 
                     // Write LLM debug log for stream path
-                    $this->debugData['model_used']            = $streamBackendUsed ?? null;
-                    $this->debugData['ai_provider']           = $useOpenAiFallback ? 'openai' : ($aiProvider ?? null);
+                    $actualStreamModel = $model ?? null;
+                    if (str_starts_with((string) $streamBackendUsed, 'local_fallback_')) {
+                        $actualStreamModel = substr((string) $streamBackendUsed, strlen('local_fallback_'));
+                    }
+                    $actualStreamBackend = $useOpenAiFallback
+                        ? 'openai'
+                        : (str_starts_with((string) $streamBackendUsed, 'local_fallback_') ? 'ollama_local_fallback' : 'ollama_vastai');
+                    $this->debugData['model_used']            = $actualStreamModel;
+                    $this->debugData['ai_provider']           = $actualStreamBackend;
                     $this->debugData['max_tokens']            = $maxTokens ?? null;
                     $this->debugData['llm_elapsed_ms']        = isset($responseElapsedMs) ? (int) $responseElapsedMs : null;
                     $this->debugData['total_elapsed_ms']      = (int) round((microtime(true) - $requestStartedAt) * 1000);
@@ -4733,6 +4861,22 @@ class WidgetController
                     $this->debugData['low_relevance_warning'] = isset($streamLowRelevanceWarning) && $streamLowRelevanceWarning !== '';
                     $this->debugData['best_qdrant_score']     = $streamMaxResultScore ?? null;
                     $this->debugData['response_path']         = 'stream_llm';
+                    $this->mergeDebugExtra([
+                        'requested_model' => $model ?? null,
+                        'actual_model' => $actualStreamModel,
+                        'backend_used' => $streamBackendUsed,
+                        'actual_backend' => $actualStreamBackend,
+                        'fallback_used' => collect($streamBackendAttempts)->contains(function ($attempt) {
+                            return str_starts_with((string) ($attempt['attempt'] ?? ''), 'local-fallback');
+                        }),
+                        'attempts' => $streamBackendAttempts,
+                        'connection_failure' => collect($streamBackendAttempts)->first(function ($attempt) {
+                            return is_array($attempt)
+                                && !($attempt['successful'] ?? false)
+                                && (($attempt['attempt'] ?? '') === 'vast-primary');
+                        }),
+                        'fallback_reason' => $fallbackReason,
+                    ]);
                     $this->writeDebugLog($conversation);
 
                     // Cache this exchange in Redis for the next turn
@@ -5166,6 +5310,23 @@ class WidgetController
                 return false;
             }
 
+            if ($reason === 'low_intent_confidence') {
+                $threshold = (float) ($settings['escalation_email_confidence_threshold'] ?? 0.4);
+                $meta = is_array($conversation->metadata) ? $conversation->metadata : [];
+                $confidence = data_get($meta, 'escalation.confidence');
+                if (is_numeric($confidence) && (float) $confidence > $threshold) {
+                    Log::info('Escalation email skipped by confidence threshold', [
+                        'conversation_id' => $conversation->conversation_id,
+                        'org_id' => $organization->id,
+                        'reason' => $reason,
+                        'confidence' => (float) $confidence,
+                        'threshold' => $threshold,
+                    ]);
+
+                    return false;
+                }
+            }
+
             $emails = $settings['escalation_notify_emails'] ?? [];
             if (is_string($emails)) {
                 $emails = array_filter(array_map('trim', preg_split('/[\s,]+/', $emails)));
@@ -5410,8 +5571,9 @@ class WidgetController
             return false;
         }
 
-        // Strong contact intent keywords ("location" removed — too ambiguous; covered below)
-        if (preg_match('/\b(contact|reach|email|phone|call|whatsapp|address|customer care|helpline)\b/i', $message)) {
+        // Strong contact intent phrases. Keep these specific so product names such as
+        // "No Contact Thermometer" do not trigger the deterministic contact shortcut.
+        if (preg_match('/\b(contact\s+(?:us|you|support|team|details?|info|information)|reach\s+(?:us|you)|email(?:\s+address)?|phone(?:\s+number)?|call(?:\s+us|\s+you)?|whatsapp|address|customer care|helpline)\b/i', $message)) {
             return true;
         }
 
@@ -5439,13 +5601,23 @@ class WidgetController
         return 'You can reach us at ' . implode(' | ', $parts) . '.';
     }
 
-    private function buildDeterministicContactQueryResponse(Organization $organization, string $message): string
+    private function buildDeterministicContactQueryResponse(Organization $organization, string $message, ?array $searchResults = null): string
     {
         $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
         $website = (string) ($organization->website ?: config('app.url'));
         $email = $organization->contact_email ?? ($settings['contact_email'] ?? null);
         $phone = $organization->contact_phone ?? ($settings['contact_phone'] ?? null);
         $hours = trim((string) ($settings['business_hours'] ?? ''));
+
+        $contactFaqMatch = $this->getDeterministicContactFaqMatchResponse($searchResults, $organization, $message);
+        if ($contactFaqMatch) {
+            return $this->enforceOfficialContacts(
+                $this->decodeHtmlEntitiesRecursively((string) ($contactFaqMatch['response'] ?? '')),
+                $email,
+                $phone,
+                $website
+            );
+        }
 
         $response = $this->buildContactResponse($email, $phone, $website);
 
@@ -5456,10 +5628,38 @@ class WidgetController
         return $response;
     }
 
+    private function getDeterministicContactFaqMatchResponse(?array $searchResults, Organization $organization, string $message): ?array
+    {
+        $faqMatch = $this->getExactFaqMatchResponse($searchResults, $organization, $message);
+        if (!$faqMatch) {
+            return null;
+        }
+
+        $payload = is_array($faqMatch['payload'] ?? null) ? $faqMatch['payload'] : [];
+        $contactSignals = strtolower(trim(implode(' ', array_filter([
+            (string) ($payload['title'] ?? ''),
+            (string) ($payload['category'] ?? ''),
+            (string) ($payload['keywords'] ?? ''),
+            (string) ($faqMatch['response'] ?? ''),
+        ]))));
+
+        if ($contactSignals === '') {
+            return null;
+        }
+
+        if (!preg_match('/\b(contact|phone|email|reach|call|location|campus|address)\b/i', $contactSignals)) {
+            return null;
+        }
+
+        return $faqMatch;
+    }
+
     private function getExactFaqMatchResponse(?array $searchResults, Organization $organization, string $message = ''): ?array
     {
+        $fallbackMatch = $this->getKeywordFaqMatchResponse($organization, $message);
+
         if (!$searchResults || empty($searchResults['results']) || !is_array($searchResults['results'])) {
-            return $this->getKeywordFaqMatchResponse($organization, $message);
+            return $fallbackMatch;
         }
 
         $threshold = 0.62;
@@ -5504,7 +5704,6 @@ class WidgetController
         }
 
         if (!$best) {
-            $fallbackMatch = $this->getKeywordFaqMatchResponse($organization, $message);
             if ($fallbackMatch) {
                 $fallbackMatch['semantic_threshold'] = $threshold;
                 $fallbackMatch['semantic_best_score'] = $bestFaqSemanticScore;
@@ -5530,6 +5729,25 @@ class WidgetController
 
         if ($response === '') {
             return null;
+        }
+
+        $semanticCareerText = $this->normalizeKeywordMatchText(
+            trim(
+                (string) ($payload['title'] ?? '') . ' '
+                . (string) ($payload['category'] ?? '') . ' '
+                . (string) ($payload['keywords'] ?? '')
+            )
+        );
+        $semanticLooksCareerSpecific = $semanticCareerText !== ''
+            && (bool) preg_match('/\b(job|career|vacancy|opening|recruitment|hiring|employment|apply|teacher|staff|resume|cv|biodata)\b/u', $semanticCareerText);
+        $fallbackHasCareerIntent = (bool) ($fallbackMatch['match_debug']['has_career_intent'] ?? false);
+
+        if ($fallbackMatch && $fallbackHasCareerIntent && !$semanticLooksCareerSpecific) {
+            $fallbackMatch['semantic_threshold'] = $threshold;
+            $fallbackMatch['semantic_best_score'] = $best['score'];
+            $fallbackMatch['semantic_threshold_passed'] = true;
+
+            return $fallbackMatch;
         }
 
         return [
@@ -5651,6 +5869,9 @@ class WidgetController
                 $score += 0.9;
             }
 
+            $isCareerFaqCandidate = $hasCareerIntent
+                && ($this->containsAnyKeywordTerm($faqTerms, $careerTerms) || str_contains($categoryNorm, 'career'));
+
             if ($hasCareerIntent && $this->containsAnyKeywordTerm($faqTerms, $careerTerms)) {
                 $score += 1.05;
             }
@@ -5663,11 +5884,14 @@ class WidgetController
                 continue;
             }
 
-            if ($specificQueryCount >= 4 && !$matchedPhraseKeyword && count($specificOverlapTerms) < 2) {
+            $relaxCoverageForCareerFaq = $isCareerFaqCandidate
+                && ($strongKeywordHit || count($specificOverlapTerms) >= 1);
+
+            if ($specificQueryCount >= 4 && !$matchedPhraseKeyword && count($specificOverlapTerms) < 2 && !$relaxCoverageForCareerFaq) {
                 continue;
             }
 
-            if ($specificQueryCount >= 3 && !$matchedPhraseKeyword && $specificCoverage !== null && $specificCoverage < 0.34) {
+            if ($specificQueryCount >= 3 && !$matchedPhraseKeyword && $specificCoverage !== null && $specificCoverage < 0.34 && !$relaxCoverageForCareerFaq) {
                 continue;
             }
 
@@ -5727,6 +5951,11 @@ class WidgetController
             'post khali' => 'vacancy',
             'khali post' => 'vacancy',
             'job khali' => 'vacancy',
+            'jobs' => 'job',
+            'careers' => 'career',
+            'vacancies' => 'vacancy',
+            'openings' => 'opening',
+            'teachers' => 'teacher',
             'kensi' => 'which',
             'kon si' => 'which',
             'konsi' => 'which',
@@ -5897,6 +6126,19 @@ class WidgetController
     {
         $settings = $organization->settings ?? [];
         $map = [];
+
+        $this->mergeOrganizationQueryNormalizationMap(
+            $map,
+            AdminSetting::get('global_query_translation_map', []),
+            false,
+            true
+        );
+        $this->mergeOrganizationQueryNormalizationMap(
+            $map,
+            AdminSetting::get('global_query_alias_map', []),
+            true,
+            false
+        );
 
         $this->mergeOrganizationQueryNormalizationMap(
             $map,
@@ -6675,7 +6917,7 @@ class WidgetController
 
         if ($followUpTopicAnchor !== '') {
             $queryParts[] = $followUpTopicAnchor;
-        } elseif ($lastUserMessage !== '') {
+        } elseif ($lastUserMessage !== '' && !$this->shopifyMessageContainsOrderEntity($lastUserMessage) && !$this->containsUrl($lastUserMessage)) {
             $queryParts[] = $lastUserMessage;
         }
 
@@ -6769,7 +7011,8 @@ class WidgetController
             'other', 'more', 'cheaper', 'higher', 'lower', 'budget', 'range', 'price', 'pricing', 'cost', 'amount', 'available',
             'availability', 'stock', 'item', 'items', 'product', 'products', 'service', 'services', 'option', 'options', 'variant',
             'variants', 'size', 'sizes', 'color', 'colors', 'colour', 'colours', 'rs', 'inr', 'usd', 'it', 'that', 'this', 'these',
-            'those', 'me', 'show', 'tell', 'please', 'one', 'ones'
+            'those', 'me', 'show', 'tell', 'please', 'one', 'ones', 'order', 'tracking', 'track', 'carrier', 'shipment',
+            'shipping', 'shipped', 'delivered', 'delivery', 'ups', 'fedex', 'usps', 'dhl'
         ];
 
         $tokens = array_values(array_filter(explode(' ', $normalized), function ($token) use ($stopwords) {
@@ -6778,6 +7021,14 @@ class WidgetController
             }
 
             if (in_array($token, $stopwords, true)) {
+                return false;
+            }
+
+            if ((bool) preg_match('/^1z[a-z0-9]{16}$/i', $token)) {
+                return false;
+            }
+
+            if ((bool) preg_match('/^(?=.*[a-z])(?=.*\d)[a-z0-9._-]{10,}$/i', $token)) {
                 return false;
             }
 
@@ -6956,6 +7207,10 @@ class WidgetController
         $explicitTerms = $this->extractExplicitCatalogTerms($lastUserMessage);
         if (!empty($explicitTerms)) {
             return trim((string) $explicitTerms[0]);
+        }
+
+        if ($this->shopifyMessageContainsOrderEntity($lastUserMessage) || $this->containsUrl($lastUserMessage)) {
+            return '';
         }
 
         $meaningfulTerms = $this->extractMeaningfulFollowUpTerms($lastUserMessage);
@@ -8348,6 +8603,206 @@ class WidgetController
         return "I'm sorry, I couldn't find specific information about that in our knowledge base. Could you describe what you're looking for in a little more detail? That will help me give you the most accurate answer!";
     }
 
+    private function getLowConfidenceNoAnswerThreshold(): float
+    {
+        // Treat weak matches as ungrounded and force a contact fallback.
+        return 0.52;
+    }
+
+    private function buildLowConfidenceContactFallbackResponse(Organization $organization, string $message, array $routeAnalysis = []): string
+    {
+        if (empty($routeAnalysis)) {
+            $routeAnalysis = app(IntentDetectionService::class)->analyzeRoutePlan($message, $organization->id);
+        }
+
+        $topic = trim((string) ($routeAnalysis['policy_topic'] ?? 'that'));
+        if ($topic === '') {
+            $topic = 'that';
+        }
+
+        $contact = $this->buildContactResponse(
+            $organization->contact_email ?? null,
+            $organization->contact_phone ?? null,
+            $organization->website ?: config('app.url')
+        );
+
+        $scopeNote = $this->buildScopeFallbackNote($organization);
+        if ($scopeNote !== '') {
+            return "We don't have enough information about your query right now. {$scopeNote} {$contact}";
+        }
+
+        return "We don't have enough information about your query right now. {$contact}";
+    }
+
+    private function prepareMultilingualInferenceInput(Organization $organization, string $message, string $responseLanguage = 'auto'): array
+    {
+        $originalMessage = trim($message);
+        if ($originalMessage === '') {
+            return [
+                'original_query' => '',
+                'inference_query' => '',
+                'language' => 'en',
+                'used_translation' => false,
+                'prompt_instruction' => '',
+            ];
+        }
+
+        $translationModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+        $normalized = $this->aiAgentService->normalizeQueryForInference($originalMessage, $translationModel, [
+            'use_vastai' => true,
+        ]);
+
+        $inferenceQuery = trim((string) ($normalized['normalized_query'] ?? ''));
+        if ($inferenceQuery === '') {
+            $inferenceQuery = $originalMessage;
+        }
+
+        $language = trim((string) ($normalized['language'] ?? 'en')) ?: 'en';
+        $usedTranslation = (bool) ($normalized['used_translation'] ?? false);
+
+        return [
+            'original_query' => $originalMessage,
+            'inference_query' => $inferenceQuery,
+            'language' => $language,
+            'script' => trim((string) ($normalized['script'] ?? 'latin')) ?: 'latin',
+            'used_translation' => $usedTranslation,
+            'prompt_instruction' => $this->buildMultilingualPromptInstruction(
+                $responseLanguage,
+                $language,
+                trim((string) ($normalized['script'] ?? 'latin')) ?: 'latin',
+                $originalMessage,
+                $inferenceQuery,
+                $usedTranslation
+            ),
+        ];
+    }
+
+    private function buildMultilingualPromptInstruction(
+        string $responseLanguage,
+        string $originalLanguage,
+        string $originalScript,
+        string $originalMessage,
+        string $normalizedQuery,
+        bool $usedTranslation
+    ): string {
+        if (!$usedTranslation) {
+            return '';
+        }
+
+        $languageLabel = $this->describeQueryLanguage($originalLanguage);
+        $normalizedQuery = trim((string) preg_replace('/\s+/', ' ', $normalizedQuery));
+        $scriptInstruction = $this->describeReplyScriptInstruction($originalLanguage, $originalScript);
+
+        if ($responseLanguage === 'auto') {
+            return "LANGUAGE HANDLING: The user's latest message was originally in {$languageLabel}. An internal English normalization was used only for retrieval and relevance checks. You MUST answer in the same language as the user's original latest message. {$scriptInstruction} Do not switch to another Indian language just because it is more common. Do not answer in English unless the user asked in English. Do not mention the translation layer unless the user asks. Internal retrieval query: {$normalizedQuery}.";
+        }
+
+        return "LANGUAGE HANDLING: The user's latest message was originally in {$languageLabel}. An internal English normalization was used only for retrieval and relevance checks. Respond in {$responseLanguage} as configured. Do not mention the translation layer unless the user asks. Internal retrieval query: {$normalizedQuery}.";
+    }
+
+    private function describeQueryLanguage(string $language): string
+    {
+        return match (strtolower(trim($language))) {
+            'hi' => 'Hindi',
+            'or' => 'Odia/Oriya',
+            'hinglish' => 'Hinglish',
+            default => 'the user\'s original language',
+        };
+    }
+
+    private function describeReplyScriptInstruction(string $language, string $script): string
+    {
+        $language = strtolower(trim($language));
+        $script = strtolower(trim($script));
+
+        if ($script === 'latin' && in_array($language, ['hi', 'or', 'hinglish'], true)) {
+            if ($language === 'or') {
+                return 'The user wrote in Latin-script Odia/Oriya. Prefer a clean, readable reply. If you are not highly confident producing natural Latin-script Odia/Oriya, reply in clear English instead of mixing scripts or switching unpredictably to Hindi/Hinglish.';
+            }
+
+            if ($language === 'hi' || $language === 'hinglish') {
+                return 'Reply in the same Hindi/Hinglish Latin script style as the user, not in English and not in native script.';
+            }
+
+            return 'Match the user\'s script too: reply in Latin transliteration, not native script.';
+        }
+
+        if ($script === 'oriya' && $language === 'or') {
+            return 'Reply in Odia/Oriya script.';
+        }
+
+        if ($script === 'devanagari' && $language === 'hi') {
+            return 'Reply in Devanagari script.';
+        }
+
+        return 'Match the user\'s script and style naturally.';
+    }
+
+    private function buildContextRelevanceInstruction(Organization $organization): string
+    {
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+        $contact = $this->buildContactResponse(
+            $organization->contact_email ?? ($settings['contact_email'] ?? null),
+            $organization->contact_phone ?? ($settings['contact_phone'] ?? null),
+            $organization->website ?: config('app.url')
+        );
+
+        return "CONTEXT RELEVANCE CHECK: Before answering, perform an internal relevance decision on whether CURRENT CONTEXT actually answers the user's original question. Do this privately and never reveal chain-of-thought. If the context is directly relevant, use it. If the context is only partially relevant, answer only the supported part and clearly say what is not available. If the context is not relevant, reject it even if retrieval score is high. You may answer without CURRENT CONTEXT for simple conversational questions and for safe, non-sensitive general guidance or encouragement that does not depend on organization-specific facts, policies, pricing, schedules, inventory, admissions decisions, or other external records. In those no-context answers, keep the guidance general and do not pretend it comes from the knowledge base. For any factual query that is not supported by CURRENT CONTEXT, respond: 'We don't have enough information about your query right now.' Then provide the official contact details. Official contact details: {$contact}";
+    }
+
+    private function shouldAllowNoContextInstructionalResponse(string $message, ?Organization $organization = null, ?string $normalizedMessage = null): bool
+    {
+        return $this->shouldAllowGenericHelpfulAnswer($message, $organization, $normalizedMessage);
+    }
+
+    private function shouldAllowGenericHelpfulAnswer(string $message, ?Organization $organization = null, ?string $normalizedMessage = null): bool
+    {
+        $text = trim(mb_strtolower($message));
+        if ($text === '') {
+            return false;
+        }
+
+        $normalizedText = trim(mb_strtolower((string) $normalizedMessage));
+        $combinedText = trim($text . ' ' . $normalizedText);
+
+        if ($this->isContactQuery($message) || $this->isPolicySupportQuestion($message, $organization)) {
+            return false;
+        }
+
+        if ($this->isEntityFocusedCatalogQuery($message)) {
+            return false;
+        }
+
+        if (preg_match('/\b(price|pricing|cost|fee|fees|quote|quoted|amount|discount|offer price|availability|available|stock|in stock|out of stock|schedule|timing|timings|open|closing|hours|refund|return|delivery|shipping|warranty|book|booking|appointment|admission fee|tuition fee|hostel fee|eligibility|deadline|last date|result date|phone|email|address|location|website)\b/u', $combinedText)) {
+            return false;
+        }
+
+        if (preg_match('/\b(medical|doctor|diagnosis|treatment|prescription|health issue|legal|lawyer|lawsuit|contract|finance|loan|interest|investment|tax|insurance)\b/u', $combinedText)) {
+            return false;
+        }
+
+        $isPersonalDifficulty = (bool) preg_match('/\b(i got|i have|i am|i feel|i failed|i scored|very less mark|low marks|poor marks|bad marks|sad|worried|confused|stressed|anxious|nervous|demotivated|upset|scared|depressed)\b/u', $combinedText);
+        $asksForGuidance = (bool) preg_match('/\b(what should i do|what can i do|help me|guide me|advice|suggest|motivate|encourage|support|how to improve|next step|how can i improve|please help)\b/u', $combinedText);
+        $isEducationSupport = (bool) preg_match('/\b(board|exam|marks|mark|score|study|studies|school|college|class 10|10th|12th|career)\b/u', $combinedText);
+
+        return ($isPersonalDifficulty && $isEducationSupport)
+            || ($asksForGuidance && $isEducationSupport)
+            || ($isPersonalDifficulty && $asksForGuidance);
+    }
+
+    private function isVacancyCareerQuery(string $message, ?string $normalizedMessage = null): bool
+    {
+        $text = trim(mb_strtolower($message));
+        $normalizedText = trim(mb_strtolower((string) $normalizedMessage));
+        $combinedText = trim($text . ' ' . $normalizedText);
+
+        if ($combinedText === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(job|jobs|vacancy|vacancies|opening|openings|career|careers|recruitment|recruiting|hiring|employment|apply|application|resume|cv|biodata|naukri|chakri)\b/u', $combinedText);
+    }
+
     private function buildLowConfidenceClarificationResponse(string $message, ?array $searchResults): ?string
     {
         if (!$this->isEntityInfoQuery($message)) {
@@ -9381,6 +9836,10 @@ class WidgetController
             return false;
         }
 
+        if ($this->isVacancyCareerQuery($query, $query)) {
+            return false;
+        }
+
         if (str_contains($q, '"')) {
             return true;
         }
@@ -9480,6 +9939,11 @@ class WidgetController
             $organization->website ?: config('app.url')
         );
 
+        $scopeNote = $this->buildScopeFallbackNote($organization);
+        if ($scopeNote !== '') {
+            return "I don't have verified information in our knowledge base about {$topic} right now. {$scopeNote} {$contact}";
+        }
+
         return "I don't have verified information in our knowledge base about {$topic} right now. {$contact}";
     }
 
@@ -9505,6 +9969,19 @@ class WidgetController
         }
 
         return false;
+    }
+
+    private function shouldDisableModelThinking(?string $model): bool
+    {
+        return str_starts_with(strtolower(trim((string) $model)), 'deepseek-r1');
+    }
+
+    private function stripReasoningBlocks(string $response): string
+    {
+        $cleaned = preg_replace('/<think>.*?<\/think>\s*/is', '', $response) ?? $response;
+        $cleaned = preg_replace('/<\/?think>/i', '', $cleaned) ?? $cleaned;
+
+        return trim($cleaned);
     }
 
     private function extractCatalogUrlFromRow(OrganizationData $row): string
@@ -9787,7 +10264,7 @@ class WidgetController
 
     private function messageContainsSkuLikeReference(string $message): bool
     {
-        return (bool) preg_match('/\bsku\b[^\n]*\b[A-Z0-9][A-Z0-9._-]{2,}\b|\b[A-Z]+[A-Z0-9._-]*\d+[A-Z0-9._-]*\b/i', $message);
+        return (bool) preg_match('/\bsku\b\s*(?:[#:\-]\s*)?[a-z0-9._-]{1,}\b|\b[A-Z]+[A-Z0-9._-]*\d+[A-Z0-9._-]*\b/i', $message);
     }
 
     private function buildPromoUnavailableResponse(): string
@@ -10585,6 +11062,43 @@ class WidgetController
         return $this->buildEntityClarificationResponse($message);
     }
 
+    private function buildStructuredShopifyLinkResponse(string $message, $shopifyData, Organization $organization): ?string
+    {
+        if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
+            return null;
+        }
+
+        if (($shopifyData['specific_match'] ?? true) !== true) {
+            return null;
+        }
+
+        if (!$this->isShopifyProductLinkQuery($message)) {
+            return null;
+        }
+
+        $products = array_values(array_filter($shopifyData['data'] ?? [], static function ($product) {
+            return is_array($product) && isset($product['title']);
+        }));
+
+        if (empty($products)) {
+            return null;
+        }
+
+        $product = $products[0];
+        $title = trim((string) ($product['title'] ?? 'Product'));
+        $url = $this->canonicalizeShopifyProductUrl((string) ($product['url'] ?? ''), $organization);
+        if ($url === '') {
+            return null;
+        }
+
+        return implode("\n", [
+            '**Product:** ' . $title,
+            '**Product Link:** ' . $url,
+            '',
+            'Do you want price or stock details for this item as well?',
+        ]);
+    }
+
     private function buildStructuredShopifyAvailabilityResponse(string $message, $shopifyData): ?string
     {
         if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
@@ -10644,6 +11158,31 @@ class WidgetController
     private function isShopifyAvailabilityQuery(string $message): bool
     {
         return (bool) preg_match('/\b(availability|available|in\s+stock|stock|out\s+of\s+stock|have\s+in\s+stock|do\s+you\s+have|is\s+this\s+available)\b/i', $message);
+    }
+
+    private function isShopifyProductLinkQuery(string $message): bool
+    {
+        return (bool) preg_match('/\b(link|url|page|product\s+page|view\s+product|open\s+product|send\s+(?:me\s+)?(?:the\s+)?link)\b/i', $message);
+    }
+
+    private function canonicalizeShopifyProductUrl(string $url, Organization $organization): string
+    {
+        $url = trim($url);
+        if ($url === '' || !preg_match('/^https?:\/\//i', $url)) {
+            return '';
+        }
+
+        $storefrontBase = trim((string) ($organization->website ?: ($organization->website_url ?? '')));
+        if ($storefrontBase === '') {
+            return $url;
+        }
+
+        $productPath = (string) parse_url($url, PHP_URL_PATH);
+        if ($productPath === '') {
+            return $url;
+        }
+
+        return rtrim($storefrontBase, '/') . '/' . ltrim($productPath, '/');
     }
 
     private function isShopifyAddToCartIntent(string $message): bool
@@ -11035,7 +11574,18 @@ class WidgetController
             // Conservative phone pattern: starts with optional +, then digits with optional separators, min total digits >= 7
             $phonePattern = '/\+?[\d][\d\s\-\(\)]{6,}/';
 
-            if (!empty($officialPhone)) {
+            $phoneMatches = [];
+            preg_match_all($phonePattern, $out, $phoneMatches);
+            $distinctPhoneNumbers = [];
+            foreach (($phoneMatches[0] ?? []) as $phoneMatch) {
+                $digits = preg_replace('/\D+/', '', (string) $phoneMatch);
+                if (strlen($digits) >= 7) {
+                    $distinctPhoneNumbers[$digits] = true;
+                }
+            }
+            $hasStructuredMultiplePhones = count($distinctPhoneNumbers) > 1;
+
+            if (!empty($officialPhone) && !$hasStructuredMultiplePhones) {
                 $out = preg_replace_callback($phonePattern, function($m) use ($officialPhone) {
                     // Keep if it's clearly not a phone (e.g., numbers with letters), else replace
                     $candidate = trim($m[0]);
@@ -11044,15 +11594,18 @@ class WidgetController
                     return strlen($digits) >= 7 ? $officialPhone : $candidate;
                 }, $out) ?? $out;
             } else {
-                $out = preg_replace_callback($phonePattern, function($m) {
-                    $candidate = trim($m[0]);
-                    $digits = preg_replace('/\D+/', '', $candidate);
-                    return strlen($digits) >= 7 ? '' : $candidate;
-                }, $out) ?? $out;
+                if (empty($officialPhone)) {
+                    $out = preg_replace_callback($phonePattern, function($m) {
+                        $candidate = trim($m[0]);
+                        $digits = preg_replace('/\D+/', '', $candidate);
+                        return strlen($digits) >= 7 ? '' : $candidate;
+                    }, $out) ?? $out;
+                }
             }
 
             // Clean up extra spaces/commas left by removals
             $out = preg_replace('/\s{2,}/', ' ', $out) ?? $out;
+            $out = preg_replace('/(?<=\d)(or|and)(?=\s+[A-Z])/i', ' $1', $out) ?? $out;
             $out = preg_replace('/\s+([,;.])/', '$1', $out) ?? $out;
             $out = trim($out);
 
@@ -12276,6 +12829,30 @@ class WidgetController
         }
 
         return "When CURRENT CONTEXT includes a line starting with 'Details:', include one short, relevant final sentence using that data. Treat it as optional context, never invent missing values, and only include it when it helps answer the user's query.";
+    }
+
+    private function buildScopeInstruction(Organization $organization): string
+    {
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+        $customInstruction = trim((string) ($settings['scope_instruction'] ?? ''));
+
+        if ($customInstruction === '') {
+            return '';
+        }
+
+        return 'BUSINESS SCOPE: ' . $customInstruction . ' Apply this whenever the user asks for something outside the organization\'s real business scope or for services not explicitly supported in CURRENT CONTEXT. If the request is out of scope, say so briefly, do not improvise alternatives, and provide the official contact details.';
+    }
+
+    private function buildScopeFallbackNote(Organization $organization): string
+    {
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+        $note = trim((string) ($settings['scope_instruction'] ?? ''));
+
+        if ($note === '') {
+            return '';
+        }
+
+        return rtrim($note, " \t\n\r\0\x0B.") . '.';
     }
 
     private function buildVacancyInstruction(Organization $organization): string

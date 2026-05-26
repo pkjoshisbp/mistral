@@ -71,6 +71,7 @@ class IntegrationSettingsManager extends Component
     public $handoff_offline_message = '';
     public $escalation_notify_enabled = false;
     public $escalation_notify_emails = '';
+    public $escalation_email_confidence_threshold = 0.4;
 
     protected $rules = [
         'name' => 'required|min:3',
@@ -110,6 +111,7 @@ class IntegrationSettingsManager extends Component
         'handoff_offline_message' => 'nullable|string|max:500',
         'escalation_notify_enabled' => 'boolean',
         'escalation_notify_emails' => 'nullable|string|max:1000',
+        'escalation_email_confidence_threshold' => 'required|numeric|min:0|max:1',
     ];
 
     public function mount()
@@ -174,6 +176,7 @@ class IntegrationSettingsManager extends Component
         $this->handoff_offline_message = $settings['handoff_offline_message'] ?? '';
         $this->escalation_notify_enabled = (bool) ($settings['escalation_notify_enabled'] ?? false);
         $this->escalation_notify_emails = $this->keywordsToString($settings['escalation_notify_emails'] ?? []);
+        $this->escalation_email_confidence_threshold = (float) ($settings['escalation_email_confidence_threshold'] ?? 0.4);
         $this->business_hours = $settings['business_hours'] ?? '';
         $this->holiday_dates = $this->keywordsToString($settings['holiday_dates'] ?? []);
         $this->seasonal_promotions = $settings['seasonal_promotions'] ?? '';
@@ -243,6 +246,7 @@ class IntegrationSettingsManager extends Component
             $settings['handoff_offline_message'] = trim((string) $this->handoff_offline_message) ?: null;
             $settings['escalation_notify_enabled'] = (bool) $this->escalation_notify_enabled;
             $settings['escalation_notify_emails'] = $this->stringToKeywords($this->escalation_notify_emails ?? '');
+            $settings['escalation_email_confidence_threshold'] = (float) ($this->escalation_email_confidence_threshold ?? 0.4);
             $settings['business_hours'] = trim((string) $this->business_hours) ?: null;
             $settings['holiday_dates'] = $this->stringToKeywords($this->holiday_dates ?? '');
             $settings['seasonal_promotions'] = trim((string) $this->seasonal_promotions) ?: null;

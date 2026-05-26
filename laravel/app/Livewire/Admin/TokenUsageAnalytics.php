@@ -58,10 +58,12 @@ class TokenUsageAnalytics extends Component
         $query = $this->getBaseQuery();
         
         return [
-            'total_tokens' => $query->sum('tokens_used'),
-            'total_requests' => $query->count(),
-            'unique_users' => $query->distinct('user_id')->count(),
-            'unique_organizations' => $query->distinct('organization_id')->count(),
+            'total_tokens' => (clone $query)->sum('tokens_used'),
+            'total_requests' => (clone $query)->count(),
+            'unique_users' => (clone $query)->distinct('user_id')->count(),
+            'unique_organizations' => (clone $query)->distinct('organization_id')->count(),
+            'estimated_tokens' => (clone $query)->where('usage_is_estimated', true)->sum('tokens_used'),
+            'reasoning_tokens' => (clone $query)->sum('reasoning_tokens'),
         ];
     }
 

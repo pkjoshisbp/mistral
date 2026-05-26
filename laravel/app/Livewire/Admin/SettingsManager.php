@@ -4,6 +4,7 @@ namespace App\Livewire\Admin;
 
 use Livewire\Component;
 use App\Models\AdminSetting;
+use App\Support\VastAiConfig;
 use Illuminate\Support\Facades\Auth;
 
 class SettingsManager extends Component
@@ -47,6 +48,11 @@ class SettingsManager extends Component
     public $llamacpp_threads = 4;
     public $llamacpp_context_length = 4096;
     public $ai_use_intent_rewrite = true;
+    public $global_query_translation_map = '';
+    public $global_query_alias_map = '';
+    public $vastai_ssh_host = '';
+    public $vastai_ssh_port = 51734;
+    public $vastai_ssh_user = 'root';
 
     // WhatsApp Cloud Settings
     public $whatsapp_api_version = 'v20.0';
@@ -64,6 +70,7 @@ class SettingsManager extends Component
     public function getAvailableLlamaModels()
     {
         return [
+            'deepseek-r1:8b'           => 'DeepSeek R1 Distill Llama 8B (Vast.ai, trial)',
             'llama3.1:8b'              => 'Llama 3.1 8B (Vast.ai, recommended)',
             'mistral-nemo:latest'       => 'Mistral Nemo (Vast.ai)',
             'llama3.2:1b'              => 'Llama 3.2:1B (Fast, lightweight)',
@@ -140,6 +147,7 @@ class SettingsManager extends Component
     private function resolveOllamaUrlForModel(string $model): string
     {
         $vastModels = [
+            'deepseek-r1:8b',
             'llama3.1:8b',
             'mistral-nemo',
             'mistral-nemo:latest',
@@ -192,6 +200,11 @@ class SettingsManager extends Component
         $this->llamacpp_threads = AdminSetting::get('llamacpp_threads', 4);
         $this->llamacpp_context_length = AdminSetting::get('llamacpp_context_length', 4096);
         $this->ai_use_intent_rewrite = (bool) AdminSetting::get('ai_use_intent_rewrite', true);
+        $this->global_query_translation_map = (string) AdminSetting::get('global_query_translation_map', '');
+        $this->global_query_alias_map = (string) AdminSetting::get('global_query_alias_map', '');
+        $this->vastai_ssh_host = (string) AdminSetting::get('vastai_ssh_host', env('VAST_HOST', '123.21.80.170'));
+        $this->vastai_ssh_port = (int) AdminSetting::get('vastai_ssh_port', env('VAST_PORT', 51734));
+        $this->vastai_ssh_user = (string) AdminSetting::get('vastai_ssh_user', env('VAST_USER', 'root'));
 
         // WhatsApp Settings
         $this->whatsapp_api_version = AdminSetting::get('whatsapp_api_version', 'v20.0');
@@ -357,6 +370,11 @@ class SettingsManager extends Component
             'llamacpp_threads' => 'nullable|integer|min:1|max:32',
             'llamacpp_context_length' => 'nullable|integer|min:512|max:8192',
             'ai_use_intent_rewrite' => 'boolean',
+            'global_query_translation_map' => 'nullable|string|max:12000',
+            'global_query_alias_map' => 'nullable|string|max:12000',
+            'vastai_ssh_host' => 'required|string|max:255',
+            'vastai_ssh_port' => 'required|integer|min:1|max:65535',
+            'vastai_ssh_user' => 'required|string|max:64',
         ]);
 
         // Save to admin settings
@@ -370,6 +388,13 @@ class SettingsManager extends Component
         AdminSetting::set('llamacpp_threads', $this->llamacpp_threads, 'number', 'ai', 'llama.cpp Threads');
         AdminSetting::set('llamacpp_context_length', $this->llamacpp_context_length, 'number', 'ai', 'llama.cpp Context Length');
         AdminSetting::set('ai_use_intent_rewrite', $this->ai_use_intent_rewrite ? '1' : '0', 'boolean', 'ai', 'Use intent + query rewrite');
+        AdminSetting::set('global_query_translation_map', trim((string) $this->global_query_translation_map), 'textarea', 'ai', 'Global Query Translation Map');
+        AdminSetting::set('global_query_alias_map', trim((string) $this->global_query_alias_map), 'textarea', 'ai', 'Global Query Alias Map');
+        AdminSetting::set('vastai_ssh_host', trim((string) $this->vastai_ssh_host), 'text', 'ai', 'Vast.ai SSH Host');
+        AdminSetting::set('vastai_ssh_port', (string) $this->vastai_ssh_port, 'number', 'ai', 'Vast.ai SSH Port');
+        AdminSetting::set('vastai_ssh_user', trim((string) $this->vastai_ssh_user), 'text', 'ai', 'Vast.ai SSH User');
+
+        VastAiConfig::writeShellEnvFile();
 
         // Update environment file
         $envUpdates = [
@@ -387,7 +412,12 @@ class SettingsManager extends Component
             'provider' => $this->ai_model_provider,
             'backend_type' => $this->ai_backend_type,
             'llama_model' => $this->llama_default_model,
-            'openai_model' => $this->openai_default_model
+            'openai_model' => $this->openai_default_model,
+            'has_global_translation_map' => trim((string) $this->global_query_translation_map) !== '',
+            'has_global_alias_map' => trim((string) $this->global_query_alias_map) !== '',
+            'vastai_host' => $this->vastai_ssh_host,
+            'vastai_port' => (int) $this->vastai_ssh_port,
+            'vastai_user' => $this->vastai_ssh_user,
         ]);
         
         session()->flash('success', 'AI settings saved successfully!');

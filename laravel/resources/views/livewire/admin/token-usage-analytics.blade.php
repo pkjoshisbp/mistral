@@ -68,6 +68,11 @@
                 </div>
             </div>
 
+            <div class="alert alert-info">
+                <strong>Token accounting:</strong>
+                {{ number_format($stats['estimated_tokens'] ?? 0) }} tokens are estimated and {{ number_format($stats['reasoning_tokens'] ?? 0) }} hidden reasoning tokens have been captured or estimated.
+            </div>
+
             <!-- Filters -->
             <div class="card">
                 <div class="card-header">
@@ -234,6 +239,7 @@
                                     <th>Organization</th>
                                     <th>Endpoint</th>
                                     <th>Tokens</th>
+                                    <th>Breakdown</th>
                                     <th>Summary</th>
                                 </tr>
                             </thead>
@@ -247,14 +253,26 @@
                                         </td>
                                         <td>{{ $log->organization->name ?? 'Unknown' }}</td>
                                         <td><span class="badge badge-secondary">{{ $log->endpoint_type }}</span></td>
-                                        <td><strong>{{ number_format($log->tokens_used) }}</strong></td>
+                                        <td>
+                                            <strong>{{ number_format($log->tokens_used) }}</strong>
+                                            <br><small class="text-muted">{{ $log->usage_is_estimated ? 'Estimated' : 'Exact total' }}</small>
+                                        </td>
+                                        <td>
+                                            <small>
+                                                In: {{ number_format($log->input_tokens ?? 0) }} | Out: {{ number_format($log->output_tokens ?? 0) }}
+                                                <br>
+                                                Visible: {{ number_format($log->visible_output_tokens ?? $log->output_tokens ?? 0) }} | Reasoning: {{ number_format($log->reasoning_tokens ?? 0) }}
+                                                <br>
+                                                <span class="text-muted">{{ $log->token_estimation_method ?? 'legacy' }}</span>
+                                            </small>
+                                        </td>
                                         <td>
                                             <small>{{ Str::limit($log->request_summary, 50) }}</small>
                                         </td>
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="6" class="text-center text-muted">
+                                        <td colspan="7" class="text-center text-muted">
                                             <div class="py-4">
                                                 <i class="fas fa-info-circle fa-2x mb-2"></i>
                                                 <p>No token usage logs found for the selected criteria.</p>

@@ -134,8 +134,8 @@
           </li>
 
           <li class="nav-header">DATA MANAGEMENT</li>
-          <li class="nav-item has-treeview {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'menu-open' : '' }}">
-            <a href="#" class="nav-link {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') ? 'active' : '' }}">
+          <li class="nav-item has-treeview {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') || request()->routeIs('admin.website-crawler') ? 'menu-open' : '' }}">
+            <a href="#" class="nav-link {{ request()->routeIs('admin.data-entry') || request()->routeIs('admin.data-entry-manager') || request()->routeIs('admin.data-entry-advanced') || request()->routeIs('admin.services') || request()->routeIs('admin.faqs') || request()->routeIs('admin.general-info') || request()->routeIs('admin.documents') || request()->routeIs('admin.website-crawler') ? 'active' : '' }}">
               <i class="nav-icon fas fa-magic"></i>
               <p>Content Hub <i class="right fas fa-angle-left"></i></p>
             </a>
@@ -147,6 +147,7 @@
               <li class="nav-item"><a href="{{ route('admin.faqs') }}" class="nav-link {{ request()->routeIs('admin.faqs') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>FAQs</p></a></li>
               <li class="nav-item"><a href="{{ route('admin.general-info') }}" class="nav-link {{ request()->routeIs('admin.general-info') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>General Info</p></a></li>
               <li class="nav-item"><a href="{{ route('admin.documents') }}" class="nav-link {{ request()->routeIs('admin.documents') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Documents</p></a></li>
+              <li class="nav-item"><a href="{{ route('admin.website-crawler') }}" class="nav-link {{ request()->routeIs('admin.website-crawler') ? 'active' : '' }}"><i class="far fa-circle nav-icon"></i><p>Website Crawler</p></a></li>
             </ul>
           </li>
           

@@ -2,11 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Support\VastAiConfig;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Symfony\Component\Process\Process;
 
 class CheckVastAiConnectivity extends Command
 {
@@ -16,6 +18,7 @@ class CheckVastAiConnectivity extends Command
 
     public function handle(): int
     {
+        $vastConfig = VastAiConfig::current();
         $ollamaUrl = rtrim((string) env('VASTAI_OLLAMA_HEALTH_URL', 'http://127.0.0.1:11435/api/tags'), '/');
         $whisperHost = (string) env('VASTAI_WHISPER_HOST', '127.0.0.1');
         $whisperPort = (int) env('VASTAI_WHISPER_PORT', 18081);
@@ -24,6 +27,16 @@ class CheckVastAiConnectivity extends Command
 
         $ollamaOk = $this->checkHttp($ollamaUrl);
         $whisperOk = $this->checkTcp($whisperHost, $whisperPort);
+
+        $restartAttempted = false;
+        if (!($ollamaOk && $whisperOk)) {
+            $restartAttempted = $this->restartTunnel($vastConfig);
+            if ($restartAttempted) {
+                $ollamaOk = $this->checkHttp($ollamaUrl);
+                $whisperOk = $this->checkTcp($whisperHost, $whisperPort);
+            }
+        }
+
         $isHealthy = $ollamaOk && $whisperOk;
 
         $failureKey = 'vastai_connectivity_failures';
@@ -44,6 +57,9 @@ class CheckVastAiConnectivity extends Command
                 'ollama_url' => $ollamaUrl,
                 'whisper_host' => $whisperHost,
                 'whisper_port' => $whisperPort,
+                'configured_vast_host' => $vastConfig['host'],
+                'configured_vast_port' => $vastConfig['port'],
+                'restart_attempted' => $restartAttempted,
             ]);
             $this->info('Vast.ai connectivity OK');
             return self::SUCCESS;
@@ -67,6 +83,10 @@ class CheckVastAiConnectivity extends Command
             'ollama_url' => $ollamaUrl,
             'whisper_host' => $whisperHost,
             'whisper_port' => $whisperPort,
+            'configured_vast_host' => $vastConfig['host'],
+            'configured_vast_port' => $vastConfig['port'],
+            'configured_vast_user' => $vastConfig['user'],
+            'restart_attempted' => $restartAttempted,
         ]);
 
         if ($failures >= $failureThreshold && !Cache::has($alertKey)) {
@@ -76,6 +96,7 @@ class CheckVastAiConnectivity extends Command
                 'Please contact support.',
                 '',
                 'Checks failed consecutively: ' . $failures,
+                'Configured Vast.ai host: ' . $vastConfig['user'] . '@' . $vastConfig['host'] . ':' . $vastConfig['port'],
                 'Ollama tunnel URL: ' . $ollamaUrl,
                 'Whisper tunnel: ' . $whisperHost . ':' . $whisperPort,
                 'Timestamp: ' . now()->toDateTimeString(),
@@ -103,6 +124,46 @@ class CheckVastAiConnectivity extends Command
 
         $this->error('Vast.ai connectivity FAILED');
         return self::FAILURE;
+    }
+
+    private function restartTunnel(array $vastConfig): bool
+    {
+        $scriptPath = dirname(base_path()) . '/scripts/start-ollama-tunnel.sh';
+        if (!is_file($scriptPath)) {
+            return false;
+        }
+
+        try {
+            VastAiConfig::writeShellEnvFile();
+
+            $process = new Process(['bash', $scriptPath], dirname(base_path()), [
+                'VAST_HOST' => (string) $vastConfig['host'],
+                'VAST_PORT' => (string) $vastConfig['port'],
+                'VAST_USER' => (string) $vastConfig['user'],
+            ]);
+            $process->setTimeout(30);
+            $process->run();
+
+            Log::info('Attempted Vast.ai tunnel restart from connectivity check', [
+                'configured_vast_host' => $vastConfig['host'],
+                'configured_vast_port' => $vastConfig['port'],
+                'configured_vast_user' => $vastConfig['user'],
+                'successful' => $process->isSuccessful(),
+                'output' => trim($process->getOutput()),
+                'error_output' => trim($process->getErrorOutput()),
+            ]);
+
+            return $process->isSuccessful();
+        } catch (\Throwable $exception) {
+            Log::warning('Failed to restart Vast.ai tunnel from connectivity check', [
+                'configured_vast_host' => $vastConfig['host'],
+                'configured_vast_port' => $vastConfig['port'],
+                'configured_vast_user' => $vastConfig['user'],
+                'error' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     private function checkHttp(string $url): bool

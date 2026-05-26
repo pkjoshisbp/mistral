@@ -58,7 +58,7 @@ by a persistent SSH autossh tunnel.
 
 | Item | Value |
 |------|-------|
-| vast.ai SSH host | `123.21.129.10` |
+| vast.ai SSH host | `123.21.80.170` |
 | vast.ai SSH port | `51734` |
 | SSH user | `root` |
 | Tunnel script | `scripts/start-ollama-tunnel.sh` |
@@ -91,7 +91,7 @@ Models are stored in **`/workspace/ollama/models/`** which is on the persistent 
 `/root/.ollama/models/` is empty — all models live on `/workspace`.
 This means models survive instance restarts automatically. Always pull new models with:
 ```bash
-ssh -p 51734 root@123.21.129.10 "ollama pull <model>"
+ssh -p 51734 root@123.21.80.170 "ollama pull <model>"
 # Ollama process is already running from /workspace so it uses /workspace/ollama/models by default
 ```
 

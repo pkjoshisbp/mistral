@@ -29,10 +29,11 @@ class IntentDetectionService
             'price', 'pricing', 'cost', 'how much', 'quote', 'rate', 'charges', 'fee', 'fees'
         ],
         'fulfillment_questions' => [
-            'ship', 'shipping', 'deliver', 'delivery', 'dispatch', 'courier', 'eta', 'arrive'
+            'ship', 'shipping', 'deliver', 'delivery', 'send', 'sent', 'dispatch', 'courier', 'eta', 'arrive'
         ],
         'policy_questions' => [
-            'return', 'refund', 'exchange', 'replacement', 'cancel', 'cancellation', 'warranty'
+            'return', 'refund', 'exchange', 'replacement', 'cancel', 'cancellation', 'warranty',
+            'help', 'support', 'assistance'
         ],
         'schedule_questions' => [
             'hours', 'timing', 'timings', 'open', 'close', 'closing', 'working hours', 'business hours'
@@ -40,7 +41,7 @@ class IntentDetectionService
     ];
 
     private const ROUTE_FILLER_PATTERNS = [
-        '/\b(can\s+you|could\s+you|would\s+you|do\s+you|did\s+you|are\s+you|is\s+it|i\s+want\s+to|please|kindly)\b/i',
+        '/\b(can\s+you|could\s+you|would\s+you|do\s+you|did\s+you|are\s+you|is\s+it|i\s+want\s+to|want\s+to|wanted\s+to|need\s+to|please|kindly)\b/i',
         '/\b(ship|shipping|deliver|delivery|dispatch|courier|eta|arrive|available|availability|in\s+stock|out\s+of\s+stock|stock|inventory|price|pricing|cost|quote|rate|charges|fee|fees)\b/i',
         '/\b(return|refund|exchange|replacement|cancel|cancellation|warranty|policy|policies)\b/i',
         '/\b(what|which|where|when|who|how|much|many|about|for|the|a|an|this|that|these|those|item|product|service)\b/i',
@@ -49,7 +50,8 @@ class IntentDetectionService
     private const PRODUCT_CANDIDATE_REJECT_TERMS = [
         'outside', 'internationally', 'international', 'abroad', 'worldwide', 'usa', 'us', 'uk', 'india',
         'shipping', 'delivery', 'return', 'refund', 'policy', 'policies', 'hours', 'timing', 'timings',
-        'open', 'close', 'closed', 'store', 'shop', 'customer service', 'support'
+        'open', 'close', 'closed', 'store', 'shop', 'customer service', 'support', 'help', 'assistance',
+        'request', 'requests', 'status', 'tracking', 'track', 'follow up'
     ];
 
     private const PRODUCT_CANDIDATE_REJECT_TOKENS = [
@@ -221,7 +223,7 @@ class IntentDetectionService
             ];
         }
 
-        $normalized = mb_strtolower($query);
+        $normalized = mb_strtolower($this->normalizeQueryForSignalDetection($query, $organizationId));
         $signalMatches = [];
         $orgSignals = $this->getOrgRouteSignalKeywords($organizationId);
 
@@ -241,9 +243,18 @@ class IntentDetectionService
             }
         }
 
-        $productCandidate = $this->extractProductCandidate($query, array_keys($signalMatches));
+        $signals = array_keys($signalMatches);
+        $productCandidate = $this->extractProductCandidate($query, $signals);
         $destination = $this->extractDestinationSlot($query);
         $deliveryDeadline = $this->extractDeliveryDeadlineSlot($query);
+
+        if ($this->shouldTreatFulfillmentAsPolicyOnly($query, $productCandidate, $signals, $destination)) {
+            $productCandidate = '';
+        }
+
+        if ($this->shouldRejectSupportStatusCandidate($query, $productCandidate, $signals)) {
+            $productCandidate = '';
+        }
 
         if ($productCandidate !== '' && !isset($signalMatches['availability_checks']) && !isset($signalMatches['pricing_requests'])) {
             $signalMatches['product_lookup'] = [$productCandidate];
@@ -276,6 +287,7 @@ class IntentDetectionService
      */
     private function detectIntentByRules(string $query, int $organizationId = 0): array
     {
+        $query = $this->normalizeQueryForSignalDetection($query, $organizationId);
         $scores = [];
         $orgKeywords = $this->getOrgIntentKeywords($organizationId);
         
@@ -361,6 +373,125 @@ class IntentDetectionService
         }
 
         return $this->normalizeRouteSignalKeywords($keywords);
+    }
+
+    private function normalizeQueryForSignalDetection(string $query, int $organizationId): string
+    {
+        $normalized = trim(mb_strtolower($query));
+        if ($normalized === '') {
+            return '';
+        }
+
+        $map = $this->getQueryNormalizationMap($organizationId);
+        if (empty($map)) {
+            return $normalized;
+        }
+
+        uksort($map, static function ($left, $right) {
+            return mb_strlen((string) $right) <=> mb_strlen((string) $left);
+        });
+
+        foreach ($map as $from => $to) {
+            $from = trim((string) $from);
+            $to = trim((string) $to);
+
+            if ($from === '' || $to === '') {
+                continue;
+            }
+
+            $pattern = '/(?<![\p{L}\p{N}])' . preg_quote($from, '/') . '(?![\p{L}\p{N}])/iu';
+            $normalized = preg_replace($pattern, $to, $normalized) ?? $normalized;
+        }
+
+        return trim((string) preg_replace('/\s+/', ' ', $normalized));
+    }
+
+    private function getQueryNormalizationMap(int $organizationId): array
+    {
+        $map = [];
+
+        $this->mergeQueryNormalizationMap($map, AdminSetting::get('global_query_translation_map', []), false, true);
+        $this->mergeQueryNormalizationMap($map, AdminSetting::get('global_query_alias_map', []), true, false);
+
+        if ($organizationId > 0) {
+            $org = Organization::find($organizationId);
+            if ($org) {
+                $settings = is_array($org->settings ?? null) ? $org->settings : [];
+                $this->mergeQueryNormalizationMap($map, $settings['query_translation_map'] ?? [], false, true);
+                $this->mergeQueryNormalizationMap($map, $settings['query_alias_map'] ?? [], true, false);
+            }
+        }
+
+        return $map;
+    }
+
+    private function mergeQueryNormalizationMap(array &$map, $configured, bool $forceAliasMode, bool $allowLegacyAliasGroups): void
+    {
+        foreach ($this->queryNormalizationRows($configured) as $row) {
+            $line = trim((string) $row);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            $parts = preg_split('/=>|=|\|/', $line, 2) ?: [];
+            if (count($parts) < 2) {
+                continue;
+            }
+
+            $from = $this->normalizeQueryNormalizationValue((string) ($parts[0] ?? ''));
+            $to = $this->normalizeQueryNormalizationValue((string) ($parts[1] ?? ''));
+            if ($from === '' || $to === '') {
+                continue;
+            }
+
+            $aliases = array_values(array_unique(array_filter(array_map(function ($value) {
+                return $this->normalizeQueryNormalizationValue((string) $value);
+            }, preg_split('/,/', $to) ?: []))));
+
+            $shouldTreatAsAliasGroup = $forceAliasMode || ($allowLegacyAliasGroups && count($aliases) > 1);
+            if ($shouldTreatAsAliasGroup) {
+                $map[$from] = $from;
+                foreach ($aliases as $alias) {
+                    if ($alias !== '') {
+                        $map[$alias] = $from;
+                    }
+                }
+                continue;
+            }
+
+            $map[$from] = $aliases[0] ?? $to;
+        }
+    }
+
+    private function queryNormalizationRows($configured): array
+    {
+        if (is_string($configured)) {
+            return preg_split('/\r\n|\r|\n/', $configured) ?: [];
+        }
+
+        if (!is_array($configured)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($configured as $from => $to) {
+            if (is_int($from) && is_string($to)) {
+                $rows[] = $to;
+                continue;
+            }
+
+            $rows[] = (string) $from . ' = ' . (string) $to;
+        }
+
+        return $rows;
+    }
+
+    private function normalizeQueryNormalizationValue(string $value): string
+    {
+        $value = trim(mb_strtolower($value));
+        $value = preg_replace('/\s+/', ' ', $value) ?? $value;
+
+        return trim($value);
     }
 
     private function determinePrimaryRoute(array $signals): string
@@ -455,6 +586,74 @@ class IntentDetectionService
         }
 
         return trim($candidate);
+    }
+
+    private function shouldTreatFulfillmentAsPolicyOnly(string $query, string $productCandidate, array $signals, string $destination): bool
+    {
+        if ($productCandidate === '' || !in_array('fulfillment_questions', $signals, true)) {
+            return false;
+        }
+
+        if (!preg_match('/\b(?:ship|shipping|deliver|delivery|send|sent|dispatch|courier)\b/i', $query)) {
+            return false;
+        }
+
+        if (!preg_match('/\bfrom\s+[\p{L}][\p{L}\s.-]{1,40}\s+to\s+[\p{L}][\p{L}\s.-]{1,40}\b/iu', $query) && $destination === '') {
+            return false;
+        }
+
+        if (preg_match('/["“][^"”]+["”]/u', $query)) {
+            return false;
+        }
+
+        $normalizedQuery = mb_strtolower($query);
+        $normalizedCandidate = mb_strtolower($productCandidate);
+        $looksLikeRequestDescriptor = (bool) preg_match('/^(?:a|an|any|some|my|our|one|two|three|\d+|old|new|used|custom)\b/i', $productCandidate);
+        $hasRequestPhrasing = Str::contains($normalizedQuery, [
+            'want to send',
+            'wanted to send',
+            'need to send',
+            'can i send',
+            'send my',
+            'ship my',
+            'deliver my',
+        ]);
+
+        if (!$looksLikeRequestDescriptor && !$hasRequestPhrasing) {
+            return false;
+        }
+
+        return preg_match('/\bfrom\s+[\p{L}]/iu', $normalizedCandidate) === 1 || str_word_count($productCandidate) >= 3;
+    }
+
+    private function shouldRejectSupportStatusCandidate(string $query, string $productCandidate, array $signals): bool
+    {
+        if ($productCandidate === '') {
+            return false;
+        }
+
+        $normalizedCandidate = mb_strtolower(trim($productCandidate));
+        $normalizedQuery = mb_strtolower(trim($query));
+
+        if ($normalizedCandidate === '') {
+            return false;
+        }
+
+        $supportLikeSignals = array_intersect($signals, ['policy_questions', 'fulfillment_questions']);
+        if (empty($supportLikeSignals)) {
+            return false;
+        }
+
+        if (preg_match('/\b(help|support|assistance|request|status|tracking|track|follow\s+up|checking\s+up)\b/u', $normalizedCandidate)) {
+            return true;
+        }
+
+        if (preg_match('/\b(return|refund|exchange|replacement|cancel|warranty|help|support|assistance)\b/u', $normalizedQuery)
+            && preg_match('/\b(request|status|help|support|assistance)\b/u', $normalizedCandidate)) {
+            return true;
+        }
+
+        return false;
     }
 
     private function extractDestinationSlot(string $query): string

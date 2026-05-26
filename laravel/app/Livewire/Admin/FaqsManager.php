@@ -131,6 +131,18 @@ class FaqsManager extends Component
         $this->dispatch('activate-admin-toolbar');
     }
 
+    public function handleAddClick()
+    {
+        $this->editingId = null;
+        $this->question = $this->answer = $this->follow_up = $this->category = $this->keywords = '';
+        $this->is_active = true;
+        $this->sort_order = 0;
+        $this->is_starter_prompt = false;
+        $this->starter_sort_order = 0;
+        $this->showForm = true;
+        $this->dispatch('activate-admin-toolbar');
+    }
+
     public function previewFunnelBranch()
     {
         $this->branchPreviewResult = null;

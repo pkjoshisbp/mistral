@@ -3,7 +3,7 @@
     <section class="content"><div class="container-fluid">
         @if(session()->has('message'))<div class="alert alert-success">{{ session('message') }}</div>@endif
         @if(session()->has('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
-    <div class="card"><div class="card-header d-flex justify-content-between"><div><strong>Manage FAQs</strong><div class="mt-1"><select wire:model.live="selectedOrganization" class="form-control" style="width:200px"><option value="">Select Organization</option>@foreach($this->organizations as $org)<option value="{{ $org->id }}">{{ $org->name }}</option>@endforeach</select></div></div><div class="d-flex gap-2"><button class="btn btn-outline-secondary mr-2" wire:click="importJson" @disabled(!$selectedOrganization)><i class="fas fa-file-upload"></i> Import JSON</button><button class="btn btn-primary" wire:click="$toggle('showForm')"><i class="fas fa-plus"></i> {{ $editingId ? 'Edit' : 'Add' }} FAQ</button></div></div>
+    <div class="card"><div class="card-header d-flex justify-content-between"><div><strong>Manage FAQs</strong><div class="mt-1"><select wire:model.live="selectedOrganization" class="form-control" style="width:200px"><option value="">Select Organization</option>@foreach($this->organizations as $org)<option value="{{ $org->id }}">{{ $org->name }}</option>@endforeach</select></div></div><div class="d-flex gap-2"><button class="btn btn-outline-secondary mr-2" wire:click="importJson" @disabled(!$selectedOrganization)><i class="fas fa-file-upload"></i> Import JSON</button><button class="btn btn-primary" wire:click="handleAddClick"><i class="fas fa-plus"></i> {{ $editingId ? 'Edit' : 'Add' }} FAQ</button></div></div>
         <div class="card-body">
             <div class="mb-3 p-3 border rounded bg-white">
                 <h6 class="mb-2"><i class="fas fa-upload"></i> Upload FAQs JSON</h6>
@@ -78,7 +78,7 @@
             
             @if($showForm)
             <div class="border rounded p-3 mb-4 bg-light">
-                <form wire:submit.prevent="{{ $editingId ? 'update' : 'create' }}">
+                <form wire:submit.prevent="{{ $editingId ? 'update' : 'create' }}" onsubmit="window.syncAdminFaqAnswer && window.syncAdminFaqAnswer()">
                     <div class="row">
                         <div class="col-md-6 mb-2"><label>Question *</label><input type="text" wire:model="question" class="form-control">@error('question')<small class="text-danger">{{ $message }}</small>@enderror</div>
                         <div class="col-md-3 mb-2"><label>Category</label><input type="text" wire:model="category" class="form-control"></div>
@@ -135,7 +135,7 @@
                                 <textarea id="admin-faq-answer-source" class="form-control font-monospace mt-1" rows="8" style="display:none;" placeholder="HTML source…"></textarea>
                             </div>
                             {{-- Hidden sync textarea — outside wire:ignore so Livewire can update it --}}
-                            <textarea id="admin-faq-answer-livewire" wire:model.live="answer" style="display:none;"></textarea>
+                            <textarea id="admin-faq-answer-livewire" wire:model.defer="answer" style="display:none;"></textarea>
                             <small class="text-muted d-block mt-1">Tip: paste images directly into the text area (max 1200px). Allowed tags: p, br, strong, b, em, i, ul, ol, li, a, img, code, pre, blockquote, h1–h6.</small>
                             @error('answer')<small class="text-danger">{{ $message }}</small>@enderror
                         </div>
@@ -212,9 +212,14 @@ window.initAdminHtmlToolbar = function() {
     try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch(e) {}
 
     function syncToLivewire() {
-        hidden.value = editor.innerHTML.replace(/<br\s*\/?>/i, '').trim();
+        const rawValue = source && source.style.display !== 'none'
+            ? source.value
+            : editor.innerHTML;
+        hidden.value = rawValue.replace(/<br\s*\/?>/i, '').trim();
         hidden.dispatchEvent(new Event('input', { bubbles: true }));
     }
+
+    window.syncAdminFaqAnswer = syncToLivewire;
 
     editor.innerHTML = hidden.value || '';
 

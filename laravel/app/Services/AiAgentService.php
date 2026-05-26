@@ -1928,6 +1928,57 @@ Rules:
         }
     }
 
+    public function normalizeQueryForInference(string $query, ?string $model = null, array $options = []): array
+    {
+        $query = trim($query);
+        if ($query === '') {
+            return [
+                'original_query' => '',
+                'normalized_query' => '',
+                'language' => 'en',
+                'confidence' => 1.0,
+                'used_translation' => false,
+            ];
+        }
+
+        try {
+            $payload = [
+                'query' => $query,
+                'model' => $model ?: $this->getLlamaModel(),
+                'use_vastai' => (bool) ($options['use_vastai'] ?? true),
+            ];
+
+            if (array_key_exists('force_translate', $options)) {
+                $payload['force_translate'] = (bool) $options['force_translate'];
+            }
+
+            $response = Http::timeout(45)->post("{$this->baseUrl}/language/normalize-query", $payload);
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::warning('Query normalization request failed', [
+                'status' => $response->status(),
+                'query' => $query,
+                'model' => $payload['model'],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Query normalization exception', [
+                'query' => $query,
+                'model' => $model,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return [
+            'original_query' => $query,
+            'normalized_query' => $query,
+            'language' => 'en',
+            'confidence' => 0.0,
+            'used_translation' => false,
+        ];
+    }
+
     /**
      * LLM chat with conversation context
      */
@@ -2015,40 +2066,19 @@ Rules:
                 
                 // Log token usage if organization is provided
                 if ($organizationId) {
-                    $tokensUsed = 0;
-                    $inputTokens = 0;
-                    $outputTokens = 0;
-
-                    // Try to get tokens from response first
-                    if (isset($result['usage']['total_tokens'])) {
-                        $tokensUsed    = (int) $result['usage']['total_tokens'];
-                        $inputTokens   = (int) ($result['usage']['prompt_tokens'] ?? 0);
-                        $outputTokens  = (int) ($result['usage']['completion_tokens'] ?? 0);
-                        // Fallback if breakdown missing but total present
-                        if ($inputTokens === 0 && $outputTokens === 0 && $tokensUsed > 0) {
-                            $inputText    = json_encode($messages);
-                            $outputText   = $result['message']['content'] ?? '';
-                            $inputTokens  = max(1, (int) (strlen($inputText) / 4));
-                            $outputTokens = max(1, (int) (strlen($outputText) / 4));
-                        }
-                    } else {
-                        // Estimate tokens if not provided by FastAPI
-                        $inputText    = json_encode($messages);
-                        $outputText   = isset($result['message']['content']) ? $result['message']['content'] : '';
-                        $inputTokens  = max(1, (int) (strlen($inputText) / 4));
-                        $outputTokens = max(1, (int) (strlen($outputText) / 4));
-                        $tokensUsed   = $inputTokens + $outputTokens;
-                    }
+                    $outputText = isset($result['message']['content']) ? (string) $result['message']['content'] : '';
+                    $usageData = $this->buildTokenUsageData($messages, $outputText, (string) ($payload['model'] ?? ''), $result['usage'] ?? null);
 
                     $this->logTokenUsage(
                         $userId,
                         $organizationId,
                         'llm_chat',
-                        $tokensUsed,
+                        $usageData['tokens_used'],
                         substr($payloadPreview, 0, 255),
-                        $inputTokens,
-                        $outputTokens,
-                        $sessionId
+                        $usageData['input_tokens'],
+                        $usageData['output_tokens'],
+                        $sessionId,
+                        $usageData
                     );
                 }
                 
@@ -2134,30 +2164,30 @@ Rules:
                 return null;
             }
 
+            $usage = $result->usage->toArray();
+
             // Convert OpenAI response format to match our existing format
             $response = [
                 'message' => [
                     'role' => $result->choices[0]->message->role,
                     'content' => $content,
                 ],
-                'usage' => [
-                    'prompt_tokens' => $result->usage->promptTokens,
-                    'completion_tokens' => $result->usage->completionTokens,
-                    'total_tokens' => $result->usage->totalTokens,
-                ]
+                'usage' => $usage,
             ];
 
             // Log token usage for organization-scoped chats, including widget chats with no user id.
             if ($organizationId) {
+                $usageData = $this->buildTokenUsageData($messages, $content, $model, $response['usage']);
                 $this->logTokenUsage(
                     $userId,
                     $organizationId,
                     'openai_chat',
-                    $response['usage']['total_tokens'],
+                    $usageData['tokens_used'],
                     "OpenAI {$model} chat",
-                    (int) ($response['usage']['prompt_tokens'] ?? 0),
-                    (int) ($response['usage']['completion_tokens'] ?? 0),
-                    $sessionId
+                    $usageData['input_tokens'],
+                    $usageData['output_tokens'],
+                    $sessionId,
+                    $usageData
                 );
             }
 
@@ -2199,19 +2229,133 @@ Rules:
         return max($tokensFromWords, $tokensFromChars);
     }
 
+    private function buildTokenUsageData(array $messages, string $responseText, ?string $model = null, ?array $providerUsage = null): array
+    {
+        $inputTokens = max(1, (int) ceil($this->estimateTokenCount($messages)));
+        $visibleOutputTokens = max(0, (int) ceil(strlen($responseText) / 4));
+        $outputTokens = $visibleOutputTokens;
+        $reasoningTokens = 0;
+        $tokensUsed = $inputTokens + $outputTokens;
+        $usageIsEstimated = true;
+        $tokenEstimationMethod = 'estimated_visible_output_only';
+
+        $providerUsage = is_array($providerUsage) ? $providerUsage : [];
+        $providerPromptTokens = isset($providerUsage['prompt_tokens']) ? (int) $providerUsage['prompt_tokens'] : null;
+        $providerCompletionTokens = isset($providerUsage['completion_tokens']) ? (int) $providerUsage['completion_tokens'] : null;
+        $providerTotalTokens = isset($providerUsage['total_tokens']) ? (int) $providerUsage['total_tokens'] : null;
+        $providerReasoningTokens = $providerUsage['completion_tokens_details']['reasoning_tokens']
+            ?? $providerUsage['reasoning_tokens']
+            ?? null;
+
+        if ($providerPromptTokens !== null || $providerCompletionTokens !== null || $providerTotalTokens !== null) {
+            $inputTokens = max(0, (int) ($providerPromptTokens ?? $inputTokens));
+
+            if ($providerCompletionTokens !== null) {
+                $outputTokens = max(0, (int) $providerCompletionTokens);
+            } elseif ($providerTotalTokens !== null) {
+                $outputTokens = max(0, $providerTotalTokens - $inputTokens);
+            }
+
+            if ($providerReasoningTokens !== null) {
+                $reasoningTokens = max(0, (int) $providerReasoningTokens);
+                $tokenEstimationMethod = 'exact_provider_usage_reasoning_details';
+            } else {
+                $visibleOutputTokens = min($visibleOutputTokens, $outputTokens > 0 ? $outputTokens : $visibleOutputTokens);
+                $reasoningTokens = max(0, $outputTokens - $visibleOutputTokens);
+                $tokenEstimationMethod = ($providerPromptTokens !== null && $providerCompletionTokens !== null)
+                    ? 'exact_provider_usage_derived_reasoning'
+                    : 'exact_total_estimated_breakdown';
+            }
+
+            if ($providerTotalTokens !== null) {
+                $tokensUsed = max(0, $providerTotalTokens);
+                $usageIsEstimated = false;
+            } else {
+                $tokensUsed = max(0, $inputTokens + $outputTokens);
+                $usageIsEstimated = true;
+            }
+
+            return [
+                'tokens_used' => $tokensUsed,
+                'input_tokens' => $inputTokens,
+                'output_tokens' => $outputTokens,
+                'visible_output_tokens' => $visibleOutputTokens > 0 ? $visibleOutputTokens : null,
+                'reasoning_tokens' => $reasoningTokens > 0 ? $reasoningTokens : null,
+                'usage_is_estimated' => $usageIsEstimated,
+                'token_estimation_method' => $tokenEstimationMethod,
+            ];
+        }
+
+        if ($this->isReasoningModel($model)) {
+            $reasoningTokens = $this->estimateReasoningTokens($inputTokens, $visibleOutputTokens, $model);
+            $outputTokens = $visibleOutputTokens + $reasoningTokens;
+            $tokensUsed = $inputTokens + $outputTokens;
+            $tokenEstimationMethod = 'estimated_reasoning_multiplier';
+        }
+
+        return [
+            'tokens_used' => $tokensUsed,
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'visible_output_tokens' => $visibleOutputTokens > 0 ? $visibleOutputTokens : null,
+            'reasoning_tokens' => $reasoningTokens > 0 ? $reasoningTokens : null,
+            'usage_is_estimated' => true,
+            'token_estimation_method' => $tokenEstimationMethod,
+        ];
+    }
+
+    private function isReasoningModel(?string $model): bool
+    {
+        $normalized = strtolower(trim((string) $model));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return str_starts_with($normalized, 'gpt-5')
+            || str_starts_with($normalized, 'o1')
+            || str_starts_with($normalized, 'o3')
+            || str_contains($normalized, 'deepseek-r1');
+    }
+
+    private function estimateReasoningTokens(int $inputTokens, int $visibleOutputTokens, ?string $model = null): int
+    {
+        if (!$this->isReasoningModel($model) || $visibleOutputTokens <= 0) {
+            return 0;
+        }
+
+        $estimate = (int) ceil(max($inputTokens * 0.6, $visibleOutputTokens * 0.5));
+        $cap = (int) ceil($visibleOutputTokens * 3);
+
+        return max(0, min($estimate, $cap));
+    }
+
     /**
      * Log token usage for widget streaming responses
      */
-    public function logWidgetTokenUsage(int $organizationId, array $messages, string $responseText, string $endpointType = 'llm_chat_stream', ?string $sessionId = null): void
+    public function logWidgetTokenUsage(int $organizationId, array $messages, string $responseText, string $endpointType = 'llm_chat_stream', ?string $sessionId = null, ?string $model = null, ?array $providerUsage = null): void
     {
         try {
             $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, $endpointType);
-            $inputTokens  = max(1, (int) $this->estimateTokenCount($messages));
-            $outputTokens = max(1, (int) (strlen($responseText) / 4));
-            $totalTokens  = $inputTokens + $outputTokens;
-            $summary = 'in:' . $inputTokens . ' out:' . $outputTokens . ' | ' . substr(json_encode($messages), 0, 200);
+            $usageData = $this->buildTokenUsageData($messages, $responseText, $model, $providerUsage);
+            $summary = 'in:' . $usageData['input_tokens']
+                . ' out:' . $usageData['output_tokens']
+                . ' visible:' . ($usageData['visible_output_tokens'] ?? 0)
+                . ' reasoning:' . ($usageData['reasoning_tokens'] ?? 0)
+                . ' method:' . $usageData['token_estimation_method']
+                . ' | ' . substr(json_encode($messages), 0, 200);
 
-            $this->logTokenUsage(null, $organizationId, $endpointType, $totalTokens, $summary, $inputTokens, $outputTokens, $sessionId);
+            $this->logTokenUsage(
+                null,
+                $organizationId,
+                $endpointType,
+                $usageData['tokens_used'],
+                $summary,
+                $usageData['input_tokens'],
+                $usageData['output_tokens'],
+                $sessionId,
+                $usageData
+            );
         } catch (\Exception $e) {
             Log::error('Failed to log widget token usage', [
                 'organization_id' => $organizationId,
@@ -2806,7 +2950,7 @@ Rules:
     /**
      * Log token usage for billing and monitoring purposes
      */
-    private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary, int $inputTokens = 0, int $outputTokens = 0, ?string $sessionId = null)
+    private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary, int $inputTokens = 0, int $outputTokens = 0, ?string $sessionId = null, array $usageMeta = [])
     {
         try {
             $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, (string) $endpointType);
@@ -2848,6 +2992,10 @@ Rules:
                 'tokens_used' => $tokensUsed,
                 'input_tokens' => $inputTokens > 0 ? $inputTokens : null,
                 'output_tokens' => $outputTokens > 0 ? $outputTokens : null,
+                'visible_output_tokens' => isset($usageMeta['visible_output_tokens']) && $usageMeta['visible_output_tokens'] > 0 ? (int) $usageMeta['visible_output_tokens'] : null,
+                'reasoning_tokens' => isset($usageMeta['reasoning_tokens']) && $usageMeta['reasoning_tokens'] > 0 ? (int) $usageMeta['reasoning_tokens'] : null,
+                'usage_is_estimated' => (bool) ($usageMeta['usage_is_estimated'] ?? false),
+                'token_estimation_method' => $usageMeta['token_estimation_method'] ?? null,
                 'request_summary' => $requestSummary,
                 'used_at' => now()
             ]);

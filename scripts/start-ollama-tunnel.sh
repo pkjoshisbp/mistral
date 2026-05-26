@@ -4,8 +4,16 @@
 # Video generation (ComfyUI, Wav2Lip), XTTS, and Indic TTS have been removed.
 # Only Ollama (11435) and Whisper STT (18081) remain.
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$SCRIPT_DIR/.vastai-tunnel.env"
+
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
 # Direct connection to vast.ai instance
-VAST_HOST="${VAST_HOST:-123.21.129.10}"
+VAST_HOST="${VAST_HOST:-123.21.80.170}"
 VAST_PORT="${VAST_PORT:-51734}"
 VAST_USER="${VAST_USER:-root}"
 LOCAL_PORT="11435"

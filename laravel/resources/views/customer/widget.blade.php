@@ -12,6 +12,10 @@
                     <p class="text-muted mb-0">Customize and embed your AI chat widget</p>
                 </div>
                 <div class="card-body">
+                    @php
+                        $custOrg = auth()->user()->primaryOrganization() ?? auth()->user()->organizations->first();
+                        $widgetEmbedTarget = $custOrg?->slug ?: ($custOrg?->id ?? auth()->user()->organization_id ?? 3);
+                    @endphp
                     <div class="row">
                         <div class="col-md-8">
                             <div class="mb-4">
@@ -22,7 +26,7 @@
 &lt;script&gt;<br>
 &nbsp;&nbsp;(function() {<br>
 &nbsp;&nbsp;&nbsp;&nbsp;const script = document.createElement('script');<br>
-&nbsp;&nbsp;&nbsp;&nbsp;script.src = 'https://ai-chat.support/widget/{{ auth()->user()->primaryOrganization()?->id ?? auth()->user()->organization_id ?? 3 }}/script.js';<br>
+&nbsp;&nbsp;&nbsp;&nbsp;script.src = 'https://ai-chat.support/widget/{{ $widgetEmbedTarget }}/script.js';<br>
 &nbsp;&nbsp;&nbsp;&nbsp;script.async = true;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;document.head.appendChild(script);<br>
 &nbsp;&nbsp;})();<br>
@@ -41,7 +45,7 @@
                                     <div class="row">
                                         <div class="col-md-6 mb-3">
                                             <label class="form-label">Widget Position</label>
-                                            @php $custOrg = auth()->user()->primaryOrganization() ?? auth()->user()->organizations->first(); $pos = $custOrg->settings['widget_position'] ?? 'bottom-right'; @endphp
+                                            @php $pos = $custOrg->settings['widget_position'] ?? 'bottom-right'; @endphp
                                             <input type="hidden" id="organizationId" name="organizationId" value="{{ $custOrg->id }}">
                                             <select class="form-select" id="chatPosition" name="chatPosition">
                                                 <option value="bottom-right" {{ $pos==='bottom-right' ? 'selected' : '' }}>Bottom Right</option>
@@ -270,6 +274,11 @@
                                         <small class="text-muted">Use one mapping per line in format <strong>canonical = alias 1, alias 2, alias 3</strong>. Single aliases also work here, for example <strong>college = clg</strong>.</small>
                                     </div>
                                     <div class="mb-3">
+                                        <label class="form-label">Business Scope / Out-of-Scope Note (optional)</label>
+                                        <textarea id="scopeInstruction" name="scopeInstruction" class="form-control" rows="4" placeholder="We sell artworks listed on our platform. Do not imply that we provide standalone shipping services for third-party paintings. For requests outside our business scope, say so briefly and share our official contact details.">{{ $custOrg->settings['scope_instruction'] ?? '' }}</textarea>
+                                        <small class="text-muted">This helps the assistant handle awkward or out-of-place queries in a business-specific way and is also used in safe fallback replies.</small>
+                                    </div>
+                                    <div class="mb-3">
                                         <label class="form-label">Custom Widget CSS (optional)</label>
                                         <textarea id="widgetCustomCss" name="widgetCustomCss" class="form-control" rows="6" placeholder="/* Example */&#10;.ai-chat-window {&#10;  max-width: 460px !important;&#10;}">{{ $custOrg->settings['widget_custom_css'] ?? '' }}</textarea>
                                         <small class="text-muted">Applies only to this organization's widget.</small>
@@ -328,11 +337,11 @@
 
 <script>
 function copyWidgetCode() {
-    const organizationId = {{ auth()->user()->primaryOrganization()?->id ?? auth()->user()->organization_id ?? 3 }};
+    const organizationTarget = @json(auth()->user()->primaryOrganization()?->slug ?? auth()->user()->primaryOrganization()?->id ?? auth()->user()->organization_id ?? 3);
     const code = `<script>
 (function() {
     const script = document.createElement('script');
-    script.src = 'https://ai-chat.support/widget/${organizationId}/script.js';
+    script.src = 'https://ai-chat.support/widget/${organizationTarget}/script.js';
     script.async = true;
     document.head.appendChild(script);
 })();
@@ -401,10 +410,13 @@ document.getElementById('widgetSettingsForm').addEventListener('submit', async f
         offsetY: parseInt(document.getElementById('offsetY').value || '20', 10),
         welcomeMessage: document.getElementById('welcomeMessage').value,
         assistantDisplayName: document.getElementById('assistantDisplayName').value,
+        responseLanguage: document.getElementById('responseLanguage').value,
         requireContactForGuests: document.getElementById('requireContactForGuests').checked,
         widgetContactFields: document.getElementById('widgetContactFields').value,
         widgetAllowedDomains: document.getElementById('widgetAllowedDomains').value,
         queryTranslationMap: document.getElementById('queryTranslationMap').value,
+        queryAliasMap: document.getElementById('queryAliasMap').value,
+        scopeInstruction: document.getElementById('scopeInstruction').value,
         widgetCustomCss: document.getElementById('widgetCustomCss').value,
         widgetCustomJs: document.getElementById('widgetCustomJs').value,
         _token: form.querySelector('input[name="_token"]').value

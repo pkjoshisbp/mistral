@@ -500,6 +500,14 @@
                                 <textarea wire:model.defer="escalation_notify_emails" class="form-control" id="escalation_notify_emails" rows="2" placeholder="support@example.com, owner@example.com"></textarea>
                                 <small class="form-text text-muted">Comma-separated emails.</small>
                             </div>
+                            <div class="form-group">
+                                <label for="escalation_email_confidence_threshold">Escalation Email Threshold</label>
+                                <input type="number" step="0.01" min="0" max="1" wire:model.defer="escalation_email_confidence_threshold" class="form-control @error('escalation_email_confidence_threshold') is-invalid @enderror" id="escalation_email_confidence_threshold">
+                                @error('escalation_email_confidence_threshold')
+                                    <span class="invalid-feedback d-block">{{ $message }}</span>
+                                @enderror
+                                <small class="form-text text-muted">For low-confidence escalations, email only when confidence is at or below this value. Human-requested and complaint escalations still notify immediately.</small>
+                            </div>
                         </div>
                     </div>
                 </div>

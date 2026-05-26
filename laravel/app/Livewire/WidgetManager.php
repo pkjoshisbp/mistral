@@ -29,6 +29,7 @@ class WidgetManager extends Component
         'settings.widget_custom_css' => 'nullable|string|max:20000',
         'settings.widget_custom_js' => 'nullable|string|max:20000',
         'settings.shopify_auto_color' => 'nullable|boolean',
+    ];
 
     public function mount()
     {
@@ -103,11 +104,14 @@ class WidgetManager extends Component
         }
 
         $baseUrl = config('app.url');
-        $this->embedCode = "<!-- AI Chat Widget for Organization ID: {$this->selectedOrgId} -->
+        $organization = Organization::find($this->selectedOrgId);
+        $embedTarget = $organization?->slug ?: (string) $this->selectedOrgId;
+
+        $this->embedCode = "<!-- AI Chat Widget for Organization: {$embedTarget} -->
 <script>
     (function() {
         var script = document.createElement('script');
-        script.src = '{$baseUrl}/widget/{$this->selectedOrgId}/script.js';
+        script.src = '{$baseUrl}/widget/{$embedTarget}/script.js';
         script.async = true;
         document.head.appendChild(script);
     })();

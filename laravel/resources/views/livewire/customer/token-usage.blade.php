@@ -67,6 +67,8 @@
                 <div class="alert alert-info">
                     <h5><i class="icon fas fa-info"></i> About Token Usage</h5>
                     Tokens represent the computational units used by AI models to process your requests. Each chat message, search query, and AI response consumes tokens based on the length and complexity of the content. Monitor your usage to understand your AI consumption patterns.
+                    <hr>
+                    <p class="mb-0">Estimated tokens: <strong>{{ number_format($stats['estimated_tokens'] ?? 0) }}</strong> | Hidden reasoning tokens: <strong>{{ number_format($stats['reasoning_tokens'] ?? 0) }}</strong></p>
                 </div>
 
                 <!-- Filters -->
@@ -191,6 +193,7 @@
                                         <th>User</th>
                                         <th>Service Type</th>
                                         <th>Tokens Used</th>
+                                        <th>Breakdown</th>
                                         <th>Request Summary</th>
                                     </tr>
                                 </thead>
@@ -205,14 +208,26 @@
                                                 @endif
                                             </td>
                                             <td><span class="badge badge-secondary">{{ ucwords(str_replace('_', ' ', $log->endpoint_type)) }}</span></td>
-                                            <td><strong>{{ number_format($log->tokens_used) }}</strong></td>
+                                            <td>
+                                                <strong>{{ number_format($log->tokens_used) }}</strong>
+                                                <br><small class="text-muted">{{ $log->usage_is_estimated ? 'Estimated' : 'Exact total' }}</small>
+                                            </td>
+                                            <td>
+                                                <small>
+                                                    In: {{ number_format($log->input_tokens ?? 0) }} | Out: {{ number_format($log->output_tokens ?? 0) }}
+                                                    <br>
+                                                    Visible: {{ number_format($log->visible_output_tokens ?? $log->output_tokens ?? 0) }} | Reasoning: {{ number_format($log->reasoning_tokens ?? 0) }}
+                                                    <br>
+                                                    <span class="text-muted">{{ $log->token_estimation_method ?? 'legacy' }}</span>
+                                                </small>
+                                            </td>
                                             <td>
                                                 <small>{{ Str::limit($log->request_summary, 60) ?? 'N/A' }}</small>
                                             </td>
                                         </tr>
                                     @empty
                                         <tr>
-                                            <td colspan="5" class="text-center text-muted">
+                                            <td colspan="6" class="text-center text-muted">
                                                 <div class="py-4">
                                                     <i class="fas fa-chart-line fa-2x mb-2"></i>
                                                     <p>No usage records found for the selected criteria.</p>

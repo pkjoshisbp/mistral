@@ -39,6 +39,7 @@ class OrganizationAiManager extends Component
     public $handoffOfflineMessage = '';
     public $escalationNotifyEnabled = false;
     public $escalationNotifyEmails = '';
+    public $escalationEmailConfidenceThreshold = 0.4;
     public $businessHours = '';
     public $businessHoursMode = 'selector';
     public $businessHoursStartTime = '';
@@ -55,6 +56,7 @@ class OrganizationAiManager extends Component
     public $pricingActionRequiresKeywords = false;
     public $queryTranslationMap = '';
     public $queryAliasMap = '';
+    public $scopeInstruction = '';
     public $intentKeywords = [
         'booking' => '',
         'pricing' => '',
@@ -91,8 +93,10 @@ class OrganizationAiManager extends Component
         'approvedSensitiveCategories' => 'nullable|array',
         'queryTranslationMap' => 'nullable|string|max:12000',
         'queryAliasMap' => 'nullable|string|max:12000',
+        'scopeInstruction' => 'nullable|string|max:2000',
         'notifyChatEmailMode' => 'required|in:immediate,digest',
-        'notifyChatEmailIntervalMinutes' => 'required|integer|min:1|max:120'
+        'notifyChatEmailIntervalMinutes' => 'required|integer|min:1|max:120',
+        'escalationEmailConfidenceThreshold' => 'required|numeric|min:0|max:1'
     ];
 
     public function getBusinessHoursPreviewProperty(): string
@@ -155,6 +159,7 @@ class OrganizationAiManager extends Component
         $this->handoffOfflineMessage = $settings['handoff_offline_message'] ?? '';
         $this->escalationNotifyEnabled = (bool) ($settings['escalation_notify_enabled'] ?? false);
         $this->escalationNotifyEmails = $this->keywordsToString($settings['escalation_notify_emails'] ?? []);
+        $this->escalationEmailConfidenceThreshold = (float) ($settings['escalation_email_confidence_threshold'] ?? 0.4);
         $this->businessHours = $settings['business_hours'] ?? '';
         $this->syncBusinessHoursSelector();
         $this->holidayDates = $this->keywordsToString($settings['holiday_dates'] ?? []);
@@ -172,6 +177,7 @@ class OrganizationAiManager extends Component
         );
         $this->queryTranslationMap = $splitNormalizationMaps['translations'];
         $this->queryAliasMap = $splitNormalizationMaps['aliases'];
+        $this->scopeInstruction = (string) ($settings['scope_instruction'] ?? '');
         $storedKeywords = $settings['intent_keywords'] ?? [];
         $this->intentKeywords = [
             'booking' => $this->keywordsToString($storedKeywords['booking'] ?? []),
@@ -335,6 +341,7 @@ class OrganizationAiManager extends Component
         $this->availableModels = [
             'ollama' => [
                 'llama' => [
+                    'deepseek-r1:8b' => 'DeepSeek R1 Distill Llama 8B (Vast.ai, trial)',
                     'llama3.1:8b' => 'Llama 3.1 8B (Vast.ai, recommended)',
                     'mistral-nemo:latest' => 'Mistral Nemo (Vast.ai)',
                     'llama3.2:3b' => 'Llama 3.2 3B (Fast)',
@@ -443,6 +450,7 @@ class OrganizationAiManager extends Component
             $currentSettings['handoff_offline_message'] = trim((string) $this->handoffOfflineMessage) ?: null;
             $currentSettings['escalation_notify_enabled'] = (bool) $this->escalationNotifyEnabled;
             $currentSettings['escalation_notify_emails'] = $this->stringToKeywords($this->escalationNotifyEmails ?? '');
+            $currentSettings['escalation_email_confidence_threshold'] = (float) ($this->escalationEmailConfidenceThreshold ?? 0.4);
             if ($this->businessHoursMode === 'selector' && $this->businessHoursStartTime && $this->businessHoursEndTime) {
                 $currentSettings['business_hours'] = $this->buildBusinessHoursString();
             } else {
@@ -459,6 +467,7 @@ class OrganizationAiManager extends Component
             $currentSettings['pricing_action_requires_keywords'] = (bool) $this->pricingActionRequiresKeywords;
             $currentSettings['query_translation_map'] = trim((string) $this->queryTranslationMap) ?: null;
             $currentSettings['query_alias_map'] = trim((string) $this->queryAliasMap) ?: null;
+            $currentSettings['scope_instruction'] = trim((string) $this->scopeInstruction) ?: null;
 
             $currentSettings['intent_keywords'] = [
                 'booking' => $this->stringToKeywords($this->intentKeywords['booking'] ?? ''),

@@ -1,5 +1,12 @@
 # AI Agent Multi-Tenant Chat System - Copilot Instructions
 
+## Critical Tenant Boundary Rule
+
+- If a behavior, prompt, ranking rule, FAQ shortcut, workflow, or fix is specific to one organization and does not apply to all organizations, it must be implemented at the organization level, not in shared/global logic.
+- Do not add organization-specific conditions, keyword heuristics, prompt shaping, or retrieval boosts inside shared controllers, shared services, shared widgets, or global defaults.
+- Prefer organization-scoped configuration, organization data, organization prompts, organization-specific mappings, or organization-level feature flags.
+- Before implementing a fix, explicitly verify whether it is global or organization-specific. If it is organization-specific, keep the change scoped to that organization.
+
 > **IMPORTANT:** Before assuming anything about ports, GPU, installed tools, or
 > service locations — read the full reference first:
 > **[docs/PROJECT_SETUP.md](../docs/PROJECT_SETUP.md)**

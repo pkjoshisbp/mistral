@@ -18,12 +18,17 @@ class TokenUsageLog extends Model
         'tokens_used',
         'input_tokens',
         'output_tokens',
+        'visible_output_tokens',
+        'reasoning_tokens',
+        'usage_is_estimated',
+        'token_estimation_method',
         'request_summary',
         'used_at'
     ];
 
     protected $casts = [
-        'used_at' => 'datetime'
+        'used_at' => 'datetime',
+        'usage_is_estimated' => 'boolean',
     ];
 
     public function user()

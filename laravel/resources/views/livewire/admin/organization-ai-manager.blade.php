@@ -297,6 +297,13 @@
                                                         <div class="invalid-feedback">{{ $message }}</div>
                                                     @enderror
                                                     <small class="text-muted d-block mt-2">One mapping per line. Format: canonical term = alias 1, alias 2, alias 3. Single aliases also work here, for example: college = clg.</small>
+
+                                                    <label class="form-label fw-bold mt-3" for="scopeInstruction">Business scope / out-of-scope note</label>
+                                                    <textarea wire:model.defer="scopeInstruction" class="form-control @error('scopeInstruction') is-invalid @enderror" id="scopeInstruction" rows="4" placeholder="We sell artworks listed on our platform. Do not imply that we provide standalone shipping services for third-party paintings. For requests outside our business scope, say so briefly and share our official contact details."></textarea>
+                                                    @error('scopeInstruction')
+                                                        <div class="invalid-feedback">{{ $message }}</div>
+                                                    @enderror
+                                                    <small class="text-muted d-block mt-2">Optional. This note is added to the assistant guidance and also reused in safe fallback responses when a question appears outside the organization’s business scope.</small>
                                                 </div>
                                             </div>
 
@@ -363,6 +370,14 @@
                                                         <label class="form-label fw-bold">Escalation Notification Emails</label>
                                                         <textarea wire:model.defer="escalationNotifyEmails" class="form-control" rows="2" placeholder="support@example.com, owner@example.com"></textarea>
                                                         <small class="text-muted">Comma-separated emails.</small>
+                                                    </div>
+                                                    <div class="mb-2">
+                                                        <label class="form-label fw-bold">Escalation Email Threshold</label>
+                                                        <input type="number" step="0.01" min="0" max="1" wire:model.defer="escalationEmailConfidenceThreshold" class="form-control @error('escalationEmailConfidenceThreshold') is-invalid @enderror">
+                                                        @error('escalationEmailConfidenceThreshold')
+                                                            <div class="invalid-feedback">{{ $message }}</div>
+                                                        @enderror
+                                                        <small class="text-muted">For low-confidence escalations, send email only when confidence is at or below this value. Human-requested and complaint escalations still notify immediately.</small>
                                                     </div>
                                                 </div>
                                             </div>

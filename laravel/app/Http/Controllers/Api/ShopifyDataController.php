@@ -215,14 +215,19 @@ class ShopifyDataController extends Controller
     {
         $original = $query;
         $query = strtolower($query);
+        $hasProductSignals = (bool) preg_match('/\b(product|item|sell|buy|price|cost|available|stock|inventory|sku)\b/', $query);
 
         if ($this->isPurchaseHistoryQuery($original)) {
             return 'order';
         }
 
         // Order tracking patterns
-        if (preg_match('/\b(order|tracking|track|shipment|delivery|where is my|order number|#\d+)\b/', $query)) {
+        if (preg_match('/\b(order|tracking|track|shipment|delivery|where is my|order number)\b/', $query)) {
             return 'order';
+        }
+
+        if ($hasProductSignals) {
+            return 'products';
         }
 
         // Alphanumeric order number patterns (e.g. SPF2606, DR-1023, #1001, ORD-2024-001)
@@ -231,8 +236,10 @@ class ShopifyDataController extends Controller
             return 'order';
         }
 
-        // Shop info patterns
-        if (preg_match('/\b(store|shop|contact|location|address|phone|email|about you|who are you)\b/', $query)) {
+        // Shop info patterns. Keep these phrases specific so product names like
+        // "iHealth No Contact Thermometer" are not misclassified as store-info queries.
+        if (preg_match('/\b(store\s+hours|shop\s+hours|contact\s+us|contact\s+info|customer\s+service|support\s+email|phone\s+number|store\s+location|store\s+address|business\s+address|about\s+you|who\s+are\s+you)\b/', $query)
+            || preg_match('/\b(store|shop)\b/', $query)) {
             return 'shop_info';
         }
 
@@ -265,6 +272,27 @@ class ShopifyDataController extends Controller
         $normalizedQuery = preg_replace('/[,;:]+/', ' ', $query);
         $normalizedQuery = preg_replace('/\s+/', ' ', $normalizedQuery);
         $normalizedQuery = trim($normalizedQuery);
+
+        foreach ($this->extractExplicitSkuReferences($original) as $skuCandidate) {
+            Log::info('[SHOPIFY] Explicit SKU reference search', [
+                'original' => $original,
+                'sku' => $skuCandidate,
+            ]);
+
+            $exactSkuResults = $this->findProductsByExactSku($skuCandidate);
+            if (!empty($exactSkuResults)) {
+                return ['results' => $exactSkuResults, 'specific_match' => count($exactSkuResults) === 1];
+            }
+
+            $looseSkuResults = $this->findProductsByLooseSku($skuCandidate);
+            if (count($looseSkuResults) === 1) {
+                return ['results' => $looseSkuResults, 'specific_match' => true];
+            }
+
+            if (!empty($looseSkuResults)) {
+                return ['results' => $looseSkuResults, 'specific_match' => false];
+            }
+        }
 
         foreach ($this->extractSkuCandidates($original) as $skuCandidate) {
             Log::info('[SHOPIFY] SKU product search', [
@@ -350,6 +378,18 @@ class ShopifyDataController extends Controller
         return ['results' => $this->shopifyService->getAllProducts(10), 'specific_match' => false];
     }
 
+    protected function extractExplicitSkuReferences(string $query): array
+    {
+        preg_match_all('/\bsku\b\s*(?:[#:\-]\s*)?([a-z0-9._-]{1,})\b/i', $query, $matches);
+        $candidates = array_values(array_unique(array_map(static function ($value) {
+            return trim((string) $value);
+        }, $matches[1] ?? [])));
+
+        return array_values(array_filter($candidates, static function ($candidate) {
+            return $candidate !== '';
+        }));
+    }
+
     protected function extractSkuCandidates(string $query): array
     {
         preg_match_all('/\b[A-Z0-9][A-Z0-9._-]{2,}\b/i', $query, $matches);
@@ -366,6 +406,53 @@ class ShopifyDataController extends Controller
 
             return (bool) preg_match('/[A-Z]/i', $candidate) && (bool) preg_match('/\d/', $candidate);
         }));
+    }
+
+    protected function findProductsByExactSku(string $skuCandidate): array
+    {
+        $normalizedCandidate = strtolower(trim($skuCandidate));
+        if ($normalizedCandidate === '') {
+            return [];
+        }
+
+        $products = $this->shopifyService->getAllProducts(250);
+        $matches = array_values(array_filter($products, function ($product) use ($normalizedCandidate) {
+            foreach (is_array($product['skus'] ?? null) ? $product['skus'] : [] as $sku) {
+                if (strtolower(trim((string) $sku)) === $normalizedCandidate) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
+
+        return array_slice($matches, 0, 10);
+    }
+
+    protected function findProductsByLooseSku(string $skuCandidate): array
+    {
+        $normalizedCandidate = strtolower(trim($skuCandidate));
+        if ($normalizedCandidate === '') {
+            return [];
+        }
+
+        $products = $this->shopifyService->getAllProducts(250);
+        $matches = array_values(array_filter($products, function ($product) use ($normalizedCandidate) {
+            foreach (is_array($product['skus'] ?? null) ? $product['skus'] : [] as $sku) {
+                $normalizedSku = strtolower(trim((string) $sku));
+                if ($normalizedSku === '') {
+                    continue;
+                }
+
+                if (str_contains($normalizedSku, $normalizedCandidate)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
+
+        return array_slice($matches, 0, 10);
     }
 
     protected function extractSpecificProductReference(string $query): ?string
@@ -575,6 +662,7 @@ class ShopifyDataController extends Controller
     protected function extractSearchableTokens(string $text): array
     {
         $normalized = strtolower(trim($text));
+        $normalized = str_replace(['-', '_'], ' ', $normalized);
         $normalized = preg_replace('/[^\p{L}\p{N}\s-]/u', ' ', $normalized);
         $normalized = trim((string) preg_replace('/\s+/', ' ', $normalized));
         if ($normalized === '') {

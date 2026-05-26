@@ -402,6 +402,18 @@ document.addEventListener('DOMContentLoaded', function () {
                                     <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-robot mr-1"></i>Model / Timing</div>
                                     <div><strong>Model:</strong> <code>{{ $log['model_used'] ?? '—' }}</code></div>
                                     <div><strong>Provider:</strong> <code>{{ $log['ai_provider'] ?? '—' }}</code></div>
+                                    @if(data_get($extra, 'requested_model') && data_get($extra, 'requested_model') !== ($log['model_used'] ?? null))
+                                        <div><strong>Requested model:</strong> <code>{{ data_get($extra, 'requested_model') }}</code></div>
+                                    @endif
+                                    @if(data_get($extra, 'fallback_used'))
+                                        <div><strong>Fallback used:</strong> <span class="badge badge-warning">Yes</span></div>
+                                    @endif
+                                    @if(data_get($extra, 'backend_used'))
+                                        <div><strong>Backend path:</strong> <code>{{ data_get($extra, 'backend_used') }}</code></div>
+                                    @endif
+                                    @if(data_get($extra, 'requested_url') && data_get($extra, 'actual_url') && data_get($extra, 'requested_url') !== data_get($extra, 'actual_url'))
+                                        <div><strong>Endpoint:</strong> <span class="text-muted">{{ data_get($extra, 'actual_url') }}</span></div>
+                                    @endif
                                     <div><strong>Max tokens:</strong> {{ $log['max_tokens'] ?? '—' }}</div>
                                     <div><strong>FAQ paraphrase:</strong> {{ data_get($extra, 'faq_paraphrase_attempted') ? 'Yes' : 'No' }}</div>
                                     @if(data_get($extra, 'faq_paraphrase_model'))
@@ -423,9 +435,46 @@ document.addEventListener('DOMContentLoaded', function () {
                                     <div><strong>LLM time:</strong> {{ $log['llm_elapsed_ms'] ? $log['llm_elapsed_ms'].'ms' : '—' }}</div>
                                     <div><strong>Total time:</strong> {{ $log['total_elapsed_ms'] ? $log['total_elapsed_ms'].'ms' : '—' }}</div>
                                     <div><strong>Envelope OK:</strong> {{ ($log['envelope_parse_ok'] ?? false) ? '✅' : '❌' }}</div>
+                                    @if(is_array(data_get($extra, 'connection_failure')))
+                                        <div><strong>Connection failure:</strong> <span class="text-danger">{{ data_get($extra, 'connection_failure.error', 'Unknown error') }}</span></div>
+                                    @elseif(is_array(data_get($extra, 'fallback_reason')))
+                                        <div><strong>Fallback reason:</strong> <span class="text-danger">{{ json_encode(data_get($extra, 'fallback_reason')) }}</span></div>
+                                    @endif
                                 </div>
                             </div>
                         </div>
+
+                        @if(!empty(data_get($extra, 'attempts', [])))
+                            <div class="mt-2">
+                                <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-network-wired mr-1"></i>Backend Attempts</div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered mb-0 bg-white">
+                                        <thead class="thead-light">
+                                            <tr>
+                                                <th>Attempt</th>
+                                                <th>Model</th>
+                                                <th>Backend</th>
+                                                <th>Status</th>
+                                                <th>Time</th>
+                                                <th>Error</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach((array) data_get($extra, 'attempts', []) as $attempt)
+                                                <tr>
+                                                    <td>{{ $attempt['attempt'] ?? ($attempt['url'] ?? '—') }}</td>
+                                                    <td>{{ $attempt['model'] ?? '—' }}</td>
+                                                    <td>{{ $attempt['backend'] ?? ($attempt['url'] ?? '—') }}</td>
+                                                    <td>{!! !empty($attempt['successful']) ? '<span class="text-success">OK</span>' : '<span class="text-danger">Failed</span>' !!}</td>
+                                                    <td>{{ isset($attempt['attempt_ms']) ? ((int) $attempt['attempt_ms']).'ms' : '—' }}</td>
+                                                    <td><span class="text-danger">{{ $attempt['error'] ?? '—' }}</span></td>
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        @endif
 
                         {{-- Query expansion --}}
                         @if($log['expansion_attempted'] ?? false)

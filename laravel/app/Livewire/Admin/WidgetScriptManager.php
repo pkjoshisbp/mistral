@@ -54,107 +54,18 @@ class WidgetScriptManager extends Component
             return;
         }
 
-        $config = json_encode($this->widgetSettings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        $analyticsEnabled = isset($this->widgetSettings['analytics']) && $this->widgetSettings['analytics'] ? 'true' : 'false';
-        
+        $baseUrl = rtrim(config('app.url'), '/');
+        $embedTarget = $organization->slug ?: (string) $organization->id;
+
         $this->generatedScript = <<<JS
-<!-- AI Chat Support Widget Script -->
+<!-- AI Chat Support Widget -->
 <!-- Organization: {$organization->name} -->
 <script>
 (function() {
-    // Widget Configuration
-    window.aiChatConfig = {$config};
-    
-    // Organization ID (required for analytics and chat routing)
-    window.aiChatConfig.organizationId = '{$organization->id}';
-    window.aiChatConfig.organizationName = '{$organization->name}';
-    
-    // Analytics Configuration
-    window.aiChatAnalytics = {
-        enabled: {$analyticsEnabled},
-        trackingUrl: 'https://ai-chat.support/api/analytics/track',
-        organizationId: '{$organization->id}'
-    };
-
-    // Load Widget Script
     var script = document.createElement('script');
-    script.src = 'https://ai-chat.support/widget/ai-chat-widget.js?v=' + Date.now();
+    script.src = '{$baseUrl}/widget/{$embedTarget}/script.js';
     script.async = true;
-    script.onload = function() {
-        if (typeof AIChatWidget !== 'undefined') {
-            AIChatWidget.init(window.aiChatConfig);
-        }
-    };
     document.head.appendChild(script);
-
-    // Load Widget Styles
-    var link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://ai-chat.support/widget/ai-chat-widget.css?v=' + Date.now();
-    document.head.appendChild(link);
-
-    // Analytics Tracking (if enabled)
-    if (window.aiChatAnalytics.enabled) {
-        // Track page view
-        fetch(window.aiChatAnalytics.trackingUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            body: JSON.stringify({
-                organization_id: window.aiChatAnalytics.organizationId,
-                event_type: 'page_view',
-                page_url: window.location.href,
-                page_title: document.title,
-                referrer: document.referrer,
-                user_agent: navigator.userAgent,
-                timestamp: new Date().toISOString()
-            })
-        }).catch(function(error) {
-            console.log('Analytics tracking error:', error);
-        });
-
-        // Track widget interactions
-        document.addEventListener('aiChatWidget:opened', function() {
-            fetch(window.aiChatAnalytics.trackingUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    organization_id: window.aiChatAnalytics.organizationId,
-                    event_type: 'widget_open',
-                    page_url: window.location.href,
-                    timestamp: new Date().toISOString()
-                })
-            }).catch(function(error) {
-                console.log('Analytics tracking error:', error);
-            });
-        });
-
-        document.addEventListener('aiChatWidget:messageSent', function(event) {
-            fetch(window.aiChatAnalytics.trackingUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    organization_id: window.aiChatAnalytics.organizationId,
-                    event_type: 'chat_message',
-                    page_url: window.location.href,
-                    event_data: {
-                        message_length: event.detail.message ? event.detail.message.length : 0
-                    },
-                    timestamp: new Date().toISOString()
-                })
-            }).catch(function(error) {
-                console.log('Analytics tracking error:', error);
-            });
-        });
-    }
 })();
 </script>
 JS;

@@ -42,6 +42,7 @@ class WidgetSettingsController extends Controller
             'widgetContactFields' => 'nullable|string|max:5000',
             'queryTranslationMap' => 'nullable|string|max:12000',
             'queryAliasMap' => 'nullable|string|max:12000',
+            'scopeInstruction' => 'nullable|string|max:2000',
             'widgetCustomCss' => 'nullable|string|max:20000',
             'widgetCustomJs' => 'nullable|string|max:20000',
         ]);
@@ -168,6 +169,15 @@ class WidgetSettingsController extends Controller
                 unset($settings['query_alias_map']);
             } else {
                 $settings['query_alias_map'] = $raw;
+            }
+        }
+
+        if (array_key_exists('scopeInstruction', $data)) {
+            $raw = trim((string) $data['scopeInstruction']);
+            if ($raw === '') {
+                unset($settings['scope_instruction']);
+            } else {
+                $settings['scope_instruction'] = $raw;
             }
         }
 

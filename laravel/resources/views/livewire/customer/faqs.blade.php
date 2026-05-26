@@ -40,7 +40,7 @@
             
             @if($showForm)
             <div class="border rounded p-3 mb-4 bg-light">
-                <form wire:submit.prevent="{{ $editingId ? 'update' : 'create' }}">
+                <form wire:submit.prevent="{{ $editingId ? 'update' : 'create' }}" onsubmit="window.syncFaqAnswer && window.syncFaqAnswer()">
                     <div class="row">
                         <div class="col-md-6 mb-2">
                             <label>Question *</label>
@@ -134,7 +134,7 @@
                                 <textarea id="faq-answer-source" class="form-control font-monospace mt-1" rows="8" style="display:none;" placeholder="HTML source…"></textarea>
                             </div>
                             {{-- Hidden sync textarea — outside wire:ignore so Livewire can update it --}}
-                            <textarea id="faq-answer-livewire" wire:model.live="answer" style="display:none;"></textarea>
+                            <textarea id="faq-answer-livewire" wire:model.defer="answer" style="display:none;"></textarea>
                             <small class="text-muted d-block mt-1">Write concise factual content. Keep phone/address/map details exactly as stored.</small>
                             <small class="form-text text-muted">
                                 Allowed tags: p, br, strong, b, em, i, u, ul, ol, li, a, img, code, pre, blockquote, h1–h6. Links will open in a new tab and are marked nofollow.
@@ -251,9 +251,14 @@ window.initHtmlToolbar = function() {
 
     // ── Sync contenteditable → hidden Livewire textarea ──────────────────
     function syncToLivewire() {
-        hidden.value = editor.innerHTML.replace(/<br\s*\/?>/i, '').trim();
+        const rawValue = source && source.style.display !== 'none'
+            ? source.value
+            : editor.innerHTML;
+        hidden.value = rawValue.replace(/<br\s*\/?>/i, '').trim();
         hidden.dispatchEvent(new Event('input', { bubbles: true }));
     }
+
+    window.syncFaqAnswer = syncToLivewire;
 
     // ── Load current Livewire value into editor ───────────────────────────
     editor.innerHTML = hidden.value || '';

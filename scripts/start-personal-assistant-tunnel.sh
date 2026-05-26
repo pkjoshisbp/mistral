@@ -1,8 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$SCRIPT_DIR/.vastai-tunnel.env"
+
+if [ -f "$CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$CONFIG_FILE"
+fi
+
 # Dedicated autossh tunnel for Personal Assistant model services on vast.ai
-VAST_HOST="${VAST_HOST:-123.21.129.10}"
+VAST_HOST="${VAST_HOST:-123.21.80.170}"
 VAST_PORT="${VAST_PORT:-51734}"
 VAST_USER="${VAST_USER:-root}"
 
