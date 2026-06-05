@@ -2993,7 +2993,10 @@ async def search_qdrant(request: Request):
         )
         elapsed_ms = int((time.time() - start_time) * 1000)
         logging.info(f"qdrant_search collection={collection_name} limit={limit} elapsed_ms={elapsed_ms}")
-        return {"results": [{"id": r.id, "score": r.score, "payload": r.payload} for r in results]}
+        return {
+            "results": [{"id": r.id, "score": r.score, "payload": r.payload} for r in results],
+            "elapsed_ms": elapsed_ms,
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -3022,7 +3025,11 @@ async def search_qdrant_text(request: Request):
         )
         search_ms = int((time.time() - search_start) * 1000)
         logging.info(f"qdrant_search_text collection={collection_name} limit={limit} elapsed_ms={search_ms}")
-        return {"results": [{"id": r.id, "score": r.score, "payload": r.payload} for r in results]}
+        return {
+            "results": [{"id": r.id, "score": r.score, "payload": r.payload} for r in results],
+            "embedding_elapsed_ms": embed_ms,
+            "search_elapsed_ms": search_ms,
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -3133,7 +3140,7 @@ async def search_qdrant_by_terms(request: Request):
             f"qdrant_search_by_terms collection={collection_name} terms={len(normalized_terms)} results={len(results)} elapsed_ms={elapsed_ms}"
         )
 
-        return {"results": results}
+        return {"results": results, "elapsed_ms": elapsed_ms}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

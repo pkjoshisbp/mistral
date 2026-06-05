@@ -266,6 +266,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         $faqContactDrift = is_array(data_get($extra, 'faq_contact_drift')) ? data_get($extra, 'faq_contact_drift') : [];
                         $topMatches = is_array(data_get($extra, 'top_matches')) ? data_get($extra, 'top_matches') : [];
                         $pendingFollowUp = is_array(data_get($extra, 'pending_follow_up')) ? data_get($extra, 'pending_follow_up') : [];
+                        $retrievalTiming = is_array(data_get($extra, 'retrieval_timing')) ? data_get($extra, 'retrieval_timing') : [];
                         $debugExport = [
                             'user_message' => $log['user_message'] ?? null,
                             'intent' => $log['intent'] ?? null,
@@ -292,6 +293,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             'branch_score' => data_get($extra, 'branch_score'),
                             'timing' => [
                                 'search_elapsed_ms' => $log['search_elapsed_ms'] ?? null,
+                                'retrieval_timing' => $retrievalTiming,
                                 'llm_elapsed_ms' => $log['llm_elapsed_ms'] ?? null,
                                 'total_elapsed_ms' => $log['total_elapsed_ms'] ?? null,
                             ],
@@ -392,6 +394,15 @@ document.addEventListener('DOMContentLoaded', function () {
                                     <div><strong>Context len:</strong> {{ $log['context_length'] ?? '—' }} chars</div>
                                     @if($log['search_elapsed_ms'] ?? null)
                                         <div><strong>Search time:</strong> {{ $log['search_elapsed_ms'] }}ms</div>
+                                    @endif
+                                    @if(!empty($retrievalTiming))
+                                        <div><strong>Retrieval split:</strong>
+                                            <span class="text-muted">
+                                                @foreach($retrievalTiming as $label => $ms)
+                                                    {{ str_replace('_', ' ', $label) }} {{ $ms }}ms{{ !$loop->last ? ',' : '' }}
+                                                @endforeach
+                                            </span>
+                                        </div>
                                     @endif
                                 </div>
                             </div>
@@ -701,5 +712,4 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
 </div>
 </div>
-
 

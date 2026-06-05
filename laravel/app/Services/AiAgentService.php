@@ -113,6 +113,51 @@ class AiAgentService
     }
 
     /**
+     * Get model dedicated for second-turn / follow-up query rewriting.
+     */
+    public function getFollowUpRewriteModel(): string
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $configured = trim((string) \App\Models\AdminSetting::get('ai_followup_rewrite_model', ''));
+            if ($configured !== '') {
+                return $configured;
+            }
+        }
+
+        return 'deepseek-r1:8b';
+    }
+
+    /**
+     * Get model dedicated for retrieved-context relevance checks.
+     */
+    public function getContextRelevanceModel(): string
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $configured = trim((string) \App\Models\AdminSetting::get('ai_context_relevance_model', ''));
+            if ($configured !== '') {
+                return $configured;
+            }
+        }
+
+        return 'deepseek-r1:8b';
+    }
+
+    /**
+     * Minimum confidence required before judged context is allowed through.
+     */
+    public function getContextRelevanceMinConfidence(): float
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $configured = \App\Models\AdminSetting::get('ai_context_relevance_min_confidence', null);
+            if ($configured !== null && $configured !== '') {
+                return max(0.0, min(1.0, (float) $configured));
+            }
+        }
+
+        return 0.40;
+    }
+
+    /**
      * Get the configured AI backend type
      */
     public function getBackendType()
@@ -613,6 +658,14 @@ PROMPT;
     public function enhancedSearch($collectionName, $originalQuery, $limit = 5, array $options = [])
     {
         $searchStartTime = microtime(true);
+        $this->lastSearchDebug = [];
+        $timing = [
+            'term_search_ms' => null,
+            'embed_ms' => null,
+            'vector_search_ms' => null,
+            'rerank_ms' => null,
+            'expansion_ms' => null,
+        ];
         try {
             Log::info('Enhanced search started', [
                 'collection' => $collectionName,
@@ -637,10 +690,14 @@ PROMPT;
                 ]);
             }
 
+            $termStart = microtime(true);
             $termBoostResults = $this->searchQdrantByTerms($collectionName, (string) $originalQuery, max((int) $limit, 8));
+            $timing['term_search_ms'] = round((microtime(true) - $termStart) * 1000, 2);
 
             if (!$useRewriteAndIntent) {
+                $embedStart = microtime(true);
                 $embedding = $this->embed($originalQuery);
+                $timing['embed_ms'] = round((microtime(true) - $embedStart) * 1000, 2);
 
                 if (!$embedding || !is_array($embedding)) {
                     Log::warning('Failed to generate embedding for semantic search', [
@@ -650,12 +707,16 @@ PROMPT;
                 }
 
                 $searchLimit = max((int) $limit, 15);
+                $vectorStart = microtime(true);
                 $results = $this->searchQdrant($collectionName, $embedding, $searchLimit);
+                $timing['vector_search_ms'] = round((microtime(true) - $vectorStart) * 1000, 2);
                 $mergedResults = $this->mergeSearchResultsById([
                     $termBoostResults['results'] ?? [],
                     $results['results'] ?? [],
                 ]);
+                $rerankStart = microtime(true);
                 $rerankedResults = $this->applyHybridLexicalReranking($mergedResults, (string) $originalQuery);
+                $timing['rerank_ms'] = round((microtime(true) - $rerankStart) * 1000, 2);
                 $results = [
                     'results' => array_slice($rerankedResults, 0, (int) $limit),
                 ];
@@ -686,6 +747,7 @@ PROMPT;
                 }
 
                 if (!$skipExpansion && $firstPassMaxScore < $expansionThreshold) {
+                    $expansionStart = microtime(true);
                     Log::info('Low-confidence result, attempting query expansion', [
                         'collection'         => $collectionName,
                         'original_query'     => $originalQuery,
@@ -731,6 +793,7 @@ PROMPT;
                             }
                         }
                     }
+                    $timing['expansion_ms'] = round((microtime(true) - $expansionStart) * 1000, 2);
                 }
 
                 $searchElapsed = round((microtime(true) - $searchStartTime) * 1000, 2);
@@ -751,13 +814,18 @@ PROMPT;
                     'expansion_score_gain' => $results['expansion_score_gain'] ?? null,
                     'first_pass_score'     => round($firstPassMaxScore, 4),
                     'total_elapsed_ms'     => $searchElapsed,
+                    'timing'               => array_filter($timing, fn ($v) => $v !== null),
+                    'term_results_count'   => count($termBoostResults['results'] ?? []),
+                    'vector_results_count' => count($results['results'] ?? []),
                 ];
 
                 return $results;
             }
 
             // Use query rewrite to improve keyword matching, with safeguards
+            $rewriteStart = microtime(true);
             $rewrittenQuery = $this->rewriteQueryForSearch($originalQuery);
+            $timing['rewrite_ms'] = round((microtime(true) - $rewriteStart) * 1000, 2);
 
             if ($rewrittenQuery === $originalQuery) {
                 Log::info('Query rewrite skipped (no change)', [
@@ -772,8 +840,15 @@ PROMPT;
             }
 
             // Generate embeddings for both original and rewritten queries
+            $originalEmbedStart = microtime(true);
             $originalEmbedding = $this->embed($originalQuery);
-            $rewrittenEmbedding = $rewrittenQuery !== $originalQuery ? $this->embed($rewrittenQuery) : null;
+            $timing['original_embed_ms'] = round((microtime(true) - $originalEmbedStart) * 1000, 2);
+            $rewrittenEmbedding = null;
+            if ($rewrittenQuery !== $originalQuery) {
+                $rewrittenEmbedStart = microtime(true);
+                $rewrittenEmbedding = $this->embed($rewrittenQuery);
+                $timing['rewritten_embed_ms'] = round((microtime(true) - $rewrittenEmbedStart) * 1000, 2);
+            }
 
             if (!$originalEmbedding || !is_array($originalEmbedding)) {
                 Log::warning('Failed to generate embedding for enhanced search', [
@@ -783,15 +858,26 @@ PROMPT;
             }
 
             // Search Qdrant with original query embedding
+            $originalSearchStart = microtime(true);
             $originalResults = $this->searchQdrant($collectionName, $originalEmbedding, $limit);
+            $timing['original_vector_search_ms'] = round((microtime(true) - $originalSearchStart) * 1000, 2);
 
             // Search Qdrant with rewritten query embedding (if available)
             $rewrittenResults = null;
             if ($rewrittenEmbedding && is_array($rewrittenEmbedding)) {
+                $rewrittenSearchStart = microtime(true);
                 $rewrittenResults = $this->searchQdrant($collectionName, $rewrittenEmbedding, $limit);
+                $timing['rewritten_vector_search_ms'] = round((microtime(true) - $rewrittenSearchStart) * 1000, 2);
             }
 
             $searchElapsed = round((microtime(true) - $searchStartTime) * 1000, 2);
+            $this->lastSearchDebug = [
+                'rewritten_query'      => $rewrittenQuery !== $originalQuery ? $rewrittenQuery : null,
+                'total_elapsed_ms'     => $searchElapsed,
+                'timing'               => array_filter($timing, fn ($v) => $v !== null),
+                'term_results_count'   => count($termBoostResults['results'] ?? []),
+                'vector_results_count' => count($originalResults['results'] ?? []),
+            ];
             Log::info('Enhanced search completed', [
                 'collection' => $collectionName,
                 'original_query' => $originalQuery,
@@ -1795,12 +1881,12 @@ PROMPT;
         $assistantAnswerForPrompt = mb_substr($assistantAnswer, 0, 700);
 
         try {
-            $systemPrompt = "You rewrite ONLY the current follow-up user message into a single retrieval query.
-Use conversation context to resolve references like this/that/it.
+            $systemPrompt = "Rewrite the latest follow-up turn into one standalone retrieval query.
+Use the previous user question and previous assistant answer only as context to resolve omitted subjects, pronouns, location qualifiers, and partial references.
 Rules:
-- Keep exact entity names when present.
-- Use original question + assistant answer only as context.
-- Output one concise retrieval query (max 16 words).
+- Preserve exact entity names, locations, dates, SKUs, order numbers, and service names when present.
+- Focus on the latest user intent; do not answer the question.
+- Output one concise retrieval query (max 18 words).
 - No explanations, no labels, no markdown.";
 
             $userPrompt = "Original question: {$originalQuestion}\n"
@@ -1808,7 +1894,7 @@ Rules:
                 . "Current follow-up question: {$followUpQuestion}\n"
                 . "Return rewritten retrieval query only.";
 
-            $rewriteModel = $this->getRewriteModel();
+            $rewriteModel = $this->getFollowUpRewriteModel();
 
             Log::info('Follow-up rewrite input context', [
                 'original_question' => $originalQuestion,
@@ -1823,7 +1909,7 @@ Rules:
             ], $rewriteModel, null, null, [
                 'use_vastai' => true,
                 'temperature' => 0.0,
-                'num_predict' => 64,
+                'num_predict' => 80,
             ]);
 
             $elapsed = round((microtime(true) - $startTime) * 1000, 2);
@@ -1867,6 +1953,290 @@ Rules:
 
             return trim($originalQuestion . ' ' . $followUpQuestion);
         }
+    }
+
+    /**
+     * Decide whether a follow-up turn needs external retrieval and, if so,
+     * rewrite it into a standalone retrieval query.
+     *
+     * @param  array<int, array{role:string,content:string}>  $conversationHistory
+     * @return array{needs_retrieval:bool, rewritten_query:string, reasoning:string}
+     */
+    public function planFollowUpRetrieval(array $conversationHistory, string $latestUserMessage, string $fallbackQuery = ''): array
+    {
+        $latestUserMessage = trim($latestUserMessage);
+        $fallbackQuery = trim($fallbackQuery !== '' ? $fallbackQuery : $latestUserMessage);
+
+        if ($latestUserMessage === '') {
+            return [
+                'needs_retrieval' => true,
+                'rewritten_query' => $fallbackQuery,
+                'reasoning' => 'Latest user message was empty.',
+            ];
+        }
+
+        $historyLines = [];
+        foreach (array_slice($conversationHistory, -8) as $message) {
+            $role = strtolower(trim((string) ($message['role'] ?? '')));
+            $content = trim((string) ($message['content'] ?? ''));
+            if ($content === '' || !in_array($role, ['user', 'assistant'], true)) {
+                continue;
+            }
+
+            $historyLines[] = strtoupper($role) . ': ' . $content;
+        }
+
+        $historyText = !empty($historyLines)
+            ? implode("\n", $historyLines)
+            : '[no prior conversation history available]';
+
+        $systemPrompt = <<<'PROMPT'
+You are a retrieval planner for follow-up chat turns.
+Given conversation history and the latest user message, decide whether the latest turn can be answered from the conversation itself or requires external retrieval.
+
+Rules:
+- Set needs_retrieval=false only when the conversation already contains enough verified information to answer the latest user turn directly.
+- Set needs_retrieval=true when the latest turn introduces a new qualifier, constraint, location, entity, attribute, or scope that is not already answered in the conversation.
+- If needs_retrieval=true, rewritten_query must be a single standalone retrieval query preserving exact entities and qualifiers.
+- If needs_retrieval=false, rewritten_query must be an empty string.
+- reasoning must be one short sentence.
+- Return JSON only with keys: needs_retrieval, rewritten_query, reasoning.
+PROMPT;
+
+        $userPrompt = "Conversation History:\n{$historyText}\n\nLatest User Message:\n{$latestUserMessage}\n\nReturn JSON only.";
+
+        try {
+            $rewriteModel = $this->getFollowUpRewriteModel();
+            $response = $this->llmChat([
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $userPrompt],
+            ], $rewriteModel, null, null, [
+                'use_vastai' => true,
+                'temperature' => 0.0,
+                'num_predict' => 120,
+            ]);
+
+            $rawOutput = trim((string) ($response['message']['content'] ?? ''));
+            $decoded = $this->decodeJsonObjectResponse($rawOutput);
+            if (!is_array($decoded)) {
+                Log::warning('Follow-up retrieval planner returned non-JSON; using fallback', [
+                    'latest_user_message' => $latestUserMessage,
+                    'fallback_query' => $fallbackQuery,
+                    'rewrite_model' => $rewriteModel,
+                    'raw_output_preview' => mb_substr($rawOutput, 0, 220),
+                ]);
+
+                return [
+                    'needs_retrieval' => true,
+                    'rewritten_query' => $fallbackQuery,
+                    'reasoning' => 'Planner output was invalid, so retrieval fallback was used.',
+                ];
+            }
+
+            $needsRetrieval = (bool) ($decoded['needs_retrieval'] ?? true);
+            $rewrittenQuery = trim((string) ($decoded['rewritten_query'] ?? ''));
+            $reasoning = trim((string) ($decoded['reasoning'] ?? ''));
+
+            if ($needsRetrieval) {
+                $rewrittenQuery = $this->normalizeRewriteOutput(
+                    $rewrittenQuery !== '' ? $rewrittenQuery : $fallbackQuery,
+                    $fallbackQuery
+                );
+            } else {
+                $rewrittenQuery = '';
+            }
+
+            Log::info('Follow-up retrieval planner result', [
+                'latest_user_message' => $latestUserMessage,
+                'needs_retrieval' => $needsRetrieval,
+                'rewritten_query' => $rewrittenQuery,
+                'reasoning' => $reasoning,
+                'rewrite_model' => $rewriteModel,
+            ]);
+
+            return [
+                'needs_retrieval' => $needsRetrieval,
+                'rewritten_query' => $rewrittenQuery,
+                'reasoning' => $reasoning,
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('Follow-up retrieval planner failed; using fallback', [
+                'latest_user_message' => $latestUserMessage,
+                'fallback_query' => $fallbackQuery,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'needs_retrieval' => true,
+                'rewritten_query' => $fallbackQuery,
+                'reasoning' => 'Planner failed, so retrieval fallback was used.',
+            ];
+        }
+    }
+
+    /**
+     * Judge whether retrieved context is relevant enough to use for answering.
+     *
+     * @return array{decision:string,use_context:bool,confidence:float,threshold:float,reason:string,model:string}
+     */
+    public function assessContextRelevance(
+        string $question,
+        string $context,
+        ?int $organizationId = null,
+        ?string $sessionId = null,
+        ?string $model = null
+    ): array {
+        $question = trim($question);
+        $context = trim($context);
+
+        if ($question === '' || $context === '') {
+            return [
+                'decision' => 'unknown',
+                'use_context' => true,
+                'confidence' => 0.0,
+                'threshold' => $this->getContextRelevanceMinConfidence(),
+                'reason' => 'Question or context was empty, so no relevance check was applied.',
+                'model' => $model ?: $this->getContextRelevanceModel(),
+            ];
+        }
+
+        $judgeModel = $model ?: $this->getContextRelevanceModel();
+        $threshold = $this->getContextRelevanceMinConfidence();
+
+        $systemPrompt = <<<'PROMPT'
+You are a retrieval-context relevance judge for a customer-support assistant.
+
+Decide whether the provided CONTEXT contains information that can answer the USER QUESTION.
+
+Rules:
+- Return decision="relevant" only when the context directly supports the main answer.
+- Return decision="partial" when the context supports only part of the answer.
+- Return decision="irrelevant" when the context is about a different entity, a different topic, or lacks the facts needed to answer.
+- Never treat semantically similar items as the same item unless the exact requested entity or fact is supported.
+- Keep reason to one short sentence.
+- confidence must be a number from 0.0 to 1.0.
+- use_context must be true only for relevant or partial decisions.
+- Return JSON only with keys: decision, use_context, confidence, reason.
+PROMPT;
+
+        $userPrompt = json_encode([
+            'user_question' => $question,
+            'context' => $context,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        try {
+            $response = $this->llmChat([
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => (string) $userPrompt],
+            ], $judgeModel, null, $organizationId, array_filter([
+                'backend_type' => 'ollama',
+                'use_vastai' => true,
+                'temperature' => 0.0,
+                'num_predict' => 120,
+                'session_id' => $sessionId,
+            ], static fn ($value) => $value !== null));
+
+            $rawOutput = trim((string) ($response['message']['content'] ?? ''));
+            $decoded = $this->decodeJsonObjectResponse($rawOutput);
+            if (!is_array($decoded)) {
+                Log::warning('Context relevance judge returned non-JSON; failing open', [
+                    'question' => $question,
+                    'judge_model' => $judgeModel,
+                    'raw_output_preview' => mb_substr($rawOutput, 0, 220),
+                ]);
+
+                return [
+                    'decision' => 'unknown',
+                    'use_context' => true,
+                    'confidence' => 0.0,
+                    'threshold' => $threshold,
+                    'reason' => 'Judge output was invalid, so context was preserved.',
+                    'model' => $judgeModel,
+                ];
+            }
+
+            $decision = strtolower(trim((string) ($decoded['decision'] ?? 'unknown')));
+            if (!in_array($decision, ['relevant', 'partial', 'irrelevant'], true)) {
+                $decision = 'unknown';
+            }
+
+            $confidence = (float) ($decoded['confidence'] ?? 0.0);
+            $confidence = max(0.0, min(1.0, $confidence));
+            $reason = trim((string) ($decoded['reason'] ?? ''));
+            $useContext = array_key_exists('use_context', $decoded)
+                ? (bool) $decoded['use_context']
+                : in_array($decision, ['relevant', 'partial'], true);
+
+            if ($decision === 'irrelevant') {
+                $useContext = false;
+            }
+
+            if ($useContext && $confidence < $threshold) {
+                $useContext = false;
+                if ($reason === '') {
+                    $reason = 'Judge confidence was below the configured threshold.';
+                }
+            }
+
+            Log::info('Context relevance judge result', [
+                'question' => $question,
+                'decision' => $decision,
+                'use_context' => $useContext,
+                'confidence' => $confidence,
+                'threshold' => $threshold,
+                'reason' => $reason,
+                'judge_model' => $judgeModel,
+            ]);
+
+            return [
+                'decision' => $decision,
+                'use_context' => $useContext,
+                'confidence' => $confidence,
+                'threshold' => $threshold,
+                'reason' => $reason !== '' ? $reason : 'No reason returned.',
+                'model' => $judgeModel,
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('Context relevance judge failed; preserving context', [
+                'question' => $question,
+                'judge_model' => $judgeModel,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'decision' => 'unknown',
+                'use_context' => true,
+                'confidence' => 0.0,
+                'threshold' => $threshold,
+                'reason' => 'Judge failed, so context was preserved.',
+                'model' => $judgeModel,
+            ];
+        }
+    }
+
+    private function decodeJsonObjectResponse(string $rawOutput): ?array
+    {
+        $clean = trim($rawOutput);
+        if ($clean === '') {
+            return null;
+        }
+
+        $clean = preg_replace('/<think>.*?<\/think>\s*/is', '', $clean) ?? $clean;
+        $clean = preg_replace('/<\/?think>/i', '', $clean) ?? $clean;
+
+        $decoded = json_decode($clean, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        if (preg_match('/\{.*\}/s', $clean, $matches)) {
+            $decoded = json_decode((string) $matches[0], true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return null;
     }
 
     private function normalizeRewriteOutput(string $rewritten, string $original): string
@@ -2024,10 +2394,15 @@ Rules:
             // (commonly caused by special chars in Shopify product descriptions)
             $messages = $this->sanitizeForJson($messages);
 
+            $backendType = isset($options['backend_type'])
+                ? (string) $options['backend_type']
+                : $this->getBackendType();
+            unset($options['backend_type']);
+
             $payload = [
                 'messages' => $messages,
                 'model' => $model,
-                'backend_type' => $this->getBackendType()
+                'backend_type' => $backendType
             ];
             if (!empty($options)) {
                 $payload['options'] = $options;
@@ -2095,7 +2470,7 @@ Rules:
     /**
      * OpenAI chat completion
      */
-    public function openAiChat($messages, $model = null, $userId = null, $organizationId = null, ?string $sessionId = null)
+    public function openAiChat($messages, $model = null, $userId = null, $organizationId = null, ?string $sessionId = null, array $options = [])
     {
         try {
             $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, 'openai_chat');
@@ -2109,7 +2484,12 @@ Rules:
                 'model' => $model,
                 'messages_count' => count($messages),
                 'user_id' => $userId,
-                'organization_id' => $organizationId
+                'organization_id' => $organizationId,
+                'options' => array_intersect_key($options, array_flip([
+                    'max_completion_tokens',
+                    'reasoning_effort',
+                    'response_format',
+                ])),
             ]);
 
             // Get API key from admin settings or fallback to config
@@ -2122,20 +2502,27 @@ Rules:
                 $apiKey = config('services.openai.api_key');
             }
             
-            // Let GPT-5-mini use its default token allocation - no artificial limits
-            // The model will decide how to allocate reasoning vs output tokens
-            
-            Log::info('OpenAI chat request (no token limits)', [
-                'model' => $model,
-                'messages_count' => count($messages)
-            ]);
-            
             $client = OpenAI::client($apiKey);
 
-            $result = $client->chat()->create([
+            $payload = [
                 'model' => $model,
                 'messages' => $messages,
+            ];
+
+            $openAiOptions = $this->buildOpenAiChatOptions($model, $options);
+            if (!empty($openAiOptions)) {
+                $payload = array_merge($payload, $openAiOptions);
+            }
+
+            Log::info('OpenAI chat request payload options', [
+                'model' => $model,
+                'messages_count' => count($messages),
+                'max_completion_tokens' => $payload['max_completion_tokens'] ?? null,
+                'reasoning_effort' => $payload['reasoning_effort'] ?? null,
+                'response_format' => $payload['response_format']['type'] ?? null,
             ]);
+
+            $result = $client->chat()->create($payload);
 
             Log::info('OpenAI chat response', [
                 'id' => $result->id,
@@ -2206,6 +2593,46 @@ Rules:
             Log::error('OpenAI chat exception', ['error' => $e->getMessage()]);
             return null;
         }
+    }
+
+    private function buildOpenAiChatOptions(?string $model, array $options): array
+    {
+        $payload = [];
+        $normalizedModel = strtolower(trim((string) $model));
+
+        $maxCompletionTokens = $options['max_completion_tokens']
+            ?? $options['max_tokens']
+            ?? $options['num_predict']
+            ?? null;
+
+        if ($maxCompletionTokens !== null) {
+            $payload['max_completion_tokens'] = max(64, min(2000, (int) $maxCompletionTokens));
+        }
+
+        $reasoningEffort = $options['reasoning_effort'] ?? null;
+        if ($reasoningEffort === null && $this->isReasoningModel($model)) {
+            $reasoningEffort = str_starts_with($normalizedModel, 'gpt-5.1') ? 'none' : 'low';
+        }
+
+        if ($reasoningEffort !== null && $this->isReasoningModel($model)) {
+            $reasoningEffort = strtolower(trim((string) $reasoningEffort));
+            $supported = str_starts_with($normalizedModel, 'gpt-5.1')
+                ? ['none', 'low', 'medium', 'high']
+                : ['minimal', 'low', 'medium', 'high'];
+
+            if (in_array($reasoningEffort, $supported, true)) {
+                $payload['reasoning_effort'] = $reasoningEffort;
+            }
+        }
+
+        $responseFormat = $options['response_format'] ?? null;
+        if (is_array($responseFormat) && isset($responseFormat['type'])) {
+            $payload['response_format'] = $responseFormat;
+        } elseif ($responseFormat === 'json_object' || ($options['json_mode'] ?? false) === true) {
+            $payload['response_format'] = ['type' => 'json_object'];
+        }
+
+        return $payload;
     }
 
     /**
@@ -2396,11 +2823,14 @@ Rules:
      */
     public function smartLlmChat($messages, $model = null, $userId = null, $organizationId = null, array $options = [])
     {
-        if ($this->isOpenAiProvider()) {
-            // Always use GPT-5-mini as it's the only allowed model
-            $openAiModel = 'gpt-5-mini';
+        $provider = $organizationId
+            ? $this->getAiProviderForOrganization($organizationId)
+            : $this->getAiProvider();
+
+        if ($provider === 'openai') {
+            $openAiModel = $this->getOpenAiModelForOrganization($organizationId);
             $sessionId = isset($options['session_id']) ? (string) $options['session_id'] : null;
-            return $this->openAiChat($messages, $openAiModel, $userId, $organizationId, $sessionId);
+            return $this->openAiChat($messages, $openAiModel, $userId, $organizationId, $sessionId, $options);
         } else {
             $llamaModel = $model ?: $this->getLlamaModel();
             return $this->llmChat($messages, $llamaModel, $userId, $organizationId, $options);

@@ -18,6 +18,7 @@ use App\Services\IntentDetectionService;
 use App\Services\AiAgentService;
 use App\Services\FaqFollowUpService;
 use App\Services\FollowUpStateService;
+use App\Services\WidgetSpamGuard;
 use App\Services\LocationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -31,6 +32,8 @@ use App\Models\OrganizationData;
 
 class WidgetController
 {
+    private const SUPPRESSED_WIDGET_TEST_SESSION_ID = 'ai-chat-test-session';
+
     private $aiAgentService;
     private $faqFollowUpService;
     private $followUpStateService;
@@ -413,14 +416,7 @@ class WidgetController
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            // Check token usage limits before processing chat
-            $tokenLimitCheck = $this->checkTokenLimits($organization);
-            if ($tokenLimitCheck !== true) {
-                return response()->json($tokenLimitCheck, 429) // 429 Too Many Requests
-                    ->header('X-Robots-Tag', 'noindex, nofollow');
-            }
-
-            $message = $request->input('message');
+            $message = trim((string) $request->input('message', ''));
             $sessionId = $this->resolveWidgetSessionId((string) $request->input('session_id', ''), true);
             $userInfo = $request->input('user_info', []);
             $visitorInfo = $request->input('visitor_info', []); // For backward compatibility
@@ -444,9 +440,23 @@ class WidgetController
             $responseTone = $settings['response_tone'] ?? 'friendly';
             $responseLanguage = $settings['response_language'] ?? 'auto';
             $rulePolicy = $this->getWidgetRulePolicy($organization);
+            $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
 
             if (!$message) {
                 return response()->json(['error' => 'Message is required'], 400)
+                    ->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            $spamGuard = app(WidgetSpamGuard::class)->inspect($organization, $request, $sessionId, $message);
+            if ($spamGuard !== null) {
+                return response()->json($spamGuard['body'], $spamGuard['status'])
+                    ->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            // Check token usage limits after cheap spam checks, before expensive AI work.
+            $tokenLimitCheck = $this->checkTokenLimits($organization);
+            if ($tokenLimitCheck !== true) {
+                return response()->json($tokenLimitCheck, 429) // 429 Too Many Requests
                     ->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
@@ -479,6 +489,24 @@ class WidgetController
             $previousDebugSummary = $this->getPreviousDebugSummary($existingConversation);
 
             $lastAssistantForIntent = $this->getLastAssistantMessage($organization, $sessionId);
+            $previousAnswerFamilies = array_values(array_unique(array_merge(
+                $this->extractAnswerFamilyLabelsFromPayloads($previousContextPayloads),
+                $this->extractAnswerFamilyLabelsFromText(implode(' ', array_filter([
+                    (string) ($previousDebugSummary['user_message'] ?? ''),
+                    (string) ($previousDebugSummary['response_path'] ?? ''),
+                    (string) data_get($previousDebugSummary, 'extra.faq_title'),
+                    (string) data_get($previousDebugSummary, 'extra.faq_category'),
+                    (string) ($lastAssistantForIntent ?? ''),
+                ])))
+            )));
+            $shouldPreserveShortQualifierFamily = $this->isShortQualifierFollowUpMessage((string) $messageForInference)
+                && !empty($previousAnswerFamilies);
+            $shouldReuseCareerFollowUpAnswer = in_array('career', $previousAnswerFamilies, true)
+                && (
+                    $this->isShortQualifierFollowUpMessage((string) $messageForInference)
+                    || $this->isEllipticalFollowUpMessage((string) $messageForInference)
+                );
+            $shouldPreserveSubstantiveContactFollowUp = false;
             $lastAssistantAskedQuestionForIntent = is_string($lastAssistantForIntent)
                 && trim($lastAssistantForIntent) !== ''
                 && $this->responseHasQuestion($lastAssistantForIntent);
@@ -621,7 +649,12 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if (!$isAffirmativeContinuationForIntent && $this->shouldRunWidgetIntentDetection($organization)) {
+            if ($aiProvider === 'openai' && !$isAffirmativeContinuationForIntent) {
+                $intentResult = $this->buildFastIntentResultForOpenAi(
+                    (string) $messageForInference,
+                    $organization
+                );
+            } elseif (!$isAffirmativeContinuationForIntent && $this->shouldRunWidgetIntentDetection($organization)) {
                 try {
                     $intentResult = app(IntentDetectionService::class)->detectIntent($messageForInference, $organization->id);
                 } catch (\Throwable $t) {
@@ -791,6 +824,9 @@ class WidgetController
 
             $canReusePreviousContext = !empty($previousContextPayloads)
                 && $isRelatedFollowUp;
+            $shouldPreserveSubstantiveContactFollowUp = $isRelatedFollowUp
+                && $this->isContactQuery((string) $message)
+                && !empty(array_filter($previousAnswerFamilies, fn ($family) => $family !== 'contact'));
             $shouldUsePendingStateAnchor = $this->shouldAnchorWithPendingFollowUpState(
                 (string) $messageForInference,
                 $hasExplicitPendingFollowUpPrompt ? $pendingFollowUpState : null
@@ -809,6 +845,13 @@ class WidgetController
                 ),
             ]);
 
+            $cachedChatMessages = $isRelatedFollowUp ? $this->getCachedChatMessages((string) $sessionId) : [];
+            $followUpRetrievalPlan = null;
+            $skipFollowUpRetrieval = false;
+            $preservePreviousAnswerFamily = false;
+            $skipExactFaqShortcut = false;
+            $reusePreviousVerifiedAnswer = false;
+
             if ($isReferentialFollowUp && in_array($routeAnalysis['primary_route'] ?? null, ['fulfillment_questions', 'availability_checks', 'pricing_requests'], true)) {
                 $routeProductCandidate = trim((string) ($routeAnalysis['slots']['product_candidate'] ?? ''));
                 if ($routeProductCandidate === '' || $this->isWeakRouteProductCandidate($routeProductCandidate)) {
@@ -825,7 +868,7 @@ class WidgetController
             }
 
             $searchQuery = $messageForInference;
-            if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $shouldUsePendingStateAnchor) && !$canReusePreviousContext) {
+            if ($isRelatedFollowUp) {
                 $searchQuery = $this->buildRelatedFollowUpSearchQuery(
                     (string) $messageForInference,
                     $hasPendingFollowUpState ? $pendingFollowUpState : null,
@@ -834,6 +877,77 @@ class WidgetController
                     $isAffirmativeFollowUp,
                     $isReferentialFollowUp
                 );
+
+                if ($aiProvider === 'openai') {
+                    $skipFollowUpRetrieval = !empty($previousContextPayloads)
+                        && ($isAffirmativeFollowUp || $isContextualShortFollowUp || $shouldUsePendingStateAnchor);
+                    $followUpRetrievalPlan = [
+                        'needs_retrieval' => !$skipFollowUpRetrieval,
+                        'rewritten_query' => '',
+                        'reasoning' => $skipFollowUpRetrieval
+                            ? 'OpenAI provider reused prior verified context without local follow-up planning.'
+                            : 'OpenAI provider skipped local follow-up planning; deterministic combined query will be used.',
+                    ];
+                } else {
+                    $followUpRetrievalPlan = $this->planFollowUpRetrievalWithContext(
+                        $organization,
+                        (string) $sessionId,
+                        is_array($cachedChatMessages) ? $cachedChatMessages : [],
+                        $lastUserMessage,
+                        is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
+                        (string) $messageForInference,
+                        (string) $searchQuery
+                    );
+                    $skipFollowUpRetrieval = (($followUpRetrievalPlan['needs_retrieval'] ?? true) === false);
+                }
+
+                if ($skipFollowUpRetrieval) {
+                    $canReusePreviousContext = !empty($previousContextPayloads);
+                    $preservePreviousAnswerFamily = !empty($previousAnswerFamilies);
+                    $skipExactFaqShortcut = $preservePreviousAnswerFamily;
+                } else {
+                    $canReusePreviousContext = false;
+                }
+
+                if (!empty($followUpRetrievalPlan['rewritten_query'])) {
+                    $searchQuery = (string) $followUpRetrievalPlan['rewritten_query'];
+                }
+
+                $this->mergeDebugExtra([
+                    'follow_up_needs_retrieval' => $followUpRetrievalPlan['needs_retrieval'] ?? null,
+                    'follow_up_rewritten_query' => $followUpRetrievalPlan['rewritten_query'] ?? null,
+                    'follow_up_reasoning' => $followUpRetrievalPlan['reasoning'] ?? null,
+                ]);
+
+                $this->mergeDebugExtra([
+                    'context_reused' => $canReusePreviousContext,
+                    'reason' => $this->determineContextReuseReason(
+                        $isRelatedFollowUp,
+                        is_array($previousContextPayloads) ? $previousContextPayloads : [],
+                        $canReusePreviousContext,
+                        $shouldUsePendingStateAnchor,
+                        $hasPendingFollowUpState,
+                        $hasExplicitPendingFollowUpPrompt,
+                        $isAffirmativeFollowUp
+                    ),
+                ]);
+            }
+
+            if ($shouldPreserveShortQualifierFamily) {
+                $preservePreviousAnswerFamily = true;
+                $skipExactFaqShortcut = true;
+            }
+
+            if ($shouldPreserveSubstantiveContactFollowUp) {
+                $preservePreviousAnswerFamily = true;
+                $skipExactFaqShortcut = true;
+                if (is_string($lastAssistantForIntent) && trim($lastAssistantForIntent) !== '') {
+                    $reusePreviousVerifiedAnswer = true;
+                }
+            }
+
+            if ($shouldReuseCareerFollowUpAnswer && is_string($lastAssistantForIntent) && trim($lastAssistantForIntent) !== '') {
+                $reusePreviousVerifiedAnswer = true;
             }
 
             // Load Shopify integration early — before the query rewrite — so we can skip
@@ -846,7 +960,7 @@ class WidgetController
                 ->first();
 
             // Only run the LLM rewrite for non-Shopify orgs (Qdrant semantic search benefit).
-            if (!$shopifyIntegration && $isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $isAffirmativeFollowUp) && !$canReusePreviousContext) {
+            if ($aiProvider !== 'openai' && !$shopifyIntegration && $isRelatedFollowUp && !$canReusePreviousContext && !$skipFollowUpRetrieval && $followUpRetrievalPlan === null) {
                 $searchQuery = $this->rewriteFollowUpSearchQueryWithContext(
                     $organization,
                     (string) $sessionId,
@@ -859,7 +973,7 @@ class WidgetController
             // Determine once whether this turn has prior cached LLM context.
             // Used both to skip redundant Shopify calls and to bypass the Qdrant
             // low-confidence clarification gate when the LLM already has the data.
-            $hasCachedTurns = $isRelatedFollowUp && !empty($this->getCachedChatMessages($sessionId));
+            $hasCachedTurns = $isRelatedFollowUp && !empty($cachedChatMessages);
 
             // ---- SHOPIFY API INTEGRATION (SMART PATH) ----
             $shopifyContext = '';
@@ -1080,7 +1194,9 @@ class WidgetController
                             $actionQuery = trim($prevMsg . ' ' . $messageForInference);
                         }
                     }
-                    $actionResult = $actionService->processQuery($actionQuery, $organization->id);
+                    $actionResult = $actionService->processQuery($actionQuery, $organization->id, [
+                        'skip_semantic_action_matching' => $aiProvider === 'openai',
+                    ]);
                     if (($actionResult['type'] ?? '') === 'action_executed'
                         && ($actionResult['result']['success'] ?? false)) {
                         $liveData = $actionResult['result']['data'] ?? null;
@@ -1112,7 +1228,7 @@ class WidgetController
             
             $searchResults = null;
             $anchoredEntityResults = [];
-            if (!$canReusePreviousContext && !$liveData) {
+            if (!$canReusePreviousContext && !$liveData && !$skipFollowUpRetrieval) {
                 $routeSignals = is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [];
                 $isPureShopifyProductRoute = $hasShopifyData
                     && (bool) ($routeAnalysis['requires_product_resolution'] ?? false)
@@ -1144,10 +1260,21 @@ class WidgetController
                             $collectionName,
                             $searchQuery,
                             6, // Use broader retrieval window to reduce false negatives on specific product queries
-                            ['disable_rewrite' => true]
+                            [
+                                'disable_rewrite' => true,
+                                'skip_expansion' => $aiProvider === 'openai',
+                            ]
                         );
                     }
                 }
+            } elseif ($skipFollowUpRetrieval) {
+                Log::info('Skipping semantic search based on follow-up retrieval planner', [
+                    'org_id' => $organization->id,
+                    'org_slug' => $organization->slug,
+                    'session_id' => $sessionId,
+                    'query' => $searchQuery,
+                    'planner' => $followUpRetrievalPlan,
+                ]);
             }
             
             $context = '';
@@ -1172,7 +1299,7 @@ class WidgetController
                     $context .= "Additional information from knowledge base:\n\n";
                     foreach ($orderedResults as $_reuseResult) {
                         $_reusePayload = $_reuseResult['payload'] ?? [];
-                        if (isset($_reusePayload['title'])) {
+                        if (isset($_reusePayload['title']) && $this->shouldExposePayloadTitleInContext($_reusePayload)) {
                             $context .= "Title: " . $this->htmlToPlainWithLinks((string) $_reusePayload['title']) . "\n";
                         }
                         if (isset($_reusePayload['content']) && $_reusePayload['content'] !== '') {
@@ -1246,6 +1373,33 @@ class WidgetController
                     $orderedResults = $anchoredEntityResults;
                 }
 
+                if ($isRelatedFollowUp
+                    && !empty($previousAnswerFamilies)
+                    && (($followUpRetrievalPlan['needs_retrieval'] ?? null) === true)
+                ) {
+                    $familyCompatibleResults = $this->filterResultsForFollowUpAnswerFamily(
+                        $orderedResults,
+                        $previousAnswerFamilies
+                    );
+
+                    if (!empty($familyCompatibleResults)) {
+                        $orderedResults = $familyCompatibleResults;
+                        $searchResults['results'] = $familyCompatibleResults;
+                    } else {
+                        $orderedResults = array_map(function ($payload) {
+                            return ['payload' => $payload];
+                        }, $previousContextPayloads);
+                        $preservePreviousAnswerFamily = true;
+                        $skipExactFaqShortcut = true;
+                        $reusePreviousVerifiedAnswer = true;
+                    }
+
+                    $this->mergeDebugExtra([
+                        'follow_up_family_preserved' => $preservePreviousAnswerFamily,
+                        'follow_up_family_filtered_results' => count($orderedResults),
+                    ]);
+                }
+
                 $this->mergeDebugExtra([
                     'top_matches' => $this->buildDebugTopMatches($orderedResults),
                 ]);
@@ -1268,6 +1422,12 @@ class WidgetController
                     $this->debugData['expanded_query']        = $searchDebug['expanded_query'] ?? null;
                     $this->debugData['expansion_score_gain']  = $searchDebug['expansion_score_gain'] ?? null;
                     $this->debugData['search_elapsed_ms']     = $searchDebug['total_elapsed_ms'] ?? null;
+                    $this->mergeDebugExtra(array_filter([
+                        'retrieval_timing' => $searchDebug['timing'] ?? null,
+                        'retrieval_term_results_count' => $searchDebug['term_results_count'] ?? null,
+                        'retrieval_vector_results_count' => $searchDebug['vector_results_count'] ?? null,
+                        'retrieval_first_pass_score' => $searchDebug['first_pass_score'] ?? null,
+                    ], fn ($v) => $v !== null));
                     if (!empty($searchDebug['rewritten_query'])) {
                         $this->debugData['rewritten_query'] = $searchDebug['rewritten_query'];
                     }
@@ -1315,6 +1475,9 @@ class WidgetController
                         $contextFields = ['title', 'content', 'category'];
                         foreach ($contextFields as $field) {
                             if (isset($payload[$field]) && is_string($payload[$field]) && !empty($payload[$field])) {
+                                if ($field === 'title' && !$this->shouldExposePayloadTitleInContext($payload)) {
+                                    continue;
+                                }
                                 $fieldValue = $this->htmlToPlainWithLinks((string) $payload[$field]);
                                 if ($field === 'content') {
                                     $fieldValue = $this->stripSynonymLines($fieldValue);
@@ -1358,6 +1521,7 @@ class WidgetController
             if ($directCatalogContext !== '') {
                 $context .= ($context !== '' ? "\n" : '') . $directCatalogContext . "\n";
             }
+            $deferKnowledgeShortcutsToModel = true;
 
             // Persist last context payloads for follow-up continuity (limit to top 5)
             $payloads = $this->buildContextPayloadCache($orderedResults);
@@ -1375,7 +1539,7 @@ class WidgetController
                 (string) $searchQuery,
                 $organization
             );
-            if ($deterministicCatalogResponse !== null) {
+            if (!$deferKnowledgeShortcutsToModel && $deterministicCatalogResponse !== null) {
                 Log::info('Using deterministic catalog response (chat)', [
                     'org_id' => $organization->id,
                     'org_slug' => $organization->slug,
@@ -1428,12 +1592,11 @@ class WidgetController
 
             $isPricingLikeQuery = (($intentResult['intent'] ?? null) === 'pricing')
                 || (bool) preg_match('/\b(subscription|subscriptions|plan|plans|pricing|price|cost|package|packages|monthly|yearly|corporate|enterprise|business)\b/i', (string) $message);
-
             if ($isPricingLikeQuery) {
                 $pricingContext = $this->buildPricingContext($organization);
                 if ($pricingContext !== '') {
                     $context .= ($context !== '' ? "\n\n" : '') . $pricingContext;
-                } elseif (trim($directCatalogContext) === '' && $this->shouldUsePricingFallback($context, $shopifyContext, $message)) {
+                } elseif (!$deferKnowledgeShortcutsToModel && trim($directCatalogContext) === '' && $this->shouldUsePricingFallback($context, $shopifyContext, $message)) {
                     // Only use the generic pricing fallback when NO specific entity catalog match was found.
                     // If $directCatalogContext is non-empty, a specific product record was identified;
                     // let the LLM respond naturally (it will say "price not listed, contact us" if absent).
@@ -1483,10 +1646,55 @@ class WidgetController
                 }
             }
 
+            $deterministicPricingPlanResponse = $this->buildDeterministicPricingPlanResponse(
+                $orderedResults,
+                (string) $message,
+                $organization
+            );
+            if ($deterministicPricingPlanResponse !== null && !$hasShopifyData) {
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $deterministicPricingPlanResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location', 'city'),
+                    $sessionMetadata
+                );
+
+                $this->debugData['response_path'] = 'deterministic_pricing';
+                $this->debugData['ai_provider'] = $aiProvider ?? $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                $this->debugData['model_used'] = null;
+                $this->debugData['llm_elapsed_ms'] = 0;
+                $this->debugData['max_tokens'] = 0;
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->mergeDebugExtra([
+                    'pricing_fast_path' => true,
+                ]);
+                $this->writeDebugLog($conversation);
+
+                return response()->json([
+                    'response' => $deterministicPricingPlanResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             if ($this->isPolicySupportQuestion((string) $message)
                 && empty($shopifyContext)
                 && isset($maxResultScore)
-                && $maxResultScore <= 0.0) {
+                && $maxResultScore <= 0.0
+                && !$allowNoContextInstructionalResponse
+                && !$deferKnowledgeShortcutsToModel) {
                 $safeResponse = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
 
                 $conversation = $this->saveConversationToDatabase(
@@ -1509,6 +1717,47 @@ class WidgetController
                     'session_id' => $sessionId,
                     'timestamp' => now()->toISOString()
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            $exactFaqMatch = $this->getExactFaqMatchResponse(
+                $searchResults,
+                $organization,
+                trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message
+            );
+            $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
+            $matchedKnowledgeContext = '';
+            if ($exactFaqMatch) {
+                $matchedKnowledgeContext .= $this->buildFaqMatchKnowledgeContext('Exact FAQ candidate', $exactFaqMatch);
+            }
+            if ($branchFaqMatch && !$hasShopifyData) {
+                $matchedKnowledgeContext .= $this->buildFaqMatchKnowledgeContext('Branch FAQ candidate', $branchFaqMatch);
+            }
+            if (trim($matchedKnowledgeContext) !== '') {
+                $context .= ($context !== '' ? "\n\n" : '') . trim($matchedKnowledgeContext) . "\n";
+                $this->mergeDebugExtra([
+                    'model_evaluation_required' => true,
+                    'faq_candidate_context_added' => true,
+                    'faq_candidate_sources' => array_values(array_filter([
+                        $exactFaqMatch ? ($exactFaqMatch['match_source'] ?? 'exact') : null,
+                        $branchFaqMatch ? 'funnel_branch' : null,
+                    ])),
+                ]);
+            }
+
+            $contextRelevance = $this->applyKnowledgeContextRelevanceGate(
+                $organization,
+                trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message,
+                (string) $context,
+                $sessionId,
+                'widget_non_stream'
+            );
+            $context = $contextRelevance['context'];
+            if (($contextRelevance['use_context'] ?? true) === false && $canReusePreviousContext) {
+                $canReusePreviousContext = false;
+                $this->mergeDebugExtra([
+                    'context_reused' => false,
+                    'reason' => 'reused_context_rejected_by_relevance_gate',
+                ]);
             }
 
             // Build context with Shopify data priority
@@ -1528,6 +1777,19 @@ class WidgetController
                 $finalContext .= "Additional information from knowledge base:\n\n" . $context;
             }
 
+            if (
+                $preservePreviousAnswerFamily
+                && is_string($lastAssistantForIntent)
+                && trim($lastAssistantForIntent) !== ''
+                && (($contextRelevance['use_context'] ?? true) !== false)
+                && !$this->hasFreshTopicSignal(trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message)
+            ) {
+                $finalContext .= ($finalContext !== '' ? "\n\n" : '')
+                    . "Previous verified conversation context:\n"
+                    . $this->htmlToPlainWithLinks($lastAssistantForIntent)
+                    . "\n";
+            }
+
             $agentContext = $this->buildAgentContext($organization->id, $sessionId);
             if ($agentContext) {
                 $finalContext .= "\nAgent notes:\n" . $agentContext . "\n";
@@ -1545,13 +1807,19 @@ class WidgetController
 
             $hasVerifiedKnowledgeContext = trim((string) $context) !== '' || !empty($shopifyContext);
             $hasVerifiedContext = !empty($finalContext) || !empty($shopifyContext);
-            $exactFaqMatch = $this->getExactFaqMatchResponse(
-                $searchResults,
-                $organization,
-                trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message
-            );
+            if (
+                $exactFaqMatch
+                && ($contextRelevance['use_context'] ?? true) === false
+                && (($exactFaqMatch['match_source'] ?? '') === 'semantic')
+            ) {
+                $this->mergeDebugExtra([
+                    'exact_faq_shortcut_blocked' => true,
+                    'exact_faq_block_reason' => 'context_relevance_rejected_semantic_match',
+                ]);
+                $exactFaqMatch = null;
+            }
 
-            if ($this->isPolicySupportQuestion((string) $message) && !$hasVerifiedKnowledgeContext) {
+            if (!$deferKnowledgeShortcutsToModel && $this->isPolicySupportQuestion((string) $message) && !$hasVerifiedKnowledgeContext && !$allowNoContextInstructionalResponse) {
                 $safeResponse = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
 
                 $conversation = $this->saveConversationToDatabase(
@@ -1576,7 +1844,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if ($this->shouldUseAffirmativeNoContextFallback($isAffirmativeContinuation, $context, $shopifyContext, null)) {
+            if (!$deferKnowledgeShortcutsToModel && $this->shouldUseAffirmativeNoContextFallback($isAffirmativeContinuation, $context, $shopifyContext, null)) {
                 $safeResponse = $this->buildAffirmativeNoContextResponse($organization);
 
                 $conversation = $this->saveConversationToDatabase(
@@ -1628,7 +1896,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if ($verifiedOnly && !$hasVerifiedContext && !$allowNoContextInstructionalResponse && !$exactFaqMatch) {
+            if (!$deferKnowledgeShortcutsToModel && $verifiedOnly && !$hasVerifiedContext && !$allowNoContextInstructionalResponse && !$exactFaqMatch) {
                 $safeResponse = $this->buildVerifiedOnlyResponse($organization);
                 return response()->json([
                     'response' => $safeResponse,
@@ -1637,7 +1905,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if ($this->isContactQuery((string) $message)) {
+            if (!$deferKnowledgeShortcutsToModel && $this->isContactQuery((string) $message) && !$preservePreviousAnswerFamily) {
                 $contactResponse = $this->buildDeterministicContactQueryResponse($organization, (string) $message, $searchResults ?? null);
 
                 $conversation = $this->saveConversationToDatabase(
@@ -1670,8 +1938,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
-            if ($branchFaqMatch && !$hasShopifyData) {
+            if (!$deferKnowledgeShortcutsToModel && $branchFaqMatch && !$hasShopifyData) {
                 Log::info('Widget funnel branch FAQ match response', [
                     'org_id' => $organization->id,
                     'session_id' => $sessionId,
@@ -1769,7 +2036,77 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if ($exactFaqMatch && !$hasShopifyData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
+            if (!$deferKnowledgeShortcutsToModel && $reusePreviousVerifiedAnswer && is_string($lastAssistantForIntent) && trim($lastAssistantForIntent) !== '') {
+                $previousAnswerReuseDecision = $this->canReusePreviousAssistantAnswerForCurrentQuestion(
+                    trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message,
+                    $lastAssistantForIntent,
+                    is_array($previousContextPayloads) ? $previousContextPayloads : [],
+                    $contextRelevance ?? null,
+                    $isAffirmativeFollowUp,
+                    $isReferentialFollowUp,
+                    $isEllipticalFollowUp,
+                    $followUpRetrievalPlan
+                );
+
+                if (!$previousAnswerReuseDecision['can_reuse']) {
+                    $reusePreviousVerifiedAnswer = false;
+                    $this->mergeDebugExtra([
+                        'follow_up_answer_reused' => false,
+                        'previous_answer_reuse_blocked' => true,
+                        'previous_answer_reuse_block_reason' => $previousAnswerReuseDecision['reason'],
+                    ]);
+                }
+            }
+
+            if ($reusePreviousVerifiedAnswer && is_string($lastAssistantForIntent) && trim($lastAssistantForIntent) !== '') {
+                $preservedResponse = trim($lastAssistantForIntent);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $preservedResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location', 'city'),
+                    $sessionMetadata
+                );
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $preservedResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                $this->debugData['response_path'] = 'follow_up_preserved_answer';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->mergeDebugExtra([
+                    'context_reused' => true,
+                    'follow_up_answer_reused' => true,
+                ]);
+                $this->writeDebugLog($conversation);
+
+                return response()->json([
+                    'response' => $preservedResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString(),
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
+            if (!$deferKnowledgeShortcutsToModel && $exactFaqMatch && !$skipExactFaqShortcut && !$hasShopifyData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                 Log::info('Widget exact FAQ match response', [
                     'org_id' => $organization->id,
                     'session_id' => $sessionId,
@@ -1973,7 +2310,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if (($routeAnalysis['policy_only'] ?? false) && !$hasShopifyData) {
+            if (!$deferKnowledgeShortcutsToModel && ($routeAnalysis['policy_only'] ?? false) && !$hasShopifyData && !$allowNoContextInstructionalResponse) {
                 $safeResponse = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
 
                 $conversation = $this->saveConversationToDatabase(
@@ -1998,7 +2335,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if ($this->shouldClarifyAffirmative($message, $organization, $sessionId)) {
+            if (!$deferKnowledgeShortcutsToModel && $this->shouldClarifyAffirmative($message, $organization, $sessionId)) {
                 $shortResponse = $this->buildAffirmativeClarifyResponse();
 
                 $conversation = $this->saveConversationToDatabase(
@@ -2060,7 +2397,7 @@ class WidgetController
             }
 
             $lowConfidenceResponse = $this->buildLowConfidenceClarificationResponse($message, $searchResults);
-            if ($lowConfidenceResponse !== null && empty($shopifyContext) && !$this->isContactQuery($message)) {
+            if (!$deferKnowledgeShortcutsToModel && $lowConfidenceResponse !== null && empty($shopifyContext) && !$this->isContactQuery($message)) {
                 $conversation = $this->saveConversationToDatabase(
                     $organization,
                     $sessionId,
@@ -2113,7 +2450,8 @@ class WidgetController
             if ($this->isVeryShortQuery($message)
                 && trim((string) $context) === ''
                 && empty($shopifyContext)
-                && !$this->isContactQuery($message)) {
+                && !$this->isContactQuery($message)
+                && !$deferKnowledgeShortcutsToModel) {
                 $shortResponse = $this->isPromoQuery($message)
                     ? $this->buildPromoUnavailableResponse()
                     : $this->buildClarifyResponse();
@@ -2255,8 +2593,10 @@ class WidgetController
                 // Add low-relevance warning if context scores are poor (query is off-topic)
                 $lowRelevanceWarning = '';
                 if (isset($maxResultScore) && $maxResultScore < 0.62 && $context !== '') {
-                    // Very low score: context is likely a false positive — clear it entirely to prevent hallucination
-                    if ($maxResultScore < 0.52) {
+                    if ($aiProvider === 'openai') {
+                        $lowRelevanceWarning = "[LOW-CONFIDENCE CANDIDATE CONTEXT: Retrieval score is " . round($maxResultScore, 2) . ". Use this context only if it directly answers the user's question after your private relevance check. If it appears unrelated, ignore it and say we don't have enough information, then provide official contact details.]\n";
+                    } elseif ($maxResultScore < 0.52) {
+                        // Very low score: context is likely a false positive — clear it entirely to prevent hallucination
                         $context = '';
                         $lowRelevanceWarning = '';
                     } else {
@@ -2283,7 +2623,8 @@ class WidgetController
                             && $maxResultScore <= $this->getLowConfidenceNoAnswerThreshold()))
                     && !$this->isContactQuery($message)
                     && empty($shopifyContext)
-                    && !$allowNoContextInstructionalResponse) {
+                    && !$allowNoContextInstructionalResponse
+                    && !$deferKnowledgeShortcutsToModel) {
                     $clarificationResponse = $this->buildLowConfidenceContactFallbackResponse(
                         $organization,
                         (string) $message,
@@ -2368,6 +2709,7 @@ class WidgetController
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
                 $systemPrompt .= "CRITICAL: NEVER invent or assume URLs, phone numbers, email addresses, prices, or factual details not explicitly stated in this system prompt or CURRENT CONTEXT. ";
                 $systemPrompt .= "STRICT KNOWLEDGE BASE POLICY: Only confirm that a test, service, product, or feature is offered if it is EXPLICITLY listed BY NAME in CURRENT CONTEXT. NEVER infer that because a related or parent service is available (e.g., MRI), a specific variant or sub-procedure (e.g., MR Enterography, MR Arthrography) is also available. If the exact item the user asked about is NOT present by name in CURRENT CONTEXT, respond: 'I don't have specific information about [item name] in our knowledge base. For further details, please contact us at [contact info].' Do NOT speculate, infer, or expand beyond what is explicitly stated. ";
+                $systemPrompt .= "NO-CONTEXT POLICY GUIDANCE: If the user asks about shipping, delivery, returns, refunds, exchanges, cancellation, warranty, or support and CURRENT CONTEXT is empty or not relevant, give one short sentence of general guidance first, clearly framed as general guidance rather than our verified policy, then explain that our specific verified details are not available here and include official contact details. Do NOT give exact timelines, fees, approval outcomes, or guarantees unless they are explicitly present in CURRENT CONTEXT. ";
                 $systemPrompt .= "Never expose internal metadata fields (for example: keywords, semantic scores, candidate scores, internal limits) unless the user explicitly asks for those exact fields and they are customer-facing. ";
                 $systemPrompt .= "If CURRENT CONTEXT includes subscription/pricing details, NEVER claim that pricing information is unavailable or not provided. Respond only with the available plans and values from CURRENT CONTEXT. ";
                 $systemPrompt .= $this->buildContextRelevanceInstruction($organization) . ' ';
@@ -2416,21 +2758,22 @@ class WidgetController
                 // Order summaries with tracking numbers, URLs, and multiple fields need more room.
                 $maxTokens = 600;
             } elseif ($isPricingLikeQuery) {
-                $maxTokens = 620;
+                $maxTokens = 420;
             } elseif (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
                 || strlen($message) > 120
                 || strlen($finalContext) > 2000) {
                 $maxTokens = 420;
             }
             $localOptions = ['num_predict' => $maxTokens, 'temperature' => 0.3];
-            $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
             if ($this->shouldUseOpenAiFallback($message, $organization, $responseLanguage)) {
                 $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
-                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id, $sessionId);
+                $openAiOptions = $this->buildOpenAiWidgetOptions($model, $maxTokens, true);
+                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id, $sessionId, $openAiOptions);
             } elseif ($aiProvider === 'openai') {
                 // Use OpenAI with organization-specific or global model
                 $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
-                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id, $sessionId);
+                $openAiOptions = $this->buildOpenAiWidgetOptions($model, $maxTokens, true);
+                $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id, $sessionId, $openAiOptions);
             } else {
                 // Use local LLM with organization-specific or global model
                 $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
@@ -2504,6 +2847,60 @@ class WidgetController
                     }
                 }
             }
+
+            if ($aiProvider !== 'openai'
+                && $this->shouldDisableModelThinking($model)
+                && $this->looksLikeVisibleReasoningLeak((string) $responseText)
+            ) {
+                Log::warning('Visible reasoning leaked from widget reasoning model; retrying with fallback model', [
+                    'org_id' => $orgId,
+                    'session_id' => $sessionId,
+                    'model' => $model,
+                ]);
+
+                $fallbackModel = 'llama3.2:3b';
+                $fallbackResponse = $this->aiAgentService->llmChat($messages, $fallbackModel, null, $organization->id, $localOptions);
+
+                if ($fallbackResponse && isset($fallbackResponse['message']['content'])) {
+                    $model = $fallbackModel;
+                    $rawResponseText = $fallbackResponse['message']['content'];
+                    $responseText = $rawResponseText;
+                    $structuredFollowUpState = null;
+                    $oneCallEnvelopeUsed = false;
+                    $oneCallEnvelopeParseOk = false;
+                    $oneCallEnvelopeRetryAttempted = false;
+                    $oneCallEnvelopeRetrySucceeded = false;
+
+                    if (!$hasShopifyData) {
+                        $fallbackEnvelope = $this->extractOneCallEnvelope((string) $rawResponseText);
+                        if (is_array($fallbackEnvelope)) {
+                            $oneCallEnvelopeParseOk = true;
+                            $responseText = (string) ($fallbackEnvelope['response'] ?? $responseText);
+                            $structuredFollowUpState = $fallbackEnvelope['structured_state'] ?? null;
+                            $oneCallEnvelopeUsed = is_array($structuredFollowUpState) && !empty($structuredFollowUpState);
+                        } else {
+                            $oneCallEnvelopeRetryAttempted = true;
+                            $retryFallbackEnvelope = $this->retryStrictEnvelopeExtraction(
+                                (string) $rawResponseText,
+                                (string) $message,
+                                $organization,
+                                (int) $organization->id,
+                                $aiProvider
+                            );
+                            if (is_array($retryFallbackEnvelope)) {
+                                $oneCallEnvelopeRetrySucceeded = true;
+                                $oneCallEnvelopeParseOk = true;
+                                $responseText = (string) ($retryFallbackEnvelope['response'] ?? $responseText);
+                                $structuredFollowUpState = $retryFallbackEnvelope['structured_state'] ?? null;
+                                $oneCallEnvelopeUsed = is_array($structuredFollowUpState) && !empty($structuredFollowUpState);
+                            }
+                        }
+                    }
+                } else {
+                    $responseText = $this->stripReasoningBlocks((string) $responseText);
+                }
+            }
+
             $llmElapsedMs = round((microtime(true) - $llmStartedAt) * 1000, 2);
 
             if (!$responseText) {
@@ -2573,7 +2970,19 @@ class WidgetController
                 ['fulfillment_questions', 'policy_questions', 'schedule_questions']
             )) && trim((string) $context) === '';
 
-            if (($routeAnalysis['policy_only'] ?? false) && empty($hasShopifyData) && trim((string) $context) === '') {
+            $isInheritedTopicFollowUpTurn = $isRelatedFollowUp && (
+                $isAffirmativeContinuation
+                || $isReferentialFollowUp
+                || $isEllipticalFollowUp
+                || $isContextualShortFollowUp
+                || $hasPendingFollowUpState
+            );
+
+            if ($isInheritedTopicFollowUpTurn) {
+                $suppressGenericFollowUp = true;
+            }
+
+            if (!$deferKnowledgeShortcutsToModel && ($routeAnalysis['policy_only'] ?? false) && empty($hasShopifyData) && trim((string) $context) === '' && !$allowNoContextInstructionalResponse) {
                 $responseText = $this->buildPolicySupportUnavailableResponse($organization, (string) $message);
                 $suppressGenericFollowUp = true;
             }
@@ -2610,6 +3019,10 @@ class WidgetController
             }
 
             $responseText = $this->sanitizeContradictoryAvailabilityClaims($responseText);
+
+            if ($isInheritedTopicFollowUpTurn) {
+                $responseText = $this->stripTrailingGenericFollowUpPrompt($responseText);
+            }
 
             // Detailed logging for debugging
             Log::info('Widget AI Response Debug', [
@@ -2811,13 +3224,7 @@ class WidgetController
             return response()->json(['error' => 'Widget request origin is not allowed for this organization'], 403);
         }
 
-        // Check token limits
-        $tokenLimitCheck = $this->checkTokenLimits($organization);
-        if ($tokenLimitCheck !== true) {
-            return response()->json($tokenLimitCheck, 429);
-        }
-
-        $message = $request->input('message');
+        $message = trim((string) $request->input('message', ''));
         $sessionId = $this->resolveWidgetSessionId((string) $request->input('session_id', ''), true);
         $userInfo = $request->input('user_info', []);
         $visitorInfo = $request->input('visitor_info', []);
@@ -2834,9 +3241,22 @@ class WidgetController
         $approvedSensitive = $settings['approved_sensitive_categories'] ?? [];
         $responseTone = $settings['response_tone'] ?? 'friendly';
         $responseLanguage = $settings['response_language'] ?? 'auto';
+        $deferKnowledgeShortcutsToModel = true;
         
         if (!$message) {
             return response()->json(['error' => 'Message is required'], 400);
+        }
+
+        $spamGuard = app(WidgetSpamGuard::class)->inspect($organization, $request, $sessionId, $message);
+        if ($spamGuard !== null) {
+            return response()->json($spamGuard['body'], $spamGuard['status'])
+                ->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
+        // Check token limits after cheap spam checks, before expensive AI work.
+        $tokenLimitCheck = $this->checkTokenLimits($organization);
+        if ($tokenLimitCheck !== true) {
+            return response()->json($tokenLimitCheck, 429);
         }
 
         $inferenceInput = $this->prepareMultilingualInferenceInput(
@@ -3131,6 +3551,7 @@ class WidgetController
                 // Build context (simplified version - you can reuse logic from chat())
                 $aiService = app(AiAgentService::class);
                 $actionService = app(\App\Services\ActionService::class);
+                $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
 
                 $lastAssistantMessage = $this->getLastAssistantMessage($organization, $sessionId);
                 $lastAssistantAskedQuestion = is_string($lastAssistantMessage)
@@ -3167,8 +3588,12 @@ class WidgetController
                     is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null
                 );
 
+                $cachedChatMessages = $isRelatedFollowUp ? $this->getCachedChatMessages((string) $sessionId) : [];
+                $followUpRetrievalPlan = null;
+                $skipFollowUpRetrieval = false;
+
                 $searchQuery = $messageForInference;
-                if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $shouldUsePendingStateAnchor) && !$canReusePreviousContext) {
+                if ($isRelatedFollowUp) {
                     $searchQuery = $this->buildRelatedFollowUpSearchQuery(
                         (string) $messageForInference,
                         is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null,
@@ -3177,31 +3602,42 @@ class WidgetController
                         $isAffirmativeFollowUp,
                         $isReferentialFollowUp
                     );
-                } elseif ($isAffirmativeContinuation) {
-                    if ($isAffirmativeFollowUp && is_array($pendingFollowUpState) && !empty($pendingFollowUpState)) {
-                        $searchQuery = $this->followUpStateService->buildPinnedFollowUpQuery($pendingFollowUpState, (string) $message);
-                        if ($this->isMinimalAcknowledgementMessage((string) $message)) {
-                            if ($lastUserMessage !== '') {
-                                $searchQuery = trim($lastUserMessage . ' ' . $searchQuery);
-                            }
-                        }
+
+                    if ($aiProvider === 'openai') {
+                        $skipFollowUpRetrieval = !empty($previousContextPayloads)
+                            && ($isAffirmativeFollowUp || $isContextualShortFollowUp || $shouldUsePendingStateAnchor);
+                        $followUpRetrievalPlan = [
+                            'needs_retrieval' => !$skipFollowUpRetrieval,
+                            'rewritten_query' => '',
+                            'reasoning' => $skipFollowUpRetrieval
+                                ? 'OpenAI provider reused prior verified context without local follow-up planning.'
+                                : 'OpenAI provider skipped local follow-up planning; deterministic combined query will be used.',
+                        ];
                     } else {
-                        $queryParts = [];
+                        $followUpRetrievalPlan = $this->planFollowUpRetrievalWithContext(
+                            $organization,
+                            (string) $sessionId,
+                            is_array($cachedChatMessages) ? $cachedChatMessages : [],
+                            $lastUserMessage,
+                            is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
+                            (string) $messageForInference,
+                            (string) $searchQuery
+                        );
+                        $skipFollowUpRetrieval = (($followUpRetrievalPlan['needs_retrieval'] ?? true) === false);
+                    }
 
-                        if ($lastUserMessage !== '') {
-                            $queryParts[] = $lastUserMessage;
-                        }
+                    if ($skipFollowUpRetrieval) {
+                        $canReusePreviousContext = !empty($previousContextPayloads);
+                    } else {
+                        $canReusePreviousContext = false;
+                    }
 
-                        if (is_string($lastAssistantMessage) && trim($lastAssistantMessage) !== '') {
-                            $queryParts[] = trim($lastAssistantMessage);
-                        }
-
-                        $queryParts[] = $message;
-                        $searchQuery = trim(implode(' ', array_filter($queryParts)));
+                    if (!empty($followUpRetrievalPlan['rewritten_query'])) {
+                        $searchQuery = (string) $followUpRetrievalPlan['rewritten_query'];
                     }
                 }
 
-                if ($isRelatedFollowUp && ($isContextualShortFollowUp || $isReferentialFollowUp || $isEllipticalFollowUp || $isAffirmativeFollowUp || $isAffirmativeContinuation) && !$canReusePreviousContext) {
+                if ($aiProvider !== 'openai' && $isRelatedFollowUp && !$canReusePreviousContext && !$skipFollowUpRetrieval && $followUpRetrievalPlan === null) {
                     $searchQuery = $this->rewriteFollowUpSearchQueryWithContext(
                         $organization,
                         (string) $sessionId,
@@ -3230,7 +3666,9 @@ class WidgetController
                         ],
                     ];
                 } else {
-                    $actionResult = $actionService->processQuery($actionQuery, $organization->id);
+                    $actionResult = $actionService->processQuery($actionQuery, $organization->id, [
+                        'skip_semantic_action_matching' => $aiProvider === 'openai',
+                    ]);
                 }
                 $intentResult = $actionResult['intent'] ?? null;
 
@@ -3295,7 +3733,7 @@ class WidgetController
                             'query' => $searchQuery,
                             'payload_count' => count($resultsForPayloadCache),
                         ]);
-                    } else {
+                    } elseif (!$skipFollowUpRetrieval) {
                         $anchoredEntityResults = $this->resolveEntityAnchoredResults(
                             $organization,
                             (string) $searchQuery
@@ -3309,7 +3747,10 @@ class WidgetController
                                 'query' => $searchQuery,
                             ]);
                         } else {
-                            $searchResults = $aiService->enhancedSearch($organization->slug, $searchQuery, 5, ['disable_rewrite' => true]);
+                            $searchResults = $aiService->enhancedSearch($organization->slug, $searchQuery, 5, [
+                                'disable_rewrite' => true,
+                                'skip_expansion' => $aiProvider === 'openai',
+                            ]);
                         }
 
                         if ($searchResults && isset($searchResults['results'])) {
@@ -3338,6 +3779,14 @@ class WidgetController
                                 }
                             }
                         }
+                    } else {
+                        Log::info('Skipping semantic search based on follow-up retrieval planner (stream)', [
+                            'org_id' => $organization->id,
+                            'org_slug' => $organization->slug,
+                            'session_id' => $sessionId,
+                            'query' => $searchQuery,
+                            'planner' => $followUpRetrievalPlan,
+                        ]);
                     }
 
                     if (!empty($resultsForPayloadCache)) {
@@ -3345,7 +3794,9 @@ class WidgetController
                         foreach ($resultsForPayloadCache as $result) {
                             $payload = $result['payload'] ?? [];
 
-                            if (isset($payload['title'])) $context .= "Title: " . $payload['title'] . "\n";
+                            if (isset($payload['title']) && $this->shouldExposePayloadTitleInContext($payload)) {
+                                $context .= "Title: " . $payload['title'] . "\n";
+                            }
                             if (isset($payload['content'])) $context .= "Content: " . $this->stripSynonymLines((string) $payload['content']) . "\n";
                             
                             // Extract follow-up question if present
@@ -3461,7 +3912,7 @@ class WidgetController
                     (string) $searchQuery,
                     $organization
                 );
-                if ($deterministicCatalogResponse !== null) {
+                if (!$deferKnowledgeShortcutsToModel && $deterministicCatalogResponse !== null) {
                     Log::info('Using deterministic catalog response (stream)', [
                         'org_id' => $organization->id,
                         'org_slug' => $organization->slug,
@@ -3509,7 +3960,7 @@ class WidgetController
                     $pricingContext = $this->buildPricingContext($organization);
                     if ($pricingContext !== '') {
                         $context .= "\n\n" . $pricingContext;
-                    } elseif (trim($directCatalogContext) === '' && $this->shouldUsePricingFallback($context, null, $message)) {
+                    } elseif (!$deferKnowledgeShortcutsToModel && trim($directCatalogContext) === '' && $this->shouldUsePricingFallback($context, null, $message)) {
                         // Only use the generic pricing fallback when NO specific entity catalog match was found.
                         // If $directCatalogContext is non-empty, a specific product record was identified;
                         // let the LLM respond naturally (it will say "price not listed, contact us" if absent).
@@ -3574,7 +4025,7 @@ class WidgetController
                     $context .= "\nAgent notes:\n" . $agentContext . "\n";
                 }
 
-                if ($this->shouldUseAffirmativeNoContextFallback($isAffirmativeContinuation, $context, null, $liveData)) {
+                if (!$deferKnowledgeShortcutsToModel && $this->shouldUseAffirmativeNoContextFallback($isAffirmativeContinuation, $context, null, $liveData)) {
                     $safeResponse = $this->buildAffirmativeNoContextResponse($organization);
                     echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
@@ -3629,8 +4080,55 @@ class WidgetController
                     $organization,
                     trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message
                 );
+                $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
+                $streamMatchedKnowledgeContext = '';
+                if ($exactFaqMatch) {
+                    $streamMatchedKnowledgeContext .= $this->buildFaqMatchKnowledgeContext('Exact FAQ candidate', $exactFaqMatch);
+                }
+                if ($branchFaqMatch && !$liveData) {
+                    $streamMatchedKnowledgeContext .= $this->buildFaqMatchKnowledgeContext('Branch FAQ candidate', $branchFaqMatch);
+                }
+                if (trim($streamMatchedKnowledgeContext) !== '') {
+                    $context .= ($context !== '' ? "\n\n" : '') . trim($streamMatchedKnowledgeContext) . "\n";
+                    $this->mergeDebugExtra([
+                        'model_evaluation_required' => true,
+                        'faq_candidate_context_added' => true,
+                        'faq_candidate_sources' => array_values(array_filter([
+                            $exactFaqMatch ? ($exactFaqMatch['match_source'] ?? 'exact') : null,
+                            $branchFaqMatch ? 'funnel_branch' : null,
+                        ])),
+                    ]);
+                }
 
-                if ($verifiedOnly && !$liveData && trim($context) === '' && !$allowNoContextInstructionalResponse && !$exactFaqMatch) {
+                $streamContextRelevance = $this->applyKnowledgeContextRelevanceGate(
+                    $organization,
+                    trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message,
+                    (string) $context,
+                    $sessionId,
+                    'widget_stream'
+                );
+                $context = $streamContextRelevance['context'];
+                if (($streamContextRelevance['use_context'] ?? true) === false && $canReusePreviousContext) {
+                    $canReusePreviousContext = false;
+                    $this->mergeDebugExtra([
+                        'context_reused' => false,
+                        'reason' => 'reused_context_rejected_by_relevance_gate',
+                    ]);
+                }
+
+                if (
+                    $exactFaqMatch
+                    && ($streamContextRelevance['use_context'] ?? true) === false
+                    && (($exactFaqMatch['match_source'] ?? '') === 'semantic')
+                ) {
+                    $this->mergeDebugExtra([
+                        'exact_faq_shortcut_blocked' => true,
+                        'exact_faq_block_reason' => 'context_relevance_rejected_semantic_match',
+                    ]);
+                    $exactFaqMatch = null;
+                }
+
+                if (!$deferKnowledgeShortcutsToModel && $verifiedOnly && !$liveData && trim($context) === '' && !$allowNoContextInstructionalResponse && !$exactFaqMatch) {
                     $safeResponse = $this->buildVerifiedOnlyResponse($organization);
                     echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
@@ -3680,8 +4178,7 @@ class WidgetController
                     return;
                 }
 
-                $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
-                if ($branchFaqMatch && !$liveData) {
+                if (!$deferKnowledgeShortcutsToModel && $branchFaqMatch && !$liveData) {
                     $directResponse = $branchFaqMatch['response'];
                     $faqFollowUp = $this->faqFollowUpService->getFollowUpText(
                         $organization,
@@ -3763,7 +4260,7 @@ class WidgetController
                     return;
                 }
 
-                if ($exactFaqMatch && !$liveData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
+                if (!$deferKnowledgeShortcutsToModel && $exactFaqMatch && !$liveData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
                     $directResponse = $exactFaqMatch['response'];
                     $streamAssistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
                     // Always pass through LLM to polish the response and track token usage.
@@ -3940,7 +4437,7 @@ class WidgetController
                     return;
                 }
 
-                if ($this->shouldClarifyAffirmative($message, $organization, $sessionId)) {
+                if (!$deferKnowledgeShortcutsToModel && $this->shouldClarifyAffirmative($message, $organization, $sessionId)) {
                     $shortResponse = $this->buildAffirmativeClarifyResponse();
 
                     echo "data: " . json_encode(['content' => $shortResponse, 'done' => true]) . "\n\n";
@@ -3992,7 +4489,7 @@ class WidgetController
                 }
 
                 $lowConfidenceResponse = $this->buildLowConfidenceClarificationResponse($message, $searchResults);
-                if ($lowConfidenceResponse !== null && !$liveData && !$this->isContactQuery($message)) {
+                if (!$deferKnowledgeShortcutsToModel && $lowConfidenceResponse !== null && !$liveData && !$this->isContactQuery($message)) {
                     echo "data: " . json_encode(['content' => $lowConfidenceResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
 
@@ -4044,7 +4541,8 @@ class WidgetController
                 if ($this->isVeryShortQuery($message)
                     && trim((string) $context) === ''
                     && !$liveData
-                    && !$this->isContactQuery($message)) {
+                    && !$this->isContactQuery($message)
+                    && !$deferKnowledgeShortcutsToModel) {
                     $shortResponse = $this->isPromoQuery($message)
                         ? $this->buildPromoUnavailableResponse()
                         : $this->buildClarifyResponse();
@@ -4185,7 +4683,17 @@ class WidgetController
                 if ($promotionContext) {
                     $systemPrompt .= "\n" . $promotionContext;
                 }
-                $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                if (!isset($streamContextRelevance) || !is_array($streamContextRelevance)) {
+                    $streamContextRelevance = $this->applyKnowledgeContextRelevanceGate(
+                        $organization,
+                        trim((string) $messageForInference) !== '' ? (string) $messageForInference : (string) $message,
+                        (string) $context,
+                        $sessionId,
+                        'widget_stream'
+                    );
+                    $context = $streamContextRelevance['context'];
+                }
+
                 $contextForPrompt = $aiProvider === 'openai'
                     ? $this->compactContextForOpenAi((string) $context)
                     : (string) $context;
@@ -4212,7 +4720,9 @@ class WidgetController
 
                 $streamLowRelevanceWarning = '';
                 if ($streamMaxResultScore > 0 && $streamMaxResultScore < 0.62 && $contextForPrompt !== '') {
-                    if ($streamMaxResultScore < 0.52) {
+                    if ($aiProvider === 'openai') {
+                        $streamLowRelevanceWarning = "[LOW-CONFIDENCE CANDIDATE CONTEXT: Retrieval score is " . round($streamMaxResultScore, 2) . ". Use this context only if it directly answers the user's question after your private relevance check. If it appears unrelated, ignore it and say we don't have enough information, then provide official contact details.]\n";
+                    } elseif ($streamMaxResultScore < 0.52) {
                         // Very low score — clear context to prevent hallucination
                         $contextForPrompt = '';
                     } else {
@@ -4230,7 +4740,8 @@ class WidgetController
                         || ($streamMaxResultScore > 0.0 && $streamMaxResultScore <= $this->getLowConfidenceNoAnswerThreshold()))
                     && !$liveData
                     && !$this->isContactQuery($message)
-                    && !$allowNoContextInstructionalResponse) {
+                    && !$allowNoContextInstructionalResponse
+                    && !$deferKnowledgeShortcutsToModel) {
                     $clarificationResponse = $this->buildLowConfidenceContactFallbackResponse(
                         $organization,
                         (string) $message,
@@ -4317,6 +4828,7 @@ class WidgetController
 
                 $systemPrompt .= "\nCRITICAL: NEVER invent or assume URLs, phone numbers, email addresses, prices, or factual details not explicitly stated in this system prompt or CURRENT CONTEXT.";
                 $systemPrompt .= "\nSTRICT KNOWLEDGE BASE POLICY: Only confirm that a test, service, product, or feature is offered if it is EXPLICITLY listed BY NAME in CURRENT CONTEXT. NEVER infer that because a related or parent service is available (e.g., MRI), a specific variant or sub-procedure (e.g., MR Enterography) is also available. If the exact item the user asked about is NOT present by name in CURRENT CONTEXT, respond: 'I don't have specific information about [item name] in our knowledge base. For further details, please contact us at [contact info].' Do NOT speculate, infer, or expand beyond what is explicitly stated.";
+                $systemPrompt .= "\nNO-CONTEXT POLICY GUIDANCE: If the user asks about shipping, delivery, returns, refunds, exchanges, cancellation, warranty, or support and CURRENT CONTEXT is empty or not relevant, give one short sentence of general guidance first, clearly framed as general guidance rather than our verified policy, then explain that our specific verified details are not available here and include official contact details. Do NOT give exact timelines, fees, approval outcomes, or guarantees unless they are explicitly present in CURRENT CONTEXT.";
                 $systemPrompt .= "\nIf CURRENT CONTEXT includes subscription/pricing details, NEVER claim that pricing information is unavailable or not provided. Respond only with the available plans and values from CURRENT CONTEXT.";
                 $systemPrompt .= "\n" . $this->buildContextRelevanceInstruction($organization);
                 if ($languagePromptInstruction !== '') {
@@ -4348,13 +4860,16 @@ class WidgetController
                     $maxTokens = max(80, min(300, $affirmativeMaxTokens));
                 }
                 if ($isPricingLikeStreamQuery) {
-                    $maxTokens = max($maxTokens, 620);
+                    $maxTokens = max($maxTokens, 420);
                 } elseif (preg_match('/\b(detail|explain|list|steps|guide|compare|pricing|plans|features|benefits|requirements|policy|refund|return|shipping|warranty|guarantee)\b/i', $message)
                     || strlen($message) > 120
                     || strlen($context) > 2000) {
-                    $maxTokens = 700;
+                    $maxTokens = 520;
                 }
 
+                $model = $useOpenAiFallback
+                    ? $this->aiAgentService->getOpenAiModelForOrganization($organization->id)
+                    : $this->aiAgentService->getLlamaModelForOrganization($organization->id);
                 $isReasoningModel = $this->shouldDisableModelThinking($model);
                 $deferStreamUntilPostProcess = $isReasoningModel || $this->shouldDeferStreamUntilPostProcess(
                     (string) $message,
@@ -4375,8 +4890,8 @@ class WidgetController
                 $localNumPredictCap = $isDetailedQuery ? $maxTokens : 56;
 
                 if ($useOpenAiFallback) {
-                    $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
-                    $aiResponse = $this->aiAgentService->openAiChat($chatMessages, $model, null, $organization->id, $sessionId);
+                    $openAiOptions = $this->buildOpenAiWidgetOptions($model, $maxTokens, false);
+                    $aiResponse = $this->aiAgentService->openAiChat($chatMessages, $model, null, $organization->id, $sessionId, $openAiOptions);
                     $fullResponse = (string) ($aiResponse['message']['content'] ?? '');
                     $streamUsage = is_array($aiResponse['usage'] ?? null) ? $aiResponse['usage'] : null;
 
@@ -4404,7 +4919,6 @@ class WidgetController
                     // Stream from FastAPI with Vast.ai GPU
                     $responseStartTime = microtime(true);
                     $fastApiUrl = config('services.ai_agent.url');
-                    $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
                     Log::info('Starting LLM response generation', ['model' => $model, 'use_vastai' => true]);
                     $fullResponse = '';
                     $streamUsage = null;
@@ -5299,6 +5813,14 @@ class WidgetController
     private function sendEscalationNotification(ChatConversation $conversation, string $reason): bool
     {
         try {
+            if ($this->shouldSuppressWidgetEmailNotifications($conversation->conversation_id ?? null)) {
+                Log::info('Escalation email suppressed for widget test session', [
+                    'conversation_id' => $conversation->conversation_id,
+                    'reason' => $reason,
+                ]);
+                return false;
+            }
+
             $organization = $conversation->organization ?? Organization::find($conversation->organization_id);
             if (!$organization) {
                 return false;
@@ -5573,7 +6095,7 @@ class WidgetController
 
         // Strong contact intent phrases. Keep these specific so product names such as
         // "No Contact Thermometer" do not trigger the deterministic contact shortcut.
-        if (preg_match('/\b(contact\s+(?:us|you|support|team|details?|info|information)|reach\s+(?:us|you)|email(?:\s+address)?|phone(?:\s+number)?|call(?:\s+us|\s+you)?|whatsapp|address|customer care|helpline)\b/i', $message)) {
+        if (preg_match('/\b(contact\s+(?:us|you|support|team|details?|info|information)|reach\s+(?:us|you)|email(?:\s+address)?|(?:phone|mobile|telephone)\s+(?:number|no\.?|contact|details?|info|information)|call(?:\s+(?:us|you|back|number))?|whatsapp|address|customer care|helpline)\b/i', $message)) {
             return true;
         }
 
@@ -5657,6 +6179,7 @@ class WidgetController
     private function getExactFaqMatchResponse(?array $searchResults, Organization $organization, string $message = ''): ?array
     {
         $fallbackMatch = $this->getKeywordFaqMatchResponse($organization, $message);
+        $hasCareerIntent = $this->queryHasCareerIntent($message, $organization);
 
         if (!$searchResults || empty($searchResults['results']) || !is_array($searchResults['results'])) {
             return $fallbackMatch;
@@ -5739,8 +6262,8 @@ class WidgetController
             )
         );
         $semanticLooksCareerSpecific = $semanticCareerText !== ''
-            && (bool) preg_match('/\b(job|career|vacancy|opening|recruitment|hiring|employment|apply|teacher|staff|resume|cv|biodata)\b/u', $semanticCareerText);
-        $fallbackHasCareerIntent = (bool) ($fallbackMatch['match_debug']['has_career_intent'] ?? false);
+            && (bool) preg_match('/\b(job|jobs|career|careers|vacancy|vacancies|opening|openings|recruitment|hiring|employment|resume|cv|biodata|hr)\b/u', $semanticCareerText);
+        $fallbackHasCareerIntent = $hasCareerIntent || (bool) ($fallbackMatch['match_debug']['has_career_intent'] ?? false);
 
         if ($fallbackMatch && $fallbackHasCareerIntent && !$semanticLooksCareerSpecific) {
             $fallbackMatch['semantic_threshold'] = $threshold;
@@ -5748,6 +6271,10 @@ class WidgetController
             $fallbackMatch['semantic_threshold_passed'] = true;
 
             return $fallbackMatch;
+        }
+
+        if ($fallbackHasCareerIntent && !$semanticLooksCareerSpecific) {
+            return null;
         }
 
         return [
@@ -5785,12 +6312,8 @@ class WidgetController
         $organizationTerms = $this->buildOrganizationKeywordIgnoreTerms($organization);
         $specificQueryTerms = array_values(array_unique(array_diff($queryTerms, $genericQueryTerms, $organizationTerms)));
 
-        $careerTerms = [
-            'career', 'careers', 'job', 'jobs', 'vacancy', 'vacancies', 'opening', 'openings',
-            'post', 'posts', 'recruitment', 'hiring', 'naukri', 'chakri', 'niyukti',
-            'appointment', 'staff', 'teacher', 'teachers', 'hr', 'resume', 'cv', 'khali'
-        ];
-        $hasCareerIntent = $this->containsAnyKeywordTerm($queryTerms, $careerTerms);
+        $careerTerms = $this->getCareerIntentTerms();
+        $hasCareerIntent = $this->queryHasCareerIntent($message, $organization);
 
         $faqs = OrganizationFaq::query()
             ->where('organization_id', $organization->id)
@@ -5872,6 +6395,10 @@ class WidgetController
             $isCareerFaqCandidate = $hasCareerIntent
                 && ($this->containsAnyKeywordTerm($faqTerms, $careerTerms) || str_contains($categoryNorm, 'career'));
 
+            if ($hasCareerIntent && !$isCareerFaqCandidate) {
+                continue;
+            }
+
             if ($hasCareerIntent && $this->containsAnyKeywordTerm($faqTerms, $careerTerms)) {
                 $score += 1.05;
             }
@@ -5940,6 +6467,39 @@ class WidgetController
         return $best;
     }
 
+    private function queryHasCareerIntent(string $message, Organization $organization): bool
+    {
+        $query = $this->normalizeKeywordMatchText(
+            $message,
+            $this->getOrganizationQueryTranslationMap($organization)
+        );
+
+        if ($query === '') {
+            return false;
+        }
+
+        $queryTerms = $this->extractKeywordTerms($query);
+
+        if ($this->containsAnyKeywordTerm($queryTerms, $this->getCareerIntentTerms())) {
+            return true;
+        }
+
+        $applicationTerms = ['apply', 'application', 'resume', 'cv', 'biodata'];
+        $schoolRoleTerms = ['teacher', 'teachers', 'staff', 'faculty', 'principal'];
+
+        return $this->containsAnyKeywordTerm($queryTerms, $applicationTerms)
+            && $this->containsAnyKeywordTerm($queryTerms, $schoolRoleTerms);
+    }
+
+    private function getCareerIntentTerms(): array
+    {
+        return [
+            'career', 'careers', 'job', 'jobs', 'vacancy', 'vacancies', 'opening', 'openings',
+            'post', 'posts', 'recruitment', 'hiring', 'naukri', 'chakri', 'niyukti',
+            'employment', 'hr', 'resume', 'cv', 'biodata', 'khali',
+        ];
+    }
+
     private function normalizeKeywordMatchText(string $value, array $extraReplacements = []): string
     {
         $normalized = strtolower(trim(strip_tags($value)));
@@ -6006,6 +6566,36 @@ class WidgetController
             'intent' => 'general_qna',
             'confidence' => null,
             'method' => 'skipped_widget_kb_only',
+        ];
+    }
+
+    private function buildFastIntentResultForOpenAi(string $message, Organization $organization): array
+    {
+        $message = trim($message);
+        $routeAnalysis = app(IntentDetectionService::class)->analyzeRoutePlan($message, $organization->id);
+        $signals = is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [];
+        $lower = mb_strtolower($message);
+
+        $intent = 'static_info';
+        if ((bool) preg_match('/\b(book|booking|reserve|reservation|appointment|schedule)\b/i', $message)) {
+            $intent = 'booking';
+        } elseif (in_array('pricing_requests', $signals, true)
+            || (bool) preg_match('/\b(price|pricing|cost|fee|fees|plan|plans|package|packages|rate|rates|charge|charges|quote)\b/i', $lower)) {
+            $intent = 'pricing';
+        } elseif (in_array('availability_checks', $signals, true)
+            || (bool) preg_match('/\b(available|availability|in stock|out of stock|inventory|current|latest|status|today|now)\b/i', $lower)) {
+            $intent = 'realtime_data';
+        } elseif (($routeAnalysis['requires_product_resolution'] ?? false)
+            || (bool) preg_match('/\b(find|search|show|list|lookup|which|where|when|who|how many)\b/i', $lower)) {
+            $intent = 'lookup';
+        }
+
+        return [
+            'intent' => $intent,
+            'confidence' => 0.72,
+            'method' => 'openai_fast_rules',
+            'action_needed' => in_array($intent, ['booking', 'pricing', 'realtime_data', 'lookup'], true),
+            'route_analysis' => $routeAnalysis,
         ];
     }
 
@@ -6852,10 +7442,6 @@ class WidgetController
             return false;
         }
         
-        if ($this->isPolicySupportQuestion($current)) {
-            return false;
-        }
-
         $lastUser = trim(strip_tags((string) ($lastUserMessage ?? '')));
         $lastAssistant = trim(strip_tags((string) ($lastAssistantMessage ?? '')));
         $lastAssistantAskedQuestion = $lastAssistant !== '' && $this->responseHasQuestion($lastAssistant);
@@ -6944,6 +7530,10 @@ class WidgetController
             return false;
         }
 
+        if ($this->isShortQualifierFollowUpMessage($clean)) {
+            return true;
+        }
+
         if ((bool) preg_match('/\b(any|what about|how about|between|from|under|below|above|around|within|same|another|other|more|cheaper|higher|lower|budget|range|options?|variants?|sizes?|colou?rs?)\b/', $clean)) {
             return true;
         }
@@ -6953,6 +7543,27 @@ class WidgetController
         }
 
         return (bool) preg_match('/\b(?:under|below|above|between|from)\b[^\n]*\b(?:₹|\$|inr|usd|rs\.?)?\s*\d+/i', $clean);
+    }
+
+    private function isShortQualifierFollowUpMessage(string $message): bool
+    {
+        $clean = trim(mb_strtolower(strip_tags($message)));
+        if ($clean === '') {
+            return false;
+        }
+
+        if (!preg_match('/^(?:in|at|for|from|to|near|around|within|with|without|on)\s+[
+\p{L}\p{N}][\p{L}\p{N}\s\-]{1,40}$/u', $clean)) {
+            return false;
+        }
+
+        $tokens = preg_split('/\s+/', $clean) ?: [];
+        if (count($tokens) > 5) {
+            return false;
+        }
+
+        $meaningfulTokens = $this->extractMeaningfulFollowUpTerms($clean);
+        return !empty($meaningfulTokens) && count($meaningfulTokens) <= 3;
     }
 
     private function previousTurnProvidesFollowUpAnchor(?string $lastUserMessage, ?string $lastAssistantMessage = null, array $previousContextPayloads = []): bool
@@ -6981,6 +7592,10 @@ class WidgetController
     {
         $clean = trim(mb_strtolower(strip_tags($message)));
         if ($clean === '') {
+            return false;
+        }
+
+        if ($this->isShortQualifierFollowUpMessage($clean)) {
             return false;
         }
 
@@ -7297,6 +7912,38 @@ class WidgetController
         return $hasContext && $wordCount <= 8;
     }
 
+    private function buildOpenAiWidgetOptions(?string $model, int $visibleTokenBudget, bool $jsonEnvelope = false): array
+    {
+        $model = strtolower(trim((string) $model));
+        $visibleTokenBudget = max(80, min(900, $visibleTokenBudget));
+        $isGptFiveFamily = str_starts_with($model, 'gpt-5');
+        $isGptFiveOneFamily = str_starts_with($model, 'gpt-5.1');
+
+        $reasoningEffort = null;
+        $reasoningBuffer = 0;
+        if ($isGptFiveOneFamily) {
+            $reasoningEffort = 'low';
+            $reasoningBuffer = max(80, min(220, (int) ceil($visibleTokenBudget * 0.25)));
+        } elseif ($isGptFiveFamily) {
+            $reasoningEffort = 'minimal';
+            $reasoningBuffer = max(64, min(180, (int) ceil($visibleTokenBudget * 0.2)));
+        }
+
+        $options = [
+            'max_completion_tokens' => min(1400, $visibleTokenBudget + $reasoningBuffer),
+        ];
+
+        if ($reasoningEffort !== null) {
+            $options['reasoning_effort'] = $reasoningEffort;
+        }
+
+        if ($jsonEnvelope) {
+            $options['response_format'] = ['type' => 'json_object'];
+        }
+
+        return $options;
+    }
+
     private function buildPricingContext(Organization $organization): string
     {
         $settings = $organization->settings ?? [];
@@ -7410,6 +8057,175 @@ class WidgetController
         $lines[] = 'Note: Conversation estimates are rough; actual usage varies by message length.';
 
         return implode("\n", $lines);
+    }
+
+    private function buildDeterministicPricingPlanResponse(array $orderedResults, string $message, Organization $organization): ?string
+    {
+        if (!preg_match('/\b(price|pricing|cost|fee|fees|plan|plans|package|packages|credit|credits|token|tokens|subscription)\b/i', $message)) {
+            return null;
+        }
+
+        $requestedType = null;
+        if (preg_match('/\b(credit|credits|token|tokens)\b/i', $message)) {
+            $requestedType = 'credit';
+        } elseif (preg_match('/\b(subscription|monthly|yearly|annual|plan|plans)\b/i', $message)) {
+            $requestedType = 'subscription';
+        }
+
+        $plans = [];
+        foreach ($orderedResults as $result) {
+            $payload = is_array($result['payload'] ?? null) ? $result['payload'] : [];
+            $dataType = strtolower(trim((string) ($payload['data_type'] ?? $payload['qdrant_type'] ?? '')));
+            if (in_array($dataType, ['faq', 'question'], true)) {
+                continue;
+            }
+
+            if (strtolower((string) ($payload['category'] ?? '')) !== 'pricing'
+                && strtolower((string) ($payload['type'] ?? '')) !== 'pricing') {
+                continue;
+            }
+
+            $csv = is_array($payload['csv'] ?? null) ? $payload['csv'] : [];
+            $content = (string) ($payload['content'] ?? '');
+            $planType = strtolower(trim((string) ($csv['plan_type'] ?? $this->extractPlanField($content, 'Plan type'))));
+            if ($requestedType !== null && $planType !== '' && $planType !== $requestedType) {
+                continue;
+            }
+            if ($requestedType === 'credit' && $planType === '') {
+                $haystack = strtolower((string) ($payload['title'] ?? '') . ' ' . $content);
+                if (!str_contains($haystack, 'credit')) {
+                    continue;
+                }
+            }
+
+            $name = trim((string) ($csv['plan_name'] ?? $this->extractPlanField($content, 'Plan name')));
+            if ($name === '') {
+                $title = (string) ($payload['title'] ?? '');
+                $name = trim((string) preg_replace('/\s*\|.*$/', '', $title));
+            }
+            if ($name === '') {
+                continue;
+            }
+
+            $usd = trim((string) ($csv['usd_price'] ?? $this->extractPlanField($content, 'Usd price')));
+            $inr = trim((string) ($csv['inr_price'] ?? $this->extractPlanField($content, 'Inr price')));
+            $tokens = trim((string) ($csv['token_limit'] ?? $this->extractPlanField($content, 'Token limit')));
+            $validity = trim((string) ($csv['credit_validity_months'] ?? $this->extractPlanField($content, 'Credit validity months')));
+            $rollover = trim((string) ($csv['rollover'] ?? $this->extractPlanField($content, 'Rollover')));
+            $features = trim((string) ($csv['features'] ?? $this->extractPlanField($content, 'Features')));
+            $sortOrder = (int) ($csv['sort_order'] ?? 999);
+
+            $plans[] = [
+                'name' => $name,
+                'usd' => $usd,
+                'inr' => $inr,
+                'tokens' => $tokens,
+                'token_count' => (int) preg_replace('/\D+/', '', $tokens),
+                'validity' => $validity,
+                'rollover' => $rollover,
+                'features' => $features,
+                'sort_order' => $sortOrder,
+            ];
+        }
+
+        $plans = array_values(array_reduce($plans, function (array $carry, array $plan) {
+            $carry[strtolower($plan['name'])] = $plan;
+            return $carry;
+        }, []));
+
+        if (count($plans) < 2) {
+            return null;
+        }
+
+        usort($plans, function (array $a, array $b) {
+            if (($a['token_count'] ?? 0) > 0 || ($b['token_count'] ?? 0) > 0) {
+                return ((int) ($a['token_count'] ?? 0)) <=> ((int) ($b['token_count'] ?? 0));
+            }
+            if (($a['sort_order'] ?? 999) !== ($b['sort_order'] ?? 999)) {
+                return $a['sort_order'] <=> $b['sort_order'];
+            }
+            return strcmp($a['name'], $b['name']);
+        });
+
+        $heading = $requestedType === 'credit'
+            ? 'Our credit-based one-time plans are:'
+            : 'Our pricing plans are:';
+        $lines = [$heading];
+        foreach ($plans as $plan) {
+            $parts = [];
+            if ($plan['usd'] !== '' || $plan['inr'] !== '') {
+                $priceParts = [];
+                if ($plan['usd'] !== '') {
+                    $priceParts[] = 'USD ' . number_format((float) $plan['usd']);
+                }
+                if ($plan['inr'] !== '') {
+                    $priceParts[] = 'INR ' . number_format((float) $plan['inr']);
+                }
+                $parts[] = implode(' / ', $priceParts);
+            }
+            if (($plan['token_count'] ?? 0) > 0) {
+                $parts[] = number_format((int) $plan['token_count']) . ' tokens';
+            }
+            if ($plan['validity'] !== '') {
+                $parts[] = $plan['validity'] . ' months validity';
+            }
+            if ($plan['rollover'] !== '') {
+                $parts[] = 'rollover: ' . $plan['rollover'];
+            }
+
+            $featureSummary = $this->summarizePricingFeatures($plan['features']);
+            if ($featureSummary !== '') {
+                $parts[] = $featureSummary;
+            }
+
+            $lines[] = '- **' . $plan['name'] . ':** ' . implode('; ', $parts) . '.';
+        }
+
+        $contactParts = array_values(array_filter([
+            $organization->contact_email ? 'Email: ' . $organization->contact_email : null,
+            $organization->contact_phone ? 'Phone: ' . $organization->contact_phone : null,
+            ($organization->website ?: config('app.url')) ? 'Website: ' . ($organization->website ?: config('app.url')) : null,
+        ]));
+        if (!empty($contactParts)) {
+            $lines[] = 'For help choosing a pack, contact us at ' . implode(' | ', $contactParts) . '.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function extractPlanField(string $content, string $field): string
+    {
+        if (preg_match('/^' . preg_quote($field, '/') . ':\s*(.+)$/mi', $content, $matches)) {
+            return trim((string) $matches[1]);
+        }
+
+        return '';
+    }
+
+    private function summarizePricingFeatures(string $features): string
+    {
+        if ($features === '') {
+            return '';
+        }
+
+        $parts = array_values(array_filter(array_map('trim', explode('|', $features))));
+        $support = '';
+        foreach ($parts as $part) {
+            if (preg_match('/support/i', $part)) {
+                $support = strtolower($part);
+                break;
+            }
+        }
+
+        foreach ($parts as $part) {
+            if (preg_match('/better value|priority/i', $part)) {
+                return $support !== '' && strtolower($part) !== $support
+                    ? trim($part) . '; ' . $support
+                    : trim($part);
+            }
+        }
+
+        return $support;
     }
 
     private function buildServicePricingContext(Organization $organization): string
@@ -8568,6 +9384,11 @@ class WidgetController
         return 'widget_' . str_replace('-', '', (string) Str::uuid());
     }
 
+    private function shouldSuppressWidgetEmailNotifications(?string $sessionId): bool
+    {
+        return trim((string) $sessionId) === self::SUPPRESSED_WIDGET_TEST_SESSION_ID;
+    }
+
     /**
      * Persist the accumulated debug payload for one chat request to llm_debug_logs.
      * Safe to call from any response path; silently swallows exceptions so a DB
@@ -8626,6 +9447,11 @@ class WidgetController
             $organization->website ?: config('app.url')
         );
 
+        $generalGuidance = $this->buildGeneralPolicyGuidanceText($message, $routeAnalysis);
+        if ($generalGuidance !== '') {
+            return trim("We don't have enough verified information about {$topic} right now. {$generalGuidance} {$contact}");
+        }
+
         $scopeNote = $this->buildScopeFallbackNote($organization);
         if ($scopeNote !== '') {
             return "We don't have enough information about your query right now. {$scopeNote} {$contact}";
@@ -8642,6 +9468,17 @@ class WidgetController
                 'original_query' => '',
                 'inference_query' => '',
                 'language' => 'en',
+                'used_translation' => false,
+                'prompt_instruction' => '',
+            ];
+        }
+
+        if ($this->shouldSkipLocalQueryNormalization($organization, $originalMessage, $responseLanguage)) {
+            return [
+                'original_query' => $originalMessage,
+                'inference_query' => $originalMessage,
+                'language' => 'en',
+                'script' => 'latin',
                 'used_translation' => false,
                 'prompt_instruction' => '',
             ];
@@ -8675,6 +9512,23 @@ class WidgetController
                 $usedTranslation
             ),
         ];
+    }
+
+    private function shouldSkipLocalQueryNormalization(Organization $organization, string $message, string $responseLanguage): bool
+    {
+        if ($this->aiAgentService->getAiProviderForOrganization($organization->id) === 'openai') {
+            return true;
+        }
+
+        $message = trim($message);
+        if ($message === '') {
+            return true;
+        }
+
+        $configuredLanguage = strtolower(trim($responseLanguage));
+        $looksAscii = (bool) preg_match('/^[\x09\x0A\x0D\x20-\x7E]+$/', $message);
+
+        return $looksAscii && in_array($configuredLanguage, ['', 'auto', 'en', 'english'], true);
     }
 
     private function buildMultilingualPromptInstruction(
@@ -8747,7 +9601,90 @@ class WidgetController
             $organization->website ?: config('app.url')
         );
 
-        return "CONTEXT RELEVANCE CHECK: Before answering, perform an internal relevance decision on whether CURRENT CONTEXT actually answers the user's original question. Do this privately and never reveal chain-of-thought. If the context is directly relevant, use it. If the context is only partially relevant, answer only the supported part and clearly say what is not available. If the context is not relevant, reject it even if retrieval score is high. You may answer without CURRENT CONTEXT for simple conversational questions and for safe, non-sensitive general guidance or encouragement that does not depend on organization-specific facts, policies, pricing, schedules, inventory, admissions decisions, or other external records. In those no-context answers, keep the guidance general and do not pretend it comes from the knowledge base. For any factual query that is not supported by CURRENT CONTEXT, respond: 'We don't have enough information about your query right now.' Then provide the official contact details. Official contact details: {$contact}";
+        return "CONTEXT RELEVANCE CHECK: Before answering, spend a small amount of private reasoning to decide whether CURRENT CONTEXT actually answers the user's original question or whether the answer is already safely available from the prior conversation. Never reveal chain-of-thought or mention this check. If CURRENT CONTEXT is directly relevant, use it. If prior conversation already contains enough verified information for a follow-up, use that safely without inventing new facts. If context is only partially relevant, answer only the supported part and clearly say what is not available. If context is not relevant, reject it even if retrieval score is high. You may answer without CURRENT CONTEXT only for simple conversational messages and safe, non-sensitive general guidance that does not depend on organization-specific facts, pricing, schedules, inventory, admissions decisions, or other external records. For shipping, delivery, returns, refunds, exchanges, warranty, cancellation, or support questions with no verified organization-specific context, give brief general guidance only if clearly labeled as general and never present it as this organization's policy. Never state a specific timeline, fee, eligibility decision, promise, or guarantee unless explicitly present in CURRENT CONTEXT or prior verified conversation. For any factual query not supported by CURRENT CONTEXT or prior verified conversation, respond: 'We don't have enough information about your query right now.' Then provide official contact details. Official contact details: {$contact}";
+    }
+
+    /**
+     * @return array{context:string,decision:string,confidence:float,reason:string,use_context:bool,model:string}
+     */
+    private function applyKnowledgeContextRelevanceGate(
+        Organization $organization,
+        string $question,
+        string $context,
+        ?string $sessionId = null,
+        string $channel = 'widget'
+    ): array {
+        $question = trim($question);
+        $context = trim($context);
+
+        if ($question === '' || $context === '') {
+            return [
+                'context' => $context,
+                'decision' => 'unknown',
+                'confidence' => 0.0,
+                'reason' => 'Question or context was empty, so the gate was skipped.',
+                'use_context' => true,
+                'model' => '',
+            ];
+        }
+
+        if ($this->aiAgentService->getAiProviderForOrganization($organization->id) === 'openai') {
+            Log::info('Widget knowledge context relevance deferred to OpenAI', [
+                'channel' => $channel,
+                'org_id' => $organization->id,
+                'session_id' => $sessionId,
+            ]);
+
+            $this->debugData['context_relevance_decision'] = 'deferred_to_openai';
+            $this->debugData['context_relevance_confidence'] = null;
+            $this->debugData['context_relevance_threshold'] = null;
+            $this->debugData['context_relevance_reason'] = 'Single OpenAI response performs private context relevance check.';
+            $this->debugData['context_relevance_used'] = true;
+
+            return [
+                'context' => $context,
+                'decision' => 'deferred_to_openai',
+                'confidence' => 0.0,
+                'reason' => 'Single OpenAI response performs private context relevance check.',
+                'use_context' => true,
+                'model' => $this->aiAgentService->getOpenAiModelForOrganization($organization->id),
+            ];
+        }
+
+        $assessment = $this->aiAgentService->assessContextRelevance(
+            $question,
+            $context,
+            $organization->id,
+            $sessionId
+        );
+
+        $useContext = (bool) ($assessment['use_context'] ?? true);
+
+        Log::info('Widget knowledge context relevance assessed', [
+            'channel' => $channel,
+            'org_id' => $organization->id,
+            'session_id' => $sessionId,
+            'decision' => $assessment['decision'] ?? 'unknown',
+            'use_context' => $useContext,
+            'confidence' => $assessment['confidence'] ?? 0.0,
+            'reason' => $assessment['reason'] ?? '',
+            'model' => $assessment['model'] ?? null,
+        ]);
+
+        $this->debugData['context_relevance_decision'] = $assessment['decision'] ?? 'unknown';
+        $this->debugData['context_relevance_confidence'] = $assessment['confidence'] ?? 0.0;
+        $this->debugData['context_relevance_threshold'] = $assessment['threshold'] ?? $this->aiAgentService->getContextRelevanceMinConfidence();
+        $this->debugData['context_relevance_reason'] = $assessment['reason'] ?? '';
+        $this->debugData['context_relevance_used'] = $useContext;
+
+        return [
+            'context' => $useContext ? $context : '',
+            'decision' => (string) ($assessment['decision'] ?? 'unknown'),
+            'confidence' => (float) ($assessment['confidence'] ?? 0.0),
+            'reason' => (string) ($assessment['reason'] ?? ''),
+            'use_context' => $useContext,
+            'model' => (string) ($assessment['model'] ?? ''),
+        ];
     }
 
     private function shouldAllowNoContextInstructionalResponse(string $message, ?Organization $organization = null, ?string $normalizedMessage = null): bool
@@ -8764,6 +9701,10 @@ class WidgetController
 
         $normalizedText = trim(mb_strtolower((string) $normalizedMessage));
         $combinedText = trim($text . ' ' . $normalizedText);
+
+        if ($this->shouldAllowGenericPolicyGuidance($message, $organization, $normalizedMessage)) {
+            return true;
+        }
 
         if ($this->isContactQuery($message) || $this->isPolicySupportQuestion($message, $organization)) {
             return false;
@@ -8788,6 +9729,44 @@ class WidgetController
         return ($isPersonalDifficulty && $isEducationSupport)
             || ($asksForGuidance && $isEducationSupport)
             || ($isPersonalDifficulty && $asksForGuidance);
+    }
+
+    private function shouldAllowGenericPolicyGuidance(string $message, ?Organization $organization = null, ?string $normalizedMessage = null, array $routeAnalysis = []): bool
+    {
+        $text = trim(mb_strtolower($message));
+        if ($text === '') {
+            return false;
+        }
+
+        if (empty($routeAnalysis)) {
+            $routeAnalysis = app(IntentDetectionService::class)->analyzeRoutePlan($message, $organization?->id ?? 0);
+        }
+
+        $signals = is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [];
+        if (empty(array_intersect($signals, ['fulfillment_questions', 'policy_questions']))) {
+            return false;
+        }
+
+        if (in_array('schedule_questions', $signals, true)) {
+            return false;
+        }
+
+        if ($this->isContactQuery($message) || $this->isEntityFocusedCatalogQuery($message)) {
+            return false;
+        }
+
+        $normalizedText = trim(mb_strtolower((string) $normalizedMessage));
+        $combinedText = trim($text . ' ' . $normalizedText);
+        if ((bool) preg_match('/\b(price|pricing|cost|fee|fees|quote|quoted|amount|discount|availability|available|stock|in\s+stock|out\s+of\s+stock|schedule|timing|timings|open|closing|hours|book|booking|appointment|admission\s+fee|tuition\s+fee|hostel\s+fee|eligibility|deadline|last\s+date|result\s+date|phone|email|address|location|website)\b/u', $combinedText)) {
+            return false;
+        }
+
+        $topic = trim(mb_strtolower((string) ($routeAnalysis['policy_topic'] ?? '')));
+        if ($topic === '' || $topic === 'that') {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(shipping|delivery|dispatch|courier|return|refund|exchange|replacement|warranty|support|assistance|help|cancel|cancellation)\b/u', $topic . ' ' . $combinedText);
     }
 
     private function isVacancyCareerQuery(string $message, ?string $normalizedMessage = null): bool
@@ -9058,6 +10037,115 @@ class WidgetController
         return 'follow_up_detected_but_context_not_reused';
     }
 
+    private function buildFaqMatchKnowledgeContext(string $label, ?array $match): string
+    {
+        if (!is_array($match) || empty($match)) {
+            return '';
+        }
+
+        $payload = is_array($match['payload'] ?? null) ? $match['payload'] : [];
+        $lines = [];
+        $lines[] = "{$label}:";
+
+        $title = trim((string) ($payload['title'] ?? ''));
+        if ($title !== '' && $this->shouldExposePayloadTitleInContext($payload)) {
+            $lines[] = 'Title: ' . $this->htmlToPlainWithLinks($title);
+        }
+
+        $category = trim((string) ($payload['category'] ?? ''));
+        if ($category !== '') {
+            $lines[] = 'Category: ' . $category;
+        }
+
+        $answer = trim((string) ($match['response'] ?? $payload['content'] ?? ''));
+        if ($answer !== '') {
+            $lines[] = 'Answer: ' . $this->stripSynonymLines($this->htmlToPlainWithLinks($answer));
+        }
+
+        $followUp = trim((string) ($payload['follow_up'] ?? ''));
+        if ($followUp !== '') {
+            $lines[] = 'Follow-up: ' . $followUp;
+        }
+
+        return implode("\n", $lines) . "\n\n";
+    }
+
+    private function shouldExposePayloadTitleInContext(array $payload): bool
+    {
+        $title = trim((string) ($payload['title'] ?? ''));
+        if ($title === '') {
+            return false;
+        }
+
+        $dataType = strtolower(trim((string) ($payload['data_type'] ?? $payload['qdrant_type'] ?? '')));
+        $type = strtolower(trim((string) ($payload['type'] ?? '')));
+        $looksLikeQuestion = str_contains($title, '?')
+            || (bool) preg_match('/^\s*(what|why|when|where|who|whom|whose|which|how|can|could|do|does|did|is|are|was|were|will|would|should)\b/i', $title);
+
+        if ($looksLikeQuestion && in_array($dataType, ['faq', 'question'], true)) {
+            return false;
+        }
+
+        if ($looksLikeQuestion && $type === 'faq') {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Verbatim answer reuse is only safe for true continuation turns. A new
+     * factual request that merely shares the previous topic (for example,
+     * "mobile phone allowed in hostel") must go through retrieval/relevance
+     * instead of repeating the last answer.
+     *
+     * @return array{can_reuse:bool,reason:string}
+     */
+    private function canReusePreviousAssistantAnswerForCurrentQuestion(
+        string $message,
+        string $previousAssistantAnswer,
+        array $previousContextPayloads = [],
+        ?array $contextRelevance = null,
+        bool $isAffirmativeFollowUp = false,
+        bool $isReferentialFollowUp = false,
+        bool $isEllipticalFollowUp = false,
+        ?array $followUpRetrievalPlan = null
+    ): array {
+        $message = trim(strip_tags($message));
+        $previousAssistantAnswer = trim(strip_tags($previousAssistantAnswer));
+
+        if ($message === '' || $previousAssistantAnswer === '') {
+            return ['can_reuse' => false, 'reason' => 'empty_message_or_previous_answer'];
+        }
+
+        if (is_array($contextRelevance) && array_key_exists('use_context', $contextRelevance) && !$contextRelevance['use_context']) {
+            return ['can_reuse' => false, 'reason' => 'context_relevance_rejected_previous_context'];
+        }
+
+        if (is_array($followUpRetrievalPlan) && (($followUpRetrievalPlan['needs_retrieval'] ?? null) === true)) {
+            return ['can_reuse' => false, 'reason' => 'planner_requires_fresh_retrieval'];
+        }
+
+        if ($this->hasFreshTopicSignal($message)) {
+            return ['can_reuse' => false, 'reason' => 'current_message_has_fresh_topic_signal'];
+        }
+
+        $isSafeContinuation = $isAffirmativeFollowUp
+            || $isReferentialFollowUp
+            || $isEllipticalFollowUp
+            || $this->isShortQualifierFollowUpMessage($message);
+
+        if (!$isSafeContinuation) {
+            return ['can_reuse' => false, 'reason' => 'current_message_is_not_verbatim_answer_continuation'];
+        }
+
+        if (empty($previousContextPayloads) && !$isAffirmativeFollowUp) {
+            return ['can_reuse' => false, 'reason' => 'missing_previous_context_payloads'];
+        }
+
+        return ['can_reuse' => true, 'reason' => 'safe_continuation'];
+    }
+
     private function buildDebugTopMatches(array $results, int $limit = 5): array
     {
         $matches = [];
@@ -9083,6 +10171,24 @@ class WidgetController
         }
 
         return 'Would you like more details on this?';
+    }
+
+    private function stripTrailingGenericFollowUpPrompt(string $response): string
+    {
+        $patterns = [
+            '/\n{2,}Would you like more details on this\?\s*$/i',
+            '/\s*Would you like more details on this\?\s*$/i',
+            '/\n{2,}Would you like more details or contact information for this\?\s*$/i',
+            '/\s*Would you like more details or contact information for this\?\s*$/i',
+            '/\n{2,}Sure\s*[—-]\s*what part would you like to know more about\?\s*$/i',
+            '/\s*Sure\s*[—-]\s*what part would you like to know more about\?\s*$/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            $response = preg_replace($pattern, '', $response) ?? $response;
+        }
+
+        return trim($response);
     }
 
     private function buildAffirmativeContinuationResponse(?array $pendingFollowUpState): string
@@ -9273,6 +10379,86 @@ class WidgetController
         });
 
         return array_values(array_map(fn ($item) => $item['result'], $scored));
+    }
+
+    private function filterResultsForFollowUpAnswerFamily(array $results, array $previousAnswerFamilies): array
+    {
+        if (empty($results) || empty($previousAnswerFamilies)) {
+            return $results;
+        }
+
+        $filtered = array_values(array_filter($results, function ($result) use ($previousAnswerFamilies) {
+            $payload = is_array($result['payload'] ?? null) ? $result['payload'] : [];
+            $candidateFamilies = $this->extractAnswerFamilyLabelsFromPayloads([$payload]);
+            if (empty($candidateFamilies)) {
+                return false;
+            }
+
+            return !empty(array_intersect($previousAnswerFamilies, $candidateFamilies));
+        }));
+
+        return !empty($filtered) ? $filtered : [];
+    }
+
+    private function extractAnswerFamilyLabelsFromPayloads(array $payloads): array
+    {
+        $labels = [];
+
+        foreach ($payloads as $payload) {
+            if (!is_array($payload)) {
+                continue;
+            }
+
+            $labels = array_merge($labels, $this->extractAnswerFamilyLabelsFromText(implode(' ', array_filter([
+                (string) ($payload['title'] ?? ''),
+                (string) ($payload['category'] ?? ''),
+                (string) ($payload['keywords'] ?? ''),
+                (string) ($payload['content'] ?? ''),
+                (string) ($payload['entity'] ?? ''),
+                (string) ($payload['primary_entity'] ?? ''),
+            ]))));
+        }
+
+        return $this->normalizeAnswerFamilyLabels($labels);
+    }
+
+    private function extractAnswerFamilyLabelsFromText(string $text): array
+    {
+        $normalized = mb_strtolower($text);
+        $families = [];
+
+        $patterns = [
+            'career' => '/\b(job|jobs|career|careers|vacanc(?:y|ies)|opening|openings|position|positions|recruit(?:ment)?|hiring|employment|apply|teacher|teachers|staff|resume|cv|biodata|candidate|candidates|join|hr)\b/u',
+            'contact' => '/\b(contact|email|phone|whatsapp|address|reach|call|helpline|support)\b/u',
+            'pricing' => '/\b(price|pricing|cost|fee|fees|charges|quote|plan|plans|subscription)\b/u',
+            'admission' => '/\b(admission|admissions|class|classes|curriculum|campus|school|college|hostel|transport|scholarship|academic)\b/u',
+            'service' => '/\b(service|services|appointment|booking|schedule|timing|timings|test|tests)\b/u',
+            'policy' => '/\b(shipping|delivery|return|refund|exchange|warranty|policy|policies)\b/u',
+        ];
+
+        foreach ($patterns as $label => $pattern) {
+            if (preg_match($pattern, $normalized)) {
+                $families[] = $label;
+            }
+        }
+
+        return $this->normalizeAnswerFamilyLabels($families);
+    }
+
+    private function normalizeAnswerFamilyLabels(array $families): array
+    {
+        $families = array_values(array_unique(array_filter($families)));
+
+        if (in_array('career', $families, true)) {
+            return ['career'];
+        }
+
+        $substantiveFamilies = array_values(array_filter($families, fn ($family) => $family !== 'contact'));
+        if (!empty($substantiveFamilies)) {
+            return $substantiveFamilies;
+        }
+
+        return $families;
     }
 
     private function buildClarifyNumberResponse(): string
@@ -9939,12 +11125,47 @@ class WidgetController
             $organization->website ?: config('app.url')
         );
 
+        $generalGuidance = $this->buildGeneralPolicyGuidanceText($message, $routeAnalysis);
+        if ($generalGuidance !== '') {
+            return trim("We don't have verified information in our knowledge base about {$topic} right now. {$generalGuidance} {$contact}");
+        }
+
         $scopeNote = $this->buildScopeFallbackNote($organization);
         if ($scopeNote !== '') {
             return "I don't have verified information in our knowledge base about {$topic} right now. {$scopeNote} {$contact}";
         }
 
         return "I don't have verified information in our knowledge base about {$topic} right now. {$contact}";
+    }
+
+    private function buildGeneralPolicyGuidanceText(string $message, array $routeAnalysis = []): string
+    {
+        if (!$this->shouldAllowGenericPolicyGuidance($message, null, null, $routeAnalysis)) {
+            return '';
+        }
+
+        $topic = trim(mb_strtolower((string) ($routeAnalysis['policy_topic'] ?? '')));
+        if ($topic === '') {
+            return '';
+        }
+
+        if ((bool) preg_match('/\b(shipping|delivery|dispatch|courier)\b/u', $topic)) {
+            return 'In general, shipping time depends on product availability, destination, courier, and service level, so exact timelines can vary. If you share your location or the item you are asking about, our team can confirm the specific timeline.';
+        }
+
+        if ((bool) preg_match('/\b(return|refund|exchange|replacement|cancel|cancellation)\b/u', $topic)) {
+            return 'In general, return or refund decisions usually depend on the return window, item condition, and the seller\'s own policy, so the exact outcome cannot be confirmed without the verified policy details.';
+        }
+
+        if ((bool) preg_match('/\b(warranty)\b/u', $topic)) {
+            return 'In general, warranty coverage usually depends on the product category, purchase date, and the type of issue, so exact coverage should be confirmed against the official policy.';
+        }
+
+        if ((bool) preg_match('/\b(support|assistance|help)\b/u', $topic)) {
+            return 'In general, the fastest way to resolve support questions is to share the exact order, product, or issue details so the team can verify the correct next step.';
+        }
+
+        return 'In general, the exact answer depends on the organization\'s own policy and the details of the request, so it should be confirmed through the official team.';
     }
 
     private function shouldDeferStreamUntilPostProcess(string $message, string $searchQuery, ?array $intentResult, string $context): bool
@@ -9982,6 +11203,20 @@ class WidgetController
         $cleaned = preg_replace('/<\/?think>/i', '', $cleaned) ?? $cleaned;
 
         return trim($cleaned);
+    }
+
+    private function looksLikeVisibleReasoningLeak(string $response): bool
+    {
+        $clean = trim($response);
+        if ($clean === '') {
+            return false;
+        }
+
+        return (bool) preg_match(
+            '/^(?:first,?\s+i\s+need\s+to\s+understand|let(?:\'s|\s+me)\s+(?:think|break\s+this\s+down|analy(?:s|z)e)|thinking\s+process|analysis:|reasoning:|step\s+1\b|1\.\s+\*\*)/i',
+            $clean
+        ) || ((bool) preg_match('/\bcurrent\s+context\b/i', $clean)
+            && (bool) preg_match('/\bstrict\s+knowledge\s+base\s+policy\b|i\s+shouldn\'t\s+infer|now,\s+checking\s+the\s+current\s+context\b/i', $clean));
     }
 
     private function extractCatalogUrlFromRow(OrganizationData $row): string
@@ -10095,10 +11330,6 @@ class WidgetController
             return trim($currentSearchQuery);
         }
         
-        if ($this->isPolicySupportQuestion($followUpQuestion)) {
-            return $followUpQuestion;
-        }
-
         $originalQuestion = trim((string) $this->getLastUserMessageForSession($organization->id, $sessionId));
         $assistantAnswer = trim((string) $lastAssistantMessage);
 
@@ -10130,6 +11361,62 @@ class WidgetController
         ]);
 
         return $rewritten;
+    }
+
+    private function planFollowUpRetrievalWithContext(
+        Organization $organization,
+        string $sessionId,
+        array $cachedChatMessages,
+        ?string $lastUserMessage,
+        ?string $lastAssistantMessage,
+        string $currentMessage,
+        string $currentSearchQuery
+    ): array {
+        $history = [];
+        foreach (array_slice($cachedChatMessages, -8) as $message) {
+            $role = strtolower(trim((string) ($message['role'] ?? '')));
+            $content = trim((string) ($message['content'] ?? ''));
+            if ($content === '' || !in_array($role, ['user', 'assistant'], true)) {
+                continue;
+            }
+
+            $history[] = [
+                'role' => $role,
+                'content' => $content,
+            ];
+        }
+
+        if (empty($history)) {
+            $lastUserMessage = trim((string) ($lastUserMessage ?? ''));
+            $lastAssistantMessage = trim((string) ($lastAssistantMessage ?? ''));
+            if ($lastUserMessage !== '') {
+                $history[] = ['role' => 'user', 'content' => $lastUserMessage];
+            }
+            if ($lastAssistantMessage !== '') {
+                $history[] = ['role' => 'assistant', 'content' => $lastAssistantMessage];
+            }
+        }
+
+        $plan = $this->aiAgentService->planFollowUpRetrieval(
+            $history,
+            $currentMessage,
+            $currentSearchQuery
+        );
+
+        Log::info('Planned follow-up retrieval with context', [
+            'org_id' => $organization->id,
+            'org_slug' => $organization->slug,
+            'session_id' => $sessionId,
+            'latest_user_message' => $currentMessage,
+            'fallback_query' => $currentSearchQuery,
+            'planner' => $plan,
+        ]);
+
+        return is_array($plan) ? $plan : [
+            'needs_retrieval' => true,
+            'rewritten_query' => trim($currentSearchQuery),
+            'reasoning' => 'Planner returned invalid output, so retrieval fallback was used.',
+        ];
     }
 
     /**
@@ -10536,6 +11823,14 @@ class WidgetController
 
     private function notifyLeadIfNeeded(Lead $lead, ?Lead $existingLead, ?array $intentResult, ?string $message): void
     {
+        if ($this->shouldSuppressWidgetEmailNotifications($lead->session_id ?? null)) {
+            Log::info('Lead notification suppressed for widget test session', [
+                'session_id' => $lead->session_id,
+                'org_id' => $lead->organization_id,
+            ]);
+            return;
+        }
+
         $organization = Organization::find($lead->organization_id);
         if (!$organization) {
             return;
@@ -12265,7 +13560,9 @@ class WidgetController
                     ],
                     $model,
                     null,
-                    $organizationId
+                    $organizationId,
+                    null,
+                    $this->buildOpenAiWidgetOptions($model, 600, true)
                 );
             } else {
                 $model = $this->aiAgentService->getLlamaModelForOrganization($organizationId);
@@ -12462,6 +13759,14 @@ class WidgetController
     private function sendChatInteractionNotification($organization, $conversation, $userMessage, $aiResponse, $userInfo = [], $locationInfo = []): void
     {
         try {
+            if ($this->shouldSuppressWidgetEmailNotifications($conversation->conversation_id ?? null)) {
+                Log::info('Chat interaction email suppressed for widget test session', [
+                    'conversation_id' => $conversation->conversation_id,
+                    'org_id' => $organization->id ?? null,
+                ]);
+                return;
+            }
+
             $settings = $organization->settings ?? [];
             $enabled = (bool) ($settings['notify_chat_email_enabled'] ?? false);
             if (!$enabled) {

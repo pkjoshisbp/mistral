@@ -38,14 +38,37 @@ class ActionService
                 ? $this->intentDetector->detectIntent($query, $organizationId)
                 : ['intent' => 'general_qna', 'confidence' => 0.0];
 
+            if (!is_array($intentResult['route_analysis'] ?? null)) {
+                $intentResult['route_analysis'] = $this->intentDetector->analyzeRoutePlan($query, $organizationId);
+            }
+
+            $routeAnalysis = is_array($intentResult['route_analysis'] ?? null) ? $intentResult['route_analysis'] : [];
+            $isPolicyOnlySupportQuery = (bool) ($routeAnalysis['policy_only'] ?? false)
+                && !(bool) ($routeAnalysis['requires_product_resolution'] ?? false);
+
             if (!$useIntent) {
                 Log::info('Intent gating disabled for actions', [
                     'organization_id' => $organizationId
                 ]);
             }
 
+            if ($isPolicyOnlySupportQuery) {
+                Log::info('Policy-only support query bypassing actions', [
+                    'query' => $query,
+                    'organization_id' => $organizationId,
+                    'route_analysis' => $routeAnalysis,
+                ]);
+
+                return [
+                    'type' => 'knowledge_base',
+                    'intent' => $intentResult,
+                    'message' => 'Policy-only support query, using knowledge base'
+                ];
+            }
+
             // Step 2: Find matching actions (even if intent says static_info) so we can run high-confidence actions
-            $matchingActions = $this->findMatchingActions($query, $organizationId, $intentResult, $useIntent);
+            $skipSemanticActionMatching = (bool) ($context['skip_semantic_action_matching'] ?? false);
+            $matchingActions = $this->findMatchingActions($query, $organizationId, $intentResult, $useIntent, $skipSemanticActionMatching);
             $topAction = $matchingActions[0] ?? null;
             $topScore = $topAction['score'] ?? 0;
             $scoreThreshold = $topAction && isset($topAction['action']->min_score_threshold)
@@ -144,7 +167,7 @@ class ActionService
     /**
      * Find actions that match the user query using semantic similarity
      */
-    private function findMatchingActions(string $query, int $organizationId, array $intentResult, bool $useIntent = true): array
+    private function findMatchingActions(string $query, int $organizationId, array $intentResult, bool $useIntent = true, bool $skipSemanticFallback = false): array
     {
         // Get active actions for this organization
         $actions = OrganizationAction::forOrganization($organizationId)
@@ -164,6 +187,9 @@ class ActionService
         $queryLower = strtolower($query);
         $pricingRequiresKeywords = $this->shouldRequirePricingKeywords($organizationId);
         $pricingKeywords = $this->getPricingKeywordsForOrganization($organizationId);
+        $routeAnalysis = is_array($intentResult['route_analysis'] ?? null) ? $intentResult['route_analysis'] : [];
+        $isPolicyOnlySupportQuery = (bool) ($routeAnalysis['policy_only'] ?? false)
+            && !(bool) ($routeAnalysis['requires_product_resolution'] ?? false);
 
         // First try keyword-based matching (more reliable)
         foreach ($actions as $action) {
@@ -251,7 +277,7 @@ class ActionService
         }
 
         // If still no matches, try semantic similarity as fallback
-        if (empty($matches)) {
+        if (empty($matches) && !$skipSemanticFallback) {
             try {
                 $queryEmbedding = $this->aiAgent->embed($query);
 
@@ -310,10 +336,15 @@ class ActionService
                     'error' => $e->getMessage()
                 ]);
             }
+        } elseif (empty($matches) && $skipSemanticFallback) {
+            Log::info('Semantic action matching skipped', [
+                'organization_id' => $organizationId,
+                'reason' => 'skip_semantic_action_matching',
+            ]);
         }
 
         // Sort by similarity score (highest first)
-        if (empty($matches)) {
+        if (empty($matches) && !$isPolicyOnlySupportQuery) {
             $shopifyProductAction = $actions->first(function ($action) {
                 return $this->isShopifyActionQueryType($action, 'products');
             });

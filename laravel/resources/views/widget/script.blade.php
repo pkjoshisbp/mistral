@@ -39,6 +39,7 @@
             this.wsStream = null;
             this.wsPingTimer = null;
             this.wsShouldReconnect = true;
+            this.isSending = false;
             this.contactFields = this.normalizeContactFields(this.config.contactFields);
             this.starterPrompts = this.normalizeStarterPrompts(this.config.starterPrompts || []);
             this.starterPromptsShown = false;
@@ -778,6 +779,20 @@
             
             if (leadSkip && !this.config.requireContactForGuests) {
                 leadSkip.addEventListener('click', () => this.skipLeadForm());
+            }
+
+            if (widget) {
+                widget.addEventListener('click', (event) => {
+                    const link = event.target?.closest?.('.ai-chat-attribution-link');
+                    if (!link) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const href = link.getAttribute('href') || 'https://ai-chat.support';
+                    this.openAttributionLink(href);
+                });
             }
             
             if (input) {
@@ -2080,12 +2095,21 @@
                 this.showLeadForm();
                 return;
             }
+            if (this.isSending) {
+                return;
+            }
             const input = document.getElementById(this.ids.input);
             if (!input) return;
             
             const message = (forcedMessage !== null ? String(forcedMessage) : input.value).trim();
 
             if (!message) return;
+
+            const sendBtn = document.getElementById(this.ids.send);
+            this.isSending = true;
+            if (sendBtn) {
+                sendBtn.disabled = true;
+            }
 
             this.removeStarterPrompts();
 
@@ -2147,7 +2171,8 @@
                 if (response.status === 429) {
                     const data = await response.json();
                     const waitTime = data.retry_after || 60;
-                    this.addMessage(`Please slow down! You can send up to 5 messages per minute. Please wait ${waitTime} seconds.`, 'bot');
+                    const serverMessage = data.message || data.error || `Please slow down. Please wait ${waitTime} seconds before trying again.`;
+                    this.addMessage(serverMessage, 'bot');
                     return;
                 }
 
@@ -2197,21 +2222,13 @@
                 } else {
                     this.addMessage('Sorry, I\'m experiencing technical difficulties. Please try again later.', 'bot');
                 }
+            } finally {
+                this.isSending = false;
+                if (sendBtn) {
+                    sendBtn.disabled = false;
+                }
             }
 
-            if (widget) {
-                widget.addEventListener('click', (event) => {
-                    const link = event.target?.closest?.('.ai-chat-attribution-link');
-                    if (!link) {
-                        return;
-                    }
-
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const href = link.getAttribute('href') || 'https://ai-chat.support';
-                    this.openAttributionLink(href);
-                });
-            }
         }
 
         openAttributionLink(url) {

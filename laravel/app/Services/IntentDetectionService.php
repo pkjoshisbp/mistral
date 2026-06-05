@@ -518,7 +518,7 @@ class IntentDetectionService
 
         if (preg_match('/\b(?:can|could|would|should)\s+(.+?)\s+be\s+(?:shipped|delivered|sent)\b/i', $query, $matches)) {
             $candidate = $this->sanitizeProductCandidate($matches[1]);
-            if ($candidate !== '') {
+            if ($candidate !== '' && !$this->looksLikeQuestionFragmentProductCandidate($candidate)) {
                 return $candidate;
             }
         }
@@ -526,7 +526,7 @@ class IntentDetectionService
         if (in_array('fulfillment_questions', $signals, true)
             && preg_match('/\b(?:ship|deliver|send)\s+(.+?)(?:\s+to\b|\s+by\b|[?.!,]|$)/i', $query, $matches)) {
             $candidate = $this->sanitizeProductCandidate($matches[1]);
-            if ($candidate !== '') {
+            if ($candidate !== '' && !$this->looksLikeQuestionFragmentProductCandidate($candidate)) {
                 return $candidate;
             }
         }
@@ -539,7 +539,29 @@ class IntentDetectionService
             $candidate = preg_replace($pattern, ' ', $candidate) ?? $candidate;
         }
 
-        return $this->sanitizeProductCandidate($candidate);
+        $candidate = $this->sanitizeProductCandidate($candidate);
+
+        if ($candidate === '' || $this->looksLikeQuestionFragmentProductCandidate($candidate)) {
+            return '';
+        }
+
+        return $candidate;
+    }
+
+    private function looksLikeQuestionFragmentProductCandidate(string $candidate): bool
+    {
+        $normalized = mb_strtolower(trim($candidate));
+        if ($normalized === '') {
+            return false;
+        }
+
+        if ((bool) preg_match('/\b(?:how\s+long|how\s+soon|long\s+does\s+it\s+take|does\s+it\s+take|when\s+will\s+(?:it|this|that|these|those))\b/u', $normalized)) {
+            return true;
+        }
+
+        return str_word_count($normalized) <= 5
+            && (bool) preg_match('/\b(?:do|does|did|can|could|would|should|will|is|are|was|were|has|have|had)\b/u', $normalized)
+            && (bool) preg_match('/\b(?:it|this|that|these|those)\b/u', $normalized);
     }
 
     private function sanitizeProductCandidate(string $candidate): string

@@ -351,6 +351,32 @@
                                 </div>
                             </div>
 
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="ai_context_relevance_model">Context Relevance Judge Model</label>
+                                        <select wire:model="ai_context_relevance_model"
+                                                class="form-control @error('ai_context_relevance_model') is-invalid @enderror">
+                                            @foreach($this->getAvailableLlamaModels() as $value => $label)
+                                                <option value="{{ $value }}">{{ $label }}</option>
+                                            @endforeach
+                                        </select>
+                                        @error('ai_context_relevance_model')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Model used to decide whether retrieved knowledge-base context should be used or ignored before final answering.</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="ai_context_relevance_min_confidence">Judge Min Confidence</label>
+                                        <input type="number" wire:model="ai_context_relevance_min_confidence"
+                                               class="form-control @error('ai_context_relevance_min_confidence') is-invalid @enderror"
+                                               min="0" max="1" step="0.05" placeholder="0.40">
+                                        @error('ai_context_relevance_min_confidence')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                        <small class="form-text text-muted">Range 0.00-1.00. Retrieved context is blocked when the judge confidence is below this threshold.</small>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- llama.cpp Settings -->
                             <div x-show="$wire.ai_model_provider === 'llama' && $wire.ai_backend_type === 'llamacpp'">
                                 <div class="row">

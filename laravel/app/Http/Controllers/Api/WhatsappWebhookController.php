@@ -293,6 +293,15 @@ class WhatsappWebhookController extends Controller
                                     }
                                 }
                             }
+                            $contextRelevance = $this->applyKnowledgeContextRelevanceGate(
+                                $org,
+                                (string) $searchText,
+                                (string) $context,
+                                $ai,
+                                $conversation?->conversation_id,
+                                'whatsapp_default'
+                            );
+                            $context = $contextRelevance['context'];
                             $usedContextChars = strlen($context);
 
                             // Compose system prompt with official org contacts and widget-style rules
@@ -309,6 +318,7 @@ class WhatsappWebhookController extends Controller
                             $system .= $orgPhone ? "- Official phone: {$orgPhone}\n" : "- Official phone: (not provided)\n";
                             if ($context) { $system .= "CURRENT CONTEXT:\n{$context}\n"; }
                             $system .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
+                            $system .= $this->buildContextRelevanceInstruction($orgWebsite, $orgEmail, $orgPhone) . ' ';
                             $system .= "Rules: Only use the official website/email/phone above. Do not invent or guess any contact details. If an official contact is not provided, direct the user to the official website instead. ";
                             $system .= "Keep responses concise and direct. Always use plain text only - no HTML or markdown. Include full https URLs when mentioning sites. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
@@ -318,7 +328,9 @@ class WhatsappWebhookController extends Controller
                             $provider = $ai->getAiProviderForOrganization($org->id ?? null);
                             if ($provider === 'openai') {
                                 $model = $ai->getOpenAiModelForOrganization($org->id ?? null);
-                                $resp = $ai->openAiChat($chatMessages, $model, null, $org->id ?? null);
+                                $resp = $ai->openAiChat($chatMessages, $model, null, $org->id ?? null, null, [
+                                    'num_predict' => 350,
+                                ]);
                             } else {
                                 $model = $ai->getLlamaModelForOrganization($org->id ?? null);
                                 $resp = $ai->llmChat($chatMessages, $model, null, $org->id ?? null);
@@ -568,6 +580,15 @@ class WhatsappWebhookController extends Controller
                                 $context .= "\n";
                                 if (strlen($context) > $maxContextChars) { break; }
                             }
+                            $contextRelevance = $this->applyKnowledgeContextRelevanceGate(
+                                $org,
+                                (string) $searchText,
+                                (string) $context,
+                                $ai,
+                                $conversation?->conversation_id,
+                                'whatsapp_slug'
+                            );
+                            $context = $contextRelevance['context'];
                             $usedContextChars = strlen($context);
 
                             // Compose system prompt with official org contacts and widget-style rules
@@ -584,6 +605,7 @@ class WhatsappWebhookController extends Controller
                             $system .= $orgPhone ? "- Official phone: {$orgPhone}\n" : "- Official phone: (not provided)\n";
                             if ($context) { $system .= "CURRENT CONTEXT:\n{$context}\n"; }
                             $system .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
+                            $system .= $this->buildContextRelevanceInstruction($orgWebsite, $orgEmail, $orgPhone) . ' ';
                             $system .= "Rules: Only use the official website/email/phone above. Do not invent or guess any contact details. If an official contact is not provided, direct the user to the official website instead. ";
                             $system .= "Keep responses concise and direct. Always use plain text only - no HTML or markdown. Include full https URLs when mentioning sites. Do not mention WhatsApp or any specific messaging platform unless the user explicitly asks about it.";
 
@@ -593,7 +615,9 @@ class WhatsappWebhookController extends Controller
                             $provider = $ai->getAiProviderForOrganization($org->id);
                             if ($provider === 'openai') {
                                 $model = $ai->getOpenAiModelForOrganization($org->id);
-                                $resp = $ai->openAiChat($chatMessages, $model, null, $org->id);
+                                $resp = $ai->openAiChat($chatMessages, $model, null, $org->id, null, [
+                                    'num_predict' => 350,
+                                ]);
                             } else {
                                 $model = $ai->getLlamaModelForOrganization($org->id);
                                 $resp = $ai->llmChat($chatMessages, $model, null, $org->id);
@@ -698,6 +722,97 @@ class WhatsappWebhookController extends Controller
             ['role' => 'system', 'content' => trim($systemPrompt)],
             ['role' => 'user', 'content' => $message],
         ];
+    }
+
+    /**
+     * @return array{context:string,decision:string,confidence:float,threshold:float,reason:string,use_context:bool,model:string}
+     */
+    private function applyKnowledgeContextRelevanceGate(
+        Organization $organization,
+        string $question,
+        string $context,
+        AiAgentService $ai,
+        ?string $sessionId = null,
+        string $channel = 'whatsapp'
+    ): array {
+        $question = trim($question);
+        $context = trim($context);
+
+        if ($question === '' || $context === '') {
+            return [
+                'context' => $context,
+                'decision' => 'unknown',
+                'confidence' => 0.0,
+                'threshold' => $ai->getContextRelevanceMinConfidence(),
+                'reason' => 'Question or context was empty, so the gate was skipped.',
+                'use_context' => true,
+                'model' => '',
+            ];
+        }
+
+        if ($ai->getAiProviderForOrganization($organization->id) === 'openai') {
+            Log::info('WhatsApp knowledge context relevance deferred to OpenAI', [
+                'channel' => $channel,
+                'org_id' => $organization->id,
+                'session_id' => $sessionId,
+            ]);
+
+            return [
+                'context' => $context,
+                'decision' => 'deferred_to_openai',
+                'confidence' => 0.0,
+                'threshold' => $ai->getContextRelevanceMinConfidence(),
+                'reason' => 'Single OpenAI response performs private context relevance check.',
+                'use_context' => true,
+                'model' => $ai->getOpenAiModelForOrganization($organization->id),
+            ];
+        }
+
+        $assessment = $ai->assessContextRelevance(
+            $question,
+            $context,
+            $organization->id,
+            $sessionId
+        );
+
+        $useContext = (bool) ($assessment['use_context'] ?? true);
+
+        Log::info('WhatsApp knowledge context relevance assessed', [
+            'channel' => $channel,
+            'org_id' => $organization->id,
+            'session_id' => $sessionId,
+            'decision' => $assessment['decision'] ?? 'unknown',
+            'use_context' => $useContext,
+            'confidence' => $assessment['confidence'] ?? 0.0,
+            'threshold' => $assessment['threshold'] ?? $ai->getContextRelevanceMinConfidence(),
+            'reason' => $assessment['reason'] ?? '',
+            'model' => $assessment['model'] ?? null,
+        ]);
+
+        return [
+            'context' => $useContext ? $context : '',
+            'decision' => (string) ($assessment['decision'] ?? 'unknown'),
+            'confidence' => (float) ($assessment['confidence'] ?? 0.0),
+            'threshold' => (float) ($assessment['threshold'] ?? $ai->getContextRelevanceMinConfidence()),
+            'reason' => (string) ($assessment['reason'] ?? ''),
+            'use_context' => $useContext,
+            'model' => (string) ($assessment['model'] ?? ''),
+        ];
+    }
+
+    private function buildContextRelevanceInstruction(string $website, ?string $email, ?string $phone): string
+    {
+        $contactParts = [];
+        if ($email) {
+            $contactParts[] = 'email ' . $email;
+        }
+        if ($phone) {
+            $contactParts[] = 'phone ' . $phone;
+        }
+        $contactParts[] = 'website ' . $website;
+        $contact = implode(', ', $contactParts);
+
+        return "Before answering, spend a small amount of private reasoning to decide whether CURRENT CONTEXT actually answers the user's question or whether prior conversation already contains enough verified information for a safe follow-up answer. Never reveal chain-of-thought. If context is directly relevant, use it. If prior conversation is enough, use it without inventing new facts. If context is partially relevant, answer only the supported part and say what is missing. If it is not relevant or not enough, ignore it and respond that you do not have enough information right now, then direct the user to the official contact details: {$contact}. Never present unrelated context as if it answers the question.";
     }
 
     private function getRecentConversationMessages(?ChatConversation $conversation, int $limit = 4): array
@@ -910,4 +1025,3 @@ class WhatsappWebhookController extends Controller
         return trim($text);
     }
 }
-
