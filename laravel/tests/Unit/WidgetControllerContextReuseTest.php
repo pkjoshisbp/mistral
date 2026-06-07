@@ -185,8 +185,59 @@ class WidgetControllerContextReuseTest extends TestCase
 
         $this->assertIsString($response);
         $this->assertStringNotContainsString('What pricing plans does AI Chat Support offer?', $response);
-        $this->assertStringContainsString('**Basic:**', $response);
-        $this->assertStringContainsString('**Starter:**', $response);
+        $this->assertStringContainsString('**Basic**', $response);
+        $this->assertStringContainsString('**Starter**', $response);
+    }
+
+    public function test_artist_selling_intent_recognizes_seller_phrasing_not_buyer_or_paper_queries(): void
+    {
+        $controller = $this->controller();
+
+        $this->assertTrue($this->invokePrivate($controller, 'isArtistSellingIntent', [
+            'how i sell my painting',
+        ]));
+        $this->assertTrue($this->invokePrivate($controller, 'isArtistSellingIntent', [
+            'My painting sell',
+        ]));
+        $this->assertFalse($this->invokePrivate($controller, 'isArtistSellingIntent', [
+            'How can I buy a painting?',
+        ]));
+        $this->assertFalse($this->invokePrivate($controller, 'isArtistSellingIntent', [
+            'How I can sell my sketch or paper works?',
+        ]));
+    }
+
+    public function test_artist_selling_upload_follow_up_reuses_seller_anchor(): void
+    {
+        $controller = $this->controller();
+
+        $this->assertTrue($this->invokePrivate($controller, 'isRelatedFollowUpTurn', [
+            'how i upload',
+            'yes i have',
+            'Create your artist profile, upload artworks, and our team will review submissions for selling paintings.',
+            [
+                [
+                    'title' => 'Can i sell my paintings here?',
+                    'content' => 'Create your artist profile, upload artworks, and our team will review submissions.',
+                    'category' => 'Artists',
+                    'data_type' => 'faq',
+                ],
+            ],
+            false,
+            null,
+        ]));
+
+        $query = $this->invokePrivate($controller, 'buildRelatedFollowUpSearchQuery', [
+            'how i upload',
+            null,
+            'yes i have',
+            'Create your artist profile, upload artworks, and our team will review submissions for selling paintings.',
+            false,
+            false,
+        ]);
+
+        $this->assertStringContainsString('sell painting artist profile upload artwork', $query);
+        $this->assertStringContainsString('how i upload', $query);
     }
 
     private function controller(): WidgetController

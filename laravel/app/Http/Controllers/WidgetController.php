@@ -593,8 +593,10 @@ class WidgetController
             ) {
                 // If the acknowledgement contains a thank-you signal it means the visitor
                 // is closing — not accepting the AI's offer to continue. Treat as farewell.
-                $isThanksClosing = (bool) preg_match('/\b(thank(s| you)|thx|ty)\b/i', (string) $message);
-                if ($isThanksClosing) {
+                $isThanksClosing = (bool) preg_match('/\b(thank(s| you)|thx|ty)\b|ଧନ୍ୟବାଦ|ଧନୈବାଦ|ଧନ୍ୟବାଦ୍|ଧନୈବାଦ୍/u', (string) $message);
+                $isNegativeOrEndingClosing = $this->isNegativeFollowUp((string) $message)
+                    || $this->isConversationEndingPhrase((string) $message);
+                if ($isThanksClosing || $isNegativeOrEndingClosing) {
                     $continuationResponse = $this->buildContextualFarewellResponse(
                         $organization,
                         $sessionId,
@@ -649,12 +651,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if ($aiProvider === 'openai' && !$isAffirmativeContinuationForIntent) {
-                $intentResult = $this->buildFastIntentResultForOpenAi(
-                    (string) $messageForInference,
-                    $organization
-                );
-            } elseif (!$isAffirmativeContinuationForIntent && $this->shouldRunWidgetIntentDetection($organization)) {
+            if (!$isAffirmativeContinuationForIntent && ($aiProvider === 'openai' || $this->shouldRunWidgetIntentDetection($organization))) {
                 try {
                     $intentResult = app(IntentDetectionService::class)->detectIntent($messageForInference, $organization->id);
                 } catch (\Throwable $t) {
@@ -878,28 +875,16 @@ class WidgetController
                     $isReferentialFollowUp
                 );
 
-                if ($aiProvider === 'openai') {
-                    $skipFollowUpRetrieval = !empty($previousContextPayloads)
-                        && ($isAffirmativeFollowUp || $isContextualShortFollowUp || $shouldUsePendingStateAnchor);
-                    $followUpRetrievalPlan = [
-                        'needs_retrieval' => !$skipFollowUpRetrieval,
-                        'rewritten_query' => '',
-                        'reasoning' => $skipFollowUpRetrieval
-                            ? 'OpenAI provider reused prior verified context without local follow-up planning.'
-                            : 'OpenAI provider skipped local follow-up planning; deterministic combined query will be used.',
-                    ];
-                } else {
-                    $followUpRetrievalPlan = $this->planFollowUpRetrievalWithContext(
-                        $organization,
-                        (string) $sessionId,
-                        is_array($cachedChatMessages) ? $cachedChatMessages : [],
-                        $lastUserMessage,
-                        is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
-                        (string) $messageForInference,
-                        (string) $searchQuery
-                    );
-                    $skipFollowUpRetrieval = (($followUpRetrievalPlan['needs_retrieval'] ?? true) === false);
-                }
+                $followUpRetrievalPlan = $this->planFollowUpRetrievalWithContext(
+                    $organization,
+                    (string) $sessionId,
+                    is_array($cachedChatMessages) ? $cachedChatMessages : [],
+                    $lastUserMessage,
+                    is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
+                    (string) $messageForInference,
+                    (string) $searchQuery
+                );
+                $skipFollowUpRetrieval = (($followUpRetrievalPlan['needs_retrieval'] ?? true) === false);
 
                 if ($skipFollowUpRetrieval) {
                     $canReusePreviousContext = !empty($previousContextPayloads);
@@ -1195,7 +1180,7 @@ class WidgetController
                         }
                     }
                     $actionResult = $actionService->processQuery($actionQuery, $organization->id, [
-                        'skip_semantic_action_matching' => $aiProvider === 'openai',
+                        'skip_semantic_action_matching' => false,
                     ]);
                     if (($actionResult['type'] ?? '') === 'action_executed'
                         && ($actionResult['result']['success'] ?? false)) {
@@ -1262,7 +1247,7 @@ class WidgetController
                             6, // Use broader retrieval window to reduce false negatives on specific product queries
                             [
                                 'disable_rewrite' => true,
-                                'skip_expansion' => $aiProvider === 'openai',
+                                'skip_expansion' => false,
                             ]
                         );
                     }
@@ -1521,7 +1506,7 @@ class WidgetController
             if ($directCatalogContext !== '') {
                 $context .= ($context !== '' ? "\n" : '') . $directCatalogContext . "\n";
             }
-            $deferKnowledgeShortcutsToModel = true;
+            $deferKnowledgeShortcutsToModel = false;
 
             // Persist last context payloads for follow-up continuity (limit to top 5)
             $payloads = $this->buildContextPayloadCache($orderedResults);
@@ -1719,10 +1704,14 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            $faqMatchMessage = $isRelatedFollowUp && trim((string) $searchQuery) !== ''
+                ? (string) $searchQuery
+                : (trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message);
+
             $exactFaqMatch = $this->getExactFaqMatchResponse(
                 $searchResults,
                 $organization,
-                trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message
+                $faqMatchMessage
             );
             $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
             $matchedKnowledgeContext = '';
@@ -1956,6 +1945,7 @@ class WidgetController
                 if ($branchFollowUp !== '' && !$this->responseHasQuestion($branchResponse)) {
                     $branchResponse = trim($branchResponse) . "\n\n" . $branchFollowUp;
                 }
+                $branchResponse = $this->stripTrailingProactiveFollowUpPrompt($branchResponse);
 
                 $tokenMessages = [
                     ['role' => 'user', 'content' => $message],
@@ -2201,6 +2191,7 @@ class WidgetController
                 if ($faqFollowUp !== '' && !$this->responseHasQuestion($finalFaqResponse)) {
                     $finalFaqResponse = trim($finalFaqResponse) . "\n\n" . $faqFollowUp;
                 }
+                $finalFaqResponse = $this->stripTrailingProactiveFollowUpPrompt($finalFaqResponse);
                 if (!$paraphrasedResponse) {
                     $tokenMessages = [
                         ['role' => 'user', 'content' => $message],
@@ -2213,6 +2204,19 @@ class WidgetController
                         $sessionId
                     );
                 }
+                $this->persistLastContextPayloads(
+                    $organization,
+                    $sessionId,
+                    $this->buildContextPayloadCache([['payload' => $exactFaqMatch['payload'] ?? []]]),
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city')
+                );
+                $this->appendToChatContextCache(
+                    $sessionId,
+                    (string) $message,
+                    (string) $finalFaqResponse,
+                    (int) ($organization->settings['chat_history_ttl_hours'] ?? 24)
+                );
 
                 Log::info('Widget direct FAQ response sent', [
                     'org_id' => $organization->id,
@@ -2524,7 +2528,7 @@ class WidgetController
                 $systemPrompt .= "Use LIVE STORE DATA for product questions and the Knowledge Base for policies/FAQs.\n";
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity.\n";
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\".\n";
-                $systemPrompt .= "Be concise. Use well-formatted responses with clear structure: bold key terms, bullet points for lists, separate lines for each detail. If the answer is not in the provided context, say so and ask one clarifying question.\n";
+                $systemPrompt .= "Be concise. Use well-formatted responses with clear structure: bold key terms, bullet points for lists, separate lines for each detail. If the answer is not in the provided context, say so and provide official contact details. Ask a clarifying question only when the user's current message is too ambiguous to identify what they mean.\n";
                 $systemPrompt .= "Never expose internal metadata fields (for example: keywords, semantic scores, candidate scores, internal limits) unless the user explicitly asks for those exact fields and they are customer-facing.\n";
                 $systemPrompt .= "If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.\n";
                 $systemPrompt .= $supplementaryInstruction . "\n";
@@ -2705,7 +2709,7 @@ class WidgetController
                 }
 
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\". ";
-                $systemPrompt .= "Be concise. Use well-formatted responses with clear structure: bold key terms, bullet points for lists, separate lines for each detail. If the answer is not in the provided context, say so and ask one clarifying question. ";
+                $systemPrompt .= "Be concise. Use well-formatted responses with clear structure: bold key terms, bullet points for lists, separate lines for each detail. If the answer is not in the provided context, say so and provide official contact details. Ask a clarifying question only when the user's current message is too ambiguous to identify what they mean. ";
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
                 $systemPrompt .= "CRITICAL: NEVER invent or assume URLs, phone numbers, email addresses, prices, or factual details not explicitly stated in this system prompt or CURRENT CONTEXT. ";
                 $systemPrompt .= "STRICT KNOWLEDGE BASE POLICY: Only confirm that a test, service, product, or feature is offered if it is EXPLICITLY listed BY NAME in CURRENT CONTEXT. NEVER infer that because a related or parent service is available (e.g., MRI), a specific variant or sub-procedure (e.g., MR Enterography, MR Arthrography) is also available. If the exact item the user asked about is NOT present by name in CURRENT CONTEXT, respond: 'I don't have specific information about [item name] in our knowledge base. For further details, please contact us at [contact info].' Do NOT speculate, infer, or expand beyond what is explicitly stated. ";
@@ -2734,7 +2738,7 @@ class WidgetController
             }
 
             $systemPrompt .= "\n\nOUTPUT ENVELOPE: Return JSON ONLY with keys: response (string), entity (string), resolved_anchor (string), anchor_facets (string array), topics_covered (string array), follow_up (object|null with type and topic array).";
-            $systemPrompt .= " Keep response natural and concise for users. Set follow_up=null if not asking a follow-up question.";
+            $systemPrompt .= " Keep response natural and concise for users. Do not add proactive follow-up questions, closing sales questions, or optional next-step questions. Set follow_up=null unless a clarifying question is strictly needed to understand the user's current ambiguous message.";
             $systemPrompt .= " Use resolved_anchor as the canonical subject of the CURRENT user turn, even when the user omitted it in a follow-up. Preserve exact product, test, class, service, order, or item names from CURRENT CONTEXT when available. Use anchor_facets for short qualifiers like stock, price, admission, fee, timing, requirement, delivery, size, color, or schedule.";
 
             // Get AI response using llmChat for better token tracking
@@ -3019,6 +3023,13 @@ class WidgetController
             }
 
             $responseText = $this->sanitizeContradictoryAvailabilityClaims($responseText);
+            $responseText = $this->stripInternalEnvelopeMetadata($responseText);
+            $responseText = $this->stripUnsupportedAlternativeContextOffer($responseText);
+            $responseText = $this->stripLeadingEchoedUserMessage($responseText, (string) $message);
+            $responseText = $this->stripTrailingProactiveFollowUpPrompt($responseText);
+            if (!$this->responseHasQuestion($responseText)) {
+                $structuredFollowUpState = null;
+            }
 
             if ($isInheritedTopicFollowUpTurn) {
                 $responseText = $this->stripTrailingGenericFollowUpPrompt($responseText);
@@ -3241,7 +3252,7 @@ class WidgetController
         $approvedSensitive = $settings['approved_sensitive_categories'] ?? [];
         $responseTone = $settings['response_tone'] ?? 'friendly';
         $responseLanguage = $settings['response_language'] ?? 'auto';
-        $deferKnowledgeShortcutsToModel = true;
+        $deferKnowledgeShortcutsToModel = false;
         
         if (!$message) {
             return response()->json(['error' => 'Message is required'], 400);
@@ -3482,7 +3493,11 @@ class WidgetController
                 && !$lastAssistantAskedQuestionForEnding
                 && !$hasPendingFollowUpStateForEnding
             ) {
-                $ackResponse = "You're welcome.";
+                $ackResponse = $this->buildContextualFarewellResponse(
+                    $organization,
+                    $sessionId,
+                    $lastAssistantMessageForEnding ?? ''
+                );
 
                 echo "data: " . json_encode(['content' => $ackResponse, 'done' => true]) . "\n\n";
                 $this->streamFlush();
@@ -3504,7 +3519,15 @@ class WidgetController
                 $this->isMinimalAcknowledgementMessage((string) $message)
                 && ($lastAssistantAskedQuestionForEnding || $hasPendingFollowUpStateForEnding)
             ) {
-                $continuationResponse = $this->buildAffirmativeContinuationResponse($pendingFollowUpState);
+                $isNegativeOrEndingClosing = $this->isNegativeFollowUp((string) $message)
+                    || $this->isConversationEndingPhrase((string) $message);
+                $continuationResponse = $isNegativeOrEndingClosing
+                    ? $this->buildContextualFarewellResponse(
+                        $organization,
+                        $sessionId,
+                        $lastAssistantMessageForEnding ?? ''
+                    )
+                    : $this->buildAffirmativeContinuationResponse($pendingFollowUpState);
 
                 echo "data: " . json_encode(['content' => $continuationResponse, 'done' => true]) . "\n\n";
                 $this->streamFlush();
@@ -3603,28 +3626,16 @@ class WidgetController
                         $isReferentialFollowUp
                     );
 
-                    if ($aiProvider === 'openai') {
-                        $skipFollowUpRetrieval = !empty($previousContextPayloads)
-                            && ($isAffirmativeFollowUp || $isContextualShortFollowUp || $shouldUsePendingStateAnchor);
-                        $followUpRetrievalPlan = [
-                            'needs_retrieval' => !$skipFollowUpRetrieval,
-                            'rewritten_query' => '',
-                            'reasoning' => $skipFollowUpRetrieval
-                                ? 'OpenAI provider reused prior verified context without local follow-up planning.'
-                                : 'OpenAI provider skipped local follow-up planning; deterministic combined query will be used.',
-                        ];
-                    } else {
-                        $followUpRetrievalPlan = $this->planFollowUpRetrievalWithContext(
-                            $organization,
-                            (string) $sessionId,
-                            is_array($cachedChatMessages) ? $cachedChatMessages : [],
-                            $lastUserMessage,
-                            is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
-                            (string) $messageForInference,
-                            (string) $searchQuery
-                        );
-                        $skipFollowUpRetrieval = (($followUpRetrievalPlan['needs_retrieval'] ?? true) === false);
-                    }
+                    $followUpRetrievalPlan = $this->planFollowUpRetrievalWithContext(
+                        $organization,
+                        (string) $sessionId,
+                        is_array($cachedChatMessages) ? $cachedChatMessages : [],
+                        $lastUserMessage,
+                        is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
+                        (string) $messageForInference,
+                        (string) $searchQuery
+                    );
+                    $skipFollowUpRetrieval = (($followUpRetrievalPlan['needs_retrieval'] ?? true) === false);
 
                     if ($skipFollowUpRetrieval) {
                         $canReusePreviousContext = !empty($previousContextPayloads);
@@ -3667,7 +3678,7 @@ class WidgetController
                     ];
                 } else {
                     $actionResult = $actionService->processQuery($actionQuery, $organization->id, [
-                        'skip_semantic_action_matching' => $aiProvider === 'openai',
+                        'skip_semantic_action_matching' => false,
                     ]);
                 }
                 $intentResult = $actionResult['intent'] ?? null;
@@ -3749,7 +3760,7 @@ class WidgetController
                         } else {
                             $searchResults = $aiService->enhancedSearch($organization->slug, $searchQuery, 5, [
                                 'disable_rewrite' => true,
-                                'skip_expansion' => $aiProvider === 'openai',
+                                'skip_expansion' => false,
                             ]);
                         }
 
@@ -4075,10 +4086,14 @@ class WidgetController
                     return;
                 }
 
+                $streamFaqMatchMessage = $isRelatedFollowUp && trim((string) $searchQuery) !== ''
+                    ? (string) $searchQuery
+                    : (trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message);
+
                 $exactFaqMatch = $this->getExactFaqMatchResponse(
                     $searchResults,
                     $organization,
-                    trim($messageForInference) !== '' ? (string) $messageForInference : (string) $message
+                    $streamFaqMatchMessage
                 );
                 $branchFaqMatch = $this->getFunnelBranchFaqMatchResponse($organization, $pendingFollowUpState, (string) $message);
                 $streamMatchedKnowledgeContext = '';
@@ -4189,6 +4204,7 @@ class WidgetController
                     if ($faqFollowUp !== '') {
                         $directResponse = trim($directResponse) . "\n\n" . $faqFollowUp;
                     }
+                    $directResponse = $this->stripTrailingProactiveFollowUpPrompt($directResponse);
 
                     Log::info('Widget stream funnel branch FAQ response', [
                         'org_id' => $organization->id,
@@ -4312,6 +4328,7 @@ class WidgetController
                     if ($faqFollowUp !== '') {
                         $directResponse = trim($directResponse) . "\n\n" . $faqFollowUp;
                     }
+                    $directResponse = $this->stripTrailingProactiveFollowUpPrompt($directResponse);
                     Log::info('Widget stream exact FAQ match response', [
                         'org_id' => $organization->id,
                         'session_id' => $sessionId,
@@ -4334,6 +4351,19 @@ class WidgetController
                             $sessionId
                         );
                     }
+                    $this->persistLastContextPayloads(
+                        $organization,
+                        $sessionId,
+                        $this->buildContextPayloadCache([['payload' => $exactFaqMatch['payload'] ?? []]]),
+                        $allUserInfo,
+                        compact('country', 'region', 'location', 'city')
+                    );
+                    $this->appendToChatContextCache(
+                        $sessionId,
+                        (string) $message,
+                        (string) $directResponse,
+                        (int) ($organization->settings['chat_history_ttl_hours'] ?? 24)
+                    );
 
                     echo "data: " . json_encode(['content' => $directResponse, 'done' => true]) . "\n\n";
                     $this->streamFlush();
@@ -4667,7 +4697,7 @@ class WidgetController
                 $isAppointmentQuery = $isRealtimeSlotQuery || $isScheduleQuery;
                 $systemPrompt .= " Tone: {$responseTone}. Language: {$responseLanguage}.";
                 $systemPrompt .= " Write in first-person plural as the business (use \"we/our\"), not \"they\".";
-                $systemPrompt .= " Be concise and precise. Use **bold** for key terms and prices. For unordered lists use - bullet points; for sequential steps use numbered lists. Put each item on its own line. If the answer is not in the provided context, say so and ask one clarifying question.";
+                $systemPrompt .= " Be concise and precise. Use **bold** for key terms and prices. For unordered lists use - bullet points; for sequential steps use numbered lists. Put each item on its own line. If the answer is not in the provided context, say so and provide official contact details. Ask a clarifying question only when the user's current message is too ambiguous to identify what they mean.";
                 $systemPrompt .= " If the user asks how to contact, you MUST include official contact details (Email/Phone/Website if available) and nothing else.";
                 $systemPrompt .= " " . $supplementaryInstruction;
                 if ($scopeInstruction !== '') {
@@ -5258,6 +5288,10 @@ class WidgetController
                     $organization
                 );
                 $finalResponse = $this->sanitizeContradictoryAvailabilityClaims($finalResponse);
+                $finalResponse = $this->stripInternalEnvelopeMetadata($finalResponse);
+                $finalResponse = $this->stripUnsupportedAlternativeContextOffer($finalResponse);
+                $finalResponse = $this->stripLeadingEchoedUserMessage($finalResponse, (string) $message);
+                $finalResponse = $this->stripTrailingProactiveFollowUpPrompt($finalResponse);
                 $escalationReason = $this->getEscalationReason($message, $finalResponse, $intentResult);
                 $postfixParts = [];
 
@@ -6290,6 +6324,13 @@ class WidgetController
 
     private function getKeywordFaqMatchResponse(Organization $organization, string $message): ?array
     {
+        if ($this->isArtistSellingIntent($message)) {
+            $artistSellingMatch = $this->getArtistSellingFaqMatchResponse($organization);
+            if ($artistSellingMatch) {
+                return $artistSellingMatch;
+            }
+        }
+
         $translationMap = $this->getOrganizationQueryTranslationMap($organization);
         $query = $this->normalizeKeywordMatchText($message, $translationMap);
         if ($query === '') {
@@ -6467,6 +6508,111 @@ class WidgetController
         return $best;
     }
 
+    private function getArtistSellingFaqMatchResponse(Organization $organization): ?array
+    {
+        $faqs = OrganizationFaq::query()
+            ->where('organization_id', $organization->id)
+            ->where('is_active', true)
+            ->get(['id', 'question', 'answer', 'follow_up', 'keywords', 'category', 'updated_at']);
+
+        $best = null;
+        foreach ($faqs as $faq) {
+            $questionNorm = $this->normalizeKeywordMatchText((string) $faq->question);
+            $answerNorm = $this->normalizeKeywordMatchText((string) $faq->answer);
+            $keywordsNorm = $this->normalizeKeywordMatchText((string) ($faq->keywords ?? ''));
+            $categoryNorm = $this->normalizeKeywordMatchText((string) ($faq->category ?? ''));
+            $candidateText = trim($questionNorm . ' ' . $answerNorm . ' ' . $keywordsNorm . ' ' . $categoryNorm);
+
+            if ($candidateText === '' || !str_contains($candidateText, 'sell')) {
+                continue;
+            }
+
+            $isArtistFaq = str_contains($categoryNorm, 'artist')
+                || preg_match('/\b(artist|artwork|painting|paintings|profile|upload|submission|publishing)\b/u', $candidateText);
+            if (!$isArtistFaq) {
+                continue;
+            }
+
+            $score = 2.6;
+            if (str_contains($categoryNorm, 'artist')) {
+                $score += 1.1;
+            }
+            if (preg_match('/\bsell\b.*\bpainting|painting.*\bsell\b/u', $questionNorm)) {
+                $score += 1.4;
+            }
+            if (preg_match('/\b(upload|profile|review|submission|publishing)\b/u', $candidateText)) {
+                $score += 1.0;
+            }
+            if (preg_match('/\bwhatsapp|support\b/u', $candidateText)) {
+                $score += 0.7;
+            }
+
+            if (
+                $best === null
+                || $score > $best['score']
+                || ($score === $best['score'] && (string) $faq->updated_at > (string) ($best['updated_at'] ?? ''))
+            ) {
+                $answer = trim((string) $faq->answer);
+                if ($answer === '') {
+                    continue;
+                }
+
+                $best = [
+                    'score' => $score,
+                    'updated_at' => (string) $faq->updated_at,
+                    'response' => $answer,
+                    'payload' => [
+                        'item_id' => 'faq_' . $faq->id,
+                        'data_type' => 'faq',
+                        'type' => 'faq',
+                        'title' => $faq->question,
+                        'content' => $answer,
+                        'follow_up' => $faq->follow_up,
+                        'category' => $faq->category,
+                        'keywords' => $faq->keywords,
+                    ],
+                    'match_debug' => [
+                        'artist_selling_intent' => true,
+                    ],
+                ];
+            }
+        }
+
+        if (!$best) {
+            return null;
+        }
+
+        unset($best['updated_at']);
+        $best['match_source'] = 'artist_selling_keyword_fallback';
+
+        return $best;
+    }
+
+    private function isArtistSellingIntent(string $message): bool
+    {
+        $query = $this->normalizeKeywordMatchText($message);
+        if ($query === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(buy|purchase|order|checkout|cart)\b/u', $query)) {
+            return false;
+        }
+
+        if (preg_match('/\b(sketch|paper|print|prints|drawing|drawings)\b/u', $query)) {
+            return false;
+        }
+
+        $hasSaleVerb = (bool) preg_match('/\b(sell|sale|seller|selling|list|listing|register|registration|artist|profile|upload|submit|submission|publish|publishing)\b/u', $query);
+        $hasArtworkNoun = (bool) preg_match('/\b(painting|paintings|artwork|artworks|canvas|art)\b/u', $query);
+
+        if ($hasSaleVerb && $hasArtworkNoun) {
+            return true;
+        }
+
+        return (bool) preg_match('/\bmy\s+painting\s+sell\b|\bpainting\s+sell\b|\bsell\s+my\s+painting\b/u', $query);
+    }
+
     private function queryHasCareerIntent(string $message, Organization $organization): bool
     {
         $query = $this->normalizeKeywordMatchText(
@@ -6566,36 +6712,6 @@ class WidgetController
             'intent' => 'general_qna',
             'confidence' => null,
             'method' => 'skipped_widget_kb_only',
-        ];
-    }
-
-    private function buildFastIntentResultForOpenAi(string $message, Organization $organization): array
-    {
-        $message = trim($message);
-        $routeAnalysis = app(IntentDetectionService::class)->analyzeRoutePlan($message, $organization->id);
-        $signals = is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [];
-        $lower = mb_strtolower($message);
-
-        $intent = 'static_info';
-        if ((bool) preg_match('/\b(book|booking|reserve|reservation|appointment|schedule)\b/i', $message)) {
-            $intent = 'booking';
-        } elseif (in_array('pricing_requests', $signals, true)
-            || (bool) preg_match('/\b(price|pricing|cost|fee|fees|plan|plans|package|packages|rate|rates|charge|charges|quote)\b/i', $lower)) {
-            $intent = 'pricing';
-        } elseif (in_array('availability_checks', $signals, true)
-            || (bool) preg_match('/\b(available|availability|in stock|out of stock|inventory|current|latest|status|today|now)\b/i', $lower)) {
-            $intent = 'realtime_data';
-        } elseif (($routeAnalysis['requires_product_resolution'] ?? false)
-            || (bool) preg_match('/\b(find|search|show|list|lookup|which|where|when|who|how many)\b/i', $lower)) {
-            $intent = 'lookup';
-        }
-
-        return [
-            'intent' => $intent,
-            'confidence' => 0.72,
-            'method' => 'openai_fast_rules',
-            'action_needed' => in_array($intent, ['booking', 'pricing', 'realtime_data', 'lookup'], true),
-            'route_analysis' => $routeAnalysis,
         ];
     }
 
@@ -7446,11 +7562,20 @@ class WidgetController
         $lastAssistant = trim(strip_tags((string) ($lastAssistantMessage ?? '')));
         $lastAssistantAskedQuestion = $lastAssistant !== '' && $this->responseHasQuestion($lastAssistant);
 
+        if ($this->isAffirmativeFollowUp($current) && $this->previousTurnHasArtistSellingAnchor($lastUser, $lastAssistant, $previousContextPayloads, $pendingFollowUpState)) {
+            return true;
+        }
+
         if ($this->isAffirmativeFollowUp($current) || $this->isNegativeFollowUp($current)) {
             return $lastAssistantAskedQuestion || $hasPendingFollowUpState;
         }
 
         if ($hasPendingFollowUpState && $this->messageMatchesPendingFollowUpState($current, $pendingFollowUpState)) {
+            return true;
+        }
+
+        if ($this->isArtistSellingOperationalFollowUp($current)
+            && $this->previousTurnHasArtistSellingAnchor($lastUser, $lastAssistant, $previousContextPayloads, $pendingFollowUpState)) {
             return true;
         }
 
@@ -7496,6 +7621,11 @@ class WidgetController
             }
 
             return $searchQuery !== '' ? $searchQuery : $message;
+        }
+
+        if ($this->isArtistSellingOperationalFollowUp($message)
+            || ($isAffirmativeFollowUp && $this->previousTurnHasArtistSellingAnchor($lastUserMessage, $lastAssistantMessage))) {
+            return trim('sell painting artist profile upload artwork IndianArtZone seller guide ' . $message);
         }
 
         $queryParts = [];
@@ -7588,6 +7718,66 @@ class WidgetController
         return !empty($this->extractMeaningfulFollowUpTerms($combined));
     }
 
+    private function isArtistSellingOperationalFollowUp(string $message): bool
+    {
+        $clean = $this->normalizeKeywordMatchText($message);
+        if ($clean === '') {
+            return false;
+        }
+
+        if ($this->isArtistSellingIntent($clean)) {
+            return true;
+        }
+
+        return (bool) preg_match('/\b(upload|uploads|register|registration|artist\s+profile|profile|submit|submission|publish|publishing|list|listing|seller\s+guide|how\s+to\s+sell|app|application|mobile\s+app|android|ios)\b/u', $clean);
+    }
+
+    private function previousTurnHasArtistSellingAnchor(
+        ?string $lastUserMessage,
+        ?string $lastAssistantMessage = null,
+        array $previousContextPayloads = [],
+        ?array $pendingFollowUpState = null
+    ): bool {
+        $parts = [
+            (string) ($lastUserMessage ?? ''),
+            (string) ($lastAssistantMessage ?? ''),
+        ];
+
+        foreach ($previousContextPayloads as $payload) {
+            if (!is_array($payload)) {
+                continue;
+            }
+
+            $parts[] = implode(' ', array_filter([
+                (string) ($payload['title'] ?? ''),
+                (string) ($payload['category'] ?? ''),
+                (string) ($payload['keywords'] ?? ''),
+                (string) ($payload['content'] ?? ''),
+                (string) ($payload['follow_up'] ?? ''),
+            ]));
+        }
+
+        if (is_array($pendingFollowUpState)) {
+            $parts[] = implode(' ', array_filter([
+                (string) ($pendingFollowUpState['question'] ?? ''),
+                (string) ($pendingFollowUpState['resolved_anchor'] ?? ''),
+                (string) ($pendingFollowUpState['entity'] ?? ''),
+                implode(' ', $this->normalizeDebugList($pendingFollowUpState['topic_hints'] ?? [])),
+                implode(' ', $this->normalizeDebugList($pendingFollowUpState['topics_covered'] ?? [])),
+            ]));
+        }
+
+        $combined = $this->normalizeKeywordMatchText(implode(' ', array_filter($parts)));
+        if ($combined === '') {
+            return false;
+        }
+
+        $hasArtistContext = (bool) preg_match('/\b(artist|seller|sell|selling|profile|upload|submission|publish|publishing|whatsapp)\b/u', $combined);
+        $hasArtworkContext = (bool) preg_match('/\b(painting|paintings|artwork|artworks|canvas|art)\b/u', $combined);
+
+        return $hasArtistContext && $hasArtworkContext;
+    }
+
     private function hasFreshTopicSignal(string $message): bool
     {
         $clean = trim(mb_strtolower(strip_tags($message)));
@@ -7627,7 +7817,8 @@ class WidgetController
             'availability', 'stock', 'item', 'items', 'product', 'products', 'service', 'services', 'option', 'options', 'variant',
             'variants', 'size', 'sizes', 'color', 'colors', 'colour', 'colours', 'rs', 'inr', 'usd', 'it', 'that', 'this', 'these',
             'those', 'me', 'show', 'tell', 'please', 'one', 'ones', 'order', 'tracking', 'track', 'carrier', 'shipment',
-            'shipping', 'shipped', 'delivered', 'delivery', 'ups', 'fedex', 'usps', 'dhl'
+            'shipping', 'shipped', 'delivered', 'delivery', 'ups', 'fedex', 'usps', 'dhl',
+            'yes', 'yeah', 'yup', 'yep', 'sure', 'ok', 'okay',
         ];
 
         $tokens = array_values(array_filter(explode(' ', $normalized), function ($token) use ($stopwords) {
@@ -8152,7 +8343,6 @@ class WidgetController
             : 'Our pricing plans are:';
         $lines = [$heading];
         foreach ($plans as $plan) {
-            $parts = [];
             if ($plan['usd'] !== '' || $plan['inr'] !== '') {
                 $priceParts = [];
                 if ($plan['usd'] !== '') {
@@ -8161,24 +8351,31 @@ class WidgetController
                 if ($plan['inr'] !== '') {
                     $priceParts[] = 'INR ' . number_format((float) $plan['inr']);
                 }
-                $parts[] = implode(' / ', $priceParts);
-            }
-            if (($plan['token_count'] ?? 0) > 0) {
-                $parts[] = number_format((int) $plan['token_count']) . ' tokens';
-            }
-            if ($plan['validity'] !== '') {
-                $parts[] = $plan['validity'] . ' months validity';
-            }
-            if ($plan['rollover'] !== '') {
-                $parts[] = 'rollover: ' . $plan['rollover'];
+
+                $price = implode(' / ', $priceParts);
+            } else {
+                $price = '';
             }
 
             $featureSummary = $this->summarizePricingFeatures($plan['features']);
-            if ($featureSummary !== '') {
-                $parts[] = $featureSummary;
-            }
 
-            $lines[] = '- **' . $plan['name'] . ':** ' . implode('; ', $parts) . '.';
+            $lines[] = '';
+            $lines[] = '**' . $plan['name'] . '**';
+            if ($price !== '') {
+                $lines[] = '**Price:** ' . $price;
+            }
+            if (($plan['token_count'] ?? 0) > 0) {
+                $lines[] = '**Tokens:** ' . number_format((int) $plan['token_count']);
+            }
+            if ($plan['validity'] !== '') {
+                $lines[] = '**Validity:** ' . $plan['validity'] . ' months';
+            }
+            if ($plan['rollover'] !== '') {
+                $lines[] = '**Rollover:** ' . $plan['rollover'];
+            }
+            if ($featureSummary !== '') {
+                $lines[] = '**Features:** ' . $featureSummary;
+            }
         }
 
         $contactParts = array_values(array_filter([
@@ -8187,6 +8384,7 @@ class WidgetController
             ($organization->website ?: config('app.url')) ? 'Website: ' . ($organization->website ?: config('app.url')) : null,
         ]));
         if (!empty($contactParts)) {
+            $lines[] = '';
             $lines[] = 'For help choosing a pack, contact us at ' . implode(' | ', $contactParts) . '.';
         }
 
@@ -8892,48 +9090,11 @@ class WidgetController
 
     private function buildFollowUpPrompt(?array $intentResult, ?Organization $organization = null): string
     {
-        $intent = $intentResult['intent'] ?? '';
-        $intent = strtolower(trim($intent));
-
-        if ($intent === 'booking') {
-            if ($organization && $this->organizationSupportsBookingFollowUp($organization)) {
-                return 'Would you like me to help you with booking?';
-            }
-
-            return 'Would you like more details or contact information for this?';
-        }
-        if ($intent === 'pricing') {
-            return 'Do you want a detailed quote or a specific item price?';
-        }
-        if ($intent === 'lookup' || $intent === 'realtime_data') {
-            return 'Do you want me to look up anything else for you?';
-        }
-
         return '';
     }
 
     private function buildProactiveSuggestion(?array $intentResult, ?Organization $organization = null): string
     {
-        $intent = $intentResult['intent'] ?? '';
-        $intent = strtolower(trim($intent));
-
-        if ($intent === 'booking') {
-            if ($organization && $this->organizationSupportsBookingFollowUp($organization)) {
-                return 'Suggestion: I can share available booking options for you.';
-            }
-
-            return 'Suggestion: I can share product details, pricing, delivery, or contact options.';
-        }
-        if ($intent === 'pricing') {
-            return 'Suggestion: I can send a detailed price breakdown or compare options.';
-        }
-        if ($intent === 'realtime_data') {
-            return 'Suggestion: I can check live availability or status updates.';
-        }
-        if ($intent === 'lookup') {
-            return 'Suggestion: I can help find related items or services.';
-        }
-
         return '';
     }
 
@@ -9228,10 +9389,6 @@ class WidgetController
             return null;
         }
 
-        if ($asksPrice && !$asksAvailability) {
-            $parts[] = 'Would you like a detailed quote or a specific item price?';
-        }
-
         return implode("\n\n", $parts);
     }
 
@@ -9495,18 +9652,24 @@ class WidgetController
         }
 
         $language = trim((string) ($normalized['language'] ?? 'en')) ?: 'en';
+        $script = trim((string) ($normalized['script'] ?? 'latin')) ?: 'latin';
         $usedTranslation = (bool) ($normalized['used_translation'] ?? false);
+        if ($this->looksLikeRomanizedOdiaMessage($originalMessage) && strtolower($language) === 'en') {
+            $language = 'or';
+            $script = 'latin';
+            $usedTranslation = true;
+        }
 
         return [
             'original_query' => $originalMessage,
             'inference_query' => $inferenceQuery,
             'language' => $language,
-            'script' => trim((string) ($normalized['script'] ?? 'latin')) ?: 'latin',
+            'script' => $script,
             'used_translation' => $usedTranslation,
             'prompt_instruction' => $this->buildMultilingualPromptInstruction(
                 $responseLanguage,
                 $language,
-                trim((string) ($normalized['script'] ?? 'latin')) ?: 'latin',
+                $script,
                 $originalMessage,
                 $inferenceQuery,
                 $usedTranslation
@@ -9516,10 +9679,6 @@ class WidgetController
 
     private function shouldSkipLocalQueryNormalization(Organization $organization, string $message, string $responseLanguage): bool
     {
-        if ($this->aiAgentService->getAiProviderForOrganization($organization->id) === 'openai') {
-            return true;
-        }
-
         $message = trim($message);
         if ($message === '') {
             return true;
@@ -9527,8 +9686,38 @@ class WidgetController
 
         $configuredLanguage = strtolower(trim($responseLanguage));
         $looksAscii = (bool) preg_match('/^[\x09\x0A\x0D\x20-\x7E]+$/', $message);
+        if ($looksAscii && $this->looksLikeRomanizedOdiaMessage($message)) {
+            return false;
+        }
+
+        if ($this->aiAgentService->getAiProviderForOrganization($organization->id) === 'openai') {
+            return true;
+        }
 
         return $looksAscii && in_array($configuredLanguage, ['', 'auto', 'en', 'english'], true);
+    }
+
+    private function looksLikeRomanizedOdiaMessage(string $message): bool
+    {
+        $text = ' ' . strtolower(trim(preg_replace('/[^a-z0-9\s]/i', ' ', $message) ?? $message)) . ' ';
+        if (trim($text) === '') {
+            return false;
+        }
+
+        $signals = [
+            ' mo ', ' mora ', ' mu ', ' tume ', ' apana ', ' apananka ', ' kana ', ' kn ',
+            ' kahiparibe ', ' kahiba ', ' kuhantu ', ' artha ', ' ra ', ' pai ', ' kemiti ',
+            ' achhi ', ' achanti ', ' haba ', ' heba ', ' janmadina ', ' dhanyabad ',
+        ];
+
+        $hits = 0;
+        foreach ($signals as $signal) {
+            if (str_contains($text, $signal)) {
+                $hits++;
+            }
+        }
+
+        return $hits >= 2;
     }
 
     private function buildMultilingualPromptInstruction(
@@ -9571,7 +9760,7 @@ class WidgetController
 
         if ($script === 'latin' && in_array($language, ['hi', 'or', 'hinglish'], true)) {
             if ($language === 'or') {
-                return 'The user wrote in Latin-script Odia/Oriya. Prefer a clean, readable reply. If you are not highly confident producing natural Latin-script Odia/Oriya, reply in clear English instead of mixing scripts or switching unpredictably to Hindi/Hinglish.';
+                return 'The user wrote in Latin-script Odia/Oriya. Reply in clean Odia/Oriya script when possible. If you are not highly confident producing natural Odia/Oriya script, reply in clear English. Do not mix English and romanized Odia in the same sentence, and do not switch to Hindi/Hinglish.';
             }
 
             if ($language === 'hi' || $language === 'hinglish') {
@@ -9625,29 +9814,6 @@ class WidgetController
                 'reason' => 'Question or context was empty, so the gate was skipped.',
                 'use_context' => true,
                 'model' => '',
-            ];
-        }
-
-        if ($this->aiAgentService->getAiProviderForOrganization($organization->id) === 'openai') {
-            Log::info('Widget knowledge context relevance deferred to OpenAI', [
-                'channel' => $channel,
-                'org_id' => $organization->id,
-                'session_id' => $sessionId,
-            ]);
-
-            $this->debugData['context_relevance_decision'] = 'deferred_to_openai';
-            $this->debugData['context_relevance_confidence'] = null;
-            $this->debugData['context_relevance_threshold'] = null;
-            $this->debugData['context_relevance_reason'] = 'Single OpenAI response performs private context relevance check.';
-            $this->debugData['context_relevance_used'] = true;
-
-            return [
-                'context' => $context,
-                'decision' => 'deferred_to_openai',
-                'confidence' => 0.0,
-                'reason' => 'Single OpenAI response performs private context relevance check.',
-                'use_context' => true,
-                'model' => $this->aiAgentService->getOpenAiModelForOrganization($organization->id),
             ];
         }
 
@@ -10166,11 +10332,7 @@ class WidgetController
 
     private function buildDefaultFollowUpPrompt(string $message): string
     {
-        if ($this->isMinimalAcknowledgementMessage($message) || $this->isConversationEndingPhrase($message)) {
-            return '';
-        }
-
-        return 'Would you like more details on this?';
+        return '';
     }
 
     private function stripTrailingGenericFollowUpPrompt(string $response): string
@@ -10189,6 +10351,32 @@ class WidgetController
         }
 
         return trim($response);
+    }
+
+    private function stripTrailingProactiveFollowUpPrompt(string $response): string
+    {
+        $response = trim($response);
+        if ($response === '') {
+            return '';
+        }
+
+        $patterns = [
+            '/(?:\s|<br\s*\/?>)*(?:Would you like|Would you want|Do you want|Do you need|Can I|Can we|Shall I|Should I|May I)\b[^?]{0,280}\?\s*$/iu',
+            '/(?:\s|<br\s*\/?>)*(?:If you (?:would like|want|need)|If you have)[^?]{0,280}\?\s*$/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            $candidate = preg_replace($pattern, '', $response) ?? $response;
+            $candidate = trim($candidate);
+
+            // Keep real clarification-only answers, but remove optional next-step
+            // questions when the response already contains substantive content.
+            if ($candidate !== '' && $candidate !== $response && str_word_count(strip_tags($candidate)) >= 6) {
+                return $candidate;
+            }
+        }
+
+        return $response;
     }
 
     private function buildAffirmativeContinuationResponse(?array $pendingFollowUpState): string
@@ -10237,18 +10425,20 @@ class WidgetController
             return false;
         }
 
-        $clean = strtolower(trim($message));
+        $clean = mb_strtolower(trim($message));
         if ($clean === '') {
             return false;
         }
 
-        $clean = preg_replace('/[!.,\s]+$/', '', $clean) ?? $clean;
+        $clean = preg_replace('/[\p{P}\p{Z}\s]+$/u', '', $clean) ?? $clean;
 
         // Single-word / exact phrase acknowledgements
         $acknowledgements = [
             'ok', 'okay', 'k', 'kk', 'alright', 'all right',
             'cool', 'great', 'fine', 'thanks', 'thank you',
             'thx', 'ty', 'got it',
+            'ଧନ୍ୟବାଦ', 'ଧନ୍ୟବାଦ୍', 'ଧନୈବାଦ', 'ଧନୈବାଦ୍',
+            'ନା', 'ନାହିଁ',
         ];
 
         if (in_array($clean, $acknowledgements, true)) {
@@ -10263,6 +10453,7 @@ class WidgetController
             '/^(many|big|sincere)?\s*thanks(\.| a lot| so much| very much)?$/i',
             '/^thank you\s*(so much|very much|a lot|for (your|the) help)?[.!]*$/i',
             "/^(that(s|'s) (all|it)|nothing else|no more)([,\\s]+(thank(s| you)|thx|ty))?\$/i",
+            '/^(ଧନ୍ୟବାଦ|ଧନ୍ୟବାଦ୍|ଧନୈବାଦ|ଧନୈବାଦ୍)\s*(ନମସ୍କାର)?$/u',
         ];
 
         foreach ($combinedPatterns as $pattern) {
@@ -10429,6 +10620,7 @@ class WidgetController
 
         $patterns = [
             'career' => '/\b(job|jobs|career|careers|vacanc(?:y|ies)|opening|openings|position|positions|recruit(?:ment)?|hiring|employment|apply|teacher|teachers|staff|resume|cv|biodata|candidate|candidates|join|hr)\b/u',
+            'artist_selling' => '/\b(artist|artists|sell|selling|seller|profile|upload|uploads|submission|publish|publishing)\b/u',
             'contact' => '/\b(contact|email|phone|whatsapp|address|reach|call|helpline|support)\b/u',
             'pricing' => '/\b(price|pricing|cost|fee|fees|charges|quote|plan|plans|subscription)\b/u',
             'admission' => '/\b(admission|admissions|class|classes|curriculum|campus|school|college|hostel|transport|scholarship|academic)\b/u',
@@ -10451,6 +10643,10 @@ class WidgetController
 
         if (in_array('career', $families, true)) {
             return ['career'];
+        }
+
+        if (in_array('artist_selling', $families, true)) {
+            return ['artist_selling'];
         }
 
         $substantiveFamilies = array_values(array_filter($families, fn ($family) => $family !== 'contact'));
@@ -11483,8 +11679,8 @@ class WidgetController
             return false;
         }
 
-        $lowerMessage = strtolower(trim($message));
-        $clean = preg_replace('/[!.,\s]+$/', '', $lowerMessage) ?? $lowerMessage;
+        $lowerMessage = mb_strtolower(trim($message));
+        $clean = preg_replace('/[\p{P}\p{Z}\s]+$/u', '', $lowerMessage) ?? $lowerMessage;
 
         // Exact match list
         $endPhrases = [
@@ -11494,6 +11690,7 @@ class WidgetController
             'okay bye', 'ok bye', 'ciao', 'cheers',
             "i'm good", 'im good', 'all set', 'nothing else',
             'have a good day', 'have a great day', 'take care',
+            'ନା', 'ନାହିଁ', 'ଧନ୍ୟବାଦ', 'ଧନ୍ୟବାଦ୍', 'ଧନୈବାଦ', 'ଧନୈବାଦ୍',
         ];
 
         foreach ($endPhrases as $phrase) {
@@ -11504,6 +11701,10 @@ class WidgetController
 
         // Negative-response patterns
         if (preg_match('/^(no|nope|nah|not)\s*(thank|thanks|needed|interested|required)/i', $clean)) {
+            return true;
+        }
+
+        if (preg_match('/^(ନା|ନାହିଁ|ଧନ୍ୟବାଦ|ଧନ୍ୟବାଦ୍|ଧନୈବାଦ|ଧନୈବାଦ୍)$/u', $clean)) {
             return true;
         }
 
@@ -11527,7 +11728,7 @@ class WidgetController
             return false;
         }
 
-        $clean = strtolower(trim($message));
+        $clean = mb_strtolower(trim($message));
         $ambiguousNegativeReplies = [
             'no', 'nope', 'nah', 'not really', 'not now', 'no thanks', 'no thank you',
         ];
@@ -12009,7 +12210,121 @@ class WidgetController
         // Ensure bold field labels (e.g. **Status:**, **Carrier:**) each start on their own line.
         // The LLM sometimes omits the newline between a field value and the next label.
         $text = preg_replace('/([^\n])\*\*([A-Z][^*\n]{1,30}):\*\*/', "$1\n**$2:**", $text);
+        $text = $this->stripInternalEnvelopeMetadata($text);
+        $text = $this->stripUnsupportedAlternativeContextOffer($text);
+        $text = $this->normalizePricingPlanResponseText($text);
         return trim($text);
+    }
+
+    private function stripInternalEnvelopeMetadata(string $text): string
+    {
+        $clean = trim($text);
+        if ($clean === '') {
+            return '';
+        }
+
+        $clean = preg_replace('/^\s*\*{0,2}\s*Response\s*\*{0,2}\s*:?\s*/i', '', $clean) ?? $clean;
+
+        $labelPattern = '(?:Entity|Resolved[_\s-]*Anchor|Anchor[_\s-]*Facets|Topics[_\s-]*Covered|Follow[_\s-]*up)';
+        $patterns = [
+            '/(?:^|\n)\s*\*{0,2}\s*' . $labelPattern . '\s*\*{0,2}\s*:.*$/isu',
+            '/\s+\*{0,2}\s*' . $labelPattern . '\s*\*{0,2}\s*:.*$/isu',
+            '/(?:^|\n)\s*<(?:strong|b)>\s*' . $labelPattern . '\s*:?\s*<\/(?:strong|b)>.*$/isu',
+            '/\s+<(?:strong|b)>\s*' . $labelPattern . '\s*:?\s*<\/(?:strong|b)>.*$/isu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            $candidate = trim(preg_replace($pattern, '', $clean) ?? $clean);
+            if ($candidate !== '') {
+                $clean = $candidate;
+            }
+        }
+
+        return trim(preg_replace('/\n{3,}/', "\n\n", $clean) ?? $clean);
+    }
+
+    private function stripUnsupportedAlternativeContextOffer(string $text): string
+    {
+        $clean = trim($text);
+        if ($clean === '') {
+            return '';
+        }
+
+        if (!preg_match('/\b(?:do not|don\'t|does not|doesn\'t)\s+have\s+(?:specific\s+)?(?:information|details)|\bnot\s+available\s+in\s+our\s+knowledge\s+base|\bdon\'t\s+have\s+enough\s+information/i', $clean)) {
+            return $clean;
+        }
+
+        $clean = preg_replace(
+            '/\s+However,\s+we\s+can\s+(?:tell|share|provide)\s+you\s+about\b.*?(?=(?:\n|$|For further details|Please contact|Contact us|Email:|Phone:|Website:))/isu',
+            ' ',
+            $clean
+        ) ?? $clean;
+
+        return trim(preg_replace('/[ \t]{2,}/', ' ', $clean) ?? $clean);
+    }
+
+    private function stripLeadingEchoedUserMessage(string $response, string $message): string
+    {
+        $clean = trim($response);
+        $query = trim(preg_replace('/\s+/', ' ', strip_tags($message)) ?? $message);
+        if ($clean === '' || $query === '' || mb_strlen($query) < 4) {
+            return $clean;
+        }
+
+        $plainPrefix = trim(preg_replace('/\s+/', ' ', mb_substr(strip_tags($clean), 0, mb_strlen($query) + 8)) ?? '');
+        if (stripos($plainPrefix, $query) !== 0) {
+            return $clean;
+        }
+
+        $pattern = '/^\s*' . preg_quote($query, '/') . '\s*[:\-–—]?\s*/iu';
+        $candidate = trim(preg_replace($pattern, '', $clean, 1) ?? $clean);
+
+        return $candidate !== '' ? $candidate : $clean;
+    }
+
+    private function normalizePricingPlanResponseText(string $text): string
+    {
+        if ($text === '') {
+            return '';
+        }
+
+        $looksLikePricingPlan = preg_match('/\b(price|tokens?|validity|rollover|features?)\s*:/i', $text)
+            && preg_match('/\bplans?\b/i', $text);
+        if (!$looksLikePricingPlan) {
+            return $text;
+        }
+
+        $normalized = str_replace(["\r\n", "\r"], "\n", $text);
+        $normalized = preg_replace('/(\bplans?\s*:)\s*-\s*/i', "$1\n\n", $normalized) ?? $normalized;
+        $normalized = preg_replace(
+            '/(^|\n)\s*\*\*([A-Z][A-Za-z0-9 ()\/&,+.\'’_-]{2,80}?)\s+-\s+(Price\s*:)\*\*/u',
+            "$1\n**$2**\n**$3**",
+            $normalized
+        ) ?? $normalized;
+        $normalized = preg_replace(
+            '/(^|\n)\s*([A-Z][A-Za-z0-9 ()\/&,+.\'’_-]{2,80}?)\s+-\s+(?=\*{0,2}\s*Price\s*:)/u',
+            "$1\n$2\n",
+            $normalized
+        ) ?? $normalized;
+        $normalized = preg_replace(
+            '/\s+-\s+\*\*([A-Z][A-Za-z0-9 ()\/&,+.\'’_-]{2,80}?)\s+-\s+(Price\s*:)\*\*/u',
+            "\n\n**$1**\n**$2**",
+            $normalized
+        ) ?? $normalized;
+        $normalized = preg_replace(
+            '/\s+-\s+([A-Z][A-Za-z0-9 ()\/&,+.\'’_-]{2,80}?)\s+-\s+(?=\*{0,2}\s*Price\s*:)/u',
+            "\n\n$1\n",
+            $normalized
+        ) ?? $normalized;
+        $normalized = preg_replace(
+            '/\s+-\s+(\*{0,2}(?:Price|Tokens?|Validity|Rollover|Features?)\s*:\*{0,2})/i',
+            "\n$1",
+            $normalized
+        ) ?? $normalized;
+        $normalized = preg_replace('/\s+(For help choosing\b)/i', "\n\n$1", $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s+(Do you want\b)/i', "\n\n$1", $normalized) ?? $normalized;
+
+        return trim(preg_replace('/\n{3,}/', "\n\n", $normalized) ?? $normalized);
     }
 
     private function decodeHtmlEntitiesRecursively(string $text, int $maxPasses = 2): string
@@ -12389,8 +12704,6 @@ class WidgetController
         return implode("\n", [
             '**Product:** ' . $title,
             '**Product Link:** ' . $url,
-            '',
-            'Do you want price or stock details for this item as well?',
         ]);
     }
 
@@ -12443,9 +12756,6 @@ class WidgetController
         if (!empty($variantTitles)) {
             $lines[] = '**Available Sizes/Variants:** ' . implode(', ', array_slice($variantTitles, 0, 12));
         }
-
-        $lines[] = '';
-        $lines[] = 'Do you want me to look up anything else for you?';
 
         return implode("\n", $lines);
     }
@@ -12633,7 +12943,7 @@ class WidgetController
         $t = trim(mb_strtolower($text));
         if ($t === '') return false;
         // Simple affirmatives
-        $affirm = ['yes', 'yeah', 'yup', 'yep', 'ya', 'yah', 'sure', 'certainly', 'ok', 'okay', 'please', 'go ahead', 'go on', 'continue', 'proceed', 'carry on'];
+        $affirm = ['yes', 'yeah', 'yup', 'yep', 'ya', 'yah', 'sure', 'certainly', 'ok', 'okay', 'please', 'go ahead', 'go on', 'continue', 'proceed', 'carry on', 'ହଁ'];
         foreach ($affirm as $a) {
             if ($t === $a) return true;
         }
@@ -12660,14 +12970,15 @@ class WidgetController
         }
 
         $negatives = [
-            'no', 'nope', 'nah', 'not now', 'dont', "don't", 'do not', 'not really', 'no thanks', 'no thank you', 'maybe later'
+            'no', 'nope', 'nah', 'not now', 'dont', "don't", 'do not', 'not really', 'no thanks', 'no thank you', 'maybe later',
+            'ନା', 'ନାହିଁ',
         ];
 
         if (in_array($t, $negatives, true)) {
             return true;
         }
 
-        if (mb_strlen($t) < 20 && preg_match('/\b(no|nope|nah|not now|no thanks|not really)\b/', $t)) {
+        if (mb_strlen($t) < 20 && (preg_match('/\b(no|nope|nah|not now|no thanks|not really)\b/', $t) || preg_match('/^(ନା|ନାହିଁ)$/u', $t))) {
             return true;
         }
 
@@ -13540,8 +13851,7 @@ class WidgetController
                 // whether inline or on new lines, e.g.:
                 //   "...answer text **Entity:** Foo **Topics Covered:** Bar **Follow-up:** null"
                 // We strip from the FIRST occurrence of any envelope key to end-of-string.
-                $metaPattern = '/\s*\*{0,2}\s*(?:entity|topics[_\s]covered|follow[_\s\-]?up|details)\s*\*{0,2}\s*:.*/is';
-                $cleaned = preg_replace($metaPattern, '', $rawResponseText) ?? $rawResponseText;
+                $cleaned = $this->stripInternalEnvelopeMetadata($rawResponseText);
                 // Strip leading **Response**: or *Response*: prefix if present
                 $cleaned = preg_replace('/^\*{0,2}\s*Response\s*\*{0,2}\s*:?\s*/i', '', trim((string) $cleaned));
                 $cleaned = trim(preg_replace('/\n{3,}/', "\n\n", (string) $cleaned) ?? '');

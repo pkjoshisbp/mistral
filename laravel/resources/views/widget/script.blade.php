@@ -1122,6 +1122,7 @@
             if (!text) return '';
 
             text = this.normalizeShopifyFieldLayout(String(text));
+            text = this.normalizePricingPlanLayout(text);
 
             // Strip XML/HTML processing instructions (xml-pi tags, <!DOCTYPE ...>)
             text = text.replace(/<\?[^>]*>/g, '').replace(/<!DOCTYPE[^>]*>/gi, '');
@@ -1336,6 +1337,58 @@
                 return processed;
             }
             return processed.replace(/\n/g, '<br>');
+        }
+
+        normalizePricingPlanLayout(text) {
+            if (!text) {
+                return '';
+            }
+
+            let normalized = String(text).replace(/\r\n?/g, '\n');
+            const looksLikePricingPlan = /\b(price|tokens?|validity|rollover|features?)\s*:/i.test(normalized)
+                && /\bplans?\b/i.test(normalized);
+
+            if (!looksLikePricingPlan) {
+                return normalized;
+            }
+
+            const label = '(?:Price|Tokens?|Validity|Rollover|Features?)';
+            const htmlLabelPrefix = '(?:<(?:strong|b)>)?\\s*';
+            const htmlLabelSuffix = '\\s*:?\\s*(?:</(?:strong|b)>)?';
+
+            normalized = normalized.replace(/(\bplans?\s*:)\s*-\s*/gi, '$1\n\n');
+            normalized = normalized.replace(
+                /(^|\n)\s*\*\*([A-Z][A-Za-z0-9 ()/&,+.'’_-]{2,80}?)\s+-\s+(Price\s*:)\*\*/gu,
+                '$1\n**$2**\n**$3**'
+            );
+            normalized = normalized.replace(
+                /(^|\n)\s*<(strong|b)>\s*([A-Z][A-Za-z0-9 ()/&,+.'’_-]{2,80}?)\s+-\s+(Price\s*:)\s*<\/\2>/giu,
+                '$1\n<$2>$3</$2>\n<$2>$4</$2>'
+            );
+            normalized = normalized.replace(
+                /(^|\n)\s*([A-Z][A-Za-z0-9 ()/&,+.'’_-]{2,80}?)\s+-\s+(?=(?:\*{0,2}|<(?:strong|b)>)*\s*Price\s*:)/gu,
+                '$1\n$2\n'
+            );
+            normalized = normalized.replace(
+                /\s+-\s+\*\*([A-Z][A-Za-z0-9 ()/&,+.'’_-]{2,80}?)\s+-\s+(Price\s*:)\*\*/gu,
+                '\n\n**$1**\n**$2**'
+            );
+            normalized = normalized.replace(
+                /\s+-\s+<(strong|b)>\s*([A-Z][A-Za-z0-9 ()/&,+.'’_-]{2,80}?)\s+-\s+(Price\s*:)\s*<\/\1>/giu,
+                '\n\n<$1>$2</$1>\n<$1>$3</$1>'
+            );
+            normalized = normalized.replace(
+                /\s+-\s+([A-Z][A-Za-z0-9 ()/&,+.'’_-]{2,80}?)\s+-\s+(?=(?:\*{0,2}|<(?:strong|b)>)*\s*Price\s*:)/gu,
+                '\n\n$1\n'
+            );
+            normalized = normalized.replace(
+                new RegExp(`\\s+-\\s+((?:\\*{0,2}${label}\\s*:\\*{0,2})|(?:${htmlLabelPrefix}${label}${htmlLabelSuffix}))`, 'gi'),
+                '\n$1'
+            );
+            normalized = normalized.replace(/\s+(For help choosing\b)/gi, '\n\n$1');
+            normalized = normalized.replace(/\s+(Do you want\b)/gi, '\n\n$1');
+
+            return normalized.replace(/\n{3,}/g, '\n\n').trim();
         }
 
         normalizeShopifyFieldLayout(text) {

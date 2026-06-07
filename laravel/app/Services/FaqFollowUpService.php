@@ -9,6 +9,10 @@ class FaqFollowUpService
     public function getFollowUpText(Organization $organization, string $responseText, ?string $override = null, array $context = []): string
     {
         $settings = $organization->settings ?? [];
+        $globalEnabled = (bool) ($settings['proactive_followups_enabled'] ?? false);
+        if (!$globalEnabled) {
+            return '';
+        }
 
         $candidate = trim((string) $override);
         if ($candidate === '') {
@@ -42,6 +46,11 @@ class FaqFollowUpService
     public function getFollowUpInstruction(Organization $organization): string
     {
         $settings = $organization->settings ?? [];
+        $globalEnabled = (bool) ($settings['proactive_followups_enabled'] ?? false);
+        if (!$globalEnabled) {
+            return '';
+        }
+
         $enabled = (bool) ($settings['faq_follow_up_enabled'] ?? false);
         $text = trim((string) ($settings['faq_follow_up_text'] ?? ''));
 
