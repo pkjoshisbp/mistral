@@ -58,11 +58,11 @@
                 <div class="col-lg-3 col-6">
                     <div class="small-box bg-danger">
                         <div class="inner">
-                            <h3>{{ $stats['unique_organizations'] }}</h3>
-                            <p>Active Organizations</p>
+                            <h3>${{ number_format($stats['estimated_cost_usd'] ?? 0, 4) }}</h3>
+                            <p>Estimated OpenAI Cost</p>
                         </div>
                         <div class="icon">
-                            <i class="fas fa-building"></i>
+                            <i class="fas fa-dollar-sign"></i>
                         </div>
                     </div>
                 </div>
@@ -70,7 +70,10 @@
 
             <div class="alert alert-info">
                 <strong>Token accounting:</strong>
-                {{ number_format($stats['estimated_tokens'] ?? 0) }} tokens are estimated and {{ number_format($stats['reasoning_tokens'] ?? 0) }} hidden reasoning tokens have been captured or estimated.
+                {{ number_format($stats['estimated_tokens'] ?? 0) }} tokens are estimated,
+                {{ number_format($stats['cached_input_tokens'] ?? 0) }} cached input tokens are billed at cached-input rates,
+                and {{ number_format($stats['reasoning_tokens'] ?? 0) }} hidden reasoning tokens have been captured or estimated.
+                Cost uses configured OpenAI per-token rates and treats legacy logs without input/output split as a 50/50 estimate.
             </div>
 
             <!-- Filters -->
@@ -144,6 +147,7 @@
                                             <th>Date</th>
                                             <th>Tokens</th>
                                             <th>Requests</th>
+                                            <th>Cost</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -152,6 +156,7 @@
                                                 <td>{{ \Carbon\Carbon::parse($day->date)->format('M j, Y') }}</td>
                                                 <td>{{ number_format($day->total_tokens) }}</td>
                                                 <td>{{ number_format($day->total_requests) }}</td>
+                                                <td>${{ number_format($day->estimated_cost_usd ?? 0, 4) }}</td>
                                             </tr>
                                         @endforeach
                                     </tbody>
@@ -175,6 +180,7 @@
                                             <th>Organization</th>
                                             <th>Tokens</th>
                                             <th>Requests</th>
+                                            <th>Cost</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -183,6 +189,7 @@
                                                 <td>{{ $org->organization->name ?? 'Unknown' }}</td>
                                                 <td>{{ number_format($org->total_tokens) }}</td>
                                                 <td>{{ number_format($org->total_requests) }}</td>
+                                                <td>${{ number_format($org->estimated_cost_usd ?? 0, 4) }}</td>
                                             </tr>
                                         @endforeach
                                     </tbody>
@@ -207,6 +214,7 @@
                                     <th>Total Tokens</th>
                                     <th>Total Requests</th>
                                     <th>Average Tokens/Request</th>
+                                    <th>Cost</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -216,6 +224,7 @@
                                         <td>{{ number_format($stat->total_tokens) }}</td>
                                         <td>{{ number_format($stat->total_requests) }}</td>
                                         <td>{{ number_format($stat->avg_tokens, 1) }}</td>
+                                        <td>${{ number_format($stat->estimated_cost_usd ?? 0, 4) }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>
@@ -238,7 +247,9 @@
                                     <th>User</th>
                                     <th>Organization</th>
                                     <th>Endpoint</th>
+                                    <th>Model</th>
                                     <th>Tokens</th>
+                                    <th>Cost</th>
                                     <th>Breakdown</th>
                                     <th>Summary</th>
                                 </tr>
@@ -253,13 +264,15 @@
                                         </td>
                                         <td>{{ $log->organization->name ?? 'Unknown' }}</td>
                                         <td><span class="badge badge-secondary">{{ $log->endpoint_type }}</span></td>
+                                        <td><small>{{ $log->model ?? config('openai.default_model', 'gpt-5-mini') }}</small></td>
                                         <td>
                                             <strong>{{ number_format($log->tokens_used) }}</strong>
                                             <br><small class="text-muted">{{ $log->usage_is_estimated ? 'Estimated' : 'Exact total' }}</small>
                                         </td>
+                                        <td>${{ number_format($log->estimatedCostUsd(), 5) }}</td>
                                         <td>
                                             <small>
-                                                In: {{ number_format($log->input_tokens ?? 0) }} | Out: {{ number_format($log->output_tokens ?? 0) }}
+                                                In: {{ number_format($log->input_tokens ?? 0) }} | Cached: {{ number_format($log->cached_input_tokens ?? 0) }} | Out: {{ number_format($log->output_tokens ?? 0) }}
                                                 <br>
                                                 Visible: {{ number_format($log->visible_output_tokens ?? $log->output_tokens ?? 0) }} | Reasoning: {{ number_format($log->reasoning_tokens ?? 0) }}
                                                 <br>
@@ -272,7 +285,7 @@
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="7" class="text-center text-muted">
+                                        <td colspan="9" class="text-center text-muted">
                                             <div class="py-4">
                                                 <i class="fas fa-info-circle fa-2x mb-2"></i>
                                                 <p>No token usage logs found for the selected criteria.</p>

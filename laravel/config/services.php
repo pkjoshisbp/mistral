@@ -37,6 +37,10 @@ return [
         'intent_model' => env('AI_INTENT_MODEL', 'llama3.2:1b'),
     ],
 
+    'vastai' => [
+        'enabled' => env('VASTAI_ENABLED', true),
+    ],
+
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
     ],

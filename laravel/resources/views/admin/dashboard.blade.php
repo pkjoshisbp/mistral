@@ -23,13 +23,23 @@
     <div class="container-fluid">
         @php
             $today = now()->toDateString();
-            $tokensToday = \App\Models\TokenUsageLog::whereDate('used_at', $today)->sum('tokens_used');
-            $tokensTotal = \App\Models\TokenUsageLog::sum('tokens_used');
+            $monthStart = now()->startOfMonth();
+            $tokensTodayQuery = \App\Models\TokenUsageLog::whereDate('used_at', $today);
+            $tokensMonthQuery = \App\Models\TokenUsageLog::where('used_at', '>=', $monthStart);
+            $tokensToday = (clone $tokensTodayQuery)->sum('tokens_used');
+            $tokensMonth = (clone $tokensMonthQuery)->sum('tokens_used');
+            $costForUsageQuery = static function ($query) {
+                return $query->get(['tokens_used', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'model'])
+                    ->sum(fn ($log) => $log->estimatedCostUsd());
+            };
+            $openAiCostToday = $costForUsageQuery(clone $tokensTodayQuery);
+            $openAiCostMonth = $costForUsageQuery(clone $tokensMonthQuery);
             $aiRepliesToday = \App\Models\ChatMessage::whereIn('sender_type', ['ai', 'assistant'])
                 ->whereDate('created_at', $today)
                 ->count();
             $aiRepliesTotal = \App\Models\ChatMessage::whereIn('sender_type', ['ai', 'assistant'])->count();
             $vastStatus = \Illuminate\Support\Facades\Cache::get('vastai_connectivity_status', null);
+            $vastDisabled = !config('services.vastai.enabled', true) || (bool) data_get($vastStatus, 'disabled', false);
             $vastHealthy = (bool) data_get($vastStatus, 'healthy', false);
             $vastFailures = (int) data_get($vastStatus, 'failures', 0);
             $vastCheckedAt = (string) data_get($vastStatus, 'checked_at', 'Not checked yet');
@@ -108,46 +118,46 @@
                     <div class="icon">
                         <i class="fas fa-bolt"></i>
                     </div>
-                    <a href="{{ route('admin.analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                    <a href="{{ route('admin.token-usage-analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
                 </div>
             </div>
 
             <div class="col-lg-3 col-6">
                 <div class="small-box bg-indigo">
                     <div class="inner">
-                        <h3>{{ number_format($tokensTotal) }}</h3>
-                        <p>Total Tokens Used</p>
+                        <h3>${{ number_format($openAiCostToday, 4) }}</h3>
+                        <p>OpenAI Cost Today</p>
                     </div>
                     <div class="icon">
-                        <i class="fas fa-chart-line"></i>
+                        <i class="fas fa-dollar-sign"></i>
                     </div>
-                    <a href="{{ route('admin.analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                    <a href="{{ route('admin.token-usage-analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
                 </div>
             </div>
 
             <div class="col-lg-3 col-6">
                 <div class="small-box bg-secondary">
                     <div class="inner">
-                        <h3>{{ number_format($aiRepliesToday) }}</h3>
-                        <p>AI Replies Today</p>
+                        <h3>{{ number_format($tokensMonth) }}</h3>
+                        <p>Tokens Used This Month</p>
                     </div>
                     <div class="icon">
-                        <i class="fas fa-reply"></i>
+                        <i class="fas fa-chart-line"></i>
                     </div>
-                    <a href="{{ route('admin.analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                    <a href="{{ route('admin.token-usage-analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
                 </div>
             </div>
 
             <div class="col-lg-3 col-6">
                 <div class="small-box bg-dark">
                     <div class="inner">
-                        <h3>{{ number_format($aiRepliesTotal) }}</h3>
-                        <p>Total AI Replies</p>
+                        <h3>${{ number_format($openAiCostMonth, 4) }}</h3>
+                        <p>OpenAI Cost This Month</p>
                     </div>
                     <div class="icon">
-                        <i class="fas fa-comments"></i>
+                        <i class="fas fa-receipt"></i>
                     </div>
-                    <a href="{{ route('admin.analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+                    <a href="{{ route('admin.token-usage-analytics') }}" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
                 </div>
             </div>
         </div>
@@ -229,16 +239,20 @@
                             </div>
                             <div class="col-12">
                                 <div class="info-box">
-                                    <span class="info-box-icon {{ $vastHealthy ? 'bg-success' : 'bg-danger' }}"><i class="fas fa-link"></i></span>
+                                    <span class="info-box-icon {{ $vastDisabled ? 'bg-secondary' : ($vastHealthy ? 'bg-success' : 'bg-danger') }}"><i class="fas fa-link"></i></span>
                                     <div class="info-box-content">
                                         <span class="info-box-text">Vast.ai Connectivity</span>
                                         <span class="info-box-number">
-                                            {{ $vastHealthy ? 'Healthy' : 'Degraded' }}
-                                            @if(!$vastHealthy)
+                                            @if($vastDisabled)
+                                                Disabled
+                                            @else
+                                                {{ $vastHealthy ? 'Healthy' : 'Degraded' }}
+                                            @endif
+                                            @if(!$vastDisabled && !$vastHealthy)
                                                 ({{ $vastFailures }} failures)
                                             @endif
                                         </span>
-                                        <small class="text-muted d-block">Ollama: {{ $vastOllamaOk ? 'OK' : 'Down' }} | Whisper: {{ $vastWhisperOk ? 'OK' : 'Down' }}</small>
+                                        <small class="text-muted d-block">Ollama: {{ $vastDisabled ? 'Disabled' : ($vastOllamaOk ? 'OK' : 'Down') }} | Whisper: {{ $vastDisabled ? 'Disabled' : ($vastWhisperOk ? 'OK' : 'Down') }}</small>
                                         <small class="text-muted d-block">Last checked: {{ $vastCheckedAt }}</small>
                                     </div>
                                 </div>

@@ -295,7 +295,15 @@
                                 </div>
                             </div>
 
-                            <div class="row mt-3" x-show="$wire.ai_model_provider === 'llama' && $wire.ai_backend_type === 'ollama'">
+                            <div class="row mt-3">
+                                <div class="col-12">
+                                    @if(!config('services.vastai.enabled', true))
+                                        <div class="alert alert-secondary py-2">
+                                            <i class="fas fa-pause-circle"></i>
+                                            Vast.ai is currently disabled by VASTAI_ENABLED=false.
+                                        </div>
+                                    @endif
+                                </div>
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="vastai_ssh_host">Vast.ai SSH Host / IP</label>
@@ -347,32 +355,6 @@
                                         </select>
                                         @error('llama_default_model')<div class="invalid-feedback">{{ $message }}</div>@enderror
                                         <small class="form-text text-muted">Available Ollama models (auto-downloaded on first use)</small>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="form-group">
-                                        <label for="ai_context_relevance_model">Context Relevance Judge Model</label>
-                                        <select wire:model="ai_context_relevance_model"
-                                                class="form-control @error('ai_context_relevance_model') is-invalid @enderror">
-                                            @foreach($this->getAvailableLlamaModels() as $value => $label)
-                                                <option value="{{ $value }}">{{ $label }}</option>
-                                            @endforeach
-                                        </select>
-                                        @error('ai_context_relevance_model')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                        <small class="form-text text-muted">Model used to decide whether retrieved knowledge-base context should be used or ignored before final answering.</small>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-group">
-                                        <label for="ai_context_relevance_min_confidence">Judge Min Confidence</label>
-                                        <input type="number" wire:model="ai_context_relevance_min_confidence"
-                                               class="form-control @error('ai_context_relevance_min_confidence') is-invalid @enderror"
-                                               min="0" max="1" step="0.05" placeholder="0.40">
-                                        @error('ai_context_relevance_min_confidence')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                        <small class="form-text text-muted">Range 0.00-1.00. Retrieved context is blocked when the judge confidence is below this threshold.</small>
                                     </div>
                                 </div>
                             </div>
@@ -449,10 +431,12 @@
                                     <div class="form-group">
                                         <label for="openai_default_model">OpenAI Model</label>
                                         <select wire:model="openai_default_model" class="form-control @error('openai_default_model') is-invalid @enderror">
-                                            <option value="gpt-5-mini">GPT-5 Mini (Only Available Model)</option>
+                                            <option value="gpt-5-mini">GPT-5 Mini (Default)</option>
+                                            <option value="gpt-5.1-mini">GPT-5.1 Mini (requires account access)</option>
+                                            <option value="gpt-5.1">GPT-5.1</option>
                                         </select>
                                         @error('openai_default_model')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                        <small class="form-text text-muted">GPT-5-mini is the only allowed model for your account</small>
+                                        <small class="form-text text-muted">Used for answer generation; query understanding also defaults to GPT-5 Mini.</small>
                                     </div>
                                 </div>
                             </div>
@@ -462,7 +446,7 @@
                                 <strong>Current Configuration:</strong> 
                                 @if($ai_model_provider === 'openai')
                                     <span class="badge badge-primary">OpenAI GPT</span>
-                                    Using GPT-5 Mini model
+                                    Using {{ $openai_default_model }} model
                                 @else
                                     @if($ai_backend_type === 'ollama')
                                         <span class="badge badge-success">Ollama</span>

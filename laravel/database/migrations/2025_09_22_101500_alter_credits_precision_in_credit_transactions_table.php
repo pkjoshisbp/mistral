@@ -1,7 +1,9 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -10,7 +12,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Use raw SQL to avoid requiring doctrine/dbal for column modification
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            Schema::table('credit_transactions', function (Blueprint $table) {
+                $table->decimal('credits', 20, 4)->nullable()->change();
+            });
+
+            return;
+        }
+
         DB::statement('ALTER TABLE credit_transactions MODIFY credits DECIMAL(20,4) NULL');
     }
 
@@ -19,7 +28,14 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Revert to the previous size used when the column was created
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            Schema::table('credit_transactions', function (Blueprint $table) {
+                $table->decimal('credits', 10, 4)->nullable()->change();
+            });
+
+            return;
+        }
+
         DB::statement('ALTER TABLE credit_transactions MODIFY credits DECIMAL(10,4) NULL');
     }
 };

@@ -291,6 +291,17 @@ document.addEventListener('DOMContentLoaded', function () {
                             'pending_follow_up' => $pendingFollowUp,
                             'branch_type' => data_get($extra, 'branch_type'),
                             'branch_score' => data_get($extra, 'branch_score'),
+                            'shopify' => [
+                                'lookup_attempted' => data_get($extra, 'shopify_lookup_attempted'),
+                                'shop' => data_get($extra, 'shopify_shop'),
+                                'query' => data_get($extra, 'shopify_query'),
+                                'query_type' => data_get($extra, 'shopify_query_type'),
+                                'has_data' => data_get($extra, 'shopify_has_data'),
+                                'specific_match' => data_get($extra, 'shopify_specific_match'),
+                                'result_count' => data_get($extra, 'shopify_result_count'),
+                                'success' => data_get($extra, 'shopify_success'),
+                                'error' => data_get($extra, 'shopify_error'),
+                            ],
                             'timing' => [
                                 'search_elapsed_ms' => $log['search_elapsed_ms'] ?? null,
                                 'retrieval_timing' => $retrievalTiming,
@@ -411,9 +422,12 @@ document.addEventListener('DOMContentLoaded', function () {
                             <div class="col-12 col-md-4 mb-2">
                                 <div class="card card-body p-2 h-100 bg-light border">
                                     <div class="small font-weight-bold text-muted mb-1"><i class="fas fa-robot mr-1"></i>Model / Timing</div>
-                                    <div><strong>Model:</strong> <code>{{ $log['model_used'] ?? '—' }}</code></div>
+                                    @php
+                                        $displayModel = data_get($extra, 'faq_paraphrase_model') ?: ($log['model_used'] ?? null);
+                                    @endphp
+                                    <div><strong>Model:</strong> <code>{{ $displayModel ?? '—' }}</code></div>
                                     <div><strong>Provider:</strong> <code>{{ $log['ai_provider'] ?? '—' }}</code></div>
-                                    @if(data_get($extra, 'requested_model') && data_get($extra, 'requested_model') !== ($log['model_used'] ?? null))
+                                    @if(data_get($extra, 'requested_model') && data_get($extra, 'requested_model') !== $displayModel)
                                         <div><strong>Requested model:</strong> <code>{{ data_get($extra, 'requested_model') }}</code></div>
                                     @endif
                                     @if(data_get($extra, 'fallback_used'))
@@ -564,6 +578,32 @@ document.addEventListener('DOMContentLoaded', function () {
                                     @if(data_get($extra, 'reason'))
                                         <div><strong>Reason:</strong> <code>{{ data_get($extra, 'reason') }}</code></div>
                                     @endif
+                                    @if(data_get($extra, 'shopify_lookup_attempted') !== null)
+                                        <hr class="my-2">
+                                        <div><strong>Shopify:</strong>
+                                            @if(data_get($extra, 'shopify_lookup_attempted'))
+                                                <span class="badge badge-success">checked</span>
+                                            @else
+                                                <span class="badge badge-secondary">not checked</span>
+                                            @endif
+                                        </div>
+                                        @if(data_get($extra, 'shopify_shop'))
+                                            <div><strong>Shop:</strong> <code>{{ data_get($extra, 'shopify_shop') }}</code></div>
+                                        @endif
+                                        @if(data_get($extra, 'shopify_query_type'))
+                                            <div><strong>Query type:</strong> <code>{{ data_get($extra, 'shopify_query_type') }}</code></div>
+                                        @endif
+                                        @if(data_get($extra, 'shopify_result_count') !== null)
+                                            <div><strong>Results:</strong> {{ data_get($extra, 'shopify_result_count') }}
+                                                @if(data_get($extra, 'shopify_specific_match') !== null)
+                                                    <span class="text-muted">/ specific match: {{ data_get($extra, 'shopify_specific_match') ? 'true' : 'false' }}</span>
+                                                @endif
+                                            </div>
+                                        @endif
+                                        @if(data_get($extra, 'shopify_error'))
+                                            <div><strong>Shopify error:</strong> <code>{{ data_get($extra, 'shopify_error') }}</code></div>
+                                        @endif
+                                    @endif
                                     @if(data_get($pendingFollowUp, 'question'))
                                         <div><strong>Pending question:</strong> <span class="text-muted">{{ data_get($pendingFollowUp, 'question') }}</span></div>
                                     @endif
@@ -712,4 +752,3 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
 </div>
 </div>
-

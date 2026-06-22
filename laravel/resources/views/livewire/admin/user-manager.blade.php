@@ -30,9 +30,9 @@
 
     <!-- Create User Modal -->
     @if($showCreateModal)
-        <div class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);">
-            <div class="modal-dialog">
-                <div class="modal-content">
+        <div class="modal fade show admin-user-modal" style="display: block; background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog admin-user-modal-dialog">
+                <div class="modal-content admin-user-modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">Add User</h5>
                         <button type="button" class="close" wire:click="closeModals">
@@ -75,21 +75,23 @@
                             @if($role === 'customer')
                                 <div class="form-group mb-3">
                                     <label for="organizations">Organizations</label>
-                                    @foreach($organizations as $org)
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox"
-                                                   wire:model="selectedOrganizations" value="{{ $org->id }}"
-                                                   id="create_org_{{ $org->id }}">
-                                            <label class="form-check-label" for="create_org_{{ $org->id }}">
-                                                {{ $org->name }}
-                                            </label>
-                                        </div>
-                                    @endforeach
+                                    <div class="admin-user-org-list">
+                                        @foreach($organizations as $org)
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox"
+                                                       wire:model="selectedOrganizations" value="{{ $org->id }}"
+                                                       id="create_org_{{ $org->id }}">
+                                                <label class="form-check-label" for="create_org_{{ $org->id }}">
+                                                    {{ $org->name }}
+                                                </label>
+                                            </div>
+                                        @endforeach
+                                    </div>
                                     @error('selectedOrganizations')<div class="text-danger mt-1">{{ $message }}</div>@enderror
                                 </div>
                             @endif
 
-                            <div class="d-flex justify-content-end">
+                            <div class="admin-user-modal-actions d-flex justify-content-end">
                                 <button type="button" class="btn btn-secondary me-2" wire:click="closeModals">
                                     Cancel
                                 </button>
@@ -194,9 +196,9 @@
 
     <!-- Edit User Modal -->
     @if($showEditModal)
-        <div class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);">
-            <div class="modal-dialog">
-                <div class="modal-content">
+        <div class="modal fade show admin-user-modal" style="display: block; background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog admin-user-modal-dialog">
+                <div class="modal-content admin-user-modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">Edit User</h5>
                         <button type="button" class="close" wire:click="closeModals">
@@ -239,20 +241,23 @@
                             @if($role === 'customer')
                                 <div class="form-group mb-3">
                                     <label for="organizations">Organizations</label>
-                                    @foreach($organizations as $org)
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" 
-                                                   wire:model="selectedOrganizations" value="{{ $org->id }}"
-                                                   id="org_{{ $org->id }}">
-                                            <label class="form-check-label" for="org_{{ $org->id }}">
-                                                {{ $org->name }}
-                                            </label>
-                                        </div>
-                                    @endforeach
+                                    <div class="admin-user-org-list">
+                                        @foreach($organizations as $org)
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" 
+                                                       wire:model="selectedOrganizations" value="{{ $org->id }}"
+                                                       id="org_{{ $org->id }}">
+                                                <label class="form-check-label" for="org_{{ $org->id }}">
+                                                    {{ $org->name }}
+                                                </label>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                    @error('selectedOrganizations')<div class="text-danger mt-1">{{ $message }}</div>@enderror
                                 </div>
                             @endif
                             
-                            <div class="d-flex justify-content-end">
+                            <div class="admin-user-modal-actions d-flex justify-content-end">
                                 <button type="button" class="btn btn-secondary me-2" wire:click="closeModals">
                                     Cancel
                                 </button>
@@ -268,6 +273,48 @@
     @endif
 
     <style>
+        .admin-user-modal {
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        .admin-user-modal-dialog {
+            margin: 0 auto;
+            max-height: calc(100vh - 2rem);
+            display: flex;
+            align-items: stretch;
+        }
+
+        .admin-user-modal-content {
+            max-height: calc(100vh - 2rem);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .admin-user-modal .modal-body {
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .admin-user-org-list {
+            max-height: 260px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: .5rem .75rem;
+        }
+
+        .admin-user-modal-actions {
+            position: sticky;
+            bottom: 0;
+            z-index: 2;
+            margin: 1rem -1rem -1rem;
+            padding: .75rem 1rem;
+            background: #fff;
+            border-top: 1px solid #dee2e6;
+        }
+
         .user-org-dropdown-menu {
             max-height: 260px;
             overflow-y: auto;

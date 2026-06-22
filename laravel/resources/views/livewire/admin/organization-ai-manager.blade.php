@@ -44,6 +44,13 @@
                                             @php
                                                 $orgSettings = $org->settings ?? [];
                                                 $hasCustomModel = isset($orgSettings['ai_model']);
+                                                $globalProvider = \App\Models\AdminSetting::get('ai_model_provider', 'openai');
+                                                $effectiveProvider = $orgSettings['ai_model_provider'] ?? $globalProvider;
+                                                $effectiveModel = $hasCustomModel
+                                                    ? ($orgSettings['ai_model'] ?? 'N/A')
+                                                    : ($effectiveProvider === 'openai'
+                                                        ? \App\Models\AdminSetting::get('openai_default_model', 'gpt-5-mini')
+                                                        : \App\Models\AdminSetting::get('llama_default_model', 'llama3.2:3b'));
                                             @endphp
                                             @if($hasCustomModel)
                                                 <small class="text-success">
@@ -56,9 +63,7 @@
                                             @endif
                                         </div>
                                         <small class="text-muted">{{ $org->slug }}</small>
-                                        @if($hasCustomModel)
-                                            <br><small class="badge bg-primary">{{ $orgSettings['ai_model'] ?? 'N/A' }}</small>
-                                        @endif
+                                        <br><small class="badge bg-primary">{{ $effectiveModel }}</small>
                                     </button>
                                 @endforeach
                             </div>
@@ -675,10 +680,10 @@
                                     </div>
                                     <div class="card-body">
                                         @php
-                                            $globalProvider = \App\Models\AdminSetting::get('ai_model_provider', 'llama');
+                                            $globalProvider = \App\Models\AdminSetting::get('ai_model_provider', 'openai');
                                             $globalModel = $globalProvider === 'openai'
                                                 ? \App\Models\AdminSetting::get('openai_default_model', 'gpt-5-mini')
-                                                : \App\Models\AdminSetting::get('llama_default_model', 'llama3:8b-instruct-q5_K_M');
+                                                : \App\Models\AdminSetting::get('llama_default_model', 'llama3.2:3b');
                                         @endphp
                                         <div class="row">
                                             <div class="col-md-4">

@@ -63,13 +63,15 @@ class TokenUsageAnalytics extends Component
             'unique_users' => (clone $query)->distinct('user_id')->count(),
             'unique_organizations' => (clone $query)->distinct('organization_id')->count(),
             'estimated_tokens' => (clone $query)->where('usage_is_estimated', true)->sum('tokens_used'),
+            'cached_input_tokens' => (clone $query)->sum('cached_input_tokens'),
             'reasoning_tokens' => (clone $query)->sum('reasoning_tokens'),
+            'estimated_cost_usd' => $this->estimateCostForQuery(clone $query),
         ];
     }
 
     public function getDailyStatsProperty()
     {
-        return $this->getBaseQuery()
+        $days = $this->getBaseQuery()
             ->select(
                 DB::raw('DATE(used_at) as date'),
                 DB::raw('SUM(tokens_used) as total_tokens'),
@@ -79,11 +81,19 @@ class TokenUsageAnalytics extends Component
             ->orderBy('date', 'desc')
             ->limit(14)
             ->get();
+
+        return $days->map(function ($day) {
+            $day->estimated_cost_usd = $this->estimateCostForQuery(
+                $this->getBaseQuery()->whereDate('used_at', $day->date)
+            );
+
+            return $day;
+        });
     }
 
     public function getTopOrganizationsProperty()
     {
-        return $this->getBaseQuery()
+        $organizations = $this->getBaseQuery()
             ->select(
                 'organization_id',
                 DB::raw('SUM(tokens_used) as total_tokens'),
@@ -94,11 +104,19 @@ class TokenUsageAnalytics extends Component
             ->orderBy('total_tokens', 'desc')
             ->limit(10)
             ->get();
+
+        return $organizations->map(function ($organization) {
+            $organization->estimated_cost_usd = $this->estimateCostForQuery(
+                $this->getBaseQuery()->where('organization_id', $organization->organization_id)
+            );
+
+            return $organization;
+        });
     }
 
     public function getEndpointStatsProperty()
     {
-        return $this->getBaseQuery()
+        $endpoints = $this->getBaseQuery()
             ->select(
                 'endpoint_type',
                 DB::raw('SUM(tokens_used) as total_tokens'),
@@ -108,6 +126,21 @@ class TokenUsageAnalytics extends Component
             ->groupBy('endpoint_type')
             ->orderBy('total_tokens', 'desc')
             ->get();
+
+        return $endpoints->map(function ($endpoint) {
+            $endpoint->estimated_cost_usd = $this->estimateCostForQuery(
+                $this->getBaseQuery()->where('endpoint_type', $endpoint->endpoint_type)
+            );
+
+            return $endpoint;
+        });
+    }
+
+    private function estimateCostForQuery($query): float
+    {
+        return (float) $query
+            ->get(['tokens_used', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'model'])
+            ->sum(fn (TokenUsageLog $log) => $log->estimatedCostUsd());
     }
 
     private function getBaseQuery()

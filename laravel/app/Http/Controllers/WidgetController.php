@@ -18,6 +18,7 @@ use App\Services\IntentDetectionService;
 use App\Services\AiAgentService;
 use App\Services\FaqFollowUpService;
 use App\Services\FollowUpStateService;
+use App\Services\Widget\OrganizationWidgetBehaviorRegistry;
 use App\Services\WidgetSpamGuard;
 use App\Services\LocationService;
 use Illuminate\Http\Request;
@@ -33,20 +34,32 @@ use App\Models\OrganizationData;
 class WidgetController
 {
     private const SUPPRESSED_WIDGET_TEST_SESSION_ID = 'ai-chat-test-session';
+    private const NON_PERSISTENT_WIDGET_SESSION_PREFIXES = [
+        'codex-',
+        'debug-',
+        'test-debug-',
+    ];
 
     private $aiAgentService;
     private $faqFollowUpService;
     private $followUpStateService;
+    private OrganizationWidgetBehaviorRegistry $organizationWidgetBehaviors;
     private array $activeFollowUpTranslationMap = [];
+    private array $nonPersistentWidgetSessionIds = [];
 
     /** Accumulated debug fields for a single chat request — written once per request. */
     private array $debugData = [];
 
-    public function __construct(AiAgentService $aiAgentService, FaqFollowUpService $faqFollowUpService, FollowUpStateService $followUpStateService)
-    {
+    public function __construct(
+        AiAgentService $aiAgentService,
+        FaqFollowUpService $faqFollowUpService,
+        FollowUpStateService $followUpStateService,
+        OrganizationWidgetBehaviorRegistry $organizationWidgetBehaviors
+    ) {
         $this->aiAgentService = $aiAgentService;
         $this->faqFollowUpService = $faqFollowUpService;
         $this->followUpStateService = $followUpStateService;
+        $this->organizationWidgetBehaviors = $organizationWidgetBehaviors;
     }
 
     /**
@@ -418,6 +431,14 @@ class WidgetController
 
             $message = trim((string) $request->input('message', ''));
             $sessionId = $this->resolveWidgetSessionId((string) $request->input('session_id', ''), true);
+            $nonPersistentDebugRun = $this->shouldSuppressWidgetPersistence($request, $sessionId);
+            if ($nonPersistentDebugRun) {
+                $this->markNonPersistentWidgetSession($sessionId);
+                $this->mergeDebugExtra([
+                    'non_persistent_debug_run' => true,
+                    'persistence_suppressed' => true,
+                ]);
+            }
             $userInfo = $request->input('user_info', []);
             $visitorInfo = $request->input('visitor_info', []); // For backward compatibility
             $isShopify = $request->input('is_shopify', false); // Widget flag for Shopify stores
@@ -479,25 +500,33 @@ class WidgetController
             ]);
 
             // Load existing conversation early for handoff and follow-up continuity
-            $existingConversation = ChatConversation::where('conversation_id', $sessionId)
-                ->where('organization_id', $organization->id)
-                ->first();
+            $existingConversation = $nonPersistentDebugRun
+                ? null
+                : ChatConversation::where('conversation_id', $sessionId)
+                    ->where('organization_id', $organization->id)
+                    ->first();
             $previousContextPayloads = $existingConversation->metadata['last_context_payloads'] ?? [];
             $pendingFollowUpState = $this->followUpStateService->getPendingState($existingConversation);
             $hasPendingFollowUpState = is_array($pendingFollowUpState) && !empty($pendingFollowUpState);
             $hasExplicitPendingFollowUpPrompt = $this->pendingStateHasExplicitFollowUpPrompt($pendingFollowUpState);
             $previousDebugSummary = $this->getPreviousDebugSummary($existingConversation);
+            $conversationHistoryForUnderstanding = $this->getConversationHistoryForUnderstanding(
+                $organization,
+                (string) $sessionId
+            );
 
             $lastAssistantForIntent = $this->getLastAssistantMessage($organization, $sessionId);
+            $previousAnswerFamilyText = implode(' ', array_filter([
+                (string) ($previousDebugSummary['user_message'] ?? ''),
+                (string) ($previousDebugSummary['response_path'] ?? ''),
+                (string) data_get($previousDebugSummary, 'extra.faq_title'),
+                (string) data_get($previousDebugSummary, 'extra.faq_category'),
+                (string) ($lastAssistantForIntent ?? ''),
+            ]));
             $previousAnswerFamilies = array_values(array_unique(array_merge(
                 $this->extractAnswerFamilyLabelsFromPayloads($previousContextPayloads),
-                $this->extractAnswerFamilyLabelsFromText(implode(' ', array_filter([
-                    (string) ($previousDebugSummary['user_message'] ?? ''),
-                    (string) ($previousDebugSummary['response_path'] ?? ''),
-                    (string) data_get($previousDebugSummary, 'extra.faq_title'),
-                    (string) data_get($previousDebugSummary, 'extra.faq_category'),
-                    (string) ($lastAssistantForIntent ?? ''),
-                ])))
+                $this->extractAnswerFamilyLabelsFromText($previousAnswerFamilyText),
+                $this->organizationWidgetBehaviors->answerFamilyLabels($organization, $previousAnswerFamilyText)
             )));
             $shouldPreserveShortQualifierFamily = $this->isShortQualifierFollowUpMessage((string) $messageForInference)
                 && !empty($previousAnswerFamilies);
@@ -506,7 +535,6 @@ class WidgetController
                     $this->isShortQualifierFollowUpMessage((string) $messageForInference)
                     || $this->isEllipticalFollowUpMessage((string) $messageForInference)
                 );
-            $shouldPreserveSubstantiveContactFollowUp = false;
             $lastAssistantAskedQuestionForIntent = is_string($lastAssistantForIntent)
                 && trim($lastAssistantForIntent) !== ''
                 && $this->responseHasQuestion($lastAssistantForIntent);
@@ -651,7 +679,19 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if (!$isAffirmativeContinuationForIntent && ($aiProvider === 'openai' || $this->shouldRunWidgetIntentDetection($organization))) {
+            $queryUnderstanding = null;
+            if (!$isAffirmativeContinuationForIntent && $this->shouldRunOpenAiQueryUnderstanding($organization)) {
+                $queryUnderstanding = $this->aiAgentService->understandQueryWithOpenAi(
+                    (string) $messageForInference,
+                    $organization,
+                    $sessionId,
+                    ['conversation_history' => $conversationHistoryForUnderstanding]
+                );
+            }
+
+            if (is_array($queryUnderstanding)) {
+                $intentResult = $this->intentResultFromQueryUnderstanding($queryUnderstanding);
+            } elseif (!$isAffirmativeContinuationForIntent && ($aiProvider === 'openai' || $this->shouldRunWidgetIntentDetection($organization))) {
                 try {
                     $intentResult = app(IntentDetectionService::class)->detectIntent($messageForInference, $organization->id);
                 } catch (\Throwable $t) {
@@ -683,11 +723,28 @@ class WidgetController
             if ($routeAnalysis === []) {
                 $routeAnalysis = app(IntentDetectionService::class)->analyzeRoutePlan((string) $messageForInference, $organization->id);
             }
+            if (is_array($queryUnderstanding)) {
+                $routeAnalysis = $this->mergeRouteAnalysisWithQueryUnderstanding($routeAnalysis, $queryUnderstanding);
+            }
             $this->debugData['extra'] = array_filter([
                 'route_primary' => $routeAnalysis['primary_route'] ?? null,
                 'route_signals' => $routeAnalysis['signals'] ?? [],
                 'route_slots' => $routeAnalysis['slots'] ?? [],
             ], static fn ($value) => !($value === null || $value === []));
+
+            if (is_array($queryUnderstanding)) {
+                $this->mergeDebugExtra([
+                    'query_understanding' => [
+                        'intent' => $queryUnderstanding['intent'] ?? null,
+                        'confidence' => $queryUnderstanding['confidence'] ?? null,
+                        'is_follow_up' => $queryUnderstanding['is_follow_up'] ?? null,
+                        'rewritten_query' => $queryUnderstanding['rewritten_query'] ?? null,
+                        'entities' => $queryUnderstanding['entities'] ?? [],
+                        'search_targets' => $queryUnderstanding['search_targets'] ?? [],
+                        'history_messages' => count($conversationHistoryForUnderstanding),
+                    ],
+                ]);
+            }
 
 
             if ($existingConversation && in_array($existingConversation->agent_status, ['agent_assigned', 'agent_active'], true)) {
@@ -811,19 +868,20 @@ class WidgetController
             $isAffirmativeContinuation = $isAffirmativeFollowUp && ($lastAssistantAskedQuestion || $hasExplicitPendingFollowUpPrompt);
             $skipExactMatchOnAffirmative = (bool) ($rulePolicy['skip_exact_match_on_affirmative_follow_up'] ?? true);
             $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
+                $organization,
                 (string) $messageForInference,
                 $lastUserMessage,
                 is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
                 is_array($previousContextPayloads) ? $previousContextPayloads : [],
                 $hasPendingFollowUpState,
                 $hasPendingFollowUpState ? $pendingFollowUpState : null
+            ) || $this->queryUnderstandingIndicatesFollowUp(
+                $queryUnderstanding,
+                $conversationHistoryForUnderstanding
             );
 
             $canReusePreviousContext = !empty($previousContextPayloads)
                 && $isRelatedFollowUp;
-            $shouldPreserveSubstantiveContactFollowUp = $isRelatedFollowUp
-                && $this->isContactQuery((string) $message)
-                && !empty(array_filter($previousAnswerFamilies, fn ($family) => $family !== 'contact'));
             $shouldUsePendingStateAnchor = $this->shouldAnchorWithPendingFollowUpState(
                 (string) $messageForInference,
                 $hasExplicitPendingFollowUpPrompt ? $pendingFollowUpState : null
@@ -842,7 +900,7 @@ class WidgetController
                 ),
             ]);
 
-            $cachedChatMessages = $isRelatedFollowUp ? $this->getCachedChatMessages((string) $sessionId) : [];
+            $cachedChatMessages = $isRelatedFollowUp ? $conversationHistoryForUnderstanding : [];
             $followUpRetrievalPlan = null;
             $skipFollowUpRetrieval = false;
             $preservePreviousAnswerFamily = false;
@@ -864,15 +922,17 @@ class WidgetController
                 }
             }
 
-            $searchQuery = $messageForInference;
+            $searchQuery = $this->queryUnderstandingSearchQuery($queryUnderstanding, (string) $messageForInference);
             if ($isRelatedFollowUp) {
                 $searchQuery = $this->buildRelatedFollowUpSearchQuery(
+                    $organization,
                     (string) $messageForInference,
                     $hasPendingFollowUpState ? $pendingFollowUpState : null,
                     $lastUserMessage,
                     is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
                     $isAffirmativeFollowUp,
-                    $isReferentialFollowUp
+                    $isReferentialFollowUp,
+                    $this->queryUnderstandingSearchQuery($queryUnderstanding, '')
                 );
 
                 $followUpRetrievalPlan = $this->planFollowUpRetrievalWithContext(
@@ -921,14 +981,6 @@ class WidgetController
             if ($shouldPreserveShortQualifierFamily) {
                 $preservePreviousAnswerFamily = true;
                 $skipExactFaqShortcut = true;
-            }
-
-            if ($shouldPreserveSubstantiveContactFollowUp) {
-                $preservePreviousAnswerFamily = true;
-                $skipExactFaqShortcut = true;
-                if (is_string($lastAssistantForIntent) && trim($lastAssistantForIntent) !== '') {
-                    $reusePreviousVerifiedAnswer = true;
-                }
             }
 
             if ($shouldReuseCareerFollowUpAnswer && is_string($lastAssistantForIntent) && trim($lastAssistantForIntent) !== '') {
@@ -1015,6 +1067,7 @@ class WidgetController
                             // $searchQuery already contains rich context (prev message + current)
                             // so always use it; fall back to raw $message only if empty.
                             $shopifyApiQuery = !empty($searchQuery) ? $searchQuery : $message;
+                            $requestedShopifyProductPhrase = $this->extractRequestedShopifyProductPhrase((string) $message);
                             if ($this->messageContainsSkuLikeReference((string) $message)) {
                                 $shopifyApiQuery = (string) $message;
                             }
@@ -1024,8 +1077,15 @@ class WidgetController
                                     $shopifyApiQuery = trim($followUpTopicAnchor . ' ' . $message);
                                 }
                             }
-                            if (!$this->messageContainsSkuLikeReference((string) $message) && $shopifyProductCandidate !== '' && ($routeAnalysis['requires_product_resolution'] ?? false)) {
-                                $shopifyApiQuery = $shopifyProductCandidate;
+                            $understoodProductPhrase = $this->firstQueryUnderstandingEntity($queryUnderstanding, ['product', 'product_name', 'item']);
+                            if (!$this->messageContainsSkuLikeReference((string) $message) && ($routeAnalysis['requires_product_resolution'] ?? false)) {
+                                if ($understoodProductPhrase !== '') {
+                                    $shopifyApiQuery = $understoodProductPhrase;
+                                } elseif ($requestedShopifyProductPhrase !== '') {
+                                    $shopifyApiQuery = $requestedShopifyProductPhrase;
+                                } elseif ($shopifyProductCandidate !== '') {
+                                    $shopifyApiQuery = $shopifyProductCandidate;
+                                }
                             }
                             $customerEmail   = $allUserInfo['email'] ?? $allUserInfo['customer_email'] ?? null;
                             if (!filter_var((string) $customerEmail, FILTER_VALIDATE_EMAIL)) {
@@ -1041,6 +1101,16 @@ class WidgetController
                                     $shopifyData = $data;
                                     $hasShopifyData = !empty($data['data']);
                                     $shopifySpecificMatch = $data['specific_match'] ?? true;
+                                    $this->mergeDebugExtra([
+                                        'shopify_lookup_attempted' => true,
+                                        'shopify_success' => true,
+                                        'shopify_shop' => $integration->shop,
+                                        'shopify_query' => $shopifyApiQuery,
+                                        'shopify_query_type' => $data['query_type'] ?? null,
+                                        'shopify_has_data' => $hasShopifyData,
+                                        'shopify_specific_match' => $shopifySpecificMatch,
+                                        'shopify_result_count' => is_array($data['data'] ?? null) ? count($data['data']) : null,
+                                    ]);
 
                                     // Build concise context for LLM
                                     if ($hasShopifyData && ($data['query_type'] ?? '') === 'products') {
@@ -1150,9 +1220,23 @@ class WidgetController
                                         'data_count' => count($data['data'] ?? []),
                                         'has_data'   => $hasShopifyData
                                     ]);
+                                } else {
+                                    $this->mergeDebugExtra([
+                                        'shopify_lookup_attempted' => true,
+                                        'shopify_shop' => $integration->shop,
+                                        'shopify_query' => $shopifyApiQuery,
+                                        'shopify_success' => false,
+                                        'shopify_error' => $data['error'] ?? 'Unknown Shopify query failure',
+                                    ]);
                                 }
                             }
                         } catch (\Exception $e) {
+                            $this->mergeDebugExtra([
+                                'shopify_lookup_attempted' => true,
+                                'shopify_shop' => $integration->shop,
+                                'shopify_success' => false,
+                                'shopify_error' => $e->getMessage(),
+                            ]);
                             Log::error('Shopify API request failed in widget', [
                                 'error' => $e->getMessage(),
                                 'shop'  => $integration->shop
@@ -1363,6 +1447,7 @@ class WidgetController
                     && (($followUpRetrievalPlan['needs_retrieval'] ?? null) === true)
                 ) {
                     $familyCompatibleResults = $this->filterResultsForFollowUpAnswerFamily(
+                        $organization,
                         $orderedResults,
                         $previousAnswerFamilies
                     );
@@ -1506,7 +1591,8 @@ class WidgetController
             if ($directCatalogContext !== '') {
                 $context .= ($context !== '' ? "\n" : '') . $directCatalogContext . "\n";
             }
-            $deferKnowledgeShortcutsToModel = false;
+            $deferKnowledgeShortcutsToModel = $isRelatedFollowUp
+                || $this->queryHasMultipleExplicitFacets((string) $messageForInference);
 
             // Persist last context payloads for follow-up continuity (limit to top 5)
             $payloads = $this->buildContextPayloadCache($orderedResults);
@@ -1517,6 +1603,61 @@ class WidgetController
                 $allUserInfo,
                 compact('country', 'region', 'location', 'city')
             );
+
+            $catalogBudgetResponse = $this->organizationWidgetBehaviors->catalogBudgetResponse(
+                $organization,
+                (string) $message,
+                (string) $searchQuery,
+                $orderedResults
+            );
+            if ($catalogBudgetResponse !== null) {
+                Log::info('Using organization catalog budget response (chat)', [
+                    'org_id' => $organization->id,
+                    'org_slug' => $organization->slug,
+                    'session_id' => $sessionId,
+                    'message' => $message,
+                ]);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $catalogBudgetResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location', 'city'),
+                    $sessionMetadata
+                );
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $catalogBudgetResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                $this->debugData['response_path'] = 'organization_catalog_budget';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->writeDebugLog($conversation);
+
+                return response()->json([
+                    'response' => $catalogBudgetResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
 
             $deterministicCatalogResponse = $this->buildDeterministicCatalogEntityResponse(
                 $orderedResults,
@@ -1833,6 +1974,71 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
+            if ($this->shouldUseUnsupportedNoContextFallback(
+                (string) $message,
+                $organization,
+                (string) $context,
+                !empty($shopifyContext) || $liveData !== null,
+                $exactFaqMatch,
+                $allowNoContextInstructionalResponse,
+                $isRelatedFollowUp && ($canReusePreviousContext || $preservePreviousAnswerFamily)
+            )) {
+                $safeResponse = $this->buildUnsupportedNoContextFallbackResponse($organization, (string) $message);
+
+                $conversation = $this->saveConversationToDatabase(
+                    $organization,
+                    $sessionId,
+                    $message,
+                    $safeResponse,
+                    $allUserInfo,
+                    compact('country', 'region', 'location', 'city'),
+                    $intentResult
+                );
+
+                $this->debugData['clarification_sought'] = true;
+                $this->debugData['response_path'] = 'unsupported_no_context';
+                $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                $this->writeDebugLog($conversation);
+
+                $this->logIntentAnalytics(
+                    $organization->id,
+                    $sessionId,
+                    $intentResult,
+                    $request,
+                    compact('country', 'region', 'location', 'city'),
+                    $sessionMetadata
+                );
+
+                if ($this->isUnansweredResponse($safeResponse)) {
+                    $this->logUnansweredQuestion(
+                        $organization->id,
+                        $sessionId,
+                        $message,
+                        $safeResponse,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+                }
+
+                if ($conversation) {
+                    $this->handleEscalationIfNeeded(
+                        $conversation,
+                        $message,
+                        $safeResponse,
+                        $intentResult,
+                        $request,
+                        $sessionMetadata
+                    );
+                }
+
+                return response()->json([
+                    'response' => $safeResponse,
+                    'session_id' => $sessionId,
+                    'timestamp' => now()->toISOString()
+                ])->header('X-Robots-Tag', 'noindex, nofollow');
+            }
+
             if (!$deferKnowledgeShortcutsToModel && $this->shouldUseAffirmativeNoContextFallback($isAffirmativeContinuation, $context, $shopifyContext, null)) {
                 $safeResponse = $this->buildAffirmativeNoContextResponse($organization);
 
@@ -1894,7 +2100,7 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if (!$deferKnowledgeShortcutsToModel && $this->isContactQuery((string) $message) && !$preservePreviousAnswerFamily) {
+            if ($this->isContactQuery((string) $message)) {
                 $contactResponse = $this->buildDeterministicContactQueryResponse($organization, (string) $message, $searchResults ?? null);
 
                 $conversation = $this->saveConversationToDatabase(
@@ -2096,7 +2302,20 @@ class WidgetController
                 ])->header('X-Robots-Tag', 'noindex, nofollow');
             }
 
-            if (!$deferKnowledgeShortcutsToModel && $exactFaqMatch && !$skipExactFaqShortcut && !$hasShopifyData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
+            $allowDirectFaqResponse = $this->shouldUseDirectFaqResponse(
+                (string) $messageForInference,
+                $exactFaqMatch,
+                $isRelatedFollowUp,
+                $isAffirmativeContinuation
+            );
+            if (
+                !$deferKnowledgeShortcutsToModel
+                && $exactFaqMatch
+                && $allowDirectFaqResponse
+                && !$skipExactFaqShortcut
+                && !$hasShopifyData
+                && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)
+            ) {
                 Log::info('Widget exact FAQ match response', [
                     'org_id' => $organization->id,
                     'session_id' => $sessionId,
@@ -2111,62 +2330,38 @@ class WidgetController
                 $paraphrasedResponse = null;
                 $paraphraseElapsedMs = null;
                 $paraphraseModel = null;
-                // Skip paraphrase ONLY for keyword-fallback matches with no HTML content.
-                // FAQ content stored as HTML must be paraphrased so XML/HTML markup is cleaned.
+                // Exact FAQ hits should be fast. Clean simple CMS HTML locally instead of
+                // spending another LLM call just to remove XML/HTML artefacts.
                 $rawFaqContent = trim((string) $directResponse);
-                $skipParaphrase = (($exactFaqMatch['match_source'] ?? '') === 'keyword_fallback')
-                    && !preg_match('/<[a-zA-Z][^>]*>/', $rawFaqContent);
+                $skipParaphrase = true;
+                if (preg_match('/<[a-zA-Z][^>]*>/', $rawFaqContent)) {
+                    $directResponse = $this->htmlToPlainWithLinks(
+                        preg_replace('/<\?(?:xml|php)[^>]*(?:\?>|>)/i', '', $rawFaqContent) ?? $rawFaqContent
+                    );
+                }
 
-                if (!$skipParaphrase) {
-                    try {
-                        // Send the raw HTML to the LLM so it preserves all formatting
-                        // (tags, lists, bold, images). The LLM only touches the wording.
-                        // Strip XML processing instructions - CMS artefacts stored in the DB.
-                        $htmlFaqContent = trim((string) $directResponse);
-                        $htmlFaqContent = preg_replace('/<\?(?:xml|php)[^>]*\?>/', '', $htmlFaqContent);
-                        $htmlFaqContent = trim($htmlFaqContent);
-                        $dynamicNumPredict = min(800, max(200, (int) (mb_strlen($htmlFaqContent) * 0.8)));
-
-                        $paraphrasePrompt = "You are {$assistantName} for {$organization->name}. "
-                            . "Tone: {$responseTone}. Language: {$responseLanguage}. "
-                            . "The FAQ answer below is the source of truth. Rewrite it naturally in first-person plural (we/our) as a conversational reply. Do NOT invent new information. Do NOT omit any key facts (contact details, links, email addresses). "
-                            . ($languagePromptInstruction !== '' ? $languagePromptInstruction . ' ' : '')
-                            . "STRICT HTML RULES:\n"
-                            . "- Preserve ALL HTML tags exactly as they appear: <ul>, <ol>, <li>, <p>, <strong>, <b>, <em>, <i>, <a>, <img>, <h1>-<h6>, <blockquote>, <code>, <pre>, <br>.\n"
-                            . "- Do NOT remove, add, or restructure any HTML tags.\n"
-                            . "- Only rephrase the visible TEXT inside the tags. Never alter tag names, attributes (href, src, style, alt), or tag structure.\n"
-                            . "- Output ONLY the rewritten HTML. No explanation, no preamble, no markdown fences.\n\n"
-                            . "FAQ HTML Answer:\n{$htmlFaqContent}";
-
-                        $paraphraseMessages = [
-                            ['role' => 'system', 'content' => $paraphrasePrompt],
-                            ['role' => 'user', 'content' => $message]
-                        ];
-
-                        // Always use the org's configured model routed to vast.ai GPU.
-                        // Same model used for main chat so it is already warm from recent queries.
-                        $paraphraseOptions = ['num_predict' => $dynamicNumPredict, 'temperature' => 0.3, 'use_vastai' => true, 'session_id' => $sessionId];
-                        $paraphraseModel = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
-                        $paraphraseStartedAt = microtime(true);
-                        $paraphraseResponse = $this->aiAgentService->llmChat(
-                            $paraphraseMessages,
-                            $paraphraseModel,
-                            null,
-                            $organization->id,
-                            $paraphraseOptions
-                        );
-                        $paraphraseElapsedMs = (int) round((microtime(true) - $paraphraseStartedAt) * 1000);
-
-                        if ($paraphraseResponse && isset($paraphraseResponse['message']['content'])) {
-                            $paraphrasedResponse = trim($paraphraseResponse['message']['content']);
-                        }
-                    } catch (\Throwable $e) {
-                        Log::warning('Widget FAQ paraphrase failed', [
-                            'org_id' => $organization->id,
-                            'session_id' => $sessionId,
-                            'error' => $e->getMessage()
-                        ]);
-                    }
+                $skipFaqPolish = $this->organizationWidgetBehaviors->shouldSkipFaqPolish(
+                    $organization,
+                    $exactFaqMatch
+                );
+                $polishedFaqResponse = $skipFaqPolish
+                    ? null
+                    : $this->polishExactFaqResponse(
+                        (string) $message,
+                        (string) $directResponse,
+                        $organization,
+                        $sessionId,
+                        $assistantName,
+                        (string) $responseTone,
+                        (string) $responseLanguage,
+                        (string) $languagePromptInstruction
+                    );
+                if (is_array($polishedFaqResponse)) {
+                    $paraphrasedResponse = $polishedFaqResponse['response'];
+                    $paraphraseElapsedMs = $polishedFaqResponse['elapsed_ms'];
+                    $paraphraseModel = $polishedFaqResponse['model'];
+                    $dynamicNumPredict = $polishedFaqResponse['max_tokens'];
+                    $skipParaphrase = false;
                 }
                 $contactDrift = $paraphrasedResponse
                     ? $this->summarizeContactDrift((string) $directResponse, (string) $paraphrasedResponse)
@@ -2242,7 +2437,9 @@ class WidgetController
                     : null;
                 $this->debugData['response_path']     = 'faq_direct';
                 $this->debugData['ai_provider']       = $this->aiAgentService->getAiProviderForOrganization($organization->id);
-                $this->debugData['model_used']        = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
+                $this->debugData['model_used']        = $paraphrasedResponse
+                    ? ($paraphraseModel ?? $this->aiAgentService->getOpenAiModelForOrganization($organization->id))
+                    : null;
                 $this->debugData['llm_elapsed_ms']    = $paraphraseElapsedMs ?? 0;
                 $this->debugData['max_tokens']        = $paraphrasedResponse ? ($dynamicNumPredict ?? null) : 0;
                 $this->debugData['total_elapsed_ms']  = (int) round((microtime(true) - $requestStartedAt) * 1000);
@@ -2457,6 +2654,7 @@ class WidgetController
                 && !$this->isContactQuery($message)
                 && !$deferKnowledgeShortcutsToModel) {
                 $shortResponse = $this->isPromoQuery($message)
+                    && !$this->organizationWidgetBehaviors->shouldSuppressPromotionResponse($organization, (string) $message)
                     ? $this->buildPromoUnavailableResponse()
                     : $this->buildClarifyResponse();
 
@@ -2711,6 +2909,7 @@ class WidgetController
                 $systemPrompt .= "Write in first-person plural as the business (use \"we/our\"), not \"they\". ";
                 $systemPrompt .= "Be concise. Use well-formatted responses with clear structure: bold key terms, bullet points for lists, separate lines for each detail. If the answer is not in the provided context, say so and provide official contact details. Ask a clarifying question only when the user's current message is too ambiguous to identify what they mean. ";
                 $systemPrompt .= "Always ground factual answers in CURRENT CONTEXT. Use PRIOR HISTORY only to resolve references or maintain continuity. ";
+                $systemPrompt .= "Treat CURRENT CONTEXT as evidence, not as a script to repeat. Answer the user's exact qualifier. If the user says they already completed a suggested step, or that an option is missing/not visible, do not repeat that step as the solution. If the answer is unsupported, say only that we do not have enough verified information and offer the official contact route. Never mention CURRENT CONTEXT, context verification, retrieval, candidate context, or internal checks to the user. ";
                 $systemPrompt .= "CRITICAL: NEVER invent or assume URLs, phone numbers, email addresses, prices, or factual details not explicitly stated in this system prompt or CURRENT CONTEXT. ";
                 $systemPrompt .= "STRICT KNOWLEDGE BASE POLICY: Only confirm that a test, service, product, or feature is offered if it is EXPLICITLY listed BY NAME in CURRENT CONTEXT. NEVER infer that because a related or parent service is available (e.g., MRI), a specific variant or sub-procedure (e.g., MR Enterography, MR Arthrography) is also available. If the exact item the user asked about is NOT present by name in CURRENT CONTEXT, respond: 'I don't have specific information about [item name] in our knowledge base. For further details, please contact us at [contact info].' Do NOT speculate, infer, or expand beyond what is explicitly stated. ";
                 $systemPrompt .= "NO-CONTEXT POLICY GUIDANCE: If the user asks about shipping, delivery, returns, refunds, exchanges, cancellation, warranty, or support and CURRENT CONTEXT is empty or not relevant, give one short sentence of general guidance first, clearly framed as general guidance rather than our verified policy, then explain that our specific verified details are not available here and include official contact details. Do NOT give exact timelines, fees, approval outcomes, or guarantees unless they are explicitly present in CURRENT CONTEXT. ";
@@ -2742,7 +2941,14 @@ class WidgetController
             $systemPrompt .= " Use resolved_anchor as the canonical subject of the CURRENT user turn, even when the user omitted it in a follow-up. Preserve exact product, test, class, service, order, or item names from CURRENT CONTEXT when available. Use anchor_facets for short qualifiers like stock, price, admission, fee, timing, requirement, delivery, size, color, or schedule.";
 
             // Get AI response using llmChat for better token tracking
-            $messages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $finalContext);
+            $messages = $this->buildChatMessages(
+                $organization,
+                $sessionId,
+                $systemPrompt,
+                $message,
+                (string) $finalContext,
+                $isRelatedFollowUp
+            );
             Log::info('Widget LLM context prepared', [
                 'org_id' => $orgId,
                 'session_id' => $sessionId,
@@ -2769,21 +2975,28 @@ class WidgetController
                 $maxTokens = 420;
             }
             $localOptions = ['num_predict' => $maxTokens, 'temperature' => 0.3];
+            if ($nonPersistentDebugRun) {
+                $localOptions['skip_token_usage'] = true;
+            }
             if ($this->shouldUseOpenAiFallback($message, $organization, $responseLanguage)) {
                 $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
                 $openAiOptions = $this->buildOpenAiWidgetOptions($model, $maxTokens, true);
+                if ($nonPersistentDebugRun) {
+                    $openAiOptions['skip_token_usage'] = true;
+                }
                 $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id, $sessionId, $openAiOptions);
             } elseif ($aiProvider === 'openai') {
                 // Use OpenAI with organization-specific or global model
                 $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
                 $openAiOptions = $this->buildOpenAiWidgetOptions($model, $maxTokens, true);
+                if ($nonPersistentDebugRun) {
+                    $openAiOptions['skip_token_usage'] = true;
+                }
                 $aiResponse = $this->aiAgentService->openAiChat($messages, $model, null, $organization->id, $sessionId, $openAiOptions);
             } else {
                 // Use local LLM with organization-specific or global model
                 $model = $this->aiAgentService->getLlamaModelForOrganization($organization->id);
-                // Always route to vast.ai GPU — it is faster than local CPU inference and
-                // ensures the model is warm from previous requests.
-                $localOptions['use_vastai'] = true;
+                $localOptions['use_vastai'] = $this->aiAgentService->isVastAiEnabled();
                 $localOptions['session_id'] = $sessionId;
                 $aiResponse = $this->aiAgentService->llmChat($messages, $model, null, $organization->id, $localOptions);
             }
@@ -2793,27 +3006,46 @@ class WidgetController
             $structuredFollowUpState = null;
             $oneCallEnvelopeRetryAttempted = false;
             $oneCallEnvelopeRetrySucceeded = false;
+            $usedVerifiedKnowledgeFallback = false;
             if (!$aiResponse || !isset($aiResponse['message']['content'])) {
-                // Fallback to old method
-                $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt);
-                $rawResponseText = $aiResponse['answer'] ?? null;
-                if ($rawResponseText === null) {
-                    // Both LLM paths failed — return a helpful fallback with org contact details
-                    $fallbackContact = $this->buildContactResponse(
-                        $organization->contact_email ?? ($organization->settings['contact_email'] ?? null),
-                        $organization->contact_phone ?? ($organization->settings['contact_phone'] ?? null),
-                        $organization->website ?? null
-                    );
-                    $responseText = "I'm sorry, I wasn't able to retrieve that information right now. Please try again in a moment"
-                        . ($fallbackContact ? ', or ' . $fallbackContact : '.');
+                $verifiedKnowledgeFallback = $this->buildVerifiedKnowledgeFailureFallback(
+                    (string) $message,
+                    $exactFaqMatch,
+                    is_array($orderedResults) ? $orderedResults : [],
+                    is_array($previousContextPayloads) ? $previousContextPayloads : [],
+                    is_string($lastAssistantForIntent) ? $lastAssistantForIntent : null,
+                    $isRelatedFollowUp,
+                    (($contextRelevance['use_context'] ?? true) !== false)
+                );
+
+                if ($verifiedKnowledgeFallback !== null) {
+                    $responseText = $verifiedKnowledgeFallback;
+                    $usedVerifiedKnowledgeFallback = true;
+                    $this->mergeDebugExtra([
+                        'llm_failure_fallback' => 'verified_knowledge',
+                        'faq_source' => $exactFaqMatch['match_source'] ?? null,
+                        'faq_item_id' => data_get($exactFaqMatch, 'payload.item_id'),
+                        'faq_title' => data_get($exactFaqMatch, 'payload.title'),
+                    ]);
                 } else {
-                    $responseText = $rawResponseText;
-                }
-                // Attempt envelope extraction even in the fallback path so raw JSON is never shown
-                if ($rawResponseText) {
-                    $fallbackEnvelope = $this->extractOneCallEnvelope((string) $rawResponseText);
-                    if (is_array($fallbackEnvelope) && !empty($fallbackEnvelope['response'])) {
-                        $responseText = (string) $fallbackEnvelope['response'];
+                    // No accepted knowledge was available, so try the independent local provider.
+                    $aiResponse = $this->aiAgentService->llmAnswer($systemPrompt, 'llama3.2:3b');
+                    $rawResponseText = $aiResponse['answer'] ?? null;
+                    if ($rawResponseText === null) {
+                        $fallbackContact = $this->buildContactResponse(
+                            $organization->contact_email ?? ($organization->settings['contact_email'] ?? null),
+                            $organization->contact_phone ?? ($organization->settings['contact_phone'] ?? null),
+                            $organization->website ?? null
+                        );
+                        $responseText = "I'm temporarily unable to connect to the response service. Please try again in a moment"
+                            . ($fallbackContact ? ', or ' . $fallbackContact : '.');
+                        $this->mergeDebugExtra(['llm_failure_fallback' => 'provider_unavailable']);
+                    } else {
+                        $responseText = $rawResponseText;
+                        $fallbackEnvelope = $this->extractOneCallEnvelope((string) $rawResponseText);
+                        if (is_array($fallbackEnvelope) && !empty($fallbackEnvelope['response'])) {
+                            $responseText = (string) $fallbackEnvelope['response'];
+                        }
                     }
                 }
             } else {
@@ -2940,7 +3172,7 @@ class WidgetController
                             if ($structuredShopifyAvailabilityResponse !== null) {
                                 $responseText = $structuredShopifyAvailabilityResponse;
                             } else {
-                                $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $message, $shopifyData);
+                                $structuredShopifyMismatchResponse = $this->buildStructuredShopifySpecificMatchClarificationResponse((string) $message, $shopifyData, $organization);
                                 if ($structuredShopifyMismatchResponse !== null) {
                                     $responseText = $structuredShopifyMismatchResponse;
                                 } else {
@@ -2960,11 +3192,13 @@ class WidgetController
                 }
                 $responseText = $this->normalizeShopifyResponseText($responseText);
             }
-            $structuredPromotionResponse = $this->buildStructuredPromotionResponse(
-                (string) $message,
-                $organization,
-                !empty($hasShopifyData) ? $shopifyData : null
-            );
+            $structuredPromotionResponse = $this->organizationWidgetBehaviors->shouldSuppressPromotionResponse($organization, (string) $message)
+                ? null
+                : $this->buildStructuredPromotionResponse(
+                    (string) $message,
+                    $organization,
+                    !empty($hasShopifyData) ? $shopifyData : null
+                );
             if ($structuredPromotionResponse !== null) {
                 $responseText = $structuredPromotionResponse;
             }
@@ -3027,6 +3261,15 @@ class WidgetController
             $responseText = $this->stripUnsupportedAlternativeContextOffer($responseText);
             $responseText = $this->stripLeadingEchoedUserMessage($responseText, (string) $message);
             $responseText = $this->stripTrailingProactiveFollowUpPrompt($responseText);
+            if ($this->looksLikeVisibleReasoningLeak($responseText)) {
+                Log::warning('Widget response replaced after visible internal reasoning leak', [
+                    'org_id' => $orgId,
+                    'session_id' => $sessionId,
+                    'response_preview' => substr($responseText, 0, 300),
+                ]);
+                $responseText = $this->buildInternalReasoningLeakFallbackResponse($organization, (string) $message);
+                $structuredFollowUpState = null;
+            }
             if (!$this->responseHasQuestion($responseText)) {
                 $structuredFollowUpState = null;
             }
@@ -3124,7 +3367,9 @@ class WidgetController
             $this->debugData['context_cleared']     = isset($maxResultScore) && $maxResultScore < 0.52;
             $this->debugData['low_relevance_warning'] = isset($lowRelevanceWarning) && $lowRelevanceWarning !== '';
             $this->debugData['envelope_parse_ok']   = $oneCallEnvelopeParseOk ?? false;
-            $this->debugData['response_path']       = 'llm';
+            $this->debugData['response_path']       = $usedVerifiedKnowledgeFallback
+                ? 'verified_knowledge_fallback'
+                : 'llm';
             $this->mergeDebugExtra(array_filter([
                 'requested_model' => $model ?? null,
                 'actual_model' => $actualModelUsed !== '' ? $actualModelUsed : null,
@@ -3237,6 +3482,14 @@ class WidgetController
 
         $message = trim((string) $request->input('message', ''));
         $sessionId = $this->resolveWidgetSessionId((string) $request->input('session_id', ''), true);
+        $nonPersistentDebugRun = $this->shouldSuppressWidgetPersistence($request, $sessionId);
+        if ($nonPersistentDebugRun) {
+            $this->markNonPersistentWidgetSession($sessionId);
+            $this->mergeDebugExtra([
+                'non_persistent_debug_run' => true,
+                'persistence_suppressed' => true,
+            ]);
+        }
         $userInfo = $request->input('user_info', []);
         $visitorInfo = $request->input('visitor_info', []);
         $allUserInfo = array_merge($userInfo, $visitorInfo);
@@ -3252,7 +3505,7 @@ class WidgetController
         $approvedSensitive = $settings['approved_sensitive_categories'] ?? [];
         $responseTone = $settings['response_tone'] ?? 'friendly';
         $responseLanguage = $settings['response_language'] ?? 'auto';
-        $deferKnowledgeShortcutsToModel = false;
+        $deferKnowledgeShortcutsToModel = $this->queryHasMultipleExplicitFacets((string) $message);
         
         if (!$message) {
             return response()->json(['error' => 'Message is required'], 400);
@@ -3283,9 +3536,11 @@ class WidgetController
             $messageForInference
         );
 
-        $existingConversation = ChatConversation::where('conversation_id', $sessionId)
-            ->where('organization_id', $organization->id)
-            ->first();
+        $existingConversation = $nonPersistentDebugRun
+            ? null
+            : ChatConversation::where('conversation_id', $sessionId)
+                ->where('organization_id', $organization->id)
+                ->first();
 
         if ($this->isNumericOnlyMessage($message) && !$this->shouldBypassNumericGuard($existingConversation)) {
             $clarifyResponse = $this->buildClarifyNumberResponse();
@@ -3479,7 +3734,7 @@ class WidgetController
 
         $pendingFollowUpState = $this->followUpStateService->getPendingState($existingConversation);
 
-        return response()->stream(function () use ($organization, $message, $messageForInference, $languagePromptInstruction, $allowNoContextInstructionalResponse, $sessionId, $request, $allUserInfo, $country, $region, $location, $city, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy, $pendingFollowUpState) {
+        return response()->stream(function () use ($organization, $message, $messageForInference, $languagePromptInstruction, $allowNoContextInstructionalResponse, $sessionId, $request, $allUserInfo, $country, $region, $location, $city, $sessionMetadata, $verifiedOnly, $responseTone, $responseLanguage, $rulePolicy, $pendingFollowUpState, $deferKnowledgeShortcutsToModel) {
             $this->initStreamOutput();
             
             $lastAssistantMessageForEnding = $this->getLastAssistantMessage($organization, $sessionId);
@@ -3575,6 +3830,32 @@ class WidgetController
                 $aiService = app(AiAgentService::class);
                 $actionService = app(\App\Services\ActionService::class);
                 $aiProvider = $this->aiAgentService->getAiProviderForOrganization($organization->id);
+                $conversationHistoryForUnderstanding = $this->getConversationHistoryForUnderstanding(
+                    $organization,
+                    (string) $sessionId
+                );
+                $queryUnderstanding = null;
+                if ($this->shouldRunOpenAiQueryUnderstanding($organization)) {
+                    $queryUnderstanding = $this->aiAgentService->understandQueryWithOpenAi(
+                        (string) $messageForInference,
+                        $organization,
+                        $sessionId,
+                        ['conversation_history' => $conversationHistoryForUnderstanding]
+                    );
+                }
+                if (is_array($queryUnderstanding)) {
+                    $this->mergeDebugExtra([
+                        'query_understanding' => [
+                            'intent' => $queryUnderstanding['intent'] ?? null,
+                            'confidence' => $queryUnderstanding['confidence'] ?? null,
+                            'is_follow_up' => $queryUnderstanding['is_follow_up'] ?? null,
+                            'rewritten_query' => $queryUnderstanding['rewritten_query'] ?? null,
+                            'entities' => $queryUnderstanding['entities'] ?? [],
+                            'search_targets' => $queryUnderstanding['search_targets'] ?? [],
+                            'history_messages' => count($conversationHistoryForUnderstanding),
+                        ],
+                    ]);
+                }
 
                 $lastAssistantMessage = $this->getLastAssistantMessage($organization, $sessionId);
                 $lastAssistantAskedQuestion = is_string($lastAssistantMessage)
@@ -3597,13 +3878,18 @@ class WidgetController
                 $lastUserMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                 $lastUserMessage = is_string($lastUserMessage) ? trim($lastUserMessage) : '';
                 $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
+                    $organization,
                     (string) $messageForInference,
                     $lastUserMessage,
                     is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
                     is_array($previousContextPayloads) ? $previousContextPayloads : [],
                     is_array($pendingFollowUpState) && !empty($pendingFollowUpState),
                     is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null
+                ) || $this->queryUnderstandingIndicatesFollowUp(
+                    $queryUnderstanding,
+                    $conversationHistoryForUnderstanding
                 );
+                $deferKnowledgeShortcutsToModel = $deferKnowledgeShortcutsToModel || $isRelatedFollowUp;
                 $canReusePreviousContext = !empty($previousContextPayloads)
                     && $isRelatedFollowUp;
                 $shouldUsePendingStateAnchor = $this->shouldAnchorWithPendingFollowUpState(
@@ -3611,19 +3897,21 @@ class WidgetController
                     is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null
                 );
 
-                $cachedChatMessages = $isRelatedFollowUp ? $this->getCachedChatMessages((string) $sessionId) : [];
+                $cachedChatMessages = $isRelatedFollowUp ? $conversationHistoryForUnderstanding : [];
                 $followUpRetrievalPlan = null;
                 $skipFollowUpRetrieval = false;
 
-                $searchQuery = $messageForInference;
+                $searchQuery = $this->queryUnderstandingSearchQuery($queryUnderstanding, (string) $messageForInference);
                 if ($isRelatedFollowUp) {
                     $searchQuery = $this->buildRelatedFollowUpSearchQuery(
+                        $organization,
                         (string) $messageForInference,
                         is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null,
                         $lastUserMessage,
                         is_string($lastAssistantMessage) ? $lastAssistantMessage : '',
                         $isAffirmativeFollowUp,
-                        $isReferentialFollowUp
+                        $isReferentialFollowUp,
+                        $this->queryUnderstandingSearchQuery($queryUnderstanding, '')
                     );
 
                     $followUpRetrievalPlan = $this->planFollowUpRetrievalWithContext(
@@ -3658,7 +3946,7 @@ class WidgetController
                     );
                 }
 
-                $actionQuery = $messageForInference;
+                $actionQuery = $this->queryUnderstandingSearchQuery($queryUnderstanding, (string) $messageForInference);
                 if ($this->isPricingFollowUp($messageForInference)) {
                     $previousMessage = $this->getLastUserMessageForSession($organization->id, $sessionId);
                     if ($previousMessage) {
@@ -3682,6 +3970,9 @@ class WidgetController
                     ]);
                 }
                 $intentResult = $actionResult['intent'] ?? null;
+                if (!$intentResult && is_array($queryUnderstanding)) {
+                    $intentResult = $this->intentResultFromQueryUnderstanding($queryUnderstanding);
+                }
 
                 // Update lead with intent/priority if lead info is provided
                 $this->upsertWidgetLead(
@@ -3917,6 +4208,60 @@ class WidgetController
                     );
                 }
 
+                $catalogBudgetResponse = $this->organizationWidgetBehaviors->catalogBudgetResponse(
+                    $organization,
+                    (string) $message,
+                    (string) $searchQuery,
+                    $resultsForPayloadCache
+                );
+                if ($catalogBudgetResponse !== null) {
+                    Log::info('Using organization catalog budget response (stream)', [
+                        'org_id' => $organization->id,
+                        'org_slug' => $organization->slug,
+                        'session_id' => $sessionId,
+                        'message' => $message,
+                    ]);
+
+                    echo "data: " . json_encode(['content' => $catalogBudgetResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $catalogBudgetResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location', 'city'),
+                        $intentResult
+                    );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $catalogBudgetResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    $this->debugData['response_path'] = 'organization_catalog_budget';
+                    $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                    $this->writeDebugLog($conversation);
+
+                    return;
+                }
+
                 $deterministicCatalogResponse = $this->buildDeterministicCatalogEntityResponse(
                     $resultsForPayloadCache,
                     (string) $message,
@@ -4143,6 +4488,41 @@ class WidgetController
                     $exactFaqMatch = null;
                 }
 
+                if ($this->isContactQuery((string) $message)) {
+                    $contactResponse = $this->buildDeterministicContactQueryResponse(
+                        $organization,
+                        (string) $message,
+                        $searchResults ?? null
+                    );
+                    echo "data: " . json_encode(['content' => $contactResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $contactResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location', 'city'),
+                        $intentResult
+                    );
+
+                    $this->debugData['response_path'] = 'deterministic_contact';
+                    $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                    $this->writeDebugLog($conversation);
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+
+                    return;
+                }
+
                 if (!$deferKnowledgeShortcutsToModel && $verifiedOnly && !$liveData && trim($context) === '' && !$allowNoContextInstructionalResponse && !$exactFaqMatch) {
                     $safeResponse = $this->buildVerifiedOnlyResponse($organization);
                     echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
@@ -4157,6 +4537,69 @@ class WidgetController
                         compact('country', 'region', 'location', 'city'),
                         $intentResult
                     );
+
+                    $this->logIntentAnalytics(
+                        $organization->id,
+                        $sessionId,
+                        $intentResult,
+                        $request,
+                        compact('country', 'region', 'location', 'city'),
+                        $sessionMetadata
+                    );
+
+                    if ($this->isUnansweredResponse($safeResponse)) {
+                        $this->logUnansweredQuestion(
+                            $organization->id,
+                            $sessionId,
+                            $message,
+                            $safeResponse,
+                            $request,
+                            compact('country', 'region', 'location', 'city'),
+                            $sessionMetadata
+                        );
+                    }
+
+                    if ($conversation) {
+                        $this->handleEscalationIfNeeded(
+                            $conversation,
+                            $message,
+                            $safeResponse,
+                            $intentResult,
+                            $request,
+                            $sessionMetadata
+                        );
+                    }
+
+                    return;
+                }
+
+                if ($this->shouldUseUnsupportedNoContextFallback(
+                    (string) $message,
+                    $organization,
+                    (string) $context,
+                    (bool) $liveData,
+                    $exactFaqMatch,
+                    $allowNoContextInstructionalResponse,
+                    $isRelatedFollowUp && $canReusePreviousContext
+                )) {
+                    $safeResponse = $this->buildUnsupportedNoContextFallbackResponse($organization, (string) $message);
+                    echo "data: " . json_encode(['content' => $safeResponse, 'done' => true]) . "\n\n";
+                    $this->streamFlush();
+
+                    $conversation = $this->saveConversationToDatabase(
+                        $organization,
+                        $sessionId,
+                        $message,
+                        $safeResponse,
+                        $allUserInfo,
+                        compact('country', 'region', 'location', 'city'),
+                        $intentResult
+                    );
+
+                    $this->debugData['clarification_sought'] = true;
+                    $this->debugData['response_path'] = 'unsupported_no_context';
+                    $this->debugData['total_elapsed_ms'] = (int) round((microtime(true) - $requestStartedAt) * 1000);
+                    $this->writeDebugLog($conversation);
 
                     $this->logIntentAnalytics(
                         $organization->id,
@@ -4276,12 +4719,47 @@ class WidgetController
                     return;
                 }
 
-                if (!$deferKnowledgeShortcutsToModel && $exactFaqMatch && !$liveData && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)) {
+                $allowDirectFaqResponse = $this->shouldUseDirectFaqResponse(
+                    (string) $messageForInference,
+                    $exactFaqMatch,
+                    $isRelatedFollowUp,
+                    $isAffirmativeContinuation
+                );
+                if (
+                    !$deferKnowledgeShortcutsToModel
+                    && $exactFaqMatch
+                    && $allowDirectFaqResponse
+                    && !$liveData
+                    && !($isAffirmativeContinuation && $skipExactMatchOnAffirmative)
+                ) {
                     $directResponse = $exactFaqMatch['response'];
                     $streamAssistantName = $organization->settings['assistant_display_name'] ?? 'AI Assistant';
-                    // Always pass through LLM to polish the response and track token usage.
-                    // Keyword-fallback matches are plain text only, skip paraphrase.
-                    $streamSkipParaphrase = (($exactFaqMatch['match_source'] ?? '') === 'keyword_fallback');
+                    // Exact FAQ hits should stream quickly; clean simple CMS HTML locally.
+                    $streamSkipParaphrase = true;
+                    if (preg_match('/<[a-zA-Z][^>]*>/', (string) $directResponse)) {
+                        $directResponse = $this->htmlToPlainWithLinks(
+                            preg_replace('/<\?(?:xml|php)[^>]*(?:\?>|>)/i', '', (string) $directResponse) ?? (string) $directResponse
+                        );
+                    }
+                    $skipFaqPolish = $this->organizationWidgetBehaviors->shouldSkipFaqPolish(
+                        $organization,
+                        $exactFaqMatch
+                    );
+                    $streamPolishedFaqResponse = $skipFaqPolish
+                        ? null
+                        : $this->polishExactFaqResponse(
+                            (string) $message,
+                            (string) $directResponse,
+                            $organization,
+                            $sessionId,
+                            $streamAssistantName,
+                            (string) $responseTone,
+                            (string) $responseLanguage,
+                            (string) $languagePromptInstruction
+                        );
+                    if (is_array($streamPolishedFaqResponse)) {
+                        $directResponse = $streamPolishedFaqResponse['response'];
+                    }
                     if (!$streamSkipParaphrase) {
                         try {
                             $htmlFaqContent = trim((string) $directResponse);
@@ -4574,6 +5052,7 @@ class WidgetController
                     && !$this->isContactQuery($message)
                     && !$deferKnowledgeShortcutsToModel) {
                     $shortResponse = $this->isPromoQuery($message)
+                        && !$this->organizationWidgetBehaviors->shouldSuppressPromotionResponse($organization, (string) $message)
                         ? $this->buildPromoUnavailableResponse()
                         : $this->buildClarifyResponse();
 
@@ -4857,6 +5336,7 @@ class WidgetController
                 }
 
                 $systemPrompt .= "\nCRITICAL: NEVER invent or assume URLs, phone numbers, email addresses, prices, or factual details not explicitly stated in this system prompt or CURRENT CONTEXT.";
+                $systemPrompt .= "\nTreat CURRENT CONTEXT as evidence, not as a script to repeat. Answer the user's exact qualifier. If the user says they already completed a suggested step, or that an option is missing/not visible, do not repeat that step as the solution. If the answer is unsupported, say only that we do not have enough verified information and offer the official contact route. Never mention CURRENT CONTEXT, context verification, retrieval, candidate context, or internal checks to the user.";
                 $systemPrompt .= "\nSTRICT KNOWLEDGE BASE POLICY: Only confirm that a test, service, product, or feature is offered if it is EXPLICITLY listed BY NAME in CURRENT CONTEXT. NEVER infer that because a related or parent service is available (e.g., MRI), a specific variant or sub-procedure (e.g., MR Enterography) is also available. If the exact item the user asked about is NOT present by name in CURRENT CONTEXT, respond: 'I don't have specific information about [item name] in our knowledge base. For further details, please contact us at [contact info].' Do NOT speculate, infer, or expand beyond what is explicitly stated.";
                 $systemPrompt .= "\nNO-CONTEXT POLICY GUIDANCE: If the user asks about shipping, delivery, returns, refunds, exchanges, cancellation, warranty, or support and CURRENT CONTEXT is empty or not relevant, give one short sentence of general guidance first, clearly framed as general guidance rather than our verified policy, then explain that our specific verified details are not available here and include official contact details. Do NOT give exact timelines, fees, approval outcomes, or guarantees unless they are explicitly present in CURRENT CONTEXT.";
                 $systemPrompt .= "\nIf CURRENT CONTEXT includes subscription/pricing details, NEVER claim that pricing information is unavailable or not provided. Respond only with the available plans and values from CURRENT CONTEXT.";
@@ -4882,7 +5362,14 @@ class WidgetController
                     ]);
                 }
 
-                $chatMessages = $this->buildChatMessages($organization, $sessionId, $systemPrompt, $message, (string) $context);
+                $chatMessages = $this->buildChatMessages(
+                    $organization,
+                    $sessionId,
+                    $systemPrompt,
+                    $message,
+                    (string) $context,
+                    $isRelatedFollowUp
+                );
                 $useOpenAiFallback = $this->shouldUseOpenAiFallback($message, $organization, $responseLanguage) || $aiProvider === 'openai';
                 $maxTokens = 220;
                 $affirmativeMaxTokens = (int) ($rulePolicy['affirmative_follow_up_max_tokens'] ?? 140);
@@ -4946,10 +5433,11 @@ class WidgetController
                 }
 
                 if (!$useOpenAiFallback) {
-                    // Stream from FastAPI with Vast.ai GPU
+                    // Stream from FastAPI with Vast.ai GPU when enabled, otherwise use local fallback.
                     $responseStartTime = microtime(true);
                     $fastApiUrl = config('services.ai_agent.url');
-                    Log::info('Starting LLM response generation', ['model' => $model, 'use_vastai' => true]);
+                    $vastAiEnabled = $this->aiAgentService->isVastAiEnabled();
+                    Log::info('Starting LLM response generation', ['model' => $model, 'vastai_enabled' => $vastAiEnabled]);
                     $fullResponse = '';
                     $streamUsage = null;
                     $streamAttempt = function (bool $useVast, string $attemptModel, string $attemptLabel, bool $deferToPostProcess) use ($fastApiUrl, $chatMessages, $maxTokens, &$fullResponse, &$streamUsage, $message, $localNumPredictCap) {
@@ -5123,8 +5611,14 @@ class WidgetController
                     };
 
                     $fallbackReason = null;
-                    $skipVastAttempt = false;
+                    $skipVastAttempt = !$vastAiEnabled;
                     $vastBackoffUntil = (int) Cache::get('widget_vastai_backoff_until', 0);
+
+                    if (!$vastAiEnabled) {
+                        $fallbackReason = [
+                            'skip_vast_due_disabled' => true,
+                        ];
+                    }
 
                     if ($vastBackoffUntil > time()) {
                         $skipVastAttempt = true;
@@ -5172,7 +5666,8 @@ class WidgetController
                         ];
                     } elseif ($skipVastAttempt) {
                         $fallbackReason = [
-                            'skip_vast_due_cached_unhealthy_status' => true,
+                            'skip_vast_due_cached_unhealthy_status' => !($fallbackReason['skip_vast_due_disabled'] ?? false),
+                            'skip_vast_due_disabled' => (bool) ($fallbackReason['skip_vast_due_disabled'] ?? false),
                             'vast_status' => $vastConnectivityStatus,
                         ];
                         Log::warning('Widget stream skipping vast-primary due to recent unhealthy connectivity status', [
@@ -5248,11 +5743,21 @@ class WidgetController
                         ];
 
                         if (!$secondAttemptSuccessful) {
-                            $safeErrorMessage = 'Sorry, I encountered an error. Please try again.';
+                            $safeErrorMessage = $this->buildVerifiedKnowledgeFailureFallback(
+                                (string) $message,
+                                $exactFaqMatch,
+                                is_array($orderedResults) ? $orderedResults : [],
+                                is_array($previousContextPayloads) ? $previousContextPayloads : [],
+                                is_string($lastAssistantMessage) ? $lastAssistantMessage : null,
+                                $isRelatedFollowUp,
+                                trim((string) $context) !== ''
+                            ) ?? 'I\'m temporarily unable to connect to the response service. Please try again in a moment.';
                             echo "data: " . json_encode(['content' => $safeErrorMessage, 'done' => true]) . "\n\n";
                             $this->streamFlush();
                             $fullResponse = $safeErrorMessage;
-                            $streamBackendUsed = 'error_fallback_message';
+                            $streamBackendUsed = str_contains($safeErrorMessage, 'temporarily unable to connect')
+                                ? 'provider_unavailable'
+                                : 'verified_knowledge_fallback';
                         } else {
                             $streamBackendUsed = 'local_fallback_' . $localFallbackModel;
                         }
@@ -5292,6 +5797,15 @@ class WidgetController
                 $finalResponse = $this->stripUnsupportedAlternativeContextOffer($finalResponse);
                 $finalResponse = $this->stripLeadingEchoedUserMessage($finalResponse, (string) $message);
                 $finalResponse = $this->stripTrailingProactiveFollowUpPrompt($finalResponse);
+                if ($this->looksLikeVisibleReasoningLeak($finalResponse)) {
+                    Log::warning('Widget stream response replaced after visible internal reasoning leak', [
+                        'org_id' => $orgId,
+                        'session_id' => $sessionId,
+                        'response_preview' => substr($finalResponse, 0, 300),
+                    ]);
+                    $finalResponse = $this->buildInternalReasoningLeakFallbackResponse($organization, (string) $message);
+                    $hallucinationBlocked = true;
+                }
                 $escalationReason = $this->getEscalationReason($message, $finalResponse, $intentResult);
                 $postfixParts = [];
 
@@ -5505,6 +6019,14 @@ class WidgetController
 
     private function upsertWidgetLead(int $organizationId, string $sessionId, array $userInfo, array $locationInfo, ?array $intentResult, ?string $message, ?array $sessionMetadata = null): void
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            Log::info('Widget lead upsert suppressed for non-persistent debug session', [
+                'org_id' => $organizationId,
+                'session_id' => $sessionId,
+            ]);
+            return;
+        }
+
         if (empty($userInfo) || empty($userInfo['name']) || empty($userInfo['email'])) {
             return;
         }
@@ -5638,6 +6160,10 @@ class WidgetController
 
     private function logIntentAnalytics(int $organizationId, string $sessionId, ?array $intentResult, Request $request, array $locationInfo = [], ?array $sessionMetadata = null): void
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return;
+        }
+
         if (empty($intentResult) || empty($intentResult['intent'])) {
             return;
         }
@@ -5708,6 +6234,10 @@ class WidgetController
 
     private function logUnansweredQuestion(int $organizationId, string $sessionId, string $question, string $response, Request $request, array $locationInfo = [], ?array $sessionMetadata = null): void
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return;
+        }
+
         try {
             $pageUrl = $sessionMetadata['page_url'] ?? $request->input('page_url');
             $pageTitle = $sessionMetadata['page_title'] ?? $request->input('page_title');
@@ -6084,7 +6614,9 @@ class WidgetController
     {
         try {
             $messages = $conversation->messages()
-                ->orderBy('sent_at', 'desc')
+                ->reorder()
+                ->orderByDesc('sent_at')
+                ->orderByDesc('id')
                 ->limit(6)
                 ->get()
                 ->reverse();
@@ -6167,8 +6699,11 @@ class WidgetController
 
         $contactFaqMatch = $this->getDeterministicContactFaqMatchResponse($searchResults, $organization, $message);
         if ($contactFaqMatch) {
+            $contactFaqResponse = $this->verifiedFaqResponse($contactFaqMatch)
+                ?? $this->decodeHtmlEntitiesRecursively((string) ($contactFaqMatch['response'] ?? ''));
+
             return $this->enforceOfficialContacts(
-                $this->decodeHtmlEntitiesRecursively((string) ($contactFaqMatch['response'] ?? '')),
+                $contactFaqResponse,
                 $email,
                 $phone,
                 $website
@@ -6212,6 +6747,11 @@ class WidgetController
 
     private function getExactFaqMatchResponse(?array $searchResults, Organization $organization, string $message = ''): ?array
     {
+        $preferredOrganizationMatch = $this->organizationWidgetBehaviors->preferredFaqMatch($organization, $message);
+        if ($preferredOrganizationMatch) {
+            return $preferredOrganizationMatch;
+        }
+
         $fallbackMatch = $this->getKeywordFaqMatchResponse($organization, $message);
         $hasCareerIntent = $this->queryHasCareerIntent($message, $organization);
 
@@ -6322,13 +6862,151 @@ class WidgetController
         ];
     }
 
+    private function shouldUseDirectFaqResponse(
+        string $message,
+        ?array $match,
+        bool $isRelatedFollowUp,
+        bool $isAffirmativeContinuation
+    ): bool
+    {
+        if (!is_array($match) || trim((string) ($match['response'] ?? '')) === '') {
+            return false;
+        }
+
+        $source = trim((string) ($match['match_source'] ?? ''));
+        if ($source !== 'keyword_fallback'
+            || $isRelatedFollowUp
+            || $isAffirmativeContinuation
+            || $this->isContactQuery($message)
+            || $this->queryHasMultipleExplicitFacets($message)
+        ) {
+            return false;
+        }
+
+        $query = strtolower(trim(strip_tags($message)));
+        if ($query === '' || str_word_count($query) > 14) {
+            return false;
+        }
+
+        $needsInterpretation = (bool) preg_match(
+            '/\b(already|signed?\s*in|logged?\s*in|created|but|however|cannot|can\'t|unable|no\s+option|not\s+(?:showing|visible|available)|missing|problem|issue|error|trouble|help\s+me\s+(?:find|enable|fix))\b/i',
+            $query
+        );
+
+        return !$needsInterpretation;
+    }
+
+    private function verifiedFaqResponse(?array $match): ?string
+    {
+        if (!is_array($match)) {
+            return null;
+        }
+
+        $response = trim((string) ($match['response'] ?? ''));
+        if ($response === '') {
+            return null;
+        }
+
+        $response = preg_replace('/<\?(?:xml|php)[^>]*(?:\?>|>)/i', '', $response) ?? $response;
+        if (preg_match('/<[a-zA-Z][^>]*>/', $response)) {
+            $response = $this->htmlToPlainWithLinks($response);
+        }
+
+        $response = trim($this->decodeHtmlEntitiesRecursively($response));
+
+        return $response !== '' ? $response : null;
+    }
+
+    private function buildVerifiedKnowledgeFailureFallback(
+        string $message,
+        ?array $exactFaqMatch,
+        array $orderedResults,
+        array $previousContextPayloads,
+        ?string $lastAssistantMessage,
+        bool $isRelatedFollowUp,
+        bool $contextWasAccepted
+    ): ?string {
+        $exactResponse = $this->verifiedFaqResponse($exactFaqMatch);
+        if ($exactResponse !== null) {
+            return $this->qualifyAccountActionFallback($message, $exactResponse);
+        }
+
+        if ($contextWasAccepted) {
+            $payloads = [];
+            foreach ($orderedResults as $result) {
+                if (is_array($result['payload'] ?? null)) {
+                    $payloads[] = $result['payload'];
+                }
+            }
+            if ($isRelatedFollowUp) {
+                $payloads = array_merge($payloads, array_filter($previousContextPayloads, 'is_array'));
+            }
+
+            usort($payloads, static function (array $left, array $right): int {
+                $preferredTypes = ['faq' => 0, 'info' => 1, 'service' => 2];
+                $leftRank = $preferredTypes[strtolower((string) ($left['data_type'] ?? ''))] ?? 3;
+                $rightRank = $preferredTypes[strtolower((string) ($right['data_type'] ?? ''))] ?? 3;
+
+                return $leftRank <=> $rightRank;
+            });
+
+            foreach ($payloads as $payload) {
+                $response = $this->verifiedPayloadResponse($payload);
+                if ($response !== null) {
+                    return $this->qualifyAccountActionFallback($message, $response);
+                }
+            }
+        }
+
+        if ($contextWasAccepted
+            && $isRelatedFollowUp
+            && is_string($lastAssistantMessage)
+            && trim($lastAssistantMessage) !== ''
+            && !$this->isUnansweredResponse($lastAssistantMessage)
+        ) {
+            return $this->qualifyAccountActionFallback(
+                $message,
+                trim($this->htmlToPlainWithLinks($lastAssistantMessage))
+            );
+        }
+
+        return null;
+    }
+
+    private function verifiedPayloadResponse(array $payload): ?string
+    {
+        $content = trim((string) ($payload['content'] ?? ''));
+        if ($content === '') {
+            return null;
+        }
+
+        $content = preg_replace('/<\?(?:xml|php)[^>]*(?:\?>|>)/i', '', $content) ?? $content;
+        $content = trim($this->stripSynonymLines($this->htmlToPlainWithLinks($content)));
+        $content = trim($this->decodeHtmlEntitiesRecursively($content));
+
+        return $content !== '' ? $content : null;
+    }
+
+    private function qualifyAccountActionFallback(string $message, string $verifiedResponse): string
+    {
+        $normalized = strtolower(trim($message));
+        $asksAssistantToCreateAccount = (bool) preg_match(
+            '/\b(create|open|make|set\s*up|register)\b.*\b(account|profile)\b.*\b(for\s+me|mine|myself)\b|\b(create|open|make|set\s*up|register)\b.*\bmy\b.*\b(account|profile)\b/i',
+            $normalized
+        );
+
+        if (!$asksAssistantToCreateAccount) {
+            return $verifiedResponse;
+        }
+
+        return "I can guide you, but I can't create or access the account on your behalf. " . $verifiedResponse;
+    }
+
     private function getKeywordFaqMatchResponse(Organization $organization, string $message): ?array
     {
-        if ($this->isArtistSellingIntent($message)) {
-            $artistSellingMatch = $this->getArtistSellingFaqMatchResponse($organization);
-            if ($artistSellingMatch) {
-                return $artistSellingMatch;
-            }
+        $organizationMatch = $this->organizationWidgetBehaviors->preferredFaqMatch($organization, $message);
+        if ($organizationMatch) {
+            return $organizationMatch;
         }
 
         $translationMap = $this->getOrganizationQueryTranslationMap($organization);
@@ -6508,111 +7186,6 @@ class WidgetController
         return $best;
     }
 
-    private function getArtistSellingFaqMatchResponse(Organization $organization): ?array
-    {
-        $faqs = OrganizationFaq::query()
-            ->where('organization_id', $organization->id)
-            ->where('is_active', true)
-            ->get(['id', 'question', 'answer', 'follow_up', 'keywords', 'category', 'updated_at']);
-
-        $best = null;
-        foreach ($faqs as $faq) {
-            $questionNorm = $this->normalizeKeywordMatchText((string) $faq->question);
-            $answerNorm = $this->normalizeKeywordMatchText((string) $faq->answer);
-            $keywordsNorm = $this->normalizeKeywordMatchText((string) ($faq->keywords ?? ''));
-            $categoryNorm = $this->normalizeKeywordMatchText((string) ($faq->category ?? ''));
-            $candidateText = trim($questionNorm . ' ' . $answerNorm . ' ' . $keywordsNorm . ' ' . $categoryNorm);
-
-            if ($candidateText === '' || !str_contains($candidateText, 'sell')) {
-                continue;
-            }
-
-            $isArtistFaq = str_contains($categoryNorm, 'artist')
-                || preg_match('/\b(artist|artwork|painting|paintings|profile|upload|submission|publishing)\b/u', $candidateText);
-            if (!$isArtistFaq) {
-                continue;
-            }
-
-            $score = 2.6;
-            if (str_contains($categoryNorm, 'artist')) {
-                $score += 1.1;
-            }
-            if (preg_match('/\bsell\b.*\bpainting|painting.*\bsell\b/u', $questionNorm)) {
-                $score += 1.4;
-            }
-            if (preg_match('/\b(upload|profile|review|submission|publishing)\b/u', $candidateText)) {
-                $score += 1.0;
-            }
-            if (preg_match('/\bwhatsapp|support\b/u', $candidateText)) {
-                $score += 0.7;
-            }
-
-            if (
-                $best === null
-                || $score > $best['score']
-                || ($score === $best['score'] && (string) $faq->updated_at > (string) ($best['updated_at'] ?? ''))
-            ) {
-                $answer = trim((string) $faq->answer);
-                if ($answer === '') {
-                    continue;
-                }
-
-                $best = [
-                    'score' => $score,
-                    'updated_at' => (string) $faq->updated_at,
-                    'response' => $answer,
-                    'payload' => [
-                        'item_id' => 'faq_' . $faq->id,
-                        'data_type' => 'faq',
-                        'type' => 'faq',
-                        'title' => $faq->question,
-                        'content' => $answer,
-                        'follow_up' => $faq->follow_up,
-                        'category' => $faq->category,
-                        'keywords' => $faq->keywords,
-                    ],
-                    'match_debug' => [
-                        'artist_selling_intent' => true,
-                    ],
-                ];
-            }
-        }
-
-        if (!$best) {
-            return null;
-        }
-
-        unset($best['updated_at']);
-        $best['match_source'] = 'artist_selling_keyword_fallback';
-
-        return $best;
-    }
-
-    private function isArtistSellingIntent(string $message): bool
-    {
-        $query = $this->normalizeKeywordMatchText($message);
-        if ($query === '') {
-            return false;
-        }
-
-        if (preg_match('/\b(buy|purchase|order|checkout|cart)\b/u', $query)) {
-            return false;
-        }
-
-        if (preg_match('/\b(sketch|paper|print|prints|drawing|drawings)\b/u', $query)) {
-            return false;
-        }
-
-        $hasSaleVerb = (bool) preg_match('/\b(sell|sale|seller|selling|list|listing|register|registration|artist|profile|upload|submit|submission|publish|publishing)\b/u', $query);
-        $hasArtworkNoun = (bool) preg_match('/\b(painting|paintings|artwork|artworks|canvas|art)\b/u', $query);
-
-        if ($hasSaleVerb && $hasArtworkNoun) {
-            return true;
-        }
-
-        return (bool) preg_match('/\bmy\s+painting\s+sell\b|\bpainting\s+sell\b|\bsell\s+my\s+painting\b/u', $query);
-    }
-
     private function queryHasCareerIntent(string $message, Organization $organization): bool
     {
         $query = $this->normalizeKeywordMatchText(
@@ -6704,6 +7277,187 @@ class WidgetController
         }
 
         return $this->organizationSupportsBookingFollowUp($organization);
+    }
+
+    private function shouldRunOpenAiQueryUnderstanding(Organization $organization): bool
+    {
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+
+        if (array_key_exists('ai_query_understanding_enabled', $settings)) {
+            return (bool) $settings['ai_query_understanding_enabled'];
+        }
+
+        return (bool) AdminSetting::get('ai_query_understanding_enabled', true);
+    }
+
+    private function intentResultFromQueryUnderstanding(array $analysis): array
+    {
+        return [
+            'intent' => $analysis['intent'] ?? 'unknown',
+            'confidence' => $analysis['confidence'] ?? null,
+            'method' => 'openai_query_understanding',
+            'entities' => $analysis['entities'] ?? [],
+            'search_targets' => $analysis['search_targets'] ?? [],
+            'route_analysis' => $this->mergeRouteAnalysisWithQueryUnderstanding([], $analysis),
+        ];
+    }
+
+    private function mergeRouteAnalysisWithQueryUnderstanding(array $routeAnalysis, array $analysis): array
+    {
+        $targets = is_array($analysis['search_targets'] ?? null) ? $analysis['search_targets'] : [];
+        $intent = strtolower((string) ($analysis['intent'] ?? ''));
+        $route = is_array($analysis['route'] ?? null) ? $analysis['route'] : [];
+        $signals = array_values(array_unique(array_filter(array_merge(
+            is_array($routeAnalysis['signals'] ?? null) ? $routeAnalysis['signals'] : [],
+            is_array($route['signals'] ?? null) ? $route['signals'] : []
+        ))));
+
+        if (in_array('shopify_products', $targets, true) || $intent === 'product_search') {
+            $signals[] = 'product_lookup';
+        }
+        if ($intent === 'pricing') {
+            $signals[] = 'pricing_requests';
+        }
+        if ($intent === 'support' || $intent === 'policy') {
+            $signals[] = 'policy_questions';
+        }
+        if ($intent === 'order_status' || in_array('shopify_orders', $targets, true)) {
+            $signals[] = 'fulfillment_questions';
+        }
+        $signals = array_values(array_unique(array_filter($signals)));
+
+        $productCandidate = trim((string) data_get($routeAnalysis, 'slots.product_candidate', ''));
+        if ($productCandidate === '') {
+            $productCandidate = $this->firstQueryUnderstandingEntity($analysis, ['product', 'product_name', 'item']);
+        }
+        if ($productCandidate === '' && in_array('shopify_products', $targets, true)) {
+            $productCandidate = trim((string) ($analysis['rewritten_query'] ?? ''));
+        }
+
+        $slots = is_array($routeAnalysis['slots'] ?? null) ? $routeAnalysis['slots'] : [];
+        if ($productCandidate !== '') {
+            $slots['product_candidate'] = $productCandidate;
+        }
+
+        $primaryRoute = trim((string) ($route['primary_route'] ?? ''));
+        if ($primaryRoute === '') {
+            $primaryRoute = (string) ($routeAnalysis['primary_route'] ?? '');
+        }
+        if ($primaryRoute === '') {
+            $primaryRoute = match ($intent) {
+                'pricing' => 'pricing_requests',
+                'product_search' => 'product_lookup',
+                'order_status' => 'fulfillment_questions',
+                'support', 'policy' => 'policy_questions',
+                'booking' => 'booking',
+                default => 'lookup',
+            };
+        }
+
+        return array_merge($routeAnalysis, [
+            'primary_route' => $primaryRoute,
+            'signals' => $signals,
+            'slots' => $slots,
+            'requires_product_resolution' => (bool) (
+                ($routeAnalysis['requires_product_resolution'] ?? false)
+                || ($route['requires_product_resolution'] ?? false)
+                || in_array('shopify_products', $targets, true)
+                || ($intent === 'product_search' && $productCandidate !== '')
+            ),
+            'policy_only' => (bool) (($routeAnalysis['policy_only'] ?? false) || ($route['policy_only'] ?? false)),
+        ]);
+    }
+
+    private function queryUnderstandingSearchQuery(?array $analysis, string $fallback): string
+    {
+        $rewritten = trim((string) ($analysis['rewritten_query'] ?? ''));
+
+        if ($rewritten !== '' && $this->rewriteDropsExplicitQueryFacets($fallback, $rewritten)) {
+            return $fallback;
+        }
+
+        return $rewritten !== '' ? $rewritten : $fallback;
+    }
+
+    private function queryUnderstandingIndicatesFollowUp(?array $analysis, array $conversationHistory): bool
+    {
+        if (!is_array($analysis) || empty($conversationHistory)) {
+            return false;
+        }
+
+        return (bool) ($analysis['is_follow_up'] ?? false)
+            || strtolower(trim((string) ($analysis['intent'] ?? ''))) === 'follow_up';
+    }
+
+    private function rewriteDropsExplicitQueryFacets(string $original, string $rewritten): bool
+    {
+        $originalFacets = $this->extractExplicitQueryFacets($original);
+        if (empty($originalFacets)) {
+            return false;
+        }
+
+        $rewrittenFacets = $this->extractExplicitQueryFacets($rewritten);
+
+        return !empty(array_diff($originalFacets, $rewrittenFacets));
+    }
+
+    private function queryHasMultipleExplicitFacets(string $query): bool
+    {
+        return count($this->extractExplicitQueryFacets($query)) >= 2;
+    }
+
+    private function extractExplicitQueryFacets(string $query): array
+    {
+        $query = mb_strtolower(trim(strip_tags($query)));
+        if ($query === '') {
+            return [];
+        }
+
+        $patterns = [
+            'selling' => '/\b(sell|selling|seller|list|listing)\b/u',
+            'buying' => '/\b(buy|buying|purchase|purchasing)\b/u',
+            'shipping' => '/\b(ship|shipping|shipment|deliver|delivery)\b/u',
+            'returns' => '/\b(return|returns|exchange|exchanges)\b/u',
+            'refunds' => '/\b(refund|refunds|money\s+back)\b/u',
+            'pricing' => '/\b(price|prices|pricing|cost|costs|fee|fees|charges?)\b/u',
+            'availability' => '/\b(available|availability|stock|in\s+stock)\b/u',
+            'upload' => '/\b(upload|uploads|submit|submission|register|registration|profile)\b/u',
+            'contact' => '/\b(contact|email|phone|whatsapp|call)\b/u',
+            'booking' => '/\b(book|booking|appointment|schedule)\b/u',
+            'order_status' => '/\b(order\s+status|track|tracking|where\s+is\s+my\s+order)\b/u',
+            'requirements' => '/\b(criteria|criterias|criterion|requirement|requirements|eligibility)\b/u',
+        ];
+
+        $facets = [];
+        foreach ($patterns as $facet => $pattern) {
+            if (preg_match($pattern, $query)) {
+                $facets[] = $facet;
+            }
+        }
+
+        return $facets;
+    }
+
+    private function firstQueryUnderstandingEntity(?array $analysis, array $keys): string
+    {
+        if (!is_array($analysis)) {
+            return '';
+        }
+
+        $entities = is_array($analysis['entities'] ?? null) ? $analysis['entities'] : [];
+        foreach ($keys as $key) {
+            $value = $entities[$key] ?? null;
+            if (is_array($value)) {
+                $value = reset($value);
+            }
+
+            $value = trim((string) $value);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
     }
 
     private function buildSkippedIntentResult(): array
@@ -7128,6 +7882,10 @@ class WidgetController
      */
     private function cacheShopifyData(string $sessionId, string $context, int $ttlHours = 24): void
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return;
+        }
+
         if ($sessionId === '' || $context === '') {
             return;
         }
@@ -7160,6 +7918,10 @@ class WidgetController
      */
     private function getCachedShopifyData(string $sessionId): string
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return '';
+        }
+
         if ($sessionId === '') {
             return '';
         }
@@ -7218,6 +7980,10 @@ class WidgetController
      */
     private function getCachedChatMessages(string $sessionId): array
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return [];
+        }
+
         if ($sessionId === '') {
             return [];
         }
@@ -7234,6 +8000,38 @@ class WidgetController
     }
 
     /**
+     * Return recent persisted turns for classification and follow-up rewriting.
+     * The database is authoritative because fast-path responses are not always
+     * appended to Redis; Redis remains the fallback for transient sessions.
+     */
+    private function getConversationHistoryForUnderstanding(
+        Organization $organization,
+        string $sessionId,
+        int $limit = 8
+    ): array {
+        if ($this->isNonPersistentWidgetSession($sessionId) || trim($sessionId) === '') {
+            return [];
+        }
+
+        $history = $this->getRecentConversationMessages(
+            $organization,
+            $sessionId,
+            '',
+            max(2, $limit)
+        );
+
+        if (empty($history)) {
+            $history = $this->getCachedChatMessages($sessionId);
+        }
+
+        return array_slice(array_values(array_filter($history, static function ($message) {
+            return is_array($message)
+                && in_array($message['role'] ?? null, ['user', 'assistant'], true)
+                && trim((string) ($message['content'] ?? '')) !== '';
+        })), -max(2, $limit));
+    }
+
+    /**
      * Append a user+assistant exchange to the Redis context cache for this session.
      * Keeps the last MAX_CACHED_TURNS turns (pairs) to avoid unbounded growth.
      */
@@ -7245,6 +8043,10 @@ class WidgetController
         string $assistantResponse,
         int $ttlHours = 24
     ): void {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return;
+        }
+
         if ($sessionId === '') {
             return;
         }
@@ -7299,7 +8101,14 @@ class WidgetController
 
     // -------------------------------------------------------------------------
 
-    private function buildChatMessages(Organization $organization, string $sessionId, string $systemPrompt, string $message, string $context = ''): array
+    private function buildChatMessages(
+        Organization $organization,
+        string $sessionId,
+        string $systemPrompt,
+        string $message,
+        string $context = '',
+        bool $forceHistory = false
+    ): array
     {
         $this->primeFollowUpTranslationMap($organization);
         $hasContext = trim($context) !== '';
@@ -7316,11 +8125,16 @@ class WidgetController
             ->where('organization_id', $organization->id)
             ->first();
         $pendingFollowUpState = $this->followUpStateService->getPendingState($conversation);
-        $isRelatedFollowUp = $this->isRelatedFollowUpTurn(
+        $conversationMetadata = is_array($conversation?->metadata) ? $conversation->metadata : [];
+        $previousContextPayloads = is_array($conversationMetadata['last_context_payloads'] ?? null)
+            ? $conversationMetadata['last_context_payloads']
+            : [];
+        $isRelatedFollowUp = $forceHistory || $this->isRelatedFollowUpTurn(
+            $organization,
             $message,
             $lastUserMessage,
             is_string($lastAssistant) ? $lastAssistant : '',
-            [],
+            $previousContextPayloads,
             is_array($pendingFollowUpState) && !empty($pendingFollowUpState),
             is_array($pendingFollowUpState) && !empty($pendingFollowUpState) ? $pendingFollowUpState : null
         );
@@ -7404,7 +8218,9 @@ class WidgetController
         }
 
         $recent = $conversation->messages()
-            ->orderBy('sent_at', 'desc')
+            ->reorder()
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
             ->limit($limit)
             ->get()
             ->reverse();
@@ -7497,8 +8313,10 @@ class WidgetController
         }
 
         $lastUserMessage = $conversation->messages()
+            ->reorder()
             ->where('sender_type', 'user')
-            ->orderBy('sent_at', 'desc')
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
             ->first();
 
         if (!$lastUserMessage) {
@@ -7546,6 +8364,7 @@ class WidgetController
     }
 
     private function isRelatedFollowUpTurn(
+        Organization $organization,
         string $message,
         ?string $lastUserMessage,
         ?string $lastAssistantMessage = null,
@@ -7562,7 +8381,14 @@ class WidgetController
         $lastAssistant = trim(strip_tags((string) ($lastAssistantMessage ?? '')));
         $lastAssistantAskedQuestion = $lastAssistant !== '' && $this->responseHasQuestion($lastAssistant);
 
-        if ($this->isAffirmativeFollowUp($current) && $this->previousTurnHasArtistSellingAnchor($lastUser, $lastAssistant, $previousContextPayloads, $pendingFollowUpState)) {
+        if ($this->organizationWidgetBehaviors->isRelatedFollowUp(
+            $organization,
+            $current,
+            $lastUser,
+            $lastAssistant,
+            $previousContextPayloads,
+            $pendingFollowUpState
+        )) {
             return true;
         }
 
@@ -7571,11 +8397,6 @@ class WidgetController
         }
 
         if ($hasPendingFollowUpState && $this->messageMatchesPendingFollowUpState($current, $pendingFollowUpState)) {
-            return true;
-        }
-
-        if ($this->isArtistSellingOperationalFollowUp($current)
-            && $this->previousTurnHasArtistSellingAnchor($lastUser, $lastAssistant, $previousContextPayloads, $pendingFollowUpState)) {
             return true;
         }
 
@@ -7599,12 +8420,14 @@ class WidgetController
     }
 
     private function buildRelatedFollowUpSearchQuery(
+        Organization $organization,
         string $message,
         ?array $pendingFollowUpState,
         ?string $lastUserMessage,
         ?string $lastAssistantMessage,
         bool $isAffirmativeFollowUp,
-        bool $isReferentialFollowUp
+        bool $isReferentialFollowUp,
+        string $contextualRewrite = ''
     ): string {
         $message = trim($message);
         if ($message === '') {
@@ -7623,9 +8446,20 @@ class WidgetController
             return $searchQuery !== '' ? $searchQuery : $message;
         }
 
-        if ($this->isArtistSellingOperationalFollowUp($message)
-            || ($isAffirmativeFollowUp && $this->previousTurnHasArtistSellingAnchor($lastUserMessage, $lastAssistantMessage))) {
-            return trim('sell painting artist profile upload artwork IndianArtZone seller guide ' . $message);
+        $organizationQuery = $this->organizationWidgetBehaviors->enrichFollowUpSearchQuery(
+            $organization,
+            $message,
+            $lastUserMessage,
+            $lastAssistantMessage,
+            $isAffirmativeFollowUp
+        );
+        if (is_string($organizationQuery) && trim($organizationQuery) !== '') {
+            return trim($organizationQuery);
+        }
+
+        $contextualRewrite = trim($contextualRewrite);
+        if ($contextualRewrite !== '' && strcasecmp($contextualRewrite, $message) !== 0) {
+            return $contextualRewrite;
         }
 
         $queryParts = [];
@@ -7716,66 +8550,6 @@ class WidgetController
         }
 
         return !empty($this->extractMeaningfulFollowUpTerms($combined));
-    }
-
-    private function isArtistSellingOperationalFollowUp(string $message): bool
-    {
-        $clean = $this->normalizeKeywordMatchText($message);
-        if ($clean === '') {
-            return false;
-        }
-
-        if ($this->isArtistSellingIntent($clean)) {
-            return true;
-        }
-
-        return (bool) preg_match('/\b(upload|uploads|register|registration|artist\s+profile|profile|submit|submission|publish|publishing|list|listing|seller\s+guide|how\s+to\s+sell|app|application|mobile\s+app|android|ios)\b/u', $clean);
-    }
-
-    private function previousTurnHasArtistSellingAnchor(
-        ?string $lastUserMessage,
-        ?string $lastAssistantMessage = null,
-        array $previousContextPayloads = [],
-        ?array $pendingFollowUpState = null
-    ): bool {
-        $parts = [
-            (string) ($lastUserMessage ?? ''),
-            (string) ($lastAssistantMessage ?? ''),
-        ];
-
-        foreach ($previousContextPayloads as $payload) {
-            if (!is_array($payload)) {
-                continue;
-            }
-
-            $parts[] = implode(' ', array_filter([
-                (string) ($payload['title'] ?? ''),
-                (string) ($payload['category'] ?? ''),
-                (string) ($payload['keywords'] ?? ''),
-                (string) ($payload['content'] ?? ''),
-                (string) ($payload['follow_up'] ?? ''),
-            ]));
-        }
-
-        if (is_array($pendingFollowUpState)) {
-            $parts[] = implode(' ', array_filter([
-                (string) ($pendingFollowUpState['question'] ?? ''),
-                (string) ($pendingFollowUpState['resolved_anchor'] ?? ''),
-                (string) ($pendingFollowUpState['entity'] ?? ''),
-                implode(' ', $this->normalizeDebugList($pendingFollowUpState['topic_hints'] ?? [])),
-                implode(' ', $this->normalizeDebugList($pendingFollowUpState['topics_covered'] ?? [])),
-            ]));
-        }
-
-        $combined = $this->normalizeKeywordMatchText(implode(' ', array_filter($parts)));
-        if ($combined === '') {
-            return false;
-        }
-
-        $hasArtistContext = (bool) preg_match('/\b(artist|seller|sell|selling|profile|upload|submission|publish|publishing|whatsapp)\b/u', $combined);
-        $hasArtworkContext = (bool) preg_match('/\b(painting|paintings|artwork|artworks|canvas|art)\b/u', $combined);
-
-        return $hasArtistContext && $hasArtworkContext;
     }
 
     private function hasFreshTopicSignal(string $message): bool
@@ -8106,7 +8880,10 @@ class WidgetController
     private function buildOpenAiWidgetOptions(?string $model, int $visibleTokenBudget, bool $jsonEnvelope = false): array
     {
         $model = strtolower(trim((string) $model));
-        $visibleTokenBudget = max(80, min(900, $visibleTokenBudget));
+        $maxCompletionTokens = max(512, (int) config('openai.max_completion_tokens', 4096));
+        $maxVisibleTokens = max(300, min($maxCompletionTokens, (int) config('openai.widget_max_visible_tokens', 1200)));
+        $minReasoningBuffer = max(512, min($maxCompletionTokens, (int) config('openai.widget_reasoning_buffer_min_tokens', 1200)));
+        $visibleTokenBudget = max(80, min($maxVisibleTokens, $visibleTokenBudget));
         $isGptFiveFamily = str_starts_with($model, 'gpt-5');
         $isGptFiveOneFamily = str_starts_with($model, 'gpt-5.1');
 
@@ -8114,14 +8891,14 @@ class WidgetController
         $reasoningBuffer = 0;
         if ($isGptFiveOneFamily) {
             $reasoningEffort = 'low';
-            $reasoningBuffer = max(80, min(220, (int) ceil($visibleTokenBudget * 0.25)));
+            $reasoningBuffer = max($minReasoningBuffer, min(2400, $visibleTokenBudget * 3));
         } elseif ($isGptFiveFamily) {
             $reasoningEffort = 'minimal';
-            $reasoningBuffer = max(64, min(180, (int) ceil($visibleTokenBudget * 0.2)));
+            $reasoningBuffer = max($minReasoningBuffer, min(2400, $visibleTokenBudget * 3));
         }
 
         $options = [
-            'max_completion_tokens' => min(1400, $visibleTokenBudget + $reasoningBuffer),
+            'max_completion_tokens' => min($maxCompletionTokens, $visibleTokenBudget + $reasoningBuffer),
         ];
 
         if ($reasoningEffort !== null) {
@@ -9543,7 +10320,56 @@ class WidgetController
 
     private function shouldSuppressWidgetEmailNotifications(?string $sessionId): bool
     {
-        return trim((string) $sessionId) === self::SUPPRESSED_WIDGET_TEST_SESSION_ID;
+        return $this->isNonPersistentWidgetSession((string) $sessionId);
+    }
+
+    private function shouldSuppressWidgetPersistence(Request $request, string $sessionId): bool
+    {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return true;
+        }
+
+        foreach (['suppress_persistence', 'debug', 'debug_run', 'test_run'] as $key) {
+            if ($request->boolean($key, false)) {
+                return true;
+            }
+        }
+
+        $header = strtolower(trim((string) $request->header('X-AI-Debug-Run', '')));
+        return in_array($header, ['1', 'true', 'yes'], true);
+    }
+
+    private function markNonPersistentWidgetSession(string $sessionId): void
+    {
+        $sessionId = trim($sessionId);
+        if ($sessionId !== '') {
+            $this->nonPersistentWidgetSessionIds[$sessionId] = true;
+            \App\Services\AiAgentService::suppressTokenUsageForSession($sessionId);
+        }
+    }
+
+    private function isNonPersistentWidgetSession(string $sessionId): bool
+    {
+        $sessionId = trim($sessionId);
+        if ($sessionId === '') {
+            return false;
+        }
+
+        if (isset($this->nonPersistentWidgetSessionIds[$sessionId])) {
+            return true;
+        }
+
+        if ($sessionId === self::SUPPRESSED_WIDGET_TEST_SESSION_ID) {
+            return true;
+        }
+
+        foreach (self::NON_PERSISTENT_WIDGET_SESSION_PREFIXES as $prefix) {
+            if (str_starts_with($sessionId, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -9564,6 +10390,15 @@ class WidgetController
             if (empty($data['session_id']) || empty($data['organization_id'])) {
                 return;
             }
+
+            if ($this->isNonPersistentWidgetSession((string) $data['session_id'])) {
+                Log::info('Widget debug log suppressed for non-persistent debug session', [
+                    'session_id' => $data['session_id'],
+                    'org_id' => $data['organization_id'],
+                ]);
+                return;
+            }
+
             $data['conversation_id'] = $conversation->id ?? null;
 
             \App\Models\LlmDebugLog::create(array_filter($data, fn ($v) => $v !== null));
@@ -9817,45 +10652,91 @@ class WidgetController
             ];
         }
 
-        $assessment = $this->aiAgentService->assessContextRelevance(
-            $question,
-            $context,
-            $organization->id,
-            $sessionId
-        );
+        $useContext = true;
+        $assessment = [
+            'decision' => 'deferred_to_final_llm',
+            'confidence' => 1.0,
+            'threshold' => 0.0,
+            'reason' => 'The final answer prompt performs the private context relevance check.',
+            'model' => $this->aiAgentService->getAiProviderForOrganization($organization->id) === 'openai'
+                ? $this->aiAgentService->getOpenAiModelForOrganization($organization->id)
+                : $this->aiAgentService->getLlamaModelForOrganization($organization->id),
+        ];
 
-        $useContext = (bool) ($assessment['use_context'] ?? true);
-
-        Log::info('Widget knowledge context relevance assessed', [
+        Log::info('Widget knowledge context relevance deferred to final LLM prompt', [
             'channel' => $channel,
             'org_id' => $organization->id,
             'session_id' => $sessionId,
-            'decision' => $assessment['decision'] ?? 'unknown',
+            'decision' => $assessment['decision'],
             'use_context' => $useContext,
-            'confidence' => $assessment['confidence'] ?? 0.0,
-            'reason' => $assessment['reason'] ?? '',
-            'model' => $assessment['model'] ?? null,
+            'confidence' => $assessment['confidence'],
+            'reason' => $assessment['reason'],
+            'model' => $assessment['model'],
         ]);
 
-        $this->debugData['context_relevance_decision'] = $assessment['decision'] ?? 'unknown';
-        $this->debugData['context_relevance_confidence'] = $assessment['confidence'] ?? 0.0;
-        $this->debugData['context_relevance_threshold'] = $assessment['threshold'] ?? $this->aiAgentService->getContextRelevanceMinConfidence();
-        $this->debugData['context_relevance_reason'] = $assessment['reason'] ?? '';
+        $this->debugData['context_relevance_decision'] = $assessment['decision'];
+        $this->debugData['context_relevance_confidence'] = $assessment['confidence'];
+        $this->debugData['context_relevance_threshold'] = $assessment['threshold'];
+        $this->debugData['context_relevance_reason'] = $assessment['reason'];
         $this->debugData['context_relevance_used'] = $useContext;
 
         return [
-            'context' => $useContext ? $context : '',
-            'decision' => (string) ($assessment['decision'] ?? 'unknown'),
-            'confidence' => (float) ($assessment['confidence'] ?? 0.0),
-            'reason' => (string) ($assessment['reason'] ?? ''),
+            'context' => $context,
+            'decision' => (string) $assessment['decision'],
+            'confidence' => (float) $assessment['confidence'],
+            'reason' => (string) $assessment['reason'],
             'use_context' => $useContext,
-            'model' => (string) ($assessment['model'] ?? ''),
+            'model' => (string) $assessment['model'],
         ];
     }
 
     private function shouldAllowNoContextInstructionalResponse(string $message, ?Organization $organization = null, ?string $normalizedMessage = null): bool
     {
         return $this->shouldAllowGenericHelpfulAnswer($message, $organization, $normalizedMessage);
+    }
+
+    private function shouldUseUnsupportedNoContextFallback(
+        string $message,
+        Organization $organization,
+        string $acceptedContext,
+        bool $hasVerifiedLiveData,
+        ?array $acceptedFaqMatch,
+        bool $allowNoContextInstructionalResponse,
+        bool $canUsePriorVerifiedContext = false
+    ): bool {
+        if ($hasVerifiedLiveData
+            || trim($acceptedContext) !== ''
+            || is_array($acceptedFaqMatch)
+            || $allowNoContextInstructionalResponse
+            || $canUsePriorVerifiedContext) {
+            return false;
+        }
+
+        if ($this->isContactQuery($message)
+            || $this->isSimpleConversationalMessage($message)
+            || $this->isConversationEndingPhrase($message)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function buildUnsupportedNoContextFallbackResponse(Organization $organization, string $message): string
+    {
+        return $this->buildLowConfidenceContactFallbackResponse($organization, $message);
+    }
+
+    private function isSimpleConversationalMessage(string $message): bool
+    {
+        $query = mb_strtolower(trim(strip_tags($message)));
+        $query = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $query) ?? $query;
+        $query = trim((string) preg_replace('/\s+/', ' ', $query));
+
+        if ($query === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/^(hi|hello|hey|good\s+(morning|afternoon|evening)|thanks|thank\s+you|ok|okay)$/u', $query);
     }
 
     private function shouldAllowGenericHelpfulAnswer(string $message, ?Organization $organization = null, ?string $normalizedMessage = null): bool
@@ -10430,6 +11311,12 @@ class WidgetController
             return false;
         }
 
+        // "That's it?" and similar phrases are questions asking for expansion,
+        // not conversation-closing acknowledgements.
+        if (str_contains($clean, '?')) {
+            return false;
+        }
+
         $clean = preg_replace('/[\p{P}\p{Z}\s]+$/u', '', $clean) ?? $clean;
 
         // Single-word / exact phrase acknowledgements
@@ -10572,15 +11459,30 @@ class WidgetController
         return array_values(array_map(fn ($item) => $item['result'], $scored));
     }
 
-    private function filterResultsForFollowUpAnswerFamily(array $results, array $previousAnswerFamilies): array
+    private function filterResultsForFollowUpAnswerFamily(
+        Organization $organization,
+        array $results,
+        array $previousAnswerFamilies
+    ): array
     {
         if (empty($results) || empty($previousAnswerFamilies)) {
             return $results;
         }
 
-        $filtered = array_values(array_filter($results, function ($result) use ($previousAnswerFamilies) {
+        $filtered = array_values(array_filter($results, function ($result) use ($organization, $previousAnswerFamilies) {
             $payload = is_array($result['payload'] ?? null) ? $result['payload'] : [];
-            $candidateFamilies = $this->extractAnswerFamilyLabelsFromPayloads([$payload]);
+            $payloadText = implode(' ', array_filter([
+                (string) ($payload['title'] ?? ''),
+                (string) ($payload['category'] ?? ''),
+                (string) ($payload['keywords'] ?? ''),
+                (string) ($payload['content'] ?? ''),
+                (string) ($payload['entity'] ?? ''),
+                (string) ($payload['primary_entity'] ?? ''),
+            ]));
+            $candidateFamilies = array_values(array_unique(array_merge(
+                $this->extractAnswerFamilyLabelsFromPayloads([$payload]),
+                $this->organizationWidgetBehaviors->answerFamilyLabels($organization, $payloadText)
+            )));
             if (empty($candidateFamilies)) {
                 return false;
             }
@@ -10620,7 +11522,6 @@ class WidgetController
 
         $patterns = [
             'career' => '/\b(job|jobs|career|careers|vacanc(?:y|ies)|opening|openings|position|positions|recruit(?:ment)?|hiring|employment|apply|teacher|teachers|staff|resume|cv|biodata|candidate|candidates|join|hr)\b/u',
-            'artist_selling' => '/\b(artist|artists|sell|selling|seller|profile|upload|uploads|submission|publish|publishing)\b/u',
             'contact' => '/\b(contact|email|phone|whatsapp|address|reach|call|helpline|support)\b/u',
             'pricing' => '/\b(price|pricing|cost|fee|fees|charges|quote|plan|plans|subscription)\b/u',
             'admission' => '/\b(admission|admissions|class|classes|curriculum|campus|school|college|hostel|transport|scholarship|academic)\b/u',
@@ -10643,10 +11544,6 @@ class WidgetController
 
         if (in_array('career', $families, true)) {
             return ['career'];
-        }
-
-        if (in_array('artist_selling', $families, true)) {
-            return ['artist_selling'];
         }
 
         $substantiveFamilies = array_values(array_filter($families, fn ($family) => $family !== 'contact'));
@@ -11186,6 +12083,10 @@ class WidgetController
             }
         }
 
+        if ($this->isBroadCatalogDiscoveryQuery($trimmed)) {
+            return array_values($terms);
+        }
+
         if (preg_match('/\b(?:painting|artwork|product)\s+(?:titled|called|named)?\s*([a-z0-9][a-z0-9\s\-]{2,120})/i', $trimmed, $match)) {
             $candidate = trim((string) ($match[1] ?? ''), " \t\n\r\0\x0B.,;:!?\"'");
             if ($candidate !== '') {
@@ -11211,6 +12112,25 @@ class WidgetController
         return array_values($deduped);
     }
 
+    private function isBroadCatalogDiscoveryQuery(string $query): bool
+    {
+        $q = strtolower(trim($query));
+        if ($q === '') {
+            return false;
+        }
+
+        if (str_contains($q, '"')
+            || (bool) preg_match('/\b(?:titled|called|named|sku|model\s+no|item\s+no)\b/i', $q)
+            || (bool) preg_match('/https?:\/\//i', $q)) {
+            return false;
+        }
+
+        $hasCatalogNoun = (bool) preg_match('/\b(painting|paintings|artwork|artworks|product|products|item|items)\b/i', $q);
+        $hasDiscoveryFacet = (bool) preg_match('/\b(theme|category|style|type|options?|recommend|suggest|show|find|need|want|looking|budget|under|below|within|upto|up\s+to|less\s+than|cheaper|affordable|range)\b/i', $q);
+
+        return $hasCatalogNoun && $hasDiscoveryFacet;
+    }
+
     private function isEntityFocusedCatalogQuery(string $query): bool
     {
         $q = strtolower(trim($query));
@@ -11227,7 +12147,7 @@ class WidgetController
         }
 
         return (bool) preg_match(
-            '/\b(availability|available|in\s+stock|stock|price|cost|customi[sz]e|customi[sz]ation|deliver|delivery|eta|sku|item|product|service|test)\b/',
+            '/\b(availability|available|in\s+stock|stock|price|cost|customi[sz]e|customi[sz]ation|deliver|delivery|eta|sku|item|product|service|test|buy|buying|purchase|purchasing|looking\s+for|interested\s+in|need|want|carry)\b/',
             $q
         );
     }
@@ -11408,11 +12328,43 @@ class WidgetController
             return false;
         }
 
-        return (bool) preg_match(
+        return $this->looksLikeContextAuditLeak($clean)
+            || (bool) preg_match(
             '/^(?:first,?\s+i\s+need\s+to\s+understand|let(?:\'s|\s+me)\s+(?:think|break\s+this\s+down|analy(?:s|z)e)|thinking\s+process|analysis:|reasoning:|step\s+1\b|1\.\s+\*\*)/i',
             $clean
         ) || ((bool) preg_match('/\bcurrent\s+context\b/i', $clean)
             && (bool) preg_match('/\bstrict\s+knowledge\s+base\s+policy\b|i\s+shouldn\'t\s+infer|now,\s+checking\s+the\s+current\s+context\b/i', $clean));
+    }
+
+    private function looksLikeContextAuditLeak(string $response): bool
+    {
+        $clean = mb_strtolower(trim(strip_tags($response)));
+        if ($clean === '') {
+            return false;
+        }
+
+        $normalized = preg_replace('/\s+/', ' ', $clean) ?? $clean;
+
+        return (bool) preg_match('/\bcurrent\s+context\b|\bcandidate\s+context\b|\bretrieval\s+(?:score|context|result)|\binternal\s+(?:check|audit|reasoning)|\bprivate\s+relevance\s+check\b/u', $normalized)
+            || (bool) preg_match('/\b(?:context|knowledge\s+base)\s+(?:does\s+not\s+verify|doesn\'t\s+verify|verify\s+(?:nahin|nahi|not)|verified\s+nahin|verified\s+nahi)\b/u', $normalized)
+            || (bool) preg_match('/\b(?:yeh|yah|this)\s+context\s+verify\b/u', $normalized)
+            || (bool) preg_match('/\b(?:aapka\s+uddeshya|kaunsa\s+online\s+platform|payment\s+gateway).*?\b(?:context|verify|verified)\b/u', $normalized);
+    }
+
+    private function buildInternalReasoningLeakFallbackResponse(Organization $organization, string $message): string
+    {
+        $contact = $this->buildContactResponse(
+            $organization->contact_email ?? null,
+            $organization->contact_phone ?? null,
+            $organization->website ?: config('app.url')
+        );
+
+        $scopeNote = $this->buildScopeFallbackNote($organization);
+        if ($scopeNote !== '') {
+            return "We don't have enough verified information to answer that accurately right now. {$scopeNote} {$contact}";
+        }
+
+        return "We don't have enough verified information to answer that accurately right now. Please share a little more detail about what you need, or contact us directly. {$contact}";
     }
 
     private function extractCatalogUrlFromRow(OrganizationData $row): string
@@ -11464,6 +12416,10 @@ class WidgetController
 
     private function getLastAssistantMessage(Organization $organization, string $sessionId): ?string
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return null;
+        }
+
         if ($sessionId === '') {
             return null;
         }
@@ -11477,8 +12433,10 @@ class WidgetController
         }
 
         $lastAssistant = $conversation->messages()
+            ->reorder()
             ->whereIn('sender_type', ['ai', 'assistant'])
-            ->orderBy('sent_at', 'desc')
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
             ->first();
 
         if (!$lastAssistant) {
@@ -11742,7 +12700,27 @@ class WidgetController
 
     private function isPromoQuery(string $message): bool
     {
-        return (bool) preg_match('/\b(promo|promotion|discount|offer|coupon|deal|sale|special)\b/i', $message);
+        $query = mb_strtolower(trim(strip_tags($message)));
+        $query = preg_replace('/[^a-z0-9\s]+/i', ' ', $query) ?? $query;
+        $query = trim((string) preg_replace('/\s+/', ' ', $query));
+
+        if ($query === '') {
+            return false;
+        }
+
+        if ((bool) preg_match('/\b(promo|promos|promotion|promotions|coupon|coupons|voucher|vouchers)\b/u', $query)) {
+            return true;
+        }
+
+        if ((bool) preg_match('/\b(discount|discounts)\b/u', $query)) {
+            return true;
+        }
+
+        return (bool) preg_match(
+            '/\b(?:any|current|active|available|today|now|running|have|has|got|give|provide|share|show|list|apply|use)\b.{0,40}\b(?:offer|offers|deal|deals|sale|sales|special|specials)\b'
+            . '|\b(?:offer|offers|deal|deals|sale|sales|special|specials)\b.{0,40}\b(?:available|active|current|today|now|running|discount|discounts|coupon|coupons|code|codes|price|prices)\b/u',
+            $query
+        );
     }
 
     private function isPromoApplicationIntent(string $message): bool
@@ -12006,8 +12984,10 @@ class WidgetController
         }
 
         $lastAssistant = $conversation->messages()
+            ->reorder()
             ->whereIn('sender_type', ['ai', 'agent'])
-            ->latest('sent_at')
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
             ->first();
 
         if (!$lastAssistant || !is_string($lastAssistant->message)) {
@@ -12098,6 +13078,78 @@ class WidgetController
     /**
      * Convert HTML to plain text while preserving links as "text (url)" or just the URL.
      */
+    private function polishExactFaqResponse(
+        string $message,
+        string $sourceAnswer,
+        Organization $organization,
+        string $sessionId,
+        string $assistantName,
+        string $responseTone,
+        string $responseLanguage,
+        string $languagePromptInstruction = ''
+    ): ?array {
+        $sourceAnswer = trim($this->decodeHtmlEntitiesRecursively($sourceAnswer));
+        if ($sourceAnswer === '' || mb_strlen($sourceAnswer) > 1200) {
+            return null;
+        }
+
+        if ($this->aiAgentService->getAiProviderForOrganization($organization->id) !== 'openai') {
+            return null;
+        }
+
+        $model = $this->aiAgentService->getOpenAiModelForOrganization($organization->id);
+        $systemPrompt = "You are {$assistantName} for {$organization->name}. "
+            . "Tone: {$responseTone}. Language: {$responseLanguage}. "
+            . "Rewrite the source answer into a brief polished customer reply. "
+            . "Keep it 2-3 short sentences and 35-70 words. "
+            . "Use first-person plural as the business (we/our). "
+            . "Do not add facts, promises, prices, timelines, links, or contact details not present in the source. "
+            . "No bullets, no headings, no markdown, no preamble. "
+            . ($languagePromptInstruction !== '' ? $languagePromptInstruction : '');
+
+        try {
+            $startedAt = microtime(true);
+            $openAiOptions = $this->buildOpenAiWidgetOptions($model, 320, false);
+            $response = $this->aiAgentService->openAiChat(
+                [
+                    ['role' => 'system', 'content' => $systemPrompt],
+                    ['role' => 'user', 'content' => "User question:\n{$message}\n\nSource answer:\n{$sourceAnswer}"],
+                ],
+                $model,
+                null,
+                $organization->id,
+                $sessionId,
+                $openAiOptions
+            );
+            $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
+            $content = trim((string) ($response['message']['content'] ?? ''));
+            if ($content === '') {
+                return null;
+            }
+
+            $content = trim(strip_tags($this->decodeHtmlEntitiesRecursively($content)));
+            if ($content === '' || mb_strlen($content) > 900) {
+                return null;
+            }
+
+            return [
+                'response' => $content,
+                'elapsed_ms' => $elapsedMs,
+                'model' => $model,
+                'max_tokens' => $openAiOptions['max_completion_tokens'] ?? 320,
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('Widget FAQ polish failed', [
+                'org_id' => $organization->id,
+                'session_id' => $sessionId,
+                'model' => $model,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
     private function htmlToPlainWithLinks(string $html): string
     {
         if ($html === '') return '';
@@ -12655,7 +13707,7 @@ class WidgetController
         return implode("\n", $lines);
     }
 
-    private function buildStructuredShopifySpecificMatchClarificationResponse(string $message, $shopifyData): ?string
+    private function buildStructuredShopifySpecificMatchClarificationResponse(string $message, $shopifyData, Organization $organization): ?string
     {
         if (!is_array($shopifyData) || (($shopifyData['query_type'] ?? null) !== 'products')) {
             return null;
@@ -12669,7 +13721,142 @@ class WidgetController
             return null;
         }
 
-        return $this->buildEntityClarificationResponse($message);
+        return $this->buildShopifySpecificNoMatchResponse($message, $shopifyData, $organization);
+    }
+
+    private function buildShopifySpecificNoMatchResponse(string $message, $shopifyData, Organization $organization): string
+    {
+        $terms = array_filter([
+            $this->extractRequestedShopifyProductPhrase($message),
+            ...$this->extractExplicitCatalogTerms($message),
+        ]);
+        $requested = $terms[0] ?? trim((string) ($shopifyData['search_keywords'] ?? ''));
+        $requested = trim($requested, " \t\n\r\0\x0B.,;:!?\"'");
+
+        if ($requested === '') {
+            $requested = 'that exact item';
+        }
+
+        $lines = [
+            "I checked our live Shopify catalog and couldn't find {$requested}.",
+        ];
+
+        $products = array_values(array_filter($shopifyData['data'] ?? [], static function ($product) {
+            return is_array($product) && trim((string) ($product['title'] ?? '')) !== '';
+        }));
+
+        if (!empty($products)) {
+            $filteredAlternatives = $this->filterShopifyAlternativesByRequestedCategory($products, $requested, $organization);
+            if (!empty($filteredAlternatives)) {
+                $products = $filteredAlternatives;
+            }
+            $examples = array_slice($products, 0, 3);
+            $lines[] = 'The closest catalog items I can see right now are:';
+            foreach ($examples as $product) {
+                $title = trim((string) ($product['title'] ?? 'Product'));
+                $currency = strtoupper(trim((string) ($product['currency'] ?? 'USD')));
+                $price = trim((string) ($product['price'] ?? ''));
+                $line = "- {$title}";
+                if ($price !== '') {
+                    $line .= " ({$currency} {$price})";
+                }
+                $lines[] = $line;
+            }
+        }
+
+        $lines[] = 'If you have an exact product name, SKU, or acceptable alternative, share it and I can check again.';
+
+        return implode("\n", $lines);
+    }
+
+    private function extractRequestedShopifyProductPhrase(string $message): string
+    {
+        $clean = trim((string) preg_replace('/\s+/', ' ', strip_tags($message)));
+        if ($clean === '') {
+            return '';
+        }
+
+        $patterns = [
+            '/\binterested\s+in\s+(?:purchasing|buying|ordering|getting)\s+(.+)$/i',
+            '/\b(?:purchasing|buying|ordering|looking\s+for|searching\s+for)\s+(.+)$/i',
+            '/\b(?:need|needs|want|wants)\s+(.+)$/i',
+            '/\b(?:do\s+you\s+have|do\s+you\s+carry|carry|sell)\s+(.+)$/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $clean, $matches)) {
+                $candidate = trim((string) ($matches[1] ?? ''), " \t\n\r\0\x0B.,;:!?\"'");
+                $candidate = preg_replace('/\b(?:for|to)\s+(?:a|an|the|my|our|their)?\s*(?:customer|client|patient|student|students)\b.*$/i', '', $candidate) ?? $candidate;
+                $candidate = trim((string) preg_replace('/\s+/', ' ', $candidate), " \t\n\r\0\x0B.,;:!?\"'");
+                if ($candidate !== '' && mb_strlen($candidate) >= 3) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function filterShopifyAlternativesByRequestedCategory(array $products, string $requested, Organization $organization): array
+    {
+        $tokens = $this->extractShopifyAlternativeCategoryTokens($requested, $organization);
+        if (empty($tokens)) {
+            return [];
+        }
+
+        return array_values(array_filter($products, function ($product) use ($tokens) {
+            if (!is_array($product)) {
+                return false;
+            }
+
+            $haystack = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', ' ', implode(' ', [
+                (string) ($product['title'] ?? ''),
+                (string) ($product['product_type'] ?? ''),
+            ]))));
+
+            if ($haystack === '') {
+                return false;
+            }
+
+            foreach ($tokens as $token) {
+                $singular = rtrim($token, 's');
+                if (!preg_match('/\b' . preg_quote($token, '/') . '\b/i', $haystack)
+                    && ($singular === $token || !preg_match('/\b' . preg_quote($singular, '/') . 's?\b/i', $haystack))) {
+                    return false;
+                }
+            }
+
+            return true;
+        }));
+    }
+
+    private function extractShopifyAlternativeCategoryTokens(string $requested, Organization $organization): array
+    {
+        $normalized = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', ' ', $requested)));
+        if ($normalized === '') {
+            return [];
+        }
+
+        $settings = is_array($organization->settings ?? null) ? $organization->settings : [];
+        $modifierTerms = $settings['shopify_specific_modifier_terms'] ?? [];
+        if (is_string($modifierTerms)) {
+            $modifierTerms = preg_split('/[,|]+/', $modifierTerms) ?: [];
+        }
+        if (!is_array($modifierTerms)) {
+            $modifierTerms = [];
+        }
+
+        $ignore = array_merge([
+            'the', 'a', 'an', 'for', 'with', 'and', 'or',
+        ], array_map(static function ($term) {
+            return strtolower(trim((string) $term));
+        }, $modifierTerms));
+
+        $tokens = array_values(array_filter(explode(' ', $normalized), static function ($token) use ($ignore) {
+            return strlen($token) >= 3 && !in_array($token, $ignore, true);
+        }));
+
+        return array_slice(array_values(array_unique($tokens)), 0, 4);
     }
 
     private function buildStructuredShopifyLinkResponse(string $message, $shopifyData, Organization $organization): ?string
@@ -13103,6 +14290,10 @@ class WidgetController
 
     private function persistLastContextPayloads(Organization $organization, string $sessionId, array $payloads, array $userInfo = [], array $locationInfo = []): void
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return;
+        }
+
         if (empty($payloads) || trim($sessionId) === '') {
             return;
         }
@@ -13667,6 +14858,14 @@ class WidgetController
      */
     private function saveConversationToDatabase($organization, $sessionId, $userMessage, $aiResponse, $userInfo = [], $locationInfo = [], $intentResult = null, ?array $structuredFollowUpState = null)
     {
+        if ($this->isNonPersistentWidgetSession((string) $sessionId)) {
+            Log::info('Widget conversation persistence suppressed for non-persistent debug session', [
+                'org_id' => $organization->id ?? null,
+                'session_id' => $sessionId,
+            ]);
+            return null;
+        }
+
         try {
             // Find or create conversation
             $conversation = ChatConversation::firstOrCreate(
@@ -14050,6 +15249,10 @@ class WidgetController
 
     private function getLastUserMessageForSession(int $organizationId, string $sessionId): ?string
     {
+        if ($this->isNonPersistentWidgetSession($sessionId)) {
+            return null;
+        }
+
         $conversation = ChatConversation::where('conversation_id', $sessionId)
             ->where('organization_id', $organizationId)
             ->first();

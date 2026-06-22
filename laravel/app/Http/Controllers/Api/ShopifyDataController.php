@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 class ShopifyDataController extends Controller
 {
     protected $shopifyService;
+    protected array $organizationSettings = [];
 
     public function __construct(ShopifyApiService $shopifyService)
     {
@@ -61,6 +62,9 @@ class ShopifyDataController extends Controller
         }
 
         $this->shopifyService->setIntegration($integration);
+        $this->organizationSettings = is_array($integration->organization?->settings ?? null)
+            ? $integration->organization->settings
+            : [];
 
         try {
             // Auto-detect query type if not specified
@@ -151,6 +155,9 @@ class ShopifyDataController extends Controller
         }
 
         $this->shopifyService->setIntegration($integration);
+        $this->organizationSettings = is_array($integration->organization?->settings ?? null)
+            ? $integration->organization->settings
+            : [];
 
         try {
             $queryType  = $this->detectQueryType($query);
@@ -272,6 +279,7 @@ class ShopifyDataController extends Controller
         $normalizedQuery = preg_replace('/[,;:]+/', ' ', $query);
         $normalizedQuery = preg_replace('/\s+/', ' ', $normalizedQuery);
         $normalizedQuery = trim($normalizedQuery);
+        $productQuery = $this->extractRequestedProductPhrase($normalizedQuery) ?: $normalizedQuery;
 
         foreach ($this->extractExplicitSkuReferences($original) as $skuCandidate) {
             Log::info('[SHOPIFY] Explicit SKU reference search', [
@@ -308,7 +316,7 @@ class ShopifyDataController extends Controller
             }
         }
 
-        $specificReference = $this->extractSpecificProductReference($normalizedQuery);
+        $specificReference = $this->extractSpecificProductReference($productQuery);
         if (!empty($specificReference)) {
             Log::info('[SHOPIFY] Specific product reference search', [
                 'original' => $original,
@@ -319,12 +327,15 @@ class ShopifyDataController extends Controller
             $referenceMaxScore = $this->shopifyService->getLastSearchMaxScore();
 
             if (!empty($referenceResults) && $this->isConfidentSpecificProductMatch($specificReference, $referenceResults, $referenceMaxScore)) {
-                return ['results' => $referenceResults, 'specific_match' => true];
+                return [
+                    'results' => $referenceResults,
+                    'specific_match' => !$this->hasUnmatchedSpecificModifiers($productQuery, $referenceResults),
+                ];
             }
         }
         
         // Use LLM to extract product keyword(s) from natural language
-        $keywords = $this->extractProductKeyword($normalizedQuery);
+        $keywords = $this->extractProductKeyword($productQuery);
 
         if (!empty($keywords)) {
             Log::info('[SHOPIFY] Specific product search', ['original' => $original, 'keywords' => $keywords]);
@@ -332,10 +343,13 @@ class ShopifyDataController extends Controller
             $maxScore = $this->shopifyService->getLastSearchMaxScore();
 
             if (!empty($results) && $this->isConfidentSpecificProductMatch((string) $keywords, $results, $maxScore)) {
-                return ['results' => $results, 'specific_match' => true];
+                return [
+                    'results' => $results,
+                    'specific_match' => !$this->hasUnmatchedSpecificModifiers($productQuery, $results),
+                ];
             }
 
-            $fallbackKeywords = $this->fallbackKeywordExtraction($normalizedQuery);
+            $fallbackKeywords = $this->fallbackKeywordExtraction($productQuery);
             if (!empty($fallbackKeywords) && strtolower($fallbackKeywords) !== strtolower($keywords)) {
                 Log::info('[SHOPIFY] Product search fallback keywords', [
                     'original' => $original,
@@ -346,7 +360,10 @@ class ShopifyDataController extends Controller
                 $fallbackResults = $this->shopifyService->searchProducts($fallbackKeywords, 10);
                 $fallbackMaxScore = $this->shopifyService->getLastSearchMaxScore();
                 if (!empty($fallbackResults) && $this->isConfidentSpecificProductMatch((string) $fallbackKeywords, $fallbackResults, $fallbackMaxScore)) {
-                    return ['results' => $fallbackResults, 'specific_match' => true];
+                    return [
+                        'results' => $fallbackResults,
+                        'specific_match' => !$this->hasUnmatchedSpecificModifiers($productQuery, $fallbackResults),
+                    ];
                 }
             }
 
@@ -366,6 +383,23 @@ class ShopifyDataController extends Controller
                 if (!empty($embeddedResults) && $this->isConfidentSpecificProductMatch((string) $embeddedEnglish, $embeddedResults, $embeddedMaxScore)) {
                     return ['results' => $embeddedResults, 'specific_match' => true];
                 }
+            }
+        }
+
+        $broaderKeywords = $this->shouldUseBroaderProductAlternatives()
+            ? $this->deriveBroaderProductKeywords($productQuery)
+            : null;
+        if (!empty($broaderKeywords) && strtolower($broaderKeywords) !== strtolower($productQuery)) {
+            Log::info('[SHOPIFY] Broader product alternative search', [
+                'original' => $original,
+                'product_query' => $productQuery,
+                'broader_keywords' => $broaderKeywords,
+            ]);
+
+            $broaderResults = $this->shopifyService->searchProducts($broaderKeywords, 10);
+            $broaderMaxScore = $this->shopifyService->getLastSearchMaxScore();
+            if (!empty($broaderResults) && $this->isConfidentSpecificProductMatch($broaderKeywords, $broaderResults, $broaderMaxScore)) {
+                return ['results' => $broaderResults, 'specific_match' => false];
             }
         }
 
@@ -475,6 +509,34 @@ class ShopifyDataController extends Controller
         return implode(' ', array_slice($tokens, 0, 12));
     }
 
+    protected function extractRequestedProductPhrase(string $query): ?string
+    {
+        $clean = trim((string) preg_replace('/\s+/', ' ', strip_tags($query)));
+        if ($clean === '') {
+            return null;
+        }
+
+        $patterns = [
+            '/\binterested\s+in\s+(?:purchasing|buying|ordering|getting)\s+(.+)$/i',
+            '/\b(?:purchasing|buying|ordering|looking\s+for|searching\s+for)\s+(.+)$/i',
+            '/\b(?:need|needs|want|wants)\s+(.+)$/i',
+            '/\b(?:do\s+you\s+have|do\s+you\s+carry|carry|sell)\s+(.+)$/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $clean, $matches)) {
+                $candidate = trim((string) ($matches[1] ?? ''), " \t\n\r\0\x0B.,;:!?\"'");
+                $candidate = preg_replace('/\b(?:for|to)\s+(?:a|an|the|my|our|their)?\s*(?:customer|client|patient|student|students)\b.*$/i', '', $candidate) ?? $candidate;
+                $candidate = trim((string) preg_replace('/\s+/', ' ', $candidate), " \t\n\r\0\x0B.,;:!?\"'");
+                if ($candidate !== '' && mb_strlen($candidate) >= 3) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
     protected function isConfidentSpecificProductMatch(string $query, array $results, int $maxScore): bool
     {
         if (empty($results)) {
@@ -496,6 +558,110 @@ class ShopifyDataController extends Controller
         }
 
         return $maxScore >= 12;
+    }
+
+    protected function hasUnmatchedSpecificModifiers(string $query, array $results): bool
+    {
+        $modifiers = $this->extractSpecificModifierTokens($query);
+        if (empty($modifiers) || empty($results)) {
+            return false;
+        }
+
+        foreach (array_slice($results, 0, 5) as $product) {
+            if (!is_array($product)) {
+                continue;
+            }
+
+            $parts = [
+                (string) ($product['title'] ?? ''),
+                (string) ($product['description'] ?? ''),
+                (string) ($product['vendor'] ?? ''),
+                (string) ($product['product_type'] ?? ''),
+            ];
+
+            foreach (($product['variants'] ?? []) as $variant) {
+                if (is_array($variant)) {
+                    $parts[] = (string) ($variant['title'] ?? '');
+                    $parts[] = (string) ($variant['option1'] ?? '');
+                    $parts[] = (string) ($variant['option2'] ?? '');
+                    $parts[] = (string) ($variant['option3'] ?? '');
+                }
+            }
+
+            $haystack = ' ' . strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', ' ', implode(' ', $parts)))) . ' ';
+            $matchedAll = true;
+            foreach ($modifiers as $modifier) {
+                if (!str_contains($haystack, ' ' . $modifier . ' ')) {
+                    $matchedAll = false;
+                    break;
+                }
+            }
+
+            if ($matchedAll) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    protected function deriveBroaderProductKeywords(string $query): ?string
+    {
+        if (!$this->shouldUseBroaderProductAlternatives()) {
+            return null;
+        }
+
+        $tokens = $this->extractSearchableTokens($query);
+        if (empty($tokens)) {
+            return null;
+        }
+
+        $modifiers = $this->getSpecificModifierVocabulary();
+        $broaderTokens = array_values(array_filter($tokens, static function ($token) use ($modifiers) {
+            return !in_array($token, $modifiers, true);
+        }));
+
+        if (count($broaderTokens) < 2) {
+            return null;
+        }
+
+        $broader = implode(' ', array_slice($broaderTokens, 0, 6));
+        return strlen($broader) >= 3 ? $broader : null;
+    }
+
+    protected function extractSpecificModifierTokens(string $query): array
+    {
+        $tokens = $this->extractSearchableTokens($query);
+        if (empty($tokens)) {
+            return [];
+        }
+
+        $modifiers = $this->getSpecificModifierVocabulary();
+        return array_values(array_unique(array_filter($tokens, static function ($token) use ($modifiers) {
+            return in_array($token, $modifiers, true);
+        })));
+    }
+
+    protected function getSpecificModifierVocabulary(): array
+    {
+        $terms = $this->organizationSettings['shopify_specific_modifier_terms'] ?? [];
+        if (is_string($terms)) {
+            $terms = preg_split('/[,|]+/', $terms) ?: [];
+        }
+        if (!is_array($terms)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map(static function ($term) {
+            $term = strtolower(trim((string) $term));
+            $term = preg_replace('/[^a-z0-9]+/i', '', $term);
+            return $term ?: null;
+        }, $terms))));
+    }
+
+    protected function shouldUseBroaderProductAlternatives(): bool
+    {
+        return (bool) ($this->organizationSettings['shopify_broader_product_alternatives_enabled'] ?? false);
     }
 
     /**

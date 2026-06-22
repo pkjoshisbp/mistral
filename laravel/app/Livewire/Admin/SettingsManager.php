@@ -38,13 +38,11 @@ class SettingsManager extends Component
     public $homepage_client_logo_height = 100;
     
     // AI Settings
-    public $ai_model_provider = 'llama';
+    public $ai_model_provider = 'openai';
     public $ai_backend_type = 'ollama'; // ollama or llamacpp
     public $openai_api_key = '';
-    public $openai_default_model = 'gpt-5-mini'; // Only allowed model
-    public $llama_default_model = 'llama3.1:8b';
-    public $ai_context_relevance_model = 'deepseek-r1:8b';
-    public $ai_context_relevance_min_confidence = 0.4;
+    public $openai_default_model = 'gpt-5-mini';
+    public $llama_default_model = 'llama3.2:3b';
     public $llamacpp_model_path = '';
     public $llamacpp_model_repo = 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom';
     public $llamacpp_threads = 4;
@@ -72,9 +70,6 @@ class SettingsManager extends Component
     public function getAvailableLlamaModels()
     {
         return [
-            'deepseek-r1:8b'           => 'DeepSeek R1 Distill Llama 8B (Vast.ai, trial)',
-            'llama3.1:8b'              => 'Llama 3.1 8B (Vast.ai, recommended)',
-            'mistral-nemo:latest'       => 'Mistral Nemo (Vast.ai)',
             'llama3.2:1b'              => 'Llama 3.2:1B (Fast, lightweight)',
             'llama3.2:3b'              => 'Llama 3.2:3B (Balanced quality/speed)',
             'llama3.2:3b-instruct-gguf' => 'Llama 3.2:3B Instruct GGUF (llama.cpp optimized)',
@@ -148,16 +143,7 @@ class SettingsManager extends Component
 
     private function resolveOllamaUrlForModel(string $model): string
     {
-        $vastModels = [
-            'deepseek-r1:8b',
-            'llama3.1:8b',
-            'mistral-nemo',
-            'mistral-nemo:latest',
-        ];
-
-        return in_array($model, $vastModels, true)
-            ? 'http://127.0.0.1:11435'
-            : 'http://localhost:11434';
+        return 'http://localhost:11434';
     }
 
     public function loadSettings()
@@ -189,18 +175,13 @@ class SettingsManager extends Component
         $this->homepage_client_logo_height = (int) AdminSetting::get('homepage_client_logo_height', 100);
         
         // AI Settings
-        $this->ai_model_provider = AdminSetting::get('ai_model_provider', config('app.ai_model_provider', 'llama'));
+        $this->ai_model_provider = AdminSetting::get('ai_model_provider', config('app.ai_model_provider', 'openai'));
         $this->ai_backend_type = AdminSetting::get('ai_backend_type', 'ollama');
         $this->openai_api_key = AdminSetting::get('openai_api_key', '');
         $this->openai_default_model = AdminSetting::get('openai_default_model', 'gpt-5-mini');
-        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3.1:8b');
-        $this->ai_context_relevance_model = AdminSetting::get('ai_context_relevance_model', 'deepseek-r1:8b');
-        $this->ai_context_relevance_min_confidence = (float) AdminSetting::get('ai_context_relevance_min_confidence', 0.4);
+        $this->llama_default_model = AdminSetting::get('llama_default_model', 'llama3.2:3b');
         if (!array_key_exists($this->llama_default_model, $this->getAvailableLlamaModels())) {
-            $this->llama_default_model = 'llama3.1:8b';
-        }
-        if (!array_key_exists($this->ai_context_relevance_model, $this->getAvailableLlamaModels())) {
-            $this->ai_context_relevance_model = 'deepseek-r1:8b';
+            $this->llama_default_model = 'llama3.2:3b';
         }
         $this->llamacpp_model_path = AdminSetting::get('llamacpp_model_path', '');
         $this->llamacpp_model_repo = AdminSetting::get('llamacpp_model_repo', 'custom/Llama-3.2-3B-Instruct-Q8_0-Custom');
@@ -372,8 +353,6 @@ class SettingsManager extends Component
             'openai_api_key' => 'nullable|string',
             'openai_default_model' => 'nullable|string',
             'llama_default_model' => 'nullable|string',
-            'ai_context_relevance_model' => 'nullable|string',
-            'ai_context_relevance_min_confidence' => 'nullable|numeric|min:0|max:1',
             'llamacpp_model_path' => 'nullable|string',
             'llamacpp_model_repo' => 'nullable|string',
             'llamacpp_threads' => 'nullable|integer|min:1|max:32',
@@ -392,8 +371,6 @@ class SettingsManager extends Component
         AdminSetting::set('openai_api_key', $this->openai_api_key, 'password', 'ai', 'OpenAI API Key', null, true);
         AdminSetting::set('openai_default_model', $this->openai_default_model, 'text', 'ai', 'OpenAI Default Model');
         AdminSetting::set('llama_default_model', $this->llama_default_model, 'select', 'ai', 'Llama Default Model');
-        AdminSetting::set('ai_context_relevance_model', $this->ai_context_relevance_model, 'select', 'ai', 'Context Relevance Judge Model');
-        AdminSetting::set('ai_context_relevance_min_confidence', (string) $this->ai_context_relevance_min_confidence, 'number', 'ai', 'Context Relevance Minimum Confidence');
         AdminSetting::set('llamacpp_model_path', $this->llamacpp_model_path, 'text', 'ai', 'llama.cpp Model Path');
         AdminSetting::set('llamacpp_model_repo', $this->llamacpp_model_repo, 'select', 'ai', 'llama.cpp Model Repository');
         AdminSetting::set('llamacpp_threads', $this->llamacpp_threads, 'number', 'ai', 'llama.cpp Threads');
@@ -411,6 +388,7 @@ class SettingsManager extends Component
         $envUpdates = [
             'AI_MODEL_PROVIDER' => $this->ai_model_provider,
             'AI_BACKEND_TYPE' => $this->ai_backend_type,
+            'OPENAI_DEFAULT_MODEL' => $this->openai_default_model ?: 'gpt-5-mini',
         ];
         
         if ($this->openai_api_key) {
@@ -423,8 +401,6 @@ class SettingsManager extends Component
             'provider' => $this->ai_model_provider,
             'backend_type' => $this->ai_backend_type,
             'llama_model' => $this->llama_default_model,
-            'context_relevance_model' => $this->ai_context_relevance_model,
-            'context_relevance_min_confidence' => (float) $this->ai_context_relevance_min_confidence,
             'openai_model' => $this->openai_default_model,
             'has_global_translation_map' => trim((string) $this->global_query_translation_map) !== '',
             'has_global_alias_map' => trim((string) $this->global_query_alias_map) !== '',

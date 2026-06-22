@@ -121,7 +121,9 @@ return [
     |
     */
 
-    'ai_model_provider' => env('AI_MODEL_PROVIDER', 'llama'),
+    'ai_model_provider' => env('AI_MODEL_PROVIDER', 'openai'),
+
+    'openai_default_model' => env('OPENAI_DEFAULT_MODEL', 'gpt-5-mini'),
 
     /*
     |--------------------------------------------------------------------------

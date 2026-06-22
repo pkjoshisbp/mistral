@@ -11,6 +11,14 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            Schema::table('subscriptions', function (Blueprint $table) {
+                $table->foreignId('organization_id')->nullable()->change();
+            });
+
+            return;
+        }
+
         Schema::table('subscriptions', function (Blueprint $table) {
             // Drop the existing foreign key constraint
             $table->dropForeign(['organization_id']);
@@ -28,6 +36,14 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            Schema::table('subscriptions', function (Blueprint $table) {
+                $table->foreignId('organization_id')->nullable(false)->change();
+            });
+
+            return;
+        }
+
         Schema::table('subscriptions', function (Blueprint $table) {
             // Drop the nullable foreign key
             $table->dropForeign(['organization_id']);

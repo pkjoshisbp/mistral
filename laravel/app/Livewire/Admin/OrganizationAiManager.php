@@ -129,7 +129,7 @@ class OrganizationAiManager extends Component
         
         // Load organization-specific settings or fallback to global admin settings
         $this->aiBackendType = $settings['ai_backend_type'] ?? AdminSetting::get('ai_backend_type', 'ollama');
-        $this->aiModelProvider = $settings['ai_model_provider'] ?? AdminSetting::get('ai_model_provider', 'llama');
+        $this->aiModelProvider = $settings['ai_model_provider'] ?? AdminSetting::get('ai_model_provider', 'openai');
         $this->loadAvailableModels();
         if ($this->aiModelProvider === 'openai') {
             $this->aiModel = $settings['openai_model']
@@ -138,7 +138,7 @@ class OrganizationAiManager extends Component
         } else {
             $defaultLlamaModel = $this->aiBackendType === 'llamacpp'
                 ? AdminSetting::get('llamacpp_model_repo', 'llama-3.2-3b-instruct-q4_k_m.gguf')
-                : AdminSetting::get('llama_default_model', 'llama3.1:8b');
+                : AdminSetting::get('llama_default_model', 'llama3.2:3b');
             $this->aiModel = $settings['llama_model']
                 ?? $settings['ai_model']
                 ?? $defaultLlamaModel;
@@ -341,12 +341,8 @@ class OrganizationAiManager extends Component
         $this->availableModels = [
             'ollama' => [
                 'llama' => [
-                    'deepseek-r1:8b' => 'DeepSeek R1 Distill Llama 8B (Vast.ai, trial)',
-                    'llama3.1:8b' => 'Llama 3.1 8B (Vast.ai, recommended)',
-                    'mistral-nemo:latest' => 'Mistral Nemo (Vast.ai)',
                     'llama3.2:3b' => 'Llama 3.2 3B (Fast)',
                     'llama3.2:1b' => 'Llama 3.2 1B (Fastest)', 
-                    'llama3.1:70b' => 'Llama 3.1 70B (Most Capable)',
                     'mistral:7b' => 'Mistral 7B',
                     'codellama:7b' => 'Code Llama 7B'
                 ],
@@ -366,8 +362,10 @@ class OrganizationAiManager extends Component
     private function getOpenAiModelOptions(): array
     {
         $models = [
-            'gpt-5-mini' => 'GPT-5 mini (Recommended)',
+            'gpt-5-mini' => 'GPT-5 mini (Current default)',
+            'gpt-5.1-mini' => 'GPT-5.1 mini (requires account access)',
             'gpt-5' => 'GPT-5',
+            'gpt-5.1' => 'GPT-5.1',
             'gpt-4.1' => 'GPT-4.1',
             'gpt-4.1-mini' => 'GPT-4.1 mini',
             'gpt-4o' => 'GPT-4o',

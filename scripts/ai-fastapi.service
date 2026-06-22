@@ -16,6 +16,11 @@ Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=OLLAMA_URL=http://127.0.0.1:11434
+Environment=EMBED_MODEL=nomic-embed-text
+Environment=FALLBACK_EMBED_MODEL=llama3.2:1b
+Environment=VASTAI_ENABLED=false
+Environment=VASTAI_HEALTHCHECK_ENABLED=false
+Environment=CHAT_MODEL=llama3.2:3b
 Environment=QDRANT_HOST=127.0.0.1
 Environment=QDRANT_PORT=6333
 Environment=REWRITE_MODEL_PATH=/var/www/clients/client1/web64/web/ai_backend/models/llama-3.2-1b-instruct/Llama-3.2-1B-Instruct-Q4_K_M.gguf

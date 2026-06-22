@@ -12,14 +12,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Drop old foreign keys before remapping ids.
-        Schema::table('subscriptions', function (Blueprint $table) {
-            $table->dropForeign(['subscription_plan_id']);
-        });
+        $canAlterForeignKeys = Schema::getConnection()->getDriverName() !== 'sqlite';
 
-        Schema::table('credit_transactions', function (Blueprint $table) {
-            $table->dropForeign(['credit_package_id']);
-        });
+        if ($canAlterForeignKeys) {
+            Schema::table('subscriptions', function (Blueprint $table) {
+                $table->dropForeign(['subscription_plan_id']);
+            });
+
+            Schema::table('credit_transactions', function (Blueprint $table) {
+                $table->dropForeign(['credit_package_id']);
+            });
+        }
 
         // Remap subscriptions to pricing_plans (match original plan + billing cycle)
         $subscriptions = DB::table('subscriptions')->select('id', 'subscription_plan_id', 'billing_cycle')->get();
@@ -27,8 +30,8 @@ return new class extends Migration
             $pricingPlanId = DB::table('pricing_plans')
                 ->where('plan_type', 'subscription')
                 ->where('billing_period', $sub->billing_cycle)
-                ->whereRaw("JSON_EXTRACT(metadata, '$.source_table') = 'subscription_plans'")
-                ->whereRaw("JSON_EXTRACT(metadata, '$.source_id') = ?", [(int) $sub->subscription_plan_id])
+                ->where('metadata->source_table', 'subscription_plans')
+                ->where('metadata->source_id', (int) $sub->subscription_plan_id)
                 ->value('id');
 
             if ($pricingPlanId) {
@@ -46,8 +49,8 @@ return new class extends Migration
         foreach ($transactions as $tx) {
             $pricingPlanId = DB::table('pricing_plans')
                 ->where('plan_type', 'credit')
-                ->whereRaw("JSON_EXTRACT(metadata, '$.source_table') = 'credit_packages'")
-                ->whereRaw("JSON_EXTRACT(metadata, '$.source_id') = ?", [(int) $tx->credit_package_id])
+                ->where('metadata->source_table', 'credit_packages')
+                ->where('metadata->source_id', (int) $tx->credit_package_id)
                 ->value('id');
 
             if ($pricingPlanId) {
@@ -57,20 +60,21 @@ return new class extends Migration
             }
         }
 
-        // Add new foreign keys to pricing_plans
-        Schema::table('subscriptions', function (Blueprint $table) {
-            $table->foreign('subscription_plan_id')
-                ->references('id')
-                ->on('pricing_plans')
-                ->onDelete('cascade');
-        });
+        if ($canAlterForeignKeys) {
+            Schema::table('subscriptions', function (Blueprint $table) {
+                $table->foreign('subscription_plan_id')
+                    ->references('id')
+                    ->on('pricing_plans')
+                    ->onDelete('cascade');
+            });
 
-        Schema::table('credit_transactions', function (Blueprint $table) {
-            $table->foreign('credit_package_id')
-                ->references('id')
-                ->on('pricing_plans')
-                ->onDelete('set null');
-        });
+            Schema::table('credit_transactions', function (Blueprint $table) {
+                $table->foreign('credit_package_id')
+                    ->references('id')
+                    ->on('pricing_plans')
+                    ->onDelete('set null');
+            });
+        }
     }
 
     /**
@@ -78,6 +82,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
         Schema::table('subscriptions', function (Blueprint $table) {
             $table->dropForeign(['subscription_plan_id']);
         });

@@ -16,7 +16,9 @@ return new class extends Migration
             $table->timestamp('scheduled_at')->nullable()->after('sender_name');
         });
 
-        DB::statement("ALTER TABLE email_campaigns MODIFY status ENUM('draft','scheduled','sending','sent','failed') DEFAULT 'draft'");
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE email_campaigns MODIFY status ENUM('draft','scheduled','sending','sent','failed') DEFAULT 'draft'");
+        }
     }
 
     /**
@@ -26,7 +28,9 @@ return new class extends Migration
     {
         DB::table('email_campaigns')->where('status', 'scheduled')->update(['status' => 'draft']);
 
-        DB::statement("ALTER TABLE email_campaigns MODIFY status ENUM('draft','sending','sent','failed') DEFAULT 'draft'");
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE email_campaigns MODIFY status ENUM('draft','sending','sent','failed') DEFAULT 'draft'");
+        }
 
         Schema::table('email_campaigns', function (Blueprint $table) {
             $table->dropColumn('scheduled_at');

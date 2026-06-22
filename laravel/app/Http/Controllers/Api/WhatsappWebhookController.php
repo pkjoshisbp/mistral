@@ -750,53 +750,30 @@ class WhatsappWebhookController extends Controller
             ];
         }
 
-        if ($ai->getAiProviderForOrganization($organization->id) === 'openai') {
-            Log::info('WhatsApp knowledge context relevance deferred to OpenAI', [
-                'channel' => $channel,
-                'org_id' => $organization->id,
-                'session_id' => $sessionId,
-            ]);
+        $model = $ai->getAiProviderForOrganization($organization->id) === 'openai'
+            ? $ai->getOpenAiModelForOrganization($organization->id)
+            : $ai->getLlamaModelForOrganization($organization->id);
 
-            return [
-                'context' => $context,
-                'decision' => 'deferred_to_openai',
-                'confidence' => 0.0,
-                'threshold' => $ai->getContextRelevanceMinConfidence(),
-                'reason' => 'Single OpenAI response performs private context relevance check.',
-                'use_context' => true,
-                'model' => $ai->getOpenAiModelForOrganization($organization->id),
-            ];
-        }
-
-        $assessment = $ai->assessContextRelevance(
-            $question,
-            $context,
-            $organization->id,
-            $sessionId
-        );
-
-        $useContext = (bool) ($assessment['use_context'] ?? true);
-
-        Log::info('WhatsApp knowledge context relevance assessed', [
+        Log::info('WhatsApp knowledge context relevance deferred to final LLM prompt', [
             'channel' => $channel,
             'org_id' => $organization->id,
             'session_id' => $sessionId,
-            'decision' => $assessment['decision'] ?? 'unknown',
-            'use_context' => $useContext,
-            'confidence' => $assessment['confidence'] ?? 0.0,
-            'threshold' => $assessment['threshold'] ?? $ai->getContextRelevanceMinConfidence(),
-            'reason' => $assessment['reason'] ?? '',
-            'model' => $assessment['model'] ?? null,
+            'decision' => 'deferred_to_final_llm',
+            'use_context' => true,
+            'confidence' => 1.0,
+            'threshold' => 0.0,
+            'reason' => 'The final answer prompt performs the private context relevance check.',
+            'model' => $model,
         ]);
 
         return [
-            'context' => $useContext ? $context : '',
-            'decision' => (string) ($assessment['decision'] ?? 'unknown'),
-            'confidence' => (float) ($assessment['confidence'] ?? 0.0),
-            'threshold' => (float) ($assessment['threshold'] ?? $ai->getContextRelevanceMinConfidence()),
-            'reason' => (string) ($assessment['reason'] ?? ''),
-            'use_context' => $useContext,
-            'model' => (string) ($assessment['model'] ?? ''),
+            'context' => $context,
+            'decision' => 'deferred_to_final_llm',
+            'confidence' => 1.0,
+            'threshold' => 0.0,
+            'reason' => 'The final answer prompt performs the private context relevance check.',
+            'use_context' => true,
+            'model' => $model,
         ];
     }
 
@@ -822,7 +799,9 @@ class WhatsappWebhookController extends Controller
         }
 
         $recent = $conversation->messages()
-            ->orderBy('sent_at', 'desc')
+            ->reorder()
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
             ->limit($limit)
             ->get()
             ->reverse();
@@ -848,8 +827,10 @@ class WhatsappWebhookController extends Controller
         }
 
         $lastUserMessage = $conversation->messages()
+            ->reorder()
             ->where('sender_type', 'user')
-            ->orderBy('sent_at', 'desc')
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
             ->first();
 
         if (!$lastUserMessage) {

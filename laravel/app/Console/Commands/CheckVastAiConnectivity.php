@@ -18,6 +18,23 @@ class CheckVastAiConnectivity extends Command
 
     public function handle(): int
     {
+        if (!config('services.vastai.enabled', true)) {
+            Cache::forget('vastai_connectivity_failures');
+            Cache::forget('vastai_connectivity_alert_sent');
+            Cache::put('vastai_connectivity_status', [
+                'healthy' => false,
+                'disabled' => true,
+                'failures' => 0,
+                'checked_at' => now()->toDateTimeString(),
+                'ollama_ok' => false,
+                'whisper_ok' => false,
+            ], now()->addDays(1));
+
+            Log::info('Vast.ai connectivity check skipped because VASTAI_ENABLED=false');
+            $this->info('Vast.ai connectivity disabled');
+            return self::SUCCESS;
+        }
+
         $vastConfig = VastAiConfig::current();
         $ollamaUrl = rtrim((string) env('VASTAI_OLLAMA_HEALTH_URL', 'http://127.0.0.1:11435/api/tags'), '/');
         $whisperHost = (string) env('VASTAI_WHISPER_HOST', '127.0.0.1');

@@ -7,6 +7,8 @@ use App\Models\Organization;
 use App\Services\AiAgentService;
 use App\Services\FaqFollowUpService;
 use App\Services\FollowUpStateService;
+use App\Services\Widget\Behaviors\IndianArtZoneWidgetBehavior;
+use App\Services\Widget\OrganizationWidgetBehaviorRegistry;
 use Mockery;
 use ReflectionClass;
 use Tests\TestCase;
@@ -189,55 +191,306 @@ class WidgetControllerContextReuseTest extends TestCase
         $this->assertStringContainsString('**Starter**', $response);
     }
 
-    public function test_artist_selling_intent_recognizes_seller_phrasing_not_buyer_or_paper_queries(): void
+    public function test_question_shaped_that_is_it_is_not_treated_as_closing_acknowledgement(): void
     {
         $controller = $this->controller();
 
-        $this->assertTrue($this->invokePrivate($controller, 'isArtistSellingIntent', [
-            'how i sell my painting',
+        $this->assertFalse($this->invokePrivate($controller, 'isMinimalAcknowledgementMessage', [
+            "That's it?",
         ]));
-        $this->assertTrue($this->invokePrivate($controller, 'isArtistSellingIntent', [
-            'My painting sell',
-        ]));
-        $this->assertFalse($this->invokePrivate($controller, 'isArtistSellingIntent', [
-            'How can I buy a painting?',
-        ]));
-        $this->assertFalse($this->invokePrivate($controller, 'isArtistSellingIntent', [
-            'How I can sell my sketch or paper works?',
+        $this->assertTrue($this->invokePrivate($controller, 'isMinimalAcknowledgementMessage', [
+            "That's it",
         ]));
     }
 
-    public function test_artist_selling_upload_follow_up_reuses_seller_anchor(): void
+    public function test_query_understanding_rewrite_cannot_drop_an_explicit_topic(): void
+    {
+        $controller = $this->controller();
+        $original = 'How can I sell paintings and do you help with shipping?';
+
+        $query = $this->invokePrivate($controller, 'queryUnderstandingSearchQuery', [[
+            'rewritten_query' => 'painting sales criteria',
+        ], $original]);
+
+        $this->assertSame($original, $query);
+        $this->assertTrue($this->invokePrivate($controller, 'queryHasMultipleExplicitFacets', [$original]));
+    }
+
+    public function test_promo_query_detection_requires_promotion_intent(): void
     {
         $controller = $this->controller();
 
-        $this->assertTrue($this->invokePrivate($controller, 'isRelatedFollowUpTurn', [
-            'how i upload',
-            'yes i have',
-            'Create your artist profile, upload artworks, and our team will review submissions for selling paintings.',
-            [
-                [
-                    'title' => 'Can i sell my paintings here?',
-                    'content' => 'Create your artist profile, upload artworks, and our team will review submissions.',
-                    'category' => 'Artists',
-                    'data_type' => 'faq',
-                ],
-            ],
-            false,
-            null,
+        $this->assertTrue($this->invokePrivate($controller, 'isPromoQuery', [
+            'Do you have any discount coupons?',
+        ]));
+        $this->assertTrue($this->invokePrivate($controller, 'isPromoQuery', [
+            'Any sale offers available today?',
         ]));
 
-        $query = $this->invokePrivate($controller, 'buildRelatedFollowUpSearchQuery', [
-            'how i upload',
-            null,
-            'yes i have',
-            'Create your artist profile, upload artworks, and our team will review submissions for selling paintings.',
+        $this->assertFalse($this->invokePrivate($controller, 'isPromoQuery', [
+            'I want to sale my art work but how',
+        ]));
+        $this->assertFalse($this->invokePrivate($controller, 'isPromoQuery', [
+            'Is this painting for sale?',
+        ]));
+        $this->assertFalse($this->invokePrivate($controller, 'isPromoQuery', [
+            'Can you make a special order?',
+        ]));
+    }
+
+    public function test_context_audit_language_is_treated_as_visible_reasoning_leak(): void
+    {
+        $controller = $this->controller();
+
+        $leaked = 'Hum samajh rahe hain — aap tent house mein painting online bechna chahti hain. Current context mein humein platform, payment method ya shipping options ki jankari nahi hai. Yeh context verify karta hai: - Aapka uddeshya: tent house mein paintings online bechna. Yeh context verify nahi karta: - Kaunsa online marketplace.';
+
+        $this->assertTrue($this->invokePrivate($controller, 'looksLikeVisibleReasoningLeak', [$leaked]));
+        $this->assertFalse($this->invokePrivate($controller, 'looksLikeVisibleReasoningLeak', [
+            "We don't have enough verified information to answer that accurately right now. Please share a little more detail.",
+        ]));
+    }
+
+    public function test_internal_reasoning_leak_fallback_is_customer_safe(): void
+    {
+        $controller = $this->controller();
+        $organization = new Organization([
+            'website' => 'https://example.com',
+            'contact_email' => 'support@example.com',
+            'contact_phone' => '+911234567890',
+            'settings' => [
+                'scope_instruction' => 'We provide an AI chat support platform for businesses',
+            ],
+        ]);
+
+        $response = $this->invokePrivate($controller, 'buildInternalReasoningLeakFallbackResponse', [
+            $organization,
+            'Tent house mein painting online bechna chahti hun',
+        ]);
+
+        $this->assertStringContainsString("We don't have enough verified information", $response);
+        $this->assertStringContainsString('Email: support@example.com', $response);
+        $this->assertStringNotContainsString('Current context', $response);
+        $this->assertStringNotContainsString('context', strtolower($response));
+        $this->assertStringNotContainsString('retrieval', strtolower($response));
+    }
+
+    public function test_unsupported_no_context_gate_is_based_on_answerability_state(): void
+    {
+        $controller = $this->controller();
+        $organization = new Organization([
+            'website' => 'https://example.com',
+        ]);
+
+        $this->assertTrue($this->invokePrivate($controller, 'shouldUseUnsupportedNoContextFallback', [
+            'I need help selling paintings through a tent rental business',
+            $organization,
+            '',
             false,
+            null,
+            false,
+            false,
+        ]));
+
+        $this->assertFalse($this->invokePrivate($controller, 'shouldUseUnsupportedNoContextFallback', [
+            'I need help selling paintings through a tent rental business',
+            $organization,
+            'Accepted knowledge base context',
+            false,
+            null,
+            false,
+            false,
+        ]));
+
+        $this->assertFalse($this->invokePrivate($controller, 'shouldUseUnsupportedNoContextFallback', [
+            'I need help selling paintings through a tent rental business',
+            $organization,
+            '',
+            false,
+            ['response' => 'Accepted FAQ answer.'],
+            false,
+            false,
+        ]));
+
+        $this->assertFalse($this->invokePrivate($controller, 'shouldUseUnsupportedNoContextFallback', [
+            'I feel worried about exam marks, please guide me',
+            $organization,
+            '',
+            false,
+            null,
+            true,
+            false,
+        ]));
+    }
+
+    public function test_contextual_query_understanding_marks_ambiguous_criteria_as_follow_up(): void
+    {
+        $controller = $this->controller();
+        $history = [
+            ['role' => 'user', 'content' => 'How can I sell my paintings here?'],
+            ['role' => 'assistant', 'content' => 'Create an artist profile and upload your artwork for review.'],
+        ];
+
+        $this->assertTrue($this->invokePrivate($controller, 'queryUnderstandingIndicatesFollowUp', [[
+            'intent' => 'follow_up',
+            'is_follow_up' => true,
+            'rewritten_query' => 'criteria for selling paintings as an artist',
+        ], $history]));
+
+        $query = $this->invokePrivate($controller, 'buildRelatedFollowUpSearchQuery', [
+            new Organization(['slug' => 'example']),
+            'What are the criterias?',
+            null,
+            'How can I sell my paintings here?',
+            'Create an artist profile and upload your artwork for review.',
+            false,
+            false,
+            'criteria for selling paintings as an artist',
+        ]);
+
+        $this->assertSame('criteria for selling paintings as an artist', $query);
+    }
+
+    public function test_direct_faq_routing_is_reserved_for_simple_keyword_matches(): void
+    {
+        $controller = $this->controller();
+
+        $this->assertTrue($this->invokePrivate($controller, 'shouldUseDirectFaqResponse', [
+            'What are your opening hours?',
+            [
+            'match_source' => 'keyword_fallback',
+            'response' => 'Verified FAQ answer.',
+            ],
+            false,
+            false,
+        ]));
+        $this->assertFalse($this->invokePrivate($controller, 'shouldUseDirectFaqResponse', [
+            'I signed in but there is no option to upload my images',
+            [
+            'match_source' => 'organization_behavior:example:preferred_faq',
+            'response' => 'Verified FAQ answer.',
+            ],
+            false,
+            false,
+        ]));
+        $this->assertFalse($this->invokePrivate($controller, 'shouldUseDirectFaqResponse', [
+            'How do I register?',
+            [
+            'match_source' => 'semantic',
+            'response' => 'Semantic candidate.',
+            ],
+            false,
+            false,
+        ]));
+        $this->assertFalse($this->invokePrivate($controller, 'shouldUseDirectFaqResponse', [
+            'How do I register?',
+            [
+                'match_source' => 'keyword_fallback',
+                'response' => 'Verified FAQ answer.',
+            ],
+            true,
+            false,
+        ]));
+    }
+
+    public function test_verified_faq_is_available_when_both_model_calls_fail(): void
+    {
+        $controller = $this->controller();
+
+        $response = $this->invokePrivate($controller, 'verifiedFaqResponse', [[
+            'match_source' => 'semantic',
+            'response' => '<?xml encoding="UTF-8"><p>Create your profile &amp; upload your work.</p>',
+        ]]);
+
+        $this->assertSame('Create your profile & upload your work.', $response);
+        $this->assertNull($this->invokePrivate($controller, 'verifiedFaqResponse', [null]));
+    }
+
+    public function test_model_failure_uses_verified_follow_up_payload_before_provider_error(): void
+    {
+        $controller = $this->controller();
+
+        $response = $this->invokePrivate($controller, 'buildVerifiedKnowledgeFailureFallback', [
+            'create an artist account of mine',
+            null,
+            [[
+                'payload' => [
+                    'data_type' => 'faq',
+                    'content' => '<p>Create your artist profile and upload your artwork for review.</p>',
+                ],
+            ]],
+            [],
+            null,
+            true,
+            true,
+        ]);
+
+        $this->assertSame(
+            "I can guide you, but I can't create or access the account on your behalf. Create your artist profile and upload your artwork for review.",
+            $response
+        );
+    }
+
+    public function test_rejected_context_is_not_used_as_a_model_failure_fallback(): void
+    {
+        $controller = $this->controller();
+
+        $response = $this->invokePrivate($controller, 'buildVerifiedKnowledgeFailureFallback', [
+            'Tell me about something else',
+            null,
+            [['payload' => ['data_type' => 'faq', 'content' => 'Stale answer.']]],
+            [],
+            'Previous stale answer.',
+            true,
             false,
         ]);
 
-        $this->assertStringContainsString('sell painting artist profile upload artwork', $query);
-        $this->assertStringContainsString('how i upload', $query);
+        $this->assertNull($response);
+    }
+
+    public function test_broad_catalog_discovery_query_is_not_treated_as_exact_catalog_title(): void
+    {
+        $controller = $this->controller();
+
+        $terms = $this->invokePrivate($controller, 'extractExplicitCatalogTerms', [
+            'I need a painting under theme contemporary or devotional',
+        ]);
+
+        $this->assertSame([], $terms);
+    }
+
+    public function test_gpt_five_widget_budget_reserves_room_for_visible_output(): void
+    {
+        $controller = $this->controller();
+
+        $options = $this->invokePrivate($controller, 'buildOpenAiWidgetOptions', [
+            'gpt-5-mini',
+            220,
+            true,
+        ]);
+
+        $this->assertGreaterThanOrEqual(1420, $options['max_completion_tokens']);
+        $this->assertSame('minimal', $options['reasoning_effort']);
+        $this->assertSame(['type' => 'json_object'], $options['response_format']);
+    }
+
+    public function test_gpt_five_widget_budget_respects_configured_completion_ceiling(): void
+    {
+        config([
+            'openai.max_completion_tokens' => 1800,
+            'openai.widget_max_visible_tokens' => 1200,
+            'openai.widget_reasoning_buffer_min_tokens' => 1200,
+        ]);
+
+        $controller = $this->controller();
+
+        $options = $this->invokePrivate($controller, 'buildOpenAiWidgetOptions', [
+            'gpt-5.1-mini',
+            900,
+            false,
+        ]);
+
+        $this->assertSame(1800, $options['max_completion_tokens']);
+        $this->assertSame('low', $options['reasoning_effort']);
     }
 
     private function controller(): WidgetController
@@ -245,8 +498,11 @@ class WidgetControllerContextReuseTest extends TestCase
         $aiAgent = Mockery::mock(AiAgentService::class);
         $faqFollowUp = Mockery::mock(FaqFollowUpService::class);
         $followUpState = Mockery::mock(FollowUpStateService::class);
+        $organizationBehaviors = new OrganizationWidgetBehaviorRegistry(
+            new IndianArtZoneWidgetBehavior()
+        );
 
-        return new WidgetController($aiAgent, $faqFollowUp, $followUpState);
+        return new WidgetController($aiAgent, $faqFollowUp, $followUpState, $organizationBehaviors);
     }
 
     private function invokePrivate(WidgetController $controller, string $method, array $arguments = []): mixed

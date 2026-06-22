@@ -25,8 +25,10 @@ return new class extends Migration
             $table->index('user_id');
         });
 
-        // Update existing users role column to include affiliate if it's enum
-        DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('customer', 'admin', 'affiliate') DEFAULT 'customer'");
+        // SQLite stores Laravel enums as text, so no enum definition update is needed.
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('customer', 'admin', 'affiliate') DEFAULT 'customer'");
+        }
     }
 
     public function down(): void
@@ -36,7 +38,8 @@ return new class extends Migration
             $table->dropColumn('user_id');
         });
 
-        // Revert role column back if needed
-        DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('customer', 'admin') DEFAULT 'customer'");
+        if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('customer', 'admin') DEFAULT 'customer'");
+        }
     }
 };

@@ -122,7 +122,7 @@ return new class extends Migration
             ->where(function ($query) {
                 $query->where('price', 0)
                     ->orWhere('slug', 'like', 'free%')
-                    ->orWhereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.original_slug')) = 'free'");
+                    ->orWhere('metadata->original_slug', 'free');
             })
             ->get();
 

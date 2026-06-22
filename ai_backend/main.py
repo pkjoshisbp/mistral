@@ -42,7 +42,8 @@ MODEL_WARMED = False
 # Config
 DEFAULT_EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")  # Fast dedicated embedding model
 FALLBACK_EMBED_MODEL = os.getenv("FALLBACK_EMBED_MODEL", "llama3.2:1b")  # Fallback if nomic fails
-DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.1:8b")  # vast.ai primary model via tunnel
+VASTAI_ENABLED = os.getenv("VASTAI_ENABLED", "false").lower() == "true"
+DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.1:8b" if VASTAI_ENABLED else "llama3.2:3b")
 FALLBACK_CHAT_MODEL = os.getenv("FALLBACK_CHAT_MODEL", "llama3.2:3b")  # Fast local fallback
 QUERY_NORMALIZATION_MODEL = os.getenv("QUERY_NORMALIZATION_MODEL", DEFAULT_CHAT_MODEL)
 EMBED_TIMEOUT_SEC = float(os.getenv("EMBED_TIMEOUT", "25"))  # 25s handles nomic-embed-text cold-start (model load ~20s)
@@ -229,7 +230,15 @@ AVATAR_SIZE_FRACTIONS: dict[str, float] = {"small": 0.22, "medium": 0.29, "large
 
 def get_ollama_url(model: str) -> str:
     """Get the appropriate Ollama URL based on the model"""
+    if not VASTAI_ENABLED:
+        return OLLAMA_URL_LOCAL
+
     return OLLAMA_URL_VASTAI if model in VASTAI_MODELS else OLLAMA_URL_LOCAL
+
+
+def get_embedding_ollama_url(model: str) -> str:
+    """Embeddings must stay local so Qdrant retrieval does not depend on Vast.ai."""
+    return OLLAMA_URL_LOCAL
 
 
 def resolve_crawl_model(requested_model: str | None = None) -> str:
@@ -346,7 +355,7 @@ def _canonicalize_multilingual_support_query(query: str, detection: dict) -> str
 
 
 async def _normalize_query_to_english(query: str, model: str, use_vastai: bool = True) -> str:
-    ollama_url = OLLAMA_URL_VASTAI if use_vastai else get_ollama_url(model)
+    ollama_url = OLLAMA_URL_VASTAI if (use_vastai and VASTAI_ENABLED) else get_ollama_url(model)
     messages = [
         {
             "role": "system",
@@ -438,7 +447,7 @@ current_llamacpp_model = None
 MAX_OLLAMA_RUNNER_CPU = float(os.getenv("MAX_OLLAMA_RUNNER_CPU", "200.0"))  # Observability only (not used for killing)
 MAX_OLLAMA_RUNNER_TIME = int(os.getenv("MAX_OLLAMA_RUNNER_TIME", "300"))    # Max runtime in seconds (5 min)
 PROCESS_CHECK_INTERVAL = int(os.getenv("PROCESS_CHECK_INTERVAL", "30"))     # Check every 30 seconds
-VASTAI_HEALTHCHECK_ENABLED = os.getenv("VASTAI_HEALTHCHECK_ENABLED", "true").lower() == "true"
+VASTAI_HEALTHCHECK_ENABLED = VASTAI_ENABLED and os.getenv("VASTAI_HEALTHCHECK_ENABLED", "false").lower() == "true"
 VASTAI_HEALTHCHECK_INTERVAL = int(os.getenv("VASTAI_HEALTHCHECK_INTERVAL", "30"))
 VASTAI_TUNNEL_SCRIPT = os.getenv(
     "VASTAI_TUNNEL_SCRIPT",
@@ -2657,7 +2666,7 @@ async def manual_cleanup():
 async def _generate_embedding(model: str, text: str, start_time: float):
     """Single embedding via /api/embeddings — used for real-time chat queries."""
     async with embed_semaphore:
-        embed_url = get_ollama_url(model)
+        embed_url = get_embedding_ollama_url(model)
         async with httpx.AsyncClient(timeout=EMBED_TIMEOUT_SEC) as client:
             resp = await client.post(
                 f"{embed_url}/api/embeddings",
@@ -2681,7 +2690,7 @@ async def _generate_embeddings_batch(texts: list, model: str, start_time: float)
     - For 3000 items: 30 calls × 5s = 2.5min vs 3000 × 140ms = 7min sequential
     """
     async with embed_semaphore:
-        embed_url = get_ollama_url(model)
+        embed_url = get_embedding_ollama_url(model)
         async with httpx.AsyncClient(timeout=EMBED_TIMEOUT_SEC * len(texts)) as client:
             resp = await client.post(
                 f"{embed_url}/api/embed",
@@ -2710,8 +2719,8 @@ async def embed(request: Request):
     # if len(text) > MAX_EMBED_CHARS:
     #     text = text[:MAX_EMBED_CHARS]
 
-        # Quick health check against the correct backend for this model
-        embed_health_url = get_ollama_url(model)
+        # Quick health check against local Ollama only; embeddings should not depend on Vast.ai.
+        embed_health_url = get_embedding_ollama_url(model)
         async with httpx.AsyncClient(timeout=5.0) as client:
             try:
                 health_resp = await client.get(f"{embed_health_url}/api/tags")
@@ -3149,8 +3158,9 @@ async def llm_answer(request: Request):
     data = await request.json()
     prompt = data["prompt"]
     model = data.get("model", FALLBACK_EMBED_MODEL)
+    timeout_seconds = 120.0 if str(model).strip().lower() == "llama3.2:3b" else 60.0
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             ollama_url = get_ollama_url(model)
             resp = await client.post(f"{ollama_url}/api/generate", json={
                 "model": model,
@@ -3568,7 +3578,7 @@ async def normalize_query(request: Request):
     data = await request.json()
     query = (data.get("query") or "").strip()
     model = (data.get("model") or QUERY_NORMALIZATION_MODEL).strip() or QUERY_NORMALIZATION_MODEL
-    use_vastai = bool(data.get("use_vastai", True))
+    use_vastai = bool(data.get("use_vastai", True)) and VASTAI_ENABLED
 
     if query == "":
         raise HTTPException(status_code=400, detail="Query is required")
@@ -3967,7 +3977,7 @@ async def llm_chat(request: Request):
     # Handle Ollama backend (default/fallback)
     
     # Check if use_vastai is explicitly requested in options
-    use_vastai = options.get("use_vastai", False) if options else False
+    use_vastai = (options.get("use_vastai", False) if options else False) and VASTAI_ENABLED
     
     # Get the appropriate Ollama URL for this model
     if use_vastai:
@@ -4155,7 +4165,7 @@ async def stream_chat(request: Request):
     )
     
     # Check if use_vastai is explicitly requested in options
-    use_vastai = options.get("use_vastai", False) if options else False
+    use_vastai = (options.get("use_vastai", False) if options else False) and VASTAI_ENABLED
     
     # Get the appropriate Ollama URL for this model
     if use_vastai:

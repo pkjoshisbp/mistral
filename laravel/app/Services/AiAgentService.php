@@ -9,6 +9,10 @@ use OpenAI;
 
 class AiAgentService
 {
+    private const LOCAL_3B_ANSWER_TIMEOUT_SECONDS = 130;
+
+    private static array $suppressedTokenUsageSessionIds = [];
+
     private $baseUrl;
 
     /** Debug data captured during the most recent enhancedSearch() call. */
@@ -22,6 +26,14 @@ class AiAgentService
     public function __construct()
     {
         $this->baseUrl = config('services.ai_agent.url', 'http://localhost:8111');
+    }
+
+    public static function suppressTokenUsageForSession(string $sessionId): void
+    {
+        $sessionId = trim($sessionId);
+        if ($sessionId !== '') {
+            self::$suppressedTokenUsageSessionIds[$sessionId] = true;
+        }
     }
 
     /**
@@ -48,6 +60,11 @@ class AiAgentService
         return $this->getAiProvider() === 'openai';
     }
 
+    public function isVastAiEnabled(): bool
+    {
+        return (bool) config('services.vastai.enabled', true);
+    }
+
     /**
      * Get the configured OpenAI model
      */
@@ -60,7 +77,19 @@ class AiAgentService
             }
         }
         
-        return config('app.openai_default_model', 'gpt-5-mini');
+        return config('openai.default_model', config('app.openai_default_model', 'gpt-5-mini'));
+    }
+
+    public function getQueryUnderstandingModel(): string
+    {
+        if (class_exists(\App\Models\AdminSetting::class)) {
+            $configured = trim((string) \App\Models\AdminSetting::get('openai_query_understanding_model', ''));
+            if ($configured !== '') {
+                return $configured;
+            }
+        }
+
+        return (string) config('openai.query_understanding_model', $this->getOpenAiModel());
     }
 
     /**
@@ -2075,7 +2104,7 @@ PROMPT;
     }
 
     /**
-     * Judge whether retrieved context is relevant enough to use for answering.
+     * Preserve retrieved context and defer relevance judgment to the final answer prompt.
      *
      * @return array{decision:string,use_context:bool,confidence:float,threshold:float,reason:string,model:string}
      */
@@ -2088,130 +2117,32 @@ PROMPT;
     ): array {
         $question = trim($question);
         $context = trim($context);
+        $finalModel = $model;
+        if (!$finalModel) {
+            $finalModel = $this->getAiProviderForOrganization($organizationId) === 'openai'
+                ? $this->getOpenAiModelForOrganization($organizationId)
+                : $this->getLlamaModelForOrganization($organizationId);
+        }
 
         if ($question === '' || $context === '') {
             return [
                 'decision' => 'unknown',
                 'use_context' => true,
                 'confidence' => 0.0,
-                'threshold' => $this->getContextRelevanceMinConfidence(),
-                'reason' => 'Question or context was empty, so no relevance check was applied.',
-                'model' => $model ?: $this->getContextRelevanceModel(),
+                'threshold' => 0.0,
+                'reason' => 'Question or context was empty, so the prompt-level relevance check was skipped.',
+                'model' => $finalModel,
             ];
         }
 
-        $judgeModel = $model ?: $this->getContextRelevanceModel();
-        $threshold = $this->getContextRelevanceMinConfidence();
-
-        $systemPrompt = <<<'PROMPT'
-You are a retrieval-context relevance judge for a customer-support assistant.
-
-Decide whether the provided CONTEXT contains information that can answer the USER QUESTION.
-
-Rules:
-- Return decision="relevant" only when the context directly supports the main answer.
-- Return decision="partial" when the context supports only part of the answer.
-- Return decision="irrelevant" when the context is about a different entity, a different topic, or lacks the facts needed to answer.
-- Never treat semantically similar items as the same item unless the exact requested entity or fact is supported.
-- Keep reason to one short sentence.
-- confidence must be a number from 0.0 to 1.0.
-- use_context must be true only for relevant or partial decisions.
-- Return JSON only with keys: decision, use_context, confidence, reason.
-PROMPT;
-
-        $userPrompt = json_encode([
-            'user_question' => $question,
-            'context' => $context,
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
-        try {
-            $response = $this->llmChat([
-                ['role' => 'system', 'content' => $systemPrompt],
-                ['role' => 'user', 'content' => (string) $userPrompt],
-            ], $judgeModel, null, $organizationId, array_filter([
-                'backend_type' => 'ollama',
-                'use_vastai' => true,
-                'temperature' => 0.0,
-                'num_predict' => 120,
-                'session_id' => $sessionId,
-            ], static fn ($value) => $value !== null));
-
-            $rawOutput = trim((string) ($response['message']['content'] ?? ''));
-            $decoded = $this->decodeJsonObjectResponse($rawOutput);
-            if (!is_array($decoded)) {
-                Log::warning('Context relevance judge returned non-JSON; failing open', [
-                    'question' => $question,
-                    'judge_model' => $judgeModel,
-                    'raw_output_preview' => mb_substr($rawOutput, 0, 220),
-                ]);
-
-                return [
-                    'decision' => 'unknown',
-                    'use_context' => true,
-                    'confidence' => 0.0,
-                    'threshold' => $threshold,
-                    'reason' => 'Judge output was invalid, so context was preserved.',
-                    'model' => $judgeModel,
-                ];
-            }
-
-            $decision = strtolower(trim((string) ($decoded['decision'] ?? 'unknown')));
-            if (!in_array($decision, ['relevant', 'partial', 'irrelevant'], true)) {
-                $decision = 'unknown';
-            }
-
-            $confidence = (float) ($decoded['confidence'] ?? 0.0);
-            $confidence = max(0.0, min(1.0, $confidence));
-            $reason = trim((string) ($decoded['reason'] ?? ''));
-            $useContext = array_key_exists('use_context', $decoded)
-                ? (bool) $decoded['use_context']
-                : in_array($decision, ['relevant', 'partial'], true);
-
-            if ($decision === 'irrelevant') {
-                $useContext = false;
-            }
-
-            if ($useContext && $confidence < $threshold) {
-                $useContext = false;
-                if ($reason === '') {
-                    $reason = 'Judge confidence was below the configured threshold.';
-                }
-            }
-
-            Log::info('Context relevance judge result', [
-                'question' => $question,
-                'decision' => $decision,
-                'use_context' => $useContext,
-                'confidence' => $confidence,
-                'threshold' => $threshold,
-                'reason' => $reason,
-                'judge_model' => $judgeModel,
-            ]);
-
-            return [
-                'decision' => $decision,
-                'use_context' => $useContext,
-                'confidence' => $confidence,
-                'threshold' => $threshold,
-                'reason' => $reason !== '' ? $reason : 'No reason returned.',
-                'model' => $judgeModel,
-            ];
-        } catch (\Throwable $e) {
-            Log::warning('Context relevance judge failed; preserving context', [
-                'question' => $question,
-                'judge_model' => $judgeModel,
-                'error' => $e->getMessage(),
-            ]);
-
-            return [
-                'decision' => 'unknown',
-                'use_context' => true,
-                'confidence' => 0.0,
-                'threshold' => $threshold,
-                'reason' => 'Judge failed, so context was preserved.',
-                'model' => $judgeModel,
-            ];
-        }
+        return [
+            'decision' => 'deferred_to_final_llm',
+            'use_context' => true,
+            'confidence' => 1.0,
+            'threshold' => 0.0,
+            'reason' => 'The final answer prompt performs the private context relevance check.',
+            'model' => $finalModel,
+        ];
     }
 
     private function decodeJsonObjectResponse(string $rawOutput): ?array
@@ -2286,7 +2217,14 @@ PROMPT;
                 $model = $this->getLlamaModel();
             }
 
-            $response = Http::timeout(30)->post("{$this->baseUrl}/llm/answer", [
+            $timeoutSeconds = $this->llmAnswerTimeoutSeconds((string) $model);
+            Log::info('AI Agent LLM answer request', [
+                'model' => $model,
+                'timeout_seconds' => $timeoutSeconds,
+                'url' => "{$this->baseUrl}/llm/answer",
+            ]);
+
+            $response = Http::timeout($timeoutSeconds)->post("{$this->baseUrl}/llm/answer", [
                 'prompt' => $prompt,
                 'model' => $model
             ]);
@@ -2296,6 +2234,13 @@ PROMPT;
             Log::error('AI Agent LLM answer exception', ['error' => $e->getMessage()]);
             return null;
         }
+    }
+
+    private function llmAnswerTimeoutSeconds(string $model): int
+    {
+        return strtolower(trim($model)) === 'llama3.2:3b'
+            ? self::LOCAL_3B_ANSWER_TIMEOUT_SECONDS
+            : 30;
     }
 
     public function normalizeQueryForInference(string $query, ?string $model = null, array $options = []): array
@@ -2376,6 +2321,9 @@ PROMPT;
     public function llmChat($messages, $model = null, $userId = null, $organizationId = null, array $options = [])  // Default determined dynamically
     {
         try {
+            $skipTokenUsage = (bool) ($options['skip_token_usage'] ?? false);
+            unset($options['skip_token_usage']);
+
             $sessionId = $this->resolveTrackedSessionId(
                 isset($options['session_id']) ? (string) $options['session_id'] : null,
                 $organizationId,
@@ -2398,6 +2346,10 @@ PROMPT;
                 ? (string) $options['backend_type']
                 : $this->getBackendType();
             unset($options['backend_type']);
+
+            if (!$this->isVastAiEnabled() && !empty($options['use_vastai'])) {
+                $options['use_vastai'] = false;
+            }
 
             $payload = [
                 'messages' => $messages,
@@ -2440,7 +2392,7 @@ PROMPT;
                 $result = $response->json();
                 
                 // Log token usage if organization is provided
-                if ($organizationId) {
+                if ($organizationId && !$this->shouldSkipTokenUsage($sessionId, $skipTokenUsage)) {
                     $outputText = isset($result['message']['content']) ? (string) $result['message']['content'] : '';
                     $usageData = $this->buildTokenUsageData($messages, $outputText, (string) ($payload['model'] ?? ''), $result['usage'] ?? null);
 
@@ -2473,6 +2425,9 @@ PROMPT;
     public function openAiChat($messages, $model = null, $userId = null, $organizationId = null, ?string $sessionId = null, array $options = [])
     {
         try {
+            $skipTokenUsage = (bool) ($options['skip_token_usage'] ?? false);
+            unset($options['skip_token_usage']);
+
             $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, 'openai_chat');
 
             // Use configured model if none provided
@@ -2523,6 +2478,7 @@ PROMPT;
             ]);
 
             $result = $client->chat()->create($payload);
+            $initialUsage = $result->usage->toArray();
 
             Log::info('OpenAI chat response', [
                 'id' => $result->id,
@@ -2543,15 +2499,56 @@ PROMPT;
             ]);
 
             $content = trim((string) ($result->choices[0]->message->content ?? ''));
-            if ($content === '') {
-                Log::warning('OpenAI returned empty content; falling back to local model', [
+            $finishReason = (string) ($result->choices[0]->finishReason ?? '');
+            $emptyContentRetried = false;
+            if ($content === '' && $finishReason === 'length') {
+                $emptyContentRetried = true;
+                $currentLimit = max(1, (int) ($payload['max_completion_tokens'] ?? 0));
+                $configuredLimit = $this->configuredMaxCompletionTokens();
+                $retryPayload = $payload;
+                $retryPayload['max_completion_tokens'] = min($configuredLimit, max(768, $currentLimit * 3));
+                if (str_starts_with(strtolower((string) $model), 'gpt-5')) {
+                    $retryPayload['reasoning_effort'] = 'minimal';
+                }
+
+                Log::warning('OpenAI exhausted completion budget before producing visible content; retrying', [
                     'model' => $model,
-                    'finish_reason' => $result->choices[0]->finishReason ?? null,
+                    'initial_max_completion_tokens' => $currentLimit,
+                    'retry_max_completion_tokens' => $retryPayload['max_completion_tokens'],
+                ]);
+
+                $result = $client->chat()->create($retryPayload);
+                $content = trim((string) ($result->choices[0]->message->content ?? ''));
+                $finishReason = (string) ($result->choices[0]->finishReason ?? '');
+
+                Log::info('OpenAI empty-content retry response', [
+                    'id' => $result->id,
+                    'model' => $result->model,
+                    'usage' => $result->usage->toArray(),
+                    'content_length' => strlen($content),
+                    'finish_reason' => $finishReason,
+                ]);
+            }
+
+            if ($content === '') {
+                Log::warning('OpenAI returned empty content after retry policy', [
+                    'model' => $model,
+                    'finish_reason' => $finishReason,
                 ]);
                 return null;
             }
 
             $usage = $result->usage->toArray();
+            if ($emptyContentRetried && ($initialUsage['total_tokens'] ?? 0) > 0) {
+                $usage['prompt_tokens'] = (int) ($usage['prompt_tokens'] ?? 0) + (int) ($initialUsage['prompt_tokens'] ?? 0);
+                $usage['completion_tokens'] = (int) ($usage['completion_tokens'] ?? 0) + (int) ($initialUsage['completion_tokens'] ?? 0);
+                $usage['total_tokens'] = (int) ($usage['total_tokens'] ?? 0) + (int) ($initialUsage['total_tokens'] ?? 0);
+                $usage['completion_tokens_details'] = is_array($usage['completion_tokens_details'] ?? null)
+                    ? $usage['completion_tokens_details']
+                    : [];
+                $usage['completion_tokens_details']['reasoning_tokens'] = (int) data_get($usage, 'completion_tokens_details.reasoning_tokens', 0)
+                    + (int) data_get($initialUsage, 'completion_tokens_details.reasoning_tokens', 0);
+            }
 
             // Convert OpenAI response format to match our existing format
             $response = [
@@ -2563,7 +2560,7 @@ PROMPT;
             ];
 
             // Log token usage for organization-scoped chats, including widget chats with no user id.
-            if ($organizationId) {
+            if ($organizationId && !$this->shouldSkipTokenUsage($sessionId, $skipTokenUsage)) {
                 $usageData = $this->buildTokenUsageData($messages, $content, $model, $response['usage']);
                 $this->logTokenUsage(
                     $userId,
@@ -2595,6 +2592,223 @@ PROMPT;
         }
     }
 
+    public function understandQueryWithOpenAi(string $query, ?\App\Models\Organization $organization = null, ?string $sessionId = null, array $options = []): ?array
+    {
+        $query = trim($query);
+        if ($query === '') {
+            return null;
+        }
+
+        try {
+            $model = trim((string) ($options['model'] ?? $this->getQueryUnderstandingModel()));
+            if ($model === '') {
+                $model = 'gpt-5-mini';
+            }
+
+            $apiKey = null;
+            if (class_exists(\App\Models\AdminSetting::class)) {
+                $apiKey = \App\Models\AdminSetting::get('openai_api_key');
+            }
+
+            if (!$apiKey) {
+                $apiKey = config('services.openai.api_key') ?: config('openai.api_key');
+            }
+
+            if (!$apiKey) {
+                Log::warning('Query understanding skipped because OpenAI API key is not configured');
+                return null;
+            }
+
+            $settings = is_array($organization?->settings ?? null) ? $organization->settings : [];
+            $hasShopify = $organization
+                ? $organization->integrations()->where('provider', 'shopify')->where('active', true)->exists()
+                : false;
+
+            $orgHints = [
+                'organization_name' => $organization?->name,
+                'has_shopify' => $hasShopify,
+                'website' => $organization?->website,
+                'industry' => $settings['industry'] ?? null,
+            ];
+
+            $conversationHistory = [];
+            foreach (array_slice(is_array($options['conversation_history'] ?? null) ? $options['conversation_history'] : [], -8) as $message) {
+                $role = strtolower(trim((string) ($message['role'] ?? '')));
+                $content = trim((string) ($message['content'] ?? ''));
+                if ($content !== '' && in_array($role, ['user', 'assistant'], true)) {
+                    $conversationHistory[] = ['role' => $role, 'content' => $content];
+                }
+            }
+
+            $systemPrompt = <<<'PROMPT'
+You are the query understanding layer for a multi-tenant AI customer support widget.
+Return ONLY valid JSON. Do not answer the user.
+
+Analyze the latest user query in light of the recent conversation and produce:
+- intent: one of product_search, order_status, pricing, support, contact, job_query, booking, policy, general_info, follow_up, unknown
+- confidence: number from 0 to 1
+- is_follow_up: boolean; true when the latest query depends on an earlier turn for its subject, entity, scope, or meaning
+- rewritten_query: one standalone retrieval/action query that resolves follow-up references and preserves every explicit request, entity, qualifier, and topic from the latest query
+- entities: object of arrays/strings; use keys like product, color, size, age_group, order_id, campus, position, location, date, email, phone, policy_topic
+- search_targets: ordered subset of shopify_products, shopify_orders, actions, faq, website, organization_data, none
+- route: object with primary_route, signals, requires_product_resolution, policy_only
+
+Routing rules:
+- Use recent conversation to resolve elliptical questions such as "what are the criteria?", "how much?", "what about shipping?", "is that all?", and "how do I do that?".
+- A follow-up rewritten_query must name the prior subject explicitly. Do not return a vague phrase that still depends on conversation history.
+- Never collapse a multi-part request into only one topic. For example, a request about selling and shipping must preserve both selling and shipping.
+- Shopify product/order targets are recommended only when the organization has Shopify and the user asks about products, availability, price, variants, add to cart, or orders.
+- FAQ/website/organization_data are for policy, support, jobs, services, contact, admissions, school/company info, and general knowledge-base questions.
+- Preserve Hinglish/Indian education terms like TGT, PGT, campus names, class names, and city names in rewritten_query.
+- Never invent an entity. If unsure, keep intent unknown and include faq/website as targets.
+PROMPT;
+
+            $messages = [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => json_encode([
+                    'recent_conversation' => $conversationHistory,
+                    'latest_query' => $query,
+                    'organization' => array_filter($orgHints, static fn ($value) => $value !== null && $value !== ''),
+                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
+            ];
+
+            $client = OpenAI::client($apiKey);
+            $modelsToTry = array_values(array_unique(array_filter([
+                $model,
+                $model === 'gpt-5.1-mini' ? 'gpt-5-mini' : null,
+            ])));
+            $result = null;
+            $lastModelException = null;
+
+            foreach ($modelsToTry as $attemptModel) {
+                try {
+                    $payload = [
+                        'model' => $attemptModel,
+                        'messages' => $messages,
+                    ];
+                    $payload = array_merge($payload, $this->buildOpenAiChatOptions($attemptModel, [
+                        'max_completion_tokens' => $options['max_completion_tokens'] ?? 800,
+                        'reasoning_effort' => $options['reasoning_effort'] ?? 'minimal',
+                        'response_format' => ['type' => 'json_object'],
+                    ]));
+
+                    $result = $client->chat()->create($payload);
+                    $model = $attemptModel;
+                    break;
+                } catch (\Throwable $modelException) {
+                    $lastModelException = $modelException;
+                    Log::warning('Query understanding model attempt failed', [
+                        'model' => $attemptModel,
+                        'organization_id' => $organization?->id,
+                        'error' => $modelException->getMessage(),
+                    ]);
+                }
+            }
+
+            if (!$result) {
+                throw $lastModelException ?: new \RuntimeException('No query understanding model attempt was executed.');
+            }
+
+            $content = trim((string) ($result->choices[0]->message->content ?? ''));
+            if ($content === '') {
+                Log::warning('Query understanding returned empty content', [
+                    'model' => $model,
+                    'organization_id' => $organization?->id,
+                ]);
+                return null;
+            }
+
+            $decoded = json_decode($content, true);
+            if (!is_array($decoded)) {
+                Log::warning('Query understanding returned invalid JSON', [
+                    'model' => $model,
+                    'content_preview' => substr($content, 0, 300),
+                ]);
+                return null;
+            }
+
+            $analysis = $this->normalizeQueryUnderstandingResult($decoded, $query, $hasShopify);
+            $usage = $result->usage?->toArray() ?? null;
+
+            if ($organization?->id && !$this->shouldSkipTokenUsage($sessionId)) {
+                $usageData = $this->buildTokenUsageData($messages, $content, $model, $usage);
+                $this->logTokenUsage(
+                    null,
+                    $organization->id,
+                    'openai_query_understanding',
+                    $usageData['tokens_used'],
+                    'OpenAI query understanding: ' . substr($query, 0, 180),
+                    $usageData['input_tokens'],
+                    $usageData['output_tokens'],
+                    $sessionId,
+                    $usageData
+                );
+            }
+
+            Log::info('OpenAI query understanding completed', [
+                'organization_id' => $organization?->id,
+                'model' => $model,
+                'intent' => $analysis['intent'] ?? null,
+                'targets' => $analysis['search_targets'] ?? [],
+            ]);
+
+            return $analysis;
+        } catch (\Throwable $e) {
+            Log::warning('OpenAI query understanding failed', [
+                'organization_id' => $organization?->id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    private function normalizeQueryUnderstandingResult(array $decoded, string $fallbackQuery, bool $hasShopify): array
+    {
+        $allowedIntents = ['product_search', 'order_status', 'pricing', 'support', 'contact', 'job_query', 'booking', 'policy', 'general_info', 'follow_up', 'unknown'];
+        $intent = strtolower(trim((string) ($decoded['intent'] ?? 'unknown')));
+        if (!in_array($intent, $allowedIntents, true)) {
+            $intent = 'unknown';
+        }
+
+        $targets = $decoded['search_targets'] ?? [];
+        if (is_string($targets)) {
+            $targets = [$targets];
+        }
+        $allowedTargets = ['shopify_products', 'shopify_orders', 'actions', 'faq', 'website', 'organization_data', 'none'];
+        $targets = array_values(array_unique(array_filter(array_map(
+            static fn ($target) => strtolower(trim((string) $target)),
+            is_array($targets) ? $targets : []
+        ), static fn ($target) => in_array($target, $allowedTargets, true))));
+
+        if (!$hasShopify) {
+            $targets = array_values(array_filter($targets, static fn ($target) => !str_starts_with($target, 'shopify_')));
+        }
+        if (count($targets) > 1 && in_array('none', $targets, true)) {
+            $targets = array_values(array_filter($targets, static fn ($target) => $target !== 'none'));
+        }
+        if (empty($targets)) {
+            $targets = $intent === 'unknown' ? ['faq', 'website'] : ['organization_data', 'faq', 'website'];
+        }
+
+        $entities = is_array($decoded['entities'] ?? null) ? $decoded['entities'] : [];
+        $route = is_array($decoded['route'] ?? null) ? $decoded['route'] : [];
+
+        return [
+            'intent' => $intent,
+            'confidence' => max(0.0, min(1.0, (float) ($decoded['confidence'] ?? 0.0))),
+            'is_follow_up' => (bool) ($decoded['is_follow_up'] ?? ($intent === 'follow_up')),
+            'rewritten_query' => trim((string) ($decoded['rewritten_query'] ?? $fallbackQuery)) ?: $fallbackQuery,
+            'entities' => $entities,
+            'search_targets' => $targets,
+            'route' => [
+                'primary_route' => trim((string) ($route['primary_route'] ?? '')),
+                'signals' => is_array($route['signals'] ?? null) ? array_values($route['signals']) : [],
+                'requires_product_resolution' => (bool) ($route['requires_product_resolution'] ?? in_array('shopify_products', $targets, true)),
+                'policy_only' => (bool) ($route['policy_only'] ?? false),
+            ],
+        ];
+    }
+
     private function buildOpenAiChatOptions(?string $model, array $options): array
     {
         $payload = [];
@@ -2606,7 +2820,7 @@ PROMPT;
             ?? null;
 
         if ($maxCompletionTokens !== null) {
-            $payload['max_completion_tokens'] = max(64, min(2000, (int) $maxCompletionTokens));
+            $payload['max_completion_tokens'] = max(64, min($this->configuredMaxCompletionTokens(), (int) $maxCompletionTokens));
         }
 
         $reasoningEffort = $options['reasoning_effort'] ?? null;
@@ -2633,6 +2847,11 @@ PROMPT;
         }
 
         return $payload;
+    }
+
+    private function configuredMaxCompletionTokens(): int
+    {
+        return max(512, (int) config('openai.max_completion_tokens', 4096));
     }
 
     /**
@@ -2670,6 +2889,9 @@ PROMPT;
         $providerPromptTokens = isset($providerUsage['prompt_tokens']) ? (int) $providerUsage['prompt_tokens'] : null;
         $providerCompletionTokens = isset($providerUsage['completion_tokens']) ? (int) $providerUsage['completion_tokens'] : null;
         $providerTotalTokens = isset($providerUsage['total_tokens']) ? (int) $providerUsage['total_tokens'] : null;
+        $providerCachedInputTokens = $providerUsage['prompt_tokens_details']['cached_tokens']
+            ?? $providerUsage['cached_input_tokens']
+            ?? null;
         $providerReasoningTokens = $providerUsage['completion_tokens_details']['reasoning_tokens']
             ?? $providerUsage['reasoning_tokens']
             ?? null;
@@ -2705,11 +2927,13 @@ PROMPT;
             return [
                 'tokens_used' => $tokensUsed,
                 'input_tokens' => $inputTokens,
+                'cached_input_tokens' => $providerCachedInputTokens !== null ? max(0, (int) $providerCachedInputTokens) : null,
                 'output_tokens' => $outputTokens,
                 'visible_output_tokens' => $visibleOutputTokens > 0 ? $visibleOutputTokens : null,
                 'reasoning_tokens' => $reasoningTokens > 0 ? $reasoningTokens : null,
                 'usage_is_estimated' => $usageIsEstimated,
                 'token_estimation_method' => $tokenEstimationMethod,
+                'model' => $model,
             ];
         }
 
@@ -2723,11 +2947,13 @@ PROMPT;
         return [
             'tokens_used' => $tokensUsed,
             'input_tokens' => $inputTokens,
+            'cached_input_tokens' => null,
             'output_tokens' => $outputTokens,
             'visible_output_tokens' => $visibleOutputTokens > 0 ? $visibleOutputTokens : null,
             'reasoning_tokens' => $reasoningTokens > 0 ? $reasoningTokens : null,
             'usage_is_estimated' => true,
             'token_estimation_method' => $tokenEstimationMethod,
+            'model' => $model,
         ];
     }
 
@@ -2764,6 +2990,15 @@ PROMPT;
     {
         try {
             $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, $endpointType);
+            if ($this->shouldSkipTokenUsage($sessionId)) {
+                Log::info('Widget token usage suppressed for non-persistent debug session', [
+                    'organization_id' => $organizationId,
+                    'session_id' => $sessionId,
+                    'endpoint_type' => $endpointType,
+                ]);
+                return;
+            }
+
             $usageData = $this->buildTokenUsageData($messages, $responseText, $model, $providerUsage);
             $summary = 'in:' . $usageData['input_tokens']
                 . ' out:' . $usageData['output_tokens']
@@ -3380,10 +3615,48 @@ PROMPT;
     /**
      * Log token usage for billing and monitoring purposes
      */
+    private function shouldSkipTokenUsage(?string $sessionId, bool $explicitSkip = false): bool
+    {
+        if ($explicitSkip) {
+            return true;
+        }
+
+        $sessionId = trim((string) $sessionId);
+        if ($sessionId === '') {
+            return false;
+        }
+
+        if (isset(self::$suppressedTokenUsageSessionIds[$sessionId])) {
+            return true;
+        }
+
+        if ($sessionId === 'ai-chat-test-session') {
+            return true;
+        }
+
+        foreach (['codex-', 'debug-', 'test-debug-'] as $prefix) {
+            if (str_starts_with($sessionId, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function logTokenUsage($userId, $organizationId, $endpointType, $tokensUsed, $requestSummary, int $inputTokens = 0, int $outputTokens = 0, ?string $sessionId = null, array $usageMeta = [])
     {
         try {
             $sessionId = $this->resolveTrackedSessionId($sessionId, $organizationId, (string) $endpointType);
+            if ($this->shouldSkipTokenUsage($sessionId)) {
+                Log::info('Token usage suppressed for non-persistent debug session', [
+                    'organization_id' => $organizationId,
+                    'session_id' => $sessionId,
+                    'endpoint_type' => $endpointType,
+                    'tokens_used' => $tokensUsed,
+                ]);
+                return;
+            }
+
             $subscription = null;
             
             // Handle widget usage (no user ID) - assign to organization's first user
@@ -3419,8 +3692,10 @@ PROMPT;
                 'session_id' => $sessionId,
                 'subscription_id' => $subscription ? $subscription->id : null,
                 'endpoint_type' => $endpointType,
+                'model' => isset($usageMeta['model']) && trim((string) $usageMeta['model']) !== '' ? trim((string) $usageMeta['model']) : null,
                 'tokens_used' => $tokensUsed,
                 'input_tokens' => $inputTokens > 0 ? $inputTokens : null,
+                'cached_input_tokens' => isset($usageMeta['cached_input_tokens']) && $usageMeta['cached_input_tokens'] > 0 ? (int) $usageMeta['cached_input_tokens'] : null,
                 'output_tokens' => $outputTokens > 0 ? $outputTokens : null,
                 'visible_output_tokens' => isset($usageMeta['visible_output_tokens']) && $usageMeta['visible_output_tokens'] > 0 ? (int) $usageMeta['visible_output_tokens'] : null,
                 'reasoning_tokens' => isset($usageMeta['reasoning_tokens']) && $usageMeta['reasoning_tokens'] > 0 ? (int) $usageMeta['reasoning_tokens'] : null,

@@ -118,3 +118,4 @@ openssl s_client -connect ai-chat.support:8090 -servername ai-chat.support
 - Services will start automatically on system boot
 - Logs are written to syslog and can be viewed with journalctl
 - Both services run as www-data user for security
+- If OpenAI token cost becomes too high, see `docs/VAST_AI_ROLLBACK_NOTE.md` for the safe Vast.ai rollback path.
